@@ -20,11 +20,9 @@ import { AssumptionsSections } from "@/components/final-report/AssumptionsSectio
 import { FinalReportChart } from "@/components/final-report/ChartSeries";
 import { ForecastValueTable } from "@/components/final-report/ForecastValueTable";
 import { DossierContent } from "@/components/final-report/Dossier";
-import { EditorialNotes } from "@/components/final-report/EditorialNotes";
-import { generateEditorialNotes, generateFinalReportNarrative, generateForecast, getEditorialSession, prepareEditorialSession, saveEditorialNotes, saveFinalReportNarrative } from "@/lib/api";
+import { generateEditorialNotes, generateFinalReportNarrative, generateForecast, getEditorialSession, prepareEditorialSession, saveFinalReportNarrative } from "@/lib/api";
 import { getErrorMessage } from "@/lib/utils";
-import type { EditorialNote } from "@/types/final-report-v2";
-import type { EditorialNoteReference, EditorialSession } from "@/types/editorial-session";
+import type { EditorialSession } from "@/types/editorial-session";
 import type { FinalReportModel, NarrativeBlock } from "@/types/final-report";
 import { Textarea } from "@/components/ui/textarea";
 import { decidePrepareReportAI, runPrepareReportAI, type PrepareReportAIStep } from "@/lib/prepare-report-ai";
@@ -52,8 +50,7 @@ export default function ReportPage() {
   const queryClient = useQueryClient();
   const scenarios = useMemo(() => companies.find((company) => company.id === selectedCompanyId)?.scenarios.filter((scenario) => scenario.scenario_type === "budget") ?? [], [companies, selectedCompanyId]);
   const [scenarioId, setScenarioId] = useState<number | null>(null);
-  const [savingId, setSavingId] = useState<string>();
-  const [generating, setGenerating] = useState(false);
+  const [dismissedReadyReport, setDismissedReadyReport] = useState<string>();
   const [regeneratingForecast, setRegeneratingForecast] = useState(false);
   const [aiPrepMode, setAiPrepMode] = useState<"prepare" | "regenerate_all" | null>(null);
   const [aiPrepStepLabel, setAiPrepStepLabel] = useState<string>("");
@@ -67,20 +64,17 @@ export default function ReportPage() {
   const session = useQuery({ queryKey, queryFn: () => getEditorialSession(selectedCompanyId!, scenarioId!), enabled: selectedCompanyId !== null && scenarioId !== null });
   const model = session.data?.report;
   const plan = model?.editorial_plan;
+  const readyReportKey = `${scope}:${model?.model_hash ?? "unknown"}`;
   const draftScope = `${scope}:${plan?.plan_hash ?? "unprepared"}`;
   const legacyScope = `${scope}:narrative`;
   const legacyDraftBucket = draftsByScope.current[legacyScope] ?? { values: {}, dirty: {} };
   const requestScope = `${draftScope}:${model?.source_hash ?? "unknown"}`;
   scopeRef.current = requestScope;
-  const draftBucket = draftsByScope.current[draftScope] ?? { values: {}, dirty: {} };
-  const previousDrafts = Object.entries(draftsByScope.current).filter(([key, bucket]) => key.startsWith(`${scope}:`) && key !== draftScope && key !== legacyScope && Object.values(bucket.dirty).some(Boolean));
   useEffect(() => {
     if (!session.data) return;
-    syncReportDrafts(draftsByScope.current, draftScope, session.data.report.editorial_notes ?? []);
     syncReportDrafts(draftsByScope.current, legacyScope, session.data.report.narrative);
     setDraftVersion((version) => version + 1);
   }, [draftScope, legacyScope, session.data]);
-  const updateDraft = (id: string, text: string) => { editReportDraft(draftsByScope.current, draftScope, id, text); setDraftVersion((version) => version + 1); };
   const updateNarrativeDraft = (id: string, text: string) => { editReportDraft(draftsByScope.current, legacyScope, id, text); setDraftVersion((version) => version + 1); };
   const completeAction = async (actionScope: string) => { if (scopeRef.current !== actionScope) return; await queryClient.invalidateQueries({ queryKey }); };
   const saveNarrative = async (id: string, text: string): Promise<boolean> => { if (!selectedCompanyId || !scenarioId) return false; const actionScope = requestScope; try { await saveFinalReportNarrative(selectedCompanyId, scenarioId, [{ id: id as NarrativeBlock["id"], text }]); acknowledgeReportDraft(draftsByScope.current, legacyScope, id, text); await completeAction(actionScope); toast.success("Commento salvato"); return true; } catch (error) { toast.error(getErrorMessage(error, "Impossibile salvare il commento")); return false; } };
@@ -102,15 +96,10 @@ export default function ReportPage() {
           // I commenti generali si decidono sul modello già a schermo, perché
           // vanno rigenerati PRIMA del piano (vedi lib/prepare-report-ai.ts).
           narrative: () => decidePrepareReportAI({ narrativeIds: NARRATIVE_IDS, narrativeBlocks: session.data!.report.narrative, notes: [], dirtyNoteIds: new Set<string>(), forceAll }),
-          notes: (freshSession) => {
-            const planHash = freshSession.report.editorial_plan?.plan_hash ?? "unprepared";
-            const dirtyScope = `${scope}:${planHash}`;
-            const dirtyNoteIds = new Set(Object.entries(draftsByScope.current[dirtyScope]?.dirty ?? {}).filter(([, dirty]) => dirty).map(([id]) => id));
-            return decidePrepareReportAI({ narrativeIds: NARRATIVE_IDS, narrativeBlocks: freshSession.report.narrative, notes: freshSession.report.editorial_notes ?? [], dirtyNoteIds, forceAll });
-          },
+          notes: (freshSession) => decidePrepareReportAI({ narrativeIds: NARRATIVE_IDS, narrativeBlocks: freshSession.report.narrative, notes: freshSession.report.editorial_notes ?? [], dirtyNoteIds: new Set<string>(), forceAll }),
         },
         {
-          preparePlan: () => prepareEditorialSession(companyId, scId, { source_hash: session.data!.report.source_hash, expected_revision: session.data!.revision }),
+          preparePlan: () => prepareEditorialSession(companyId, scId),
           regenerateNarrative: () => generateFinalReportNarrative(companyId, scId).then(() => undefined),
           regenerateNotes: (freshSession, targets) => {
             const notePlan = freshSession.report.editorial_plan;
@@ -130,8 +119,6 @@ export default function ReportPage() {
     }
   };
   const regenerateForecast = async () => { if (!selectedCompanyId || !scenarioId) return; const actionScope = requestScope; setRegeneratingForecast(true); try { await generateForecast(selectedCompanyId, scenarioId); await completeAction(actionScope); toast.success("Previsionale rigenerato; dossier aggiornato"); } catch (error) { toast.error(getErrorMessage(error, "Impossibile rigenerare il previsionale")); } finally { setRegeneratingForecast(false); } };
-  const save = async (note: EditorialNote, text: string, fromNote?: EditorialNoteReference) => { if (!selectedCompanyId || !scenarioId || !session.data || !plan || !text.trim()) return; const actionScope = requestScope; const submitted = text.trim(); setSavingId(note.id); try { await saveEditorialNotes(selectedCompanyId, scenarioId, { source_hash: model!.source_hash, plan_hash: plan.plan_hash, expected_revision: session.data.revision, notes: [{ id: note.id, text: submitted, revision: note.revision, ...(fromNote ? { from_note: fromNote } : {}) }] }); acknowledgeReportDraft(draftsByScope.current, draftScope, note.id, submitted); await completeAction(actionScope); toast.success("Commento salvato"); } catch (error) { toast.error(getErrorMessage(error, "Impossibile salvare il commento; la bozza è stata mantenuta")); } finally { setSavingId(undefined); } };
-  const generate = async (notes: EditorialNote[]) => { if (!selectedCompanyId || !scenarioId || !session.data || !plan || notes.length === 0) return; const safeNotes = notes.filter((note) => !draftsByScope.current[draftScope]?.dirty[note.id] && note.provenance !== "user"); if (!safeNotes.length) return; const actionScope = requestScope; setGenerating(true); try { const next = await generateEditorialNotes(selectedCompanyId, scenarioId, { source_hash: model!.source_hash, plan_hash: plan.plan_hash, expected_revision: session.data.revision, notes: safeNotes.map((note) => ({ id: note.id, revision: note.revision })) }); if (next.generation_warnings.length) next.generation_warnings.forEach((warning) => toast.warning(`${warning.note_id}: ${warning.message}`)); else toast.success("Commenti generati"); await completeAction(actionScope); } catch (error) { toast.error(getErrorMessage(error, "Generazione parziale o non riuscita")); } finally { setGenerating(false); } };
   // L'anteprima del PDF è la vista principale della pagina: la resa web del
   // dossier è una seconda lettura, e si apre solo a richiesta. Si ricarica
   // quando cambia il piano editoriale (`draftScope` porta il `plan_hash`) o
@@ -166,7 +153,7 @@ export default function ReportPage() {
     {scenarios.length === 0 && !session.isLoading ? <Alert><AlertTitle>Nessuno scenario budget</AlertTitle><AlertDescription>Crea e genera uno scenario budget prima di aprire il dossier.</AlertDescription></Alert> : null}
     {session.isLoading ? <Card><CardContent className="flex items-center justify-center py-12"><Loader2 className="mr-3 h-8 w-8 animate-spin" />Caricamento del dossier…</CardContent></Card> : null}
     {session.error ? <Alert variant="destructive"><AlertTitle>Impossibile caricare il dossier</AlertTitle><AlertDescription className="space-y-3"><p>{getErrorMessage(session.error, "Il dossier non è disponibile.")}</p><Button type="button" variant="outline" onClick={() => session.refetch()}><RefreshCw className="mr-2 h-4 w-4" />Riprova</Button></AlertDescription></Alert> : null}
-    {model ? <main className="space-y-6"><h1 className="text-3xl font-bold print:block">{model.document.title}</h1><ReadinessBanner readiness={model.readiness} className="print:hidden" />{model.readiness.reasons?.some((reason) => reason.code === "forecast_stale") ? <Alert className="border-amber-400 print:hidden"><AlertTitle>Previsionale da rigenerare</AlertTitle><AlertDescription className="flex flex-wrap items-center gap-3"><span>Le ipotesi sono cambiate dopo l&apos;ultima generazione.</span><Button type="button" variant="outline" onClick={regenerateForecast} disabled={regeneratingForecast}>{regeneratingForecast ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <RefreshCw className="mr-2 h-4 w-4" />}Rigenera previsionale</Button></AlertDescription></Alert> : null}{pending ? <Alert className="print:hidden"><AlertTitle>Piano editoriale da preparare</AlertTitle><AlertDescription>{model.editorial_readiness.reasons.join(" ")} Usa “Prepara Report AI” prima di modificare o generare commenti.</AlertDescription></Alert> : null}
+    {model ? <main className="space-y-6"><h1 className="text-3xl font-bold print:block">{model.document.title}</h1>{model.readiness.status !== "ready" || dismissedReadyReport !== readyReportKey ? <ReadinessBanner readiness={model.readiness} className="print:hidden" onDismiss={() => setDismissedReadyReport(readyReportKey)} /> : null}{model.readiness.reasons?.some((reason) => reason.code === "forecast_stale") ? <Alert className="border-amber-400 print:hidden"><AlertTitle>Previsionale da rigenerare</AlertTitle><AlertDescription className="flex flex-wrap items-center gap-3"><span>Le ipotesi sono cambiate dopo l&apos;ultima generazione.</span><Button type="button" variant="outline" onClick={regenerateForecast} disabled={regeneratingForecast}>{regeneratingForecast ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <RefreshCw className="mr-2 h-4 w-4" />}Rigenera previsionale</Button></AlertDescription></Alert> : null}{pending ? <Alert className="print:hidden"><AlertTitle>Piano editoriale da preparare</AlertTitle><AlertDescription>{model.editorial_readiness.reasons.join(" ")} Usa “Prepara Report AI” per preparare l’anteprima.</AlertDescription></Alert> : null}
       <section id="pdf-preview" className="print:hidden"><Card><CardHeader className="flex flex-row items-center justify-between gap-3 space-y-0"><CardTitle>Anteprima del PDF</CardTitle><Button type="button" variant="outline" size="sm" onClick={() => { if (selectedCompanyId && scenarioId) { loadedPreviewKey.current = previewKey; void finalReportDownload.loadInline(selectedCompanyId, scenarioId, pdfState); } }} disabled={pdfRequestBusy || aiPrepMode !== null}>{finalReportDownload.previewing ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <RefreshCw className="mr-2 h-4 w-4" />}Aggiorna anteprima</Button></CardHeader><CardContent>
         {finalReportDownload.inlineUrl ? <div className="flex gap-4">
           {pdfOutline.length ? <nav aria-label="Pagine del report" className="sticky top-4 hidden max-h-[85vh] w-56 shrink-0 overflow-y-auto pr-1 lg:block">
@@ -178,7 +165,6 @@ export default function ReportPage() {
           <iframe title="Anteprima del report PDF" src={pdfPageUrl(finalReportDownload.inlineUrl, previewPage)} className="h-[85vh] min-w-0 flex-1 rounded-md border" />
         </div> : <div className="flex h-64 items-center justify-center text-sm text-muted-foreground">{finalReportDownload.previewing ? <><Loader2 className="mr-2 h-4 w-4 animate-spin" />Preparazione anteprima…</> : pending ? "Prepara il report con «Prepara Report AI» per vedere l'anteprima." : "Anteprima non disponibile."}</div>}
       </CardContent></Card></section>
-      {plan ? <EditorialNotes key={draftScope} plan={plan} notes={model.editorial_notes ?? []} archivedNotes={session.data!.archived_notes} drafts={draftBucket.values} dirty={draftBucket.dirty} savingId={savingId} generating={generating} onDraft={updateDraft} onSave={save} onGenerate={generate} onReassociate={() => toast.info("Testo archiviato copiato nella bozza della nota selezionata")} /> : null}
       <details className="print:hidden"><summary className="cursor-pointer text-sm font-medium text-muted-foreground">Vista web del dossier · tabelle e grafici per sezione</summary>
       <div className="mt-4 flex gap-6 print:block"><div className="print:hidden"><ReportTOC /></div><div className="min-w-0 flex-1 space-y-6">
       <section id="scope"><ReportScope company={model.company} practice={model.practice} generated_at={model.generated_at} readiness={model.readiness} /></section>
@@ -189,8 +175,6 @@ export default function ReportPage() {
       <section id="balance-forecast"><Card><CardHeader><CardTitle>Stato patrimoniale previsionale</CardTitle></CardHeader><CardContent><ForecastValueTable report={model as unknown as FinalReportModel} statement="balance_sheet" /></CardContent></Card></section>
       <section id="cashflow-sustainability"><Card><CardHeader><CardTitle>Flussi di cassa e sostenibilità finanziaria</CardTitle></CardHeader><CardContent className="space-y-5"><ForecastValueTable report={model as unknown as FinalReportModel} statement="cashflow" />{model.chart_series.filter((chart) => ["cashflows", "liquidity_debt"].includes(chart.id)).map((chart) => <FinalReportChart key={chart.id} series={chart} />)}<NarrativeBlocks notes={model.narrative.filter((note) => note.id === "financial_outlook")} onSave={saveNarrative} drafts={legacyDraftBucket} onDraft={updateNarrativeDraft} /></CardContent></Card></section>
       <section id="indicators-risks"><Card><CardHeader><CardTitle>Indicatori e rischi</CardTitle></CardHeader><CardContent className="space-y-5">{model.chart_series.filter((chart) => ["working_capital_days", "coverage"].includes(chart.id)).map((chart) => <FinalReportChart key={chart.id} series={chart} />)}<NarrativeBlocks notes={model.narrative.filter((note) => note.id === "risks_and_actions")} onSave={saveNarrative} drafts={legacyDraftBucket} onDraft={updateNarrativeDraft} /></CardContent></Card></section>
-      {!plan && session.data!.archived_notes.length ? <Card className="print:hidden"><CardHeader><CardTitle>Commenti archiviati</CardTitle></CardHeader><CardContent className="space-y-3"><p className="text-sm text-muted-foreground">I testi precedenti restano recuperabili. Prepara un nuovo piano per associarli alle pagine correnti.</p>{session.data!.archived_notes.map((note) => <div key={`${note.plan_hash}:${note.id}`}><p className="text-xs text-muted-foreground">{note.provenance} · revisione {note.revision}</p><Textarea readOnly value={note.text} className="min-h-20" /></div>)}</CardContent></Card> : null}
-      {previousDrafts.length ? <Card className="print:hidden"><CardHeader><CardTitle>Bozze di un piano precedente</CardTitle></CardHeader><CardContent className="space-y-3"><p className="text-sm text-muted-foreground">Il piano è cambiato. Queste bozze non sono state associate automaticamente alle nuove pagine; puoi copiarne il testo nella nota corrente.</p>{previousDrafts.flatMap(([, bucket]) => Object.entries(bucket.values).filter(([id]) => bucket.dirty[id]).map(([id, text]) => <div key={id}><p className="text-xs text-muted-foreground">{id}</p><Textarea readOnly value={text} className="min-h-20" /></div>))}</CardContent></Card> : null}
       {session.data!.generation_warnings.map((warning) => <Alert key={`${warning.note_id}-${warning.message}`} className="border-amber-400"><AlertTitle>Generazione parziale: {warning.note_id}</AlertTitle><AlertDescription>{warning.message}</AlertDescription></Alert>)}
       <section id="diagnostics"><DiagnosticsPanel diagnostics={model.diagnostics} /></section><DossierContent report={model} includeCanonicalCharts={false} />
       </div></div></details>

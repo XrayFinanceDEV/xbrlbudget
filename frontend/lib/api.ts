@@ -841,8 +841,13 @@ export const getEditorialSession = async (companyId: number, scenarioId: number)
   const { data } = await api.get<unknown>(editorialPath(companyId, scenarioId));
   return parseEditorialSession(data);
 };
-export const prepareEditorialSession = async (companyId: number, scenarioId: number, body: { source_hash: string; expected_revision: number }): Promise<EditorialSession> => {
-  const { data } = await api.post<unknown>(`${editorialPath(companyId, scenarioId)}/prepare`, body);
+export const prepareEditorialSession = async (companyId: number, scenarioId: number): Promise<EditorialSession> => {
+  // Narrative generation can change source_hash through provenance/readiness.
+  // Read after generation: the session captured by the page is now outdated.
+  const current = await getEditorialSession(companyId, scenarioId);
+  const { data } = await api.post<unknown>(`${editorialPath(companyId, scenarioId)}/prepare`, {
+    source_hash: current.report.source_hash, expected_revision: current.revision,
+  });
   return parseEditorialSession(data);
 };
 export const saveEditorialNotes = async (companyId: number, scenarioId: number, body: { source_hash: string; plan_hash: string; expected_revision: number; notes: EditorialNoteUpdate[] }): Promise<EditorialSession> => {

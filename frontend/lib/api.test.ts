@@ -91,13 +91,47 @@ describe("editorial session API", () => {
     postMock.mockResolvedValue({ data: editorialSession });
     putMock.mockResolvedValue({ data: editorialSession });
     expect(await getEditorialSession(1, 2)).toEqual(editorialSession);
-    await prepareEditorialSession(1, 2, { source_hash: v2.source_hash, expected_revision: 3 });
+    await prepareEditorialSession(1, 2);
     await saveEditorialNotes(1, 2, { source_hash: v2.source_hash, plan_hash: "a".repeat(64), expected_revision: 3, notes: [{ id: "page-1", text: "Testo", revision: 2, from_note: { id: "old", plan_hash: "b".repeat(64), revision: 1 } }] });
     await generateEditorialNotes(1, 2, { source_hash: v2.source_hash, plan_hash: "a".repeat(64), expected_revision: 3, notes: [{ id: "page-1", revision: 2 }] });
     expect(getMock).toHaveBeenCalledWith("/companies/1/scenarios/2/final-report/editorial");
     expect(postMock).toHaveBeenNthCalledWith(1, "/companies/1/scenarios/2/final-report/editorial/prepare", { source_hash: v2.source_hash, expected_revision: 3 });
     expect(putMock).toHaveBeenCalledWith("/companies/1/scenarios/2/final-report/editorial/notes", expect.objectContaining({ expected_revision: 3, notes: [{ id: "page-1", text: "Testo", revision: 2, from_note: { id: "old", plan_hash: "b".repeat(64), revision: 1 } }] }));
     expect(postMock).toHaveBeenNthCalledWith(2, "/companies/1/scenarios/2/final-report/editorial/generate", expect.objectContaining({ notes: [{ id: "page-1", revision: 2 }] }));
+  });
+
+  it("prepares with the current source and revision after narrative generation, not the cached session", async () => {
+    getMock.mockResolvedValueOnce({ data: editorialSession });
+    const cached = await getEditorialSession(575, 18);
+    const current = { ...editorialSession, revision: 7, report: { ...v2, source_hash: "c".repeat(64) } };
+    getMock.mockResolvedValueOnce({ data: current });
+    postMock.mockResolvedValueOnce({ data: { ...current, revision: 8 } });
+
+    const prepared = await prepareEditorialSession(575, 18);
+
+    expect(cached.revision).toBe(3);
+    expect(prepared.revision).toBe(8);
+    expect(getMock).toHaveBeenNthCalledWith(2, "/companies/575/scenarios/18/final-report/editorial");
+    expect(postMock).toHaveBeenCalledWith("/companies/575/scenarios/18/final-report/editorial/prepare", {
+      source_hash: current.report.source_hash, expected_revision: 7,
+    });
+    expect(getMock.mock.invocationCallOrder[1]).toBeLessThan(postMock.mock.invocationCallOrder[0]);
+  });
+
+  it("does not prepare with stale data when refreshing the session fails", async () => {
+    const error = new Error("Sessione non disponibile");
+    getMock.mockRejectedValueOnce(error);
+    await expect(prepareEditorialSession(575, 18)).rejects.toBe(error);
+    expect(postMock).not.toHaveBeenCalled();
+  });
+
+  it("preserves a conflict that occurs after the fresh read without retrying writes", async () => {
+    const conflict = { response: { status: 409 } };
+    getMock.mockResolvedValueOnce({ data: editorialSession });
+    postMock.mockRejectedValueOnce(conflict);
+    await expect(prepareEditorialSession(575, 18)).rejects.toBe(conflict);
+    expect(getMock).toHaveBeenCalledTimes(1);
+    expect(postMock).toHaveBeenCalledTimes(1);
   });
 });
 

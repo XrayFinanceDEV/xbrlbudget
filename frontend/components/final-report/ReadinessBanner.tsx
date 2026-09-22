@@ -11,8 +11,9 @@
  * aggiunge né toglie blocchi, e non ricalcola nulla.
  */
 import * as React from "react";
-import { CircleAlert, CircleCheck, CircleHelp, FileWarning, ShieldAlert } from "lucide-react";
+import { CircleAlert, CircleCheck, CircleHelp, FileWarning, ShieldAlert, X } from "lucide-react";
 
+import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
 import type { Diagnostic, Readiness } from "@/types/final-report";
@@ -106,9 +107,10 @@ export interface ReadinessBannerProps {
   id?: string;
   /** In stampa il banner non occupa una pagina sua. */
   compact?: boolean;
+  onDismiss?: () => void;
 }
 
-export function ReadinessBanner({ readiness, className, id = "readiness", compact = false }: ReadinessBannerProps) {
+export function ReadinessBanner({ readiness, className, id = "readiness", compact = false, onDismiss }: ReadinessBannerProps) {
   const view = readinessView(readiness.status);
   const reasons = readinessReasons(readiness);
 
@@ -131,6 +133,11 @@ export function ReadinessBanner({ readiness, className, id = "readiness", compac
         >
           {view.label}
         </span>
+        {readiness.status === "ready" && onDismiss ? (
+          <Button type="button" variant="ghost" size="icon" className="ml-auto shrink-0 print:hidden" onClick={onDismiss} aria-label="Chiudi messaggio Documento pronto">
+            <X className="h-4 w-4" aria-hidden="true" />
+          </Button>
+        ) : null}
       </div>
       <CardContent className={cn("space-y-2", compact && "pt-0")}>
         <p className="text-sm">{view.description}</p>

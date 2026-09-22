@@ -66,6 +66,38 @@ def test_request_rejects_browser_context_and_coerced_revision(client):
     assert response.status_code == 422
 
 
+def test_prepare_after_narrative_generation_needs_fresh_session_and_allows_pdf(client, monkeypatch):
+    from pathlib import Path
+    from app.api.v1 import reports
+
+    if not (Path(__file__).resolve().parents[1] / "tools/typst/bin/typst").is_file():
+        pytest.skip("Install the pinned compiler for native editorial HTTP workflow")
+    baseline = client.get(_editorial(client)).json()
+    monkeypatch.setattr(reports, "generate_final_report_narrative", lambda report: {
+        block.id: "Commento di prova per il dossier." for block in report.narrative
+    })
+    generated = client.post(_url(client, client.ids["scenario"]) + "/narrative/generate")
+    assert generated.status_code == 200, generated.text
+
+    stale = client.post(_editorial(client) + "/prepare", json={
+        "source_hash": baseline["report"]["source_hash"], "expected_revision": baseline["revision"],
+    })
+    assert stale.status_code == 409, stale.text
+    assert "fonti" in stale.json()["detail"]
+
+    current = client.get(_editorial(client)).json()
+    assert current["report"]["source_hash"] != baseline["report"]["source_hash"]
+    prepared = client.post(_editorial(client) + "/prepare", json={
+        "source_hash": current["report"]["source_hash"], "expected_revision": current["revision"],
+    })
+    assert prepared.status_code == 200, prepared.text
+    assert prepared.json()["report"]["editorial_readiness"]["status"] == "ready"
+    pdf = client.post(_url(client, client.ids["scenario"]) + "/pdf", json={"document_state": "draft"})
+    assert pdf.status_code == 200, pdf.text if pdf.status_code != 200 else ""
+    assert pdf.headers["content-type"] == "application/pdf"
+    assert pdf.content.startswith(b"%PDF-")
+
+
 def test_real_prepare_save_and_reprepare_preserve_manual_note_and_all_page_coverage(client, monkeypatch):
     from pathlib import Path
     from database.report_editorial import ReportEditorialNote

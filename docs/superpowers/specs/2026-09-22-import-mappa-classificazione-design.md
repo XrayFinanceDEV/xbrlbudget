@@ -60,6 +60,29 @@ che conta: il lettore la cerca nel text layer e ancora la colonna al suo bordo d
 Misurato su 4 pagine, una per famiglia: 4 su 4 corrette, comprese le contrapposte a tre colonne
 che Qwen 3.8 (vision, con e senza thinking, a 60/110/200 dpi) sbagliava in 2 casi su 5.
 
+**Non tutte le pagine vanno alla vision** (decisione del proprietario, 2026-09-22). Una volta
+riconosciuta la struttura, di un bilancio resta da sapere solo dove finisce lo stato
+patrimoniale e dove comincia il conto economico: le pagine di uno stesso prospetto sono
+strutturalmente uguali. Il pilota mappava ogni pagina (26 chiamate su FORMETAL 701, di cui 20
+per dire «nota o testo»); il modulo procede così:
+
+1. **Filtro dal text layer.** Una pagina con meno di 5 importi monetari, o con prosa corrente
+   prevalente, è nota o testo: non si manda e non si legge.
+2. **Confine SP/CE dal testo.** I titoli di prospetto («STATO PATRIMONIALE», «CONTO
+   ECONOMICO», «ATTIVITA'/PASSIVITA'», «COSTI/RICAVI», «A) Valore della produzione») dividono
+   il documento in blocchi; ogni blocco è un prospetto.
+3. **Una chiamata per blocco.** Sonnet mappa la **prima pagina** di ogni blocco. Le pagine
+   seguenti dello stesso blocco riusano la mappa con `continuazione = true` se la riga delle
+   intestazioni di colonna, come testo normalizzato, è identica a quella della pagina mappata
+   (o manca, come nelle continuazioni senza ristampa delle intestazioni). Una pagina con
+   intestazioni diverse dentro il blocco apre una mappa nuova: è il caso delle tabelle di
+   dettaglio nelle note di un IV-CEE xbrl, che hanno colonne proprie.
+
+Atteso: 2 chiamate su TM (SP e CE hanno le stesse colonne ma sezioni diverse, attivo/passivo
+contro costi/ricavi), 2 su FORMETAL-TEST, 1-2 su AMB, 3-6 su FORMETAL 701. Mappare la sola
+prima pagina e dedurre il resto è stato scartato: la pagina del CE ha sezioni diverse dallo
+SP, e il riuso per intestazioni uguali dà lo stesso risparmio senza indovinare.
+
 ### 3.2 Lettore geometrico
 
 `fitz` → parole → righe di testo (raggruppate sul centro y, tolleranza 0,45 × altezza mediana).
@@ -142,9 +165,10 @@ periodo scambiati su FORMETAL-TEST; conti bancari a saldo avere in `sp16g` invec
 
 - **Sonnet 5, mappa**: misurati 3.135 token in ingresso e 545 in uscita a pagina (50 pagine).
   Con il listino della classe Sonnet (3 $/M in ingresso, 15 $/M in uscita, da confermare sul
-  listino corrente) sono **1,8 centesimi a pagina**: 0,10 $ per 6 pagine, 0,46 $ per 26.
-  Tempo: 6-25 s a file, con 6 pagine in parallelo. Leve se servisse: 60 dpi dimezza i token in
-  ingresso (non provato su Sonnet), oppure una prima passata economica sul solo `tipo_pagina`.
+  listino corrente) sono **1,8 centesimi a pagina**. Nel pilota, che mappava ogni pagina: 0,10 $
+  per 6 pagine, 0,46 $ per 26. Con una chiamata per blocco (§3.1): **2-6 chiamate a file, 4-11
+  centesimi e 6-10 s**, indipendenti dal numero di pagine. Leva ulteriore se servisse: 60 dpi
+  riduce i token in ingresso a un terzo (non provato su Sonnet).
 - **Qwen, classificazione**: 35 token/s in uscita, 27 ciascuna con due chiamate; 8 token a
   riga; 14-87 s a file. È tutto il tempo dell'import.
 - Prefill su gx10: 7.000-30.000 token/s, trascurabile.

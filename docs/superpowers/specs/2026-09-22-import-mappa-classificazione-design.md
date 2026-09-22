@@ -79,9 +79,29 @@ per dire «nota o testo»); il modulo procede così:
    dettaglio nelle note di un IV-CEE xbrl, che hanno colonne proprie.
 
 Atteso: 2 chiamate su TM (SP e CE hanno le stesse colonne ma sezioni diverse, attivo/passivo
-contro costi/ricavi), 2 su FORMETAL-TEST, 1-2 su AMB, 3-6 su FORMETAL 701. Mappare la sola
-prima pagina e dedurre il resto è stato scartato: la pagina del CE ha sezioni diverse dallo
-SP, e il riuso per intestazioni uguali dà lo stesso risparmio senza indovinare.
+contro costi/ricavi), 2 su FORMETAL-TEST, 1-2 su AMB. Mappare la sola prima pagina e dedurre
+il resto è stato scartato: la pagina del CE ha sezioni diverse dallo SP, e il riuso per
+intestazioni uguali dà lo stesso risparmio senza indovinare.
+
+**Xbrl di legge: percorso deterministico, senza vision** (proprietario, 2026-09-22). Un PDF
+generato dalla tassonomia («Generato automaticamente - Conforme alla tassonomia itcc-ci-…» nel
+piè di pagina, oppure schema di legge riconosciuto dal `bilancio_classifier`) ha titoli
+standard: «Stato patrimoniale», «Conto economico», e nella nota integrativa le tabelle di
+dettaglio stanno dopo titoli di sezione fissi («Crediti iscritti nell'attivo circolante»,
+«Variazioni e scadenza dei crediti…», «Debiti», «Variazioni e scadenza dei debiti»,
+«Suddivisione dei debiti per area geografica», «Debiti assistiti da garanzie reali»). Lì:
+
+- le pagine dei prospetti e le tabelle di dettaglio di crediti e debiti si individuano dai
+  titoli, dal text layer; le colonne dei prospetti sono le due date d'esercizio, e il repo le
+  legge già (`standard_ivcee_parser.has_comparative_ivcee_columns` e il parser dello schema);
+- la classificazione delle voci di legge è una **tabella**, non una chiamata: le etichette
+  sono quelle dell'art. 2424/2425 e `iv_cee_hierarchy.resolve` le risolve già; Qwen entra solo
+  per le righe che la tabella non riconosce (tipicamente nessuna);
+- la mappa vision resta come ripiego quando un titolo atteso non si trova, e si dichiara.
+
+Su FORMETAL 701 questo vale 0 chiamate a Sonnet e una a Qwen al più, contro le 26 del pilota.
+La verifica sui totali stampati (§3.3) resta identica: «Totale attivo», «Totale passivo» e i
+totali di sezione sono stampati, ed è quella che fa da rete, non il riconoscimento dei titoli.
 
 ### 3.2 Lettore geometrico
 
@@ -166,9 +186,10 @@ periodo scambiati su FORMETAL-TEST; conti bancari a saldo avere in `sp16g` invec
 - **Sonnet 5, mappa**: misurati 3.135 token in ingresso e 545 in uscita a pagina (50 pagine).
   Con il listino della classe Sonnet (3 $/M in ingresso, 15 $/M in uscita, da confermare sul
   listino corrente) sono **1,8 centesimi a pagina**. Nel pilota, che mappava ogni pagina: 0,10 $
-  per 6 pagine, 0,46 $ per 26. Con una chiamata per blocco (§3.1): **2-6 chiamate a file, 4-11
-  centesimi e 6-10 s**, indipendenti dal numero di pagine. Leva ulteriore se servisse: 60 dpi
-  riduce i token in ingresso a un terzo (non provato su Sonnet).
+  per 6 pagine, 0,46 $ per 26. Con una chiamata per blocco (§3.1): **1-2 chiamate a file sui
+  piani dei conti e sui riclassificati, 2-4 centesimi e 6-10 s**, indipendenti dal numero di
+  pagine; **zero sugli xbrl di legge**, che vanno per titoli standard. Leva ulteriore se
+  servisse: 60 dpi riduce i token in ingresso a un terzo (non provato su Sonnet).
 - **Qwen, classificazione**: 35 token/s in uscita, 27 ciascuna con due chiamate; 8 token a
   riga; 14-87 s a file. È tutto il tempo dell'import.
 - Prefill su gx10: 7.000-30.000 token/s, trascurabile.
@@ -188,8 +209,10 @@ periodo scambiati su FORMETAL-TEST; conti bancari a saldo avere in `sp16g` invec
   uno sbilancio sono avvisi da Rettifiche, mai un blocco al salvataggio.
 - Scansioni e pagine senza text layer: fuori dal tetto dei 3 minuti. OCR locale (MinerU sul
   gx10) produce il text layer, poi lo stesso percorso. Finché non c'è, la route attuale.
-- Pagine di dettaglio delle note (IV-CEE xbrl, tipo `dettaglio_conti`): non lette nel pilota.
-  Seconda fase: mappa e classificazione anche su quelle, per i sotto-campi.
+- Pagine di dettaglio delle note (IV-CEE xbrl): non lette nel pilota. Nel modulo si
+  individuano dai titoli standard di sezione (§3.1) e alimentano i sotto-campi di crediti e
+  debiti (scadenze entro/oltre, banche, fornitori, tributari), come oggi fa
+  `detail_enrichment` sulle stesse tabelle.
 
 ## 7. Rischi noti
 

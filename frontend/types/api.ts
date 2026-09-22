@@ -1298,3 +1298,49 @@ export interface ForecastPreviewResponse {
   forecast_years: ForecastPreviewYear[];
   error: ForecastPreviewError | null;
 }
+
+// ===== Indicatori della crisi d'impresa (GET .../infrannuale/crisi) =====
+
+export type LivelloRatingCrisi = "verde" | "giallo" | "arancio" | "rosso";
+
+export interface RatingCrisi {
+  codice: string;
+  etichetta: string;
+  livello: LivelloRatingCrisi;
+  oltre: number;
+  segnali: number;
+}
+
+export interface DefinizioneIndicatoreCrisi {
+  chiave: string;
+  etichetta: string;
+  formato: "euro" | "pct" | "ratio";
+  /** false per `of_revenue`: resa in tabella, fuori dal punteggio di crisi. */
+  nel_punteggio: boolean;
+}
+
+export interface ColonnaCrisi {
+  chiave: "storico" | "infrannuale" | "proiezione";
+  anno: number;
+  period_months: number;
+  /** L'`IndicatorSet` completo, grezzi `_` compresi (li leggono i grafici). */
+  indicatori: Record<string, number>;
+  punteggi: Record<string, number>;
+  /** Con i segnali extracontabili salvati. */
+  rating: RatingCrisi;
+  /** Indice = numero di segnali attivi (0..7): lo schermo sceglie con il
+   *  conteggio che ha in pagina, anche prima di salvarlo. */
+  rating_per_segnali: RatingCrisi[];
+}
+
+export interface CrisiInfrannuale {
+  reference_year: number;
+  partial_year: number;
+  period_months: number;
+  segnali_attivi: number;
+  definizioni: DefinizioneIndicatoreCrisi[];
+  storico: ColonnaCrisi;
+  infrannuale: ColonnaCrisi;
+  /** null su un periodo di 12 mesi o senza proiezione generata. */
+  proiezione: ColonnaCrisi | null;
+}

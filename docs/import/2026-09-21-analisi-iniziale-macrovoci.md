@@ -1,5 +1,8 @@
 # Analisi iniziale delle macro-voci IV CEE
 
+> La regola di arresto su macrovoci incomplete è superata dalla
+> [correzione con fallback e conti residuali](2026-09-21-fallback-macrovoci-ambienta.md).
+
 Branch: `feat/import-analytical-details`.
 Parser: `macro-analysis-v7-2026-09-21`.
 

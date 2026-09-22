@@ -70,6 +70,34 @@ def test_missing_is_not_zero_and_one_corrective_pass_is_allowed():
     assert report['status'] == 'verified'
 
 
+def test_invalid_structured_answer_can_be_corrected_without_accepting_empty_cells():
+    calls = []
+    def reader(batch, periods, feedback):
+        calls.append(feedback)
+        if not feedback:
+            return ma.MacroReading.model_validate({
+                'facts': [{'field': 'ce06_servizi', 'cells': []}],
+                'absent': [], 'unresolved': [],
+            })
+        return fixture_reader(batch, periods)
+    *_, report = ma.analyze_pdf_macros('unused', rows=fixture_rows(), reader=reader)
+    assert len(calls) == 2
+    assert any('facts.0.cells: too_short' in error for error in calls[1])
+    assert report['status'] == 'verified'
+
+
+def test_repeated_invalid_structured_answers_remain_incomplete():
+    def reader(*args):
+        return ma.MacroReading.model_validate({
+            'facts': [{'field': 'ce06_servizi', 'cells': []}],
+            'absent': [], 'unresolved': [],
+        })
+    with pytest.raises(ma.MacroAnalysisError) as exc:
+        ma.analyze_pdf_macros('unused', rows=fixture_rows(), reader=reader)
+    assert len(exc.value.report['passes']) == 2
+    assert exc.value.report['status'] == 'incomplete'
+
+
 def test_false_absence_cannot_pass_production_cost_crossfoot():
     rows = fixture_rows()
     def reader(batch, periods, feedback):
@@ -333,19 +361,25 @@ def test_524_offline_macro_reader_through_real_import_and_persistence(memory_imp
 
 
 @pytest.mark.skipif(not SAP.exists(), reason='private PDF unavailable')
-def test_incomplete_macro_analysis_blocks_details_and_database_writes(memory_import, monkeypatch):
-    from database.models import Company, FinancialYear
-    from importers import detail_enrichment
+def test_incomplete_macro_analysis_uses_fallback_and_persists(memory_import, monkeypatch):
+    from database.models import FinancialYear
+    from importers import pdf_extractor_llm as llm
     importer, sessions = memory_import
+    bs, ce, *_ = ma.analyze_pdf_macros(SAP, reader=sap_reader)
     def incomplete(rows, periods, feedback):
         reading = sap_reader(rows, periods, feedback)
         reading.facts = [f for f in reading.facts if f.field != 'ce09_ammortamenti']
         return reading
     monkeypatch.setattr(ma, 'read_macros', incomplete)
-    monkeypatch.setattr(detail_enrichment, 'enrich_pdf_details',
-                        lambda *a, **kw: pytest.fail('details before complete macros'))
-    with pytest.raises(importer.PDFImportError, match='MACROVOCI NON COMPLETE'):
-        importer.import_pdf_balance_sheet(str(SAP), fiscal_year=2026,
-            period_months=5, company_name='Must not be saved')
+    monkeypatch.setattr(llm, 'extract_pdf_with_llm', lambda *a, **kw: (dict(bs), dict(ce)))
+    monkeypatch.setattr(llm, 'extract_pdf_both_years_with_llm',
+                        lambda *a, **kw: (dict(bs), dict(ce), None, None))
+    result = importer.import_pdf_balance_sheet(str(SAP), fiscal_year=2026,
+        period_months=5, company_name='Incomplete macros with fallback')
+    assert result['success']
     with sessions() as db:
-        assert db.query(Company).count() == db.query(FinancialYear).count() == 0
+        year = db.query(FinancialYear).one()
+        report = json.loads(year.validation_report)
+        assert report['macro_analysis']['status'] == 'incomplete'
+        assert report['macro_analysis']['fallback_used']
+        assert year.income_statement.ce09_ammortamenti == D('977681.20')

@@ -12,7 +12,7 @@ import os
 import time
 from typing import Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ValidationError
 
 from calculations.ce_result import calculate_ce_result
 from importers.detail_enrichment import collect_source_rows, source_line
@@ -43,7 +43,7 @@ REQUIRED_CONTROLS = {'totale_attivo', 'totale_passivo', 'totale_patrimonio_netto
 
 class MacroCell(BaseModel):
     row: str
-    column: int = Field(ge=0)
+    column: int = Field(ge=0, description='ZERO-based index in cells[] of this row')
     sign: Literal[-1, 1] = 1
 
 
@@ -91,6 +91,10 @@ proponi componenti disgiunti (kind=component). NON sommare padre e figli.
 Se una voce non ha importo leggibile, mettila in unresolved, NON in absent.
 In absent elenca TUTTI i campi non presenti in QUESTO blocco, per ciascun periodo.
 Un campo dimenticato non è uno zero. Non dichiarare assente una voce illeggibile.
+facts contiene SOLO voci con almeno una cella citabile: cells NON può essere [].
+Per le voci assenti usa esclusivamente absent, mai un fact con cells vuoto.
+Una colonna corrente vuota con importo solo comparato è assente nel corrente,
+non illeggibile. Leggi i ruoli e le coordinate delle celle, non solo gli indici.
 
 SP: totale_crediti è SOLO C.II (non crediti immobilizzati); totale_debiti è D.
 crediti_lungo/debiti_lungo contengono SOLO scadenze esplicite oltre 12 mesi:
@@ -297,6 +301,18 @@ def analyze_pdf_macros(file_path, *, include_prior=False, reader=None, rows=None
                                           'passes': history, 'chunks': coverage})
             try:
                 reading = reader(chunk.context + chunk.primary, periods, feedback)
+            except ValidationError as exc:
+                # An invalid structured answer is a correctable reading error,
+                # not an API outage. Keep it inside the same two-pass budget;
+                # never turn missing/invalid evidence into a zero-valued fact.
+                errors = ['invalid macro response: ' + '.'.join(map(str, e['loc']))
+                          + ': ' + e['type'] for e in exc.errors(include_input=False)]
+                readings.append(({r.id for r in chunk.primary}, MacroReading(
+                    facts=[], absent=[], unresolved=[])))
+                coverage.append({'index': chunk.index, 'rows': len(chunk.primary),
+                                 'pages': sorted({r.page for r in chunk.primary}),
+                                 'status': 'invalid_response', 'errors': errors})
+                continue
             except Exception as exc:
                 # Do not expose SDK payloads/keys or retry billing/network errors.
                 reason = ('credito API insufficiente' if 'credit balance' in str(exc).lower()
@@ -308,6 +324,9 @@ def analyze_pdf_macros(file_path, *, include_prior=False, reader=None, rows=None
                              'pages': sorted({r.page for r in chunk.primary}), 'status': 'completed'})
         candidates = [reduce_macros(rows, readings, period) for period in periods]
         current = candidates[0][2]
+        current['errors'].extend(error for chunk in coverage for error in chunk.get('errors', []))
+        if current['errors']:
+            current['status'] = 'incomplete'
         history.append({'attempt': attempt + 1, 'chunks': coverage, 'errors': current['errors']})
         if current['status'] == 'verified':
             unassigned = sorted({r.page for r in rows if r.statement == 'unassigned'

@@ -214,6 +214,38 @@ def test_one_cent_excess_is_persisted_flagged_and_only_real_correction_clears_ga
             assert json.loads(fy.validation_report)['residual_finalization'] == audit
 
 
+@pytest.mark.parametrize('reason', ['missing macro/control: ce09_ammortamenti',
+                                   'macro_reader_failed:ValidationError'])
+def test_incomplete_macros_import_with_other_debt_residuals(import_fixture, monkeypatch, reason):
+    from database.models import FinancialYear
+    from importers import macro_analysis, standard_ivcee_parser
+    importer, sessions, path, current, prior = import_fixture
+    for data in (current, prior):
+        data['sp11_capitale'] -= D(50)
+        data[DEBT] = D(50)
+        data[BANK] = D(20)
+    def incomplete(*args, **kwargs):
+        raise macro_analysis.MacroAnalysisError({'status': 'incomplete', 'errors': [reason]})
+    monkeypatch.setattr(macro_analysis, 'analyze_pdf_macros', incomplete)
+    monkeypatch.setattr(standard_ivcee_parser, 'has_comparative_ivcee_columns', lambda *a: True)
+    monkeypatch.setenv('PDF_DETAIL_ENRICHMENT', '0')
+    result = importer.import_pdf_balance_sheet(str(path), fiscal_year=2025, company_name='Macro fallback')
+    assert result['success'] and result['prior_year_imported']
+    assert any('MACROVOCI DA VERIFICARE' in w for w in result['warnings'])
+    with sessions() as db:
+        years = db.query(FinancialYear).order_by(FinancialYear.year.desc()).all()
+        assert len(years) == 2
+        for year in years:
+            assert year.balance_sheet.sp16_debiti_breve == 50
+            assert year.balance_sheet.sp16a_debiti_banche_breve == 20
+            assert year.balance_sheet.sp16g_altri_debiti_breve == 30
+        audit = json.loads(years[0].validation_report)
+        assert audit['macro_analysis']['fallback_used']
+        assert audit['macro_analysis']['status'] == 'incomplete'
+        assert audit['source_reconciliation'].get('status') != 'verified'
+        assert audit['residual_finalization']['families'][DEBT]['allocated'] == '30'
+
+
 def test_conflicting_comparative_never_replaces_previously_valid_prior(import_fixture, monkeypatch):
     from database.models import FinancialYear
     importer, sessions, path, current, prior = import_fixture

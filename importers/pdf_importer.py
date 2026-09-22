@@ -20,7 +20,7 @@ from config import Sector
 
 logger = logging.getLogger(__name__)
 
-_PDF_PARSER_VERSION = "macro-analysis-v7-2026-09-21"
+_PDF_PARSER_VERSION = "macro-fallback-v8-2026-09-21"
 
 
 def _validation_report_payload(q, reliability=None) -> Dict[str, Any]:
@@ -1006,9 +1006,9 @@ def import_pdf_balance_sheet(
             if not api_key:
                 raise PDFImportError("ANTHROPIC_API_KEY is required for PDF import")
             if not is_trial_balance and not is_scanned and not _ocr_source:
-                # Native IV-CEE: exhaustive macro acquisition replaces the old
-                # page-window single/dual/retry loop. Never enrich an incomplete
-                # base or silently fall back to the very reader that lost pages.
+                # Prefer source-verified macros, but incomplete coverage must not
+                # prevent importing. The existing extractor recovers the base;
+                # finalization assigns unexplained detail to residual accounts.
                 from importers.macro_analysis import analyze_pdf_macros, MacroAnalysisError
                 from importers.standard_ivcee_parser import has_comparative_ivcee_columns
                 try:
@@ -1017,8 +1017,17 @@ def import_pdf_balance_sheet(
                         include_prior=not period_months and has_comparative_ivcee_columns(file_path),
                     )
                 except MacroAnalysisError as exc:
-                    raise PDFImportError(str(exc)) from exc
-                return bs, ce, prior_bs, prior_ce
+                    warning = (
+                        'MACROVOCI DA VERIFICARE: lettura incompleta; importazione '
+                        'proseguita con estrazione alternativa e conti residuali. '
+                        'Verificare le voci segnalate in Rettifiche.'
+                    )
+                    _macro_report = {**exc.report, 'fallback_used': True,
+                                     'warnings': [*exc.report.get('warnings', []), warning]}
+                    sc_quadratura_warnings.append(warning)
+                    logger.warning('%s Diagnosi: %s', warning, exc.report.get('errors', []))
+                else:
+                    return bs, ce, prior_bs, prior_ce
             logger.info("Using LLM extraction (ANTHROPIC_API_KEY found)")
             from importers.pdf_extractor_llm import (
                 extract_pdf_with_llm, extract_pdf_both_years_with_llm,
@@ -1517,7 +1526,8 @@ def import_pdf_balance_sheet(
         # Source-proved parents and typed partitions replace stale hypotheses,
         # even if those hypotheses balanced. Do not retain old specific fields
         # or balancing-plug metadata alongside the new source statement.
-        if _source_candidates and not _macro_report:
+        _macros_verified = _macro_report.get('status') == 'verified'
+        if _source_candidates and not _macros_verified:
             balance_sheet_data, income_data, _source_reports['current'] = apply_source_candidate(
                 balance_sheet_data, income_data, _source_candidates[0])
             if _source_candidates[0][0] is not None and not _source_complete:
@@ -1527,7 +1537,7 @@ def import_pdf_balance_sheet(
                 prior_bs_data, prior_ce_data, _source_reports['prior'] = apply_source_candidate(
                     prior_bs_data, prior_ce_data, _source_candidates[1])
         _source_current = _source_reports.get('current', {})
-        if _macro_report:
+        if _macros_verified:
             # The macro candidate was independently cross-footed. Do not let a
             # declined source-layout reader demote it, or CE sign helpers modify it.
             _source_current = _macro_report
@@ -1938,7 +1948,7 @@ def import_pdf_balance_sheet(
                     _prior_validation['warnings'].extend(_prior_residual_report.get('warnings', []))
                     _prior_validation['warnings'].extend(_detail_report.get('warnings', []))
                     _prior_validation['source_reconciliation'] = _source_reports.get('prior', {})
-                    if _macro_report:
+                    if _macros_verified:
                         _prior_validation['macro_analysis'] = _macro_report.get('prior', {})
                     _prior_source_review = bool(_source_reports.get('prior', {}).get('requires_review'))
                     _prior_validation['warnings'].extend(_source_reports.get('prior', {}).get('errors', []))

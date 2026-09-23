@@ -876,13 +876,14 @@ commenti generati da Haiku e poi editabili. I due grafici degli indicatori sono 
 solo (`components/pratica/IndicatoriCharts.tsx`), reso sia dalla tab sia dalla Stampa.
 
 **Il documento che si consegna non è la stampa del browser della tab Stampa**, che resta
-un'anteprima a schermo: «Scarica PDF» chiama `POST /scenarios/{id}/infrannuale/report/pdf`, il
-**report intermedio** (Typst: 9 pagine di sintesi, crisi d'impresa e segnali, più gli allegati A/B dei prospetti
-completi), fatto con
-gli stessi file del dossier finale (`intermedio_catalog.py`, `intermedio_renderer.py`, bundle
-`templates/intermedio/` che legge `dossier-base` senza modificarlo: toccare `dossier-base` o
-`dossier_catalog/` invalida i piani editoriali già preparati del finale). Il PDF legge i commenti
-**salvati**: il pulsante salva prima quelli modificati. **I 14 indicatori della crisi, il
+un'anteprima a schermo: «Scarica PDF» chiama `POST /scenarios/{id}/infrannuale/pdf`, il **report
+infrannuale** ReportLab (13 pagine: copertina con indice, sintesi, CE, costi, SP, circolante, debito,
+crisi d'impresa, segnali, allegati A/B), sullo stesso motore del Business plan. Numeri da
+`assemble_intermedio`, testi a regole: **non legge i commenti AI**, che restano a schermo. Il vecchio
+**report intermedio** Typst (`POST …/infrannuale/report/pdf`, `intermedio_catalog.py`,
+`templates/intermedio/`, che legge `dossier-base` senza modificarlo) resta nel codice ma
+l'interfaccia non lo chiama più. → [docs/budget/REPORT-INFRANNUALE-PDF.md](docs/budget/REPORT-INFRANNUALE-PDF.md)
+**I 14 indicatori della crisi, il
 punteggio e la classe A3→D si calcolano solo sul server** (`calculations/crisi_impresa.py`,
 `GET /scenarios/{id}/infrannuale/crisi`); il client sceglie il rating dal numero di segnali in
 pagina fra quelli che il server manda per 0..7 segnali, e non ha più una copia delle bande.
@@ -984,6 +985,7 @@ giusto è il codice, non `/docs`.
 | Come si provano gli endpoint degli scenari? | [docs/budget/TEST_BUDGET_API.md](docs/budget/TEST_BUDGET_API.md) |
 | Quali differenze storiche restano per il PDF server M2, non per il `/report` corrente? | [docs/budget/FINAL-REPORT-PDF.md](docs/budget/FINAL-REPORT-PDF.md) |
 | Il PDF Business plan esce diverso dal riferimento del committente, o un testo non torna? | [docs/budget/BUSINESS-PLAN-PDF.md](docs/budget/BUSINESS-PLAN-PDF.md) |
+| Il PDF infrannuale della Stampa esce diverso dal riferimento, o un testo non torna? | [docs/budget/REPORT-INFRANNUALE-PDF.md](docs/budget/REPORT-INFRANNUALE-PDF.md) |
 | Il giornale delle rettifiche si comporta male, o non sai cosa può fare da contropartita? | [docs/frontend/RETTIFICHE.md](docs/frontend/RETTIFICHE.md) |
 | Lo stepper della pratica blocca un passaggio, o il wizard si perde dopo un refresh? | [docs/frontend/PRATICA-PERCORSO.md](docs/frontend/PRATICA-PERCORSO.md) |
 | Devi aggiungere una voce a SP o CE, o una vista rende una riga diversa dalle altre? | [docs/frontend/LAYOUT-SP-CE.md](docs/frontend/LAYOUT-SP-CE.md) |

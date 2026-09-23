@@ -40,10 +40,10 @@ export const STEP_FIELDS: Record<WizardStepKey, readonly string[]> = {
   circolante: ["dso_days", "dio_days", "dpo_days", "receivables_long_growth_pct"],
   "patrimoniale-pregresso": [
     "bank_lines_amount", "bank_lines_rate", "financing_loans",
-    "existing_debt_repayment_years", "altri_finanz_repayment_years",
+    "existing_debt_repayment_years", "altri_finanz_repayment_years", "sp06e_growth_pct",
   ],
   "patrimoniale-piano": [
-    "sp01_growth_pct", "sp04_growth_pct", "sp06e_growth_pct", "sp06f_growth_pct",
+    "sp01_growth_pct", "sp04_growth_pct", "sp06f_growth_pct",
     "sp08_growth_pct", "sp10_growth_pct", "sp14_growth_pct", "sp16f_growth_pct",
     "sp16g_growth_pct", "sp17d_growth_pct", "sp17f_growth_pct", "sp17g_growth_pct",
     "sp18_growth_pct", "previdenza_scales_with_personnel", "tfr_accrual_suspended", "tfr_payments",

@@ -100,6 +100,15 @@ ripetono massa già totalizzata: lasciarle passare la fa contare due volte.
 Due candidati concorrono: il **CoGe-LLM** e il **parser deterministico**. Il deterministico gira
 sempre, perché è gratuito e non può peggiorare il risultato.
 
+**Il pass CoGe può girare su Qwen locale (gx10)**, con `PDF_LLM_PROVIDER_COGE=gx10`, invece che
+su Claude Haiku. Stesso prompt e stesso schema Pydantic, usati come vincolo di decodifica invece
+che come tool forzato di Anthropic. La vision resta su Anthropic in ogni caso: un PDF senza text
+layer con gx10 e senza chiave Anthropic solleva un errore dichiarato, e route C tiene il candidato
+deterministico. Un guasto di gx10 qualunque — rete, timeout, risposta fuori schema — è preso dal
+try/except già esistente, e route C ripiega sullo stesso modo: il deterministico. Il fornitore
+usato si persiste in `FinancialYear.validation_report["coge_provider"]` (anno corrente e
+precedente).
+
 Il CoGe-LLM **non** viene lanciato se l'OCR locale a coordinate ha già letto il file: sarebbe
 aggiungere un candidato stocastico a una lettura deterministica riuscita.
 

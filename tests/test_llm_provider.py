@@ -96,6 +96,33 @@ def test_json_non_valido_o_fuori_schema_errore_pulito(content):
                                 transport=httpx.MockTransport(_risposta(content=content)))
 
 
+def _risposta_corpo_200(corpo):
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json=corpo)
+    return handler
+
+
+def _risposta_non_json_200():
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, content=b"questo non e' json")
+    return handler
+
+
+@pytest.mark.parametrize("corpo", [{}, {"choices": []}, {"choices": [{}]}])
+def test_200_con_corpo_malformato_errore_pulito(corpo):
+    with pytest.raises(LLMProviderError, match="formato inatteso") as exc:
+        chiama_gx10_strutturato("s", "u", Voce, max_tokens=10,
+                                transport=httpx.MockTransport(_risposta_corpo_200(corpo)))
+    assert CHIAVE not in str(exc.value)
+
+
+def test_200_con_corpo_non_json_errore_pulito():
+    with pytest.raises(LLMProviderError, match="formato inatteso") as exc:
+        chiama_gx10_strutturato("s", "u", Voce, max_tokens=10,
+                                transport=httpx.MockTransport(_risposta_non_json_200()))
+    assert CHIAVE not in str(exc.value)
+
+
 def test_provider_coge_default_anthropic(monkeypatch):
     monkeypatch.delenv("PDF_LLM_PROVIDER_COGE", raising=False)
     assert llm_provider.provider_coge() == "anthropic"

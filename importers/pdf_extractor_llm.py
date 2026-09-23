@@ -22,6 +22,7 @@ import anthropic
 
 from config import PDF_LLM_MODEL, PDF_LLM_MAX_TOKENS
 from calculations.ce_result import calculate_ce_result
+from importers import llm_provider
 
 logger = logging.getLogger(__name__)
 
@@ -2676,7 +2677,6 @@ def _extract_with_llm(
     e' lo stesso del ramo Anthropic, meno il riferimento al tool, che su vLLM non esiste.
     """
     if provider == "gx10":
-        from importers import llm_provider
         logger.info(f"Calling gx10 for {section_name} extraction ({len(text)} chars)...")
         return llm_provider.chiama_gx10_strutturato(
             system_prompt,
@@ -3814,7 +3814,6 @@ def extract_trial_balance_with_llm(
     Raises:
         PDFImportError: if the API key is missing or extraction fails.
     """
-    from importers import llm_provider
     provider = llm_provider.provider_coge()
     client = None
     api_key = os.environ.get("ANTHROPIC_API_KEY", "")

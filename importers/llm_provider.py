@@ -59,10 +59,15 @@ def chiama_gx10_strutturato(system_prompt: str, testo_utente: str,
         raise LLMProviderError(f"gx10 non raggiungibile: {type(exc).__name__}") from None
     if r.status_code != 200:
         raise LLMProviderError(f"gx10 ha risposto {r.status_code}") from None
-    scelta = r.json()["choices"][0]
-    if scelta.get("finish_reason") == "length":
-        raise LLMProviderError("risposta gx10 troncata: max_tokens insufficiente")
-    testo = scelta["message"].get("content") or ""
+    try:
+        scelta = r.json()["choices"][0]
+        if scelta.get("finish_reason") == "length":
+            raise LLMProviderError("risposta gx10 troncata: max_tokens insufficiente")
+        testo = scelta["message"].get("content") or ""
+    except LLMProviderError:
+        raise
+    except (ValueError, KeyError, IndexError, TypeError):
+        raise LLMProviderError("risposta gx10 non valida: formato inatteso") from None
     try:
         return output_model.model_validate(json.loads(testo))
     except (json.JSONDecodeError, pydantic.ValidationError):

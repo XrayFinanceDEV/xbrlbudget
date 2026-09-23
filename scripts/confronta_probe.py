@@ -29,6 +29,7 @@ def confronta(a: list[dict], b: list[dict]) -> list[dict]:
         out.append({
             "file": f,
             "metodo": (ra.get("extraction_method"), rb.get("extraction_method")),
+            "provider": (ra.get("coge_provider"), rb.get("coge_provider")),
             "attivo": (ra.get("totale_attivo"), rb.get("totale_attivo")),
             "stesso_attivo": ra.get("totale_attivo") == rb.get("totale_attivo"),
             "sbilancio": (ra.get("sbilancio"), rb.get("sbilancio")),
@@ -45,6 +46,7 @@ def main(argv: list[str]) -> None:
             continue
         print(f"== {r['file']}")
         print(f"   metodo   {r['metodo'][0]}  |  {r['metodo'][1]}")
+        print(f"   provider {r['provider'][0]}  |  {r['provider'][1]}")
         print(f"   attivo   {r['attivo'][0]}  |  {r['attivo'][1]}")
         print(f"   sbilancio {r['sbilancio'][0]}  |  {r['sbilancio'][1]}")
         print(f"   utile    {r['utile'][0]}  |  {r['utile'][1]}")

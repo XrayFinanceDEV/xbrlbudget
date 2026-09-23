@@ -19,11 +19,23 @@ Le variabili che oggi contano davvero (`SUPABASE_JWT_SECRET`, `ANTHROPIC_API_KEY
 generate da Jenkins in `.env.docker`: vedi la guida corrente e
 [IFRAME_INTEGRATION.md](IFRAME_INTEGRATION.md).
 
-## Variabili del pass CoGe di route C (Qwen locale)
+## Variabili del fornitore LLM per l'import PDF (Qwen locale)
 
 `PDF_LLM_PROVIDER_COGE` — `anthropic` (default: il pass CoGe di route C gira su Claude
 Haiku, come oggi) oppure `gx10` (Qwen locale; solo il valore esatto `gx10` cambia il
 fornitore).
+
+`PDF_LLM_PROVIDER_IVCEE` — stesso schema, per l'estrattore testuale di route A/B (schema di
+legge IV-CEE) e per la lettura delle macro-voci (`read_macros`): `anthropic` di default,
+`gx10` per farli girare su Qwen locale.
+
+`PDF_LLM_PROVIDER_DETTAGLI` — stesso schema, per la seconda lettura (`read_details`,
+`read_accounts`: celle di dettaglio della nota integrativa e classificazione dei sottoconti):
+`anthropic` di default, `gx10` per Qwen locale.
+
+La vision resta su Anthropic in ogni caso, per tutti e tre i fornitori: un PDF senza text
+layer letto con `gx10` e senza `ANTHROPIC_API_KEY` solleva un errore dichiarato invece di
+chiamare gx10 sull'immagine (gx10 qui legge solo testo).
 
 - `GX10_API_KEY` — chiave per gx10, letta solo dall'ambiente, inviata solo come header
   `Authorization: Bearer`, mai loggata; obbligatoria quando il provider è `gx10`,

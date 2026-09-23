@@ -1802,6 +1802,14 @@ def import_pdf_balance_sheet(
             # sia costruito, poco piu' sotto in questa funzione.
             from importers.llm_provider import provider_coge
             _validation_payload["coge_provider"] = provider_coge()
+        # Fornitore configurato per l'estrattore testuale di route A/B + lettura delle
+        # macro-voci (provider_ivcee) e per la seconda lettura dei dettagli (provider_dettagli),
+        # dichiarati su OGNI route — non solo su route C come coge_provider sopra, perché
+        # questi due girano anche su A/B. Stesso motivo, stesso punto: prima della
+        # serializzazione, cosi' un GET successivo li rilegge senza rieseguire l'import.
+        from importers.llm_provider import provider_dettagli, provider_ivcee
+        _validation_payload["ivcee_provider"] = provider_ivcee()
+        _validation_payload["dettagli_provider"] = provider_dettagli()
         _validation_payload['residual_finalization'] = _residual_report
         _validation_payload['warnings'].extend(_residual_report['warnings'])
         _validation_payload['warnings'].extend(_detail_report.get('warnings', []))
@@ -1971,6 +1979,11 @@ def import_pdf_balance_sheet(
                         # gemello su _validation_payload, qualche centinaio di righe sopra.
                         from importers.llm_provider import provider_coge
                         _prior_validation["coge_provider"] = provider_coge()
+                    # Stessi due campi dell'anno corrente, stesso motivo: vedi il commento
+                    # gemello su _validation_payload, qualche centinaio di righe sopra.
+                    from importers.llm_provider import provider_dettagli, provider_ivcee
+                    _prior_validation["ivcee_provider"] = provider_ivcee()
+                    _prior_validation["dettagli_provider"] = provider_dettagli()
                     _prior_validation['residual_finalization'] = _prior_residual_report
                     _prior_validation['warnings'].extend(_prior_residual_report.get('warnings', []))
                     _prior_validation['warnings'].extend(_detail_report.get('warnings', []))

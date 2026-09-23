@@ -19,6 +19,7 @@ import glob
 import json
 import os
 import sys
+import time
 import traceback
 from decimal import Decimal
 
@@ -129,6 +130,7 @@ def probe(
         "plug_residual": None,
         "netted_contra": None,
         "prior_year_imported": None,
+        "secondi": None,
         "warnings": [],
         "masked": None,
         # Live-route evidence: #50 needs to prove that the partial comparative
@@ -190,6 +192,7 @@ def probe(
         llm.extract_pdf_with_llm = observed_single
         llm.extract_pdf_both_years_with_llm = observed_dual
         pi._single_year_read_prior_column = observed_guard
+        _inizio = time.monotonic()
         try:
             res = import_pdf_balance_sheet(
                 file_path=file_path,
@@ -203,6 +206,7 @@ def probe(
                 extraction_context=ctx,
             )
         finally:
+            rec["secondi"] = round(time.monotonic() - _inizio, 1)
             llm.extract_pdf_with_llm = original_single
             llm.extract_pdf_both_years_with_llm = original_dual
             pi._single_year_read_prior_column = original_guard
@@ -220,6 +224,8 @@ def probe(
         rec["plug_residual"] = _str_dec(_q.get("plug_residual", vr.get("plug_residual")))
         rec["netted_contra"] = _str_dec(vr.get("netted_contra"))
         rec["coge_provider"] = vr.get("coge_provider")
+        rec["ivcee_provider"] = vr.get("ivcee_provider")
+        rec["dettagli_provider"] = vr.get("dettagli_provider")
         w = list(res.get("warnings") or []) + list(vr.get("warnings") or [])
         rec["warnings"] = [str(x)[:220] for x in w][:10]
 

@@ -29,12 +29,16 @@ def confronta(a: list[dict], b: list[dict]) -> list[dict]:
         out.append({
             "file": f,
             "metodo": (ra.get("extraction_method"), rb.get("extraction_method")),
-            "provider": (ra.get("coge_provider"), rb.get("coge_provider")),
+            "provider": (
+                (ra.get("coge_provider"), ra.get("ivcee_provider"), ra.get("dettagli_provider")),
+                (rb.get("coge_provider"), rb.get("ivcee_provider"), rb.get("dettagli_provider")),
+            ),
             "attivo": (ra.get("totale_attivo"), rb.get("totale_attivo")),
             "stesso_attivo": ra.get("totale_attivo") == rb.get("totale_attivo"),
             "sbilancio": (ra.get("sbilancio"), rb.get("sbilancio")),
             "utile": (ra.get("utile_ce"), rb.get("utile_ce")),
             "campi_diversi": sorted(k for k in set(ca) | set(cb) if ca.get(k) != cb.get(k)),
+            "secondi": (ra.get("secondi"), rb.get("secondi")),
         })
     return out
 
@@ -50,6 +54,7 @@ def main(argv: list[str]) -> None:
         print(f"   attivo   {r['attivo'][0]}  |  {r['attivo'][1]}")
         print(f"   sbilancio {r['sbilancio'][0]}  |  {r['sbilancio'][1]}")
         print(f"   utile    {r['utile'][0]}  |  {r['utile'][1]}")
+        print(f"   secondi  {r['secondi'][0]}  |  {r['secondi'][1]}")
         print(f"   campi diversi ({len(r['campi_diversi'])}): {', '.join(r['campi_diversi'][:15])}")
 
 

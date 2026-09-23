@@ -462,6 +462,16 @@ def _map_sc_keys(data: Dict[str, Decimal]) -> Dict[str, Decimal]:
     return result
 
 
+def _coge_attivo(api_key: str) -> bool:
+    """Il pass CoGe di route C puo' girare? Con il fornitore di default (Haiku) serve la
+    chiave Anthropic, come sempre; con gx10 serve la chiave gx10, e la chiave Anthropic
+    non conta (la route C deve poter girare interamente in locale)."""
+    from importers.llm_provider import gx10_disponibile, provider_coge
+    if provider_coge() == "gx10":
+        return gx10_disponibile()
+    return bool(api_key)
+
+
 def _extract_route_c_last_resort(llm_extract):
     """Run the IV-CEE last resort without claiming a gross-vs-net measurement.
 
@@ -1261,7 +1271,7 @@ def import_pdf_balance_sheet(
             # source coordinates and self-validates against independent SP/CE
             # controls.  Do not let the presence of an API key add a stochastic
             # plain-text OCR candidate that has lost the two-column geometry.
-            if api_key and not local_coordinate_ocr:
+            if _coge_attivo(api_key) and not local_coordinate_ocr:
                 try:
                     from importers.pdf_extractor_llm import extract_trial_balance_with_llm
                     # On a scanned PDF, pass the OCR text so the extractor uses the
@@ -2013,6 +2023,12 @@ def import_pdf_balance_sheet(
         if is_trial_balance:
             # Route C: distinguish the CoGe LLM pass from the deterministic parser fallback.
             extraction_method = "situazione_contabile_llm" if _coge_ok else "situazione_contabile"
+            # Fornitore configurato per il pass CoGe, dichiarato su OGNI import di route C
+            # (non solo quando il pass CoGe ha vinto): _validation_payload e' lo stesso
+            # dizionario restituito in result["validation_report"] piu' sotto, quindi la
+            # chiave ci arriva senza bisogno di un secondo punto di scrittura.
+            from importers.llm_provider import provider_coge
+            _validation_payload["coge_provider"] = provider_coge()
         elif balance_sheet_data.get("_source_mineru_ivcee"):
             extraction_method = "ivcee_deterministic"
         elif balance_sheet_data.get("_source_standard_ivcee"):

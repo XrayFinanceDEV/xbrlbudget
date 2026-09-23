@@ -110,3 +110,80 @@ def test_il_retry_di_completezza_tiene_il_draw_col_tappo_piu_piccolo(tmp_path, m
     monkeypatch.setattr(P, "_reconcile_trial_to_declared", con_residuo)
     bs, _ = P.extract_trial_balance_with_llm(_pdf(tmp_path, RIGHE))
     assert bs["_plug_residual"] == min(residui)
+
+
+from importers import pdf_importer
+
+
+def test_coge_attivo_anthropic_segue_la_chiave(monkeypatch):
+    monkeypatch.delenv("PDF_LLM_PROVIDER_COGE", raising=False)
+    assert pdf_importer._coge_attivo("sk-qualcosa") is True
+    assert pdf_importer._coge_attivo("") is False
+
+
+def test_coge_attivo_gx10_segue_la_chiave_gx10_non_quella_anthropic(monkeypatch):
+    monkeypatch.setenv("PDF_LLM_PROVIDER_COGE", "gx10")
+    monkeypatch.setenv("GX10_API_KEY", "x")
+    assert pdf_importer._coge_attivo("") is True
+    monkeypatch.setenv("GX10_API_KEY", "")
+    assert pdf_importer._coge_attivo("sk-qualcosa") is False
+
+
+# ATTENZIONE: "TOTALE A PAREGGIO" e' il marker che bilancio_classifier.classify_bilancio
+# usa per instradare alla route C (s["pareggio"]); RIGHE (sopra) non lo porta e da sola
+# classifica UNSUPPORTED, quindi i due test end-to-end sotto usano questa variante.
+RIGHE_PAREGGIO = RIGHE + ["TOTALE A PAREGGIO   1.000,00"]
+
+
+def _db_in_memoria(monkeypatch):
+    """Sessione SQLite in RAM, agganciata a pdf_importer.SessionLocal come negli altri
+    test end-to-end (vedi tests/test_reliability_gating.py)."""
+    from sqlalchemy import create_engine
+    from sqlalchemy.orm import sessionmaker
+
+    from database.db import Base
+
+    engine = create_engine("sqlite:///:memory:")
+    Base.metadata.create_all(engine)
+    session_factory = sessionmaker(bind=engine)
+    monkeypatch.setattr(pdf_importer, "SessionLocal", session_factory)
+    return session_factory
+
+
+def test_route_c_senza_chiave_anthropic_con_gx10_dichiara_il_fornitore(tmp_path, monkeypatch):
+    """Prova che validation_report["coge_provider"] arriva nel risultato: l'intera route C
+    (classificazione + pass CoGe + persistenza) gira SENZA ANTHROPIC_API_KEY quando il
+    fornitore e' gx10, e il risultato dichiara "gx10" — non solo quando gx10 vince il
+    confronto con il candidato deterministico, ma su ogni import di route C."""
+    monkeypatch.setenv("PDF_LLM_PROVIDER_COGE", "gx10")
+    monkeypatch.setenv("GX10_API_KEY", "x")
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    monkeypatch.setattr(llm_provider, "chiama_gx10_strutturato", _finto_gx10([]))
+    _db_in_memoria(monkeypatch)
+
+    result = pdf_importer.import_pdf_balance_sheet(
+        file_path=_pdf(tmp_path, RIGHE_PAREGGIO), fiscal_year=2025,
+        company_name="Route C gx10", create_company=True, sector=1,
+        user_id="route-c-gx10", period_months=12,
+    )
+    assert result["validation_report"]["coge_provider"] == "gx10"
+
+
+def test_route_c_default_anthropic_senza_chiave_dichiara_anthropic_e_non_chiama_il_pass_coge(
+        tmp_path, monkeypatch):
+    """Col fornitore di default, senza chiave Anthropic il pass CoGe non parte affatto
+    (_coge_attivo lo blocca) — ma la chiave dichiarata resta "anthropic": e' il fornitore
+    CONFIGURATO, non la prova che il pass abbia girato."""
+    monkeypatch.delenv("PDF_LLM_PROVIDER_COGE", raising=False)
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    monkeypatch.setattr(
+        P, "extract_trial_balance_with_llm",
+        lambda *a, **k: (_ for _ in ()).throw(AssertionError("pass CoGe chiamato senza chiave")))
+    _db_in_memoria(monkeypatch)
+
+    result = pdf_importer.import_pdf_balance_sheet(
+        file_path=_pdf(tmp_path, RIGHE_PAREGGIO), fiscal_year=2025,
+        company_name="Route C anthropic default", create_company=True, sector=1,
+        user_id="route-c-anthropic", period_months=12,
+    )
+    assert result["validation_report"]["coge_provider"] == "anthropic"

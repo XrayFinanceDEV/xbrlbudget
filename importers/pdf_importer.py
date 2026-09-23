@@ -1791,6 +1791,17 @@ def import_pdf_balance_sheet(
             logger.warning(f"Reliability non calcolata: {_rel_err}")
 
         _validation_payload = _validation_report_payload(_qd, reliability=_reliability)
+        if is_trial_balance:
+            # Fornitore configurato per il pass CoGe di route C, dichiarato su OGNI import
+            # di route C (non solo quando il pass CoGe ha vinto il confronto col candidato
+            # deterministico). Scritto QUI, prima che il payload sia serializzato in
+            # FinancialYear.validation_report (poco sotto) e la transazione fatta commit:
+            # la provenienza si legge a posteriori da un GET, senza rieseguire l'import
+            # (docs/import/REGOLE-IMPORT-06-PERSISTENZA.md §2) — lo stesso motivo per cui
+            # _rescue_reasons/_rescued_sections sono inizializzati prima che il payload
+            # sia costruito, poco piu' sotto in questa funzione.
+            from importers.llm_provider import provider_coge
+            _validation_payload["coge_provider"] = provider_coge()
         _validation_payload['residual_finalization'] = _residual_report
         _validation_payload['warnings'].extend(_residual_report['warnings'])
         _validation_payload['warnings'].extend(_detail_report.get('warnings', []))
@@ -1954,6 +1965,12 @@ def import_pdf_balance_sheet(
                         db.flush()
 
                     _prior_validation = _validation_report_payload(_prior_q)
+                    if is_trial_balance:
+                        # Stesso fornitore dichiarato dell'anno corrente (route C legge
+                        # entrambe le colonne con lo stesso pass CoGe): vedi il commento
+                        # gemello su _validation_payload, qualche centinaio di righe sopra.
+                        from importers.llm_provider import provider_coge
+                        _prior_validation["coge_provider"] = provider_coge()
                     _prior_validation['residual_finalization'] = _prior_residual_report
                     _prior_validation['warnings'].extend(_prior_residual_report.get('warnings', []))
                     _prior_validation['warnings'].extend(_detail_report.get('warnings', []))
@@ -2023,12 +2040,6 @@ def import_pdf_balance_sheet(
         if is_trial_balance:
             # Route C: distinguish the CoGe LLM pass from the deterministic parser fallback.
             extraction_method = "situazione_contabile_llm" if _coge_ok else "situazione_contabile"
-            # Fornitore configurato per il pass CoGe, dichiarato su OGNI import di route C
-            # (non solo quando il pass CoGe ha vinto): _validation_payload e' lo stesso
-            # dizionario restituito in result["validation_report"] piu' sotto, quindi la
-            # chiave ci arriva senza bisogno di un secondo punto di scrittura.
-            from importers.llm_provider import provider_coge
-            _validation_payload["coge_provider"] = provider_coge()
         elif balance_sheet_data.get("_source_mineru_ivcee"):
             extraction_method = "ivcee_deterministic"
         elif balance_sheet_data.get("_source_standard_ivcee"):

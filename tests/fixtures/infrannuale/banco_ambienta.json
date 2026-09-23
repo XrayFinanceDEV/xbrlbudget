@@ -1,0 +1,2001 @@
+{
+ "company_name": "AMBIENTA",
+ "period_months": 6,
+ "reference_year": 2025,
+ "partial_year": 2026,
+ "period_end": "30.06.2026",
+ "ce_cols": [
+  {
+   "key": "storico",
+   "label": "2025 C",
+   "kind": "C"
+  },
+  {
+   "key": "infrannuale",
+   "label": "6M 2026",
+   "kind": "6M"
+  },
+  {
+   "key": "annualizzato",
+   "label": "Ann. 2026",
+   "kind": "Ann"
+  },
+  {
+   "key": "proiezione",
+   "label": "2026 F",
+   "kind": "F"
+  }
+ ],
+ "sp_cols": [
+  {
+   "key": "storico",
+   "label": "2025 C",
+   "kind": "C"
+  },
+  {
+   "key": "infrannuale",
+   "label": "6M 2026",
+   "kind": "6M"
+  },
+  {
+   "key": "proiezione",
+   "label": "2026 F",
+   "kind": "F"
+  }
+ ],
+ "values": {
+  "ricavi": {
+   "storico": "3761087.73",
+   "infrannuale": "2104755.00",
+   "annualizzato": "4209510.00",
+   "proiezione": "4109510.00"
+  },
+  "valore_produzione": {
+   "storico": "4006984.18",
+   "infrannuale": "2220108.00",
+   "annualizzato": "4440216.00",
+   "proiezione": "4343216.00"
+  },
+  "costi_operativi": {
+   "storico": "3854914.87",
+   "infrannuale": "2137866.22",
+   "annualizzato": "4275732.44",
+   "proiezione": "4177378.89"
+  },
+  "ebitda": {
+   "storico": "152069.31",
+   "infrannuale": "82241.78",
+   "annualizzato": "164483.56",
+   "proiezione": "165837.11"
+  },
+  "ammortamenti": {
+   "storico": "76056.89",
+   "infrannuale": "32632.00",
+   "annualizzato": "65264.00",
+   "proiezione": "75264.00"
+  },
+  "ebit": {
+   "storico": "76012.42",
+   "infrannuale": "49609.78",
+   "annualizzato": "99219.56",
+   "proiezione": "90573.11"
+  },
+  "risultato_ante_imposte": {
+   "storico": "36608.36",
+   "infrannuale": "35888.78",
+   "annualizzato": "71777.56",
+   "proiezione": "57131.11"
+  },
+  "risultato_netto": {
+   "storico": "7835.36",
+   "infrannuale": "20888.78",
+   "annualizzato": "41777.56",
+   "proiezione": "24131.11"
+  },
+  "oneri_finanziari": {
+   "storico": "-40744.18",
+   "infrannuale": "-22596.00",
+   "annualizzato": "-45192.00",
+   "proiezione": "-45192.00"
+  },
+  "imposte": {
+   "storico": "-28773.00",
+   "infrannuale": "-15000.00",
+   "annualizzato": "-30000.00",
+   "proiezione": "-33000.00"
+  },
+  "immobilizzazioni": {
+   "storico": "584093.80",
+   "infrannuale": "489671.44",
+   "proiezione": "457039.44"
+  },
+  "attivo_circolante": {
+   "storico": "1377867.28",
+   "infrannuale": "1754565.35",
+   "proiezione": "1644090.40"
+  },
+  "totale_attivo": {
+   "storico": "2170830.20",
+   "infrannuale": "2460463.09",
+   "proiezione": "2317356.14"
+  },
+  "patrimonio_netto": {
+   "storico": "179897.43",
+   "infrannuale": "200373.21",
+   "proiezione": "203615.54"
+  },
+  "debiti_finanziari": {
+   "storico": "852510.82",
+   "infrannuale": "997441.16",
+   "proiezione": "997441.16"
+  },
+  "debiti_operativi": {
+   "storico": "939011.45",
+   "infrannuale": "1101133.48",
+   "proiezione": "907442.71"
+  },
+  "liquidita": {
+   "storico": "29266.59",
+   "infrannuale": "21764.71",
+   "proiezione": "54.82"
+  },
+  "ccn_sp": {
+   "storico": "26779.69",
+   "infrannuale": "160022.97",
+   "proiezione": "243238.79"
+  },
+  "altri_proventi_fin": {
+   "storico": "1340.12",
+   "infrannuale": "8875.00",
+   "annualizzato": "17750.00",
+   "proiezione": "11750.00"
+  },
+  "materie": {
+   "storico": "146931.36",
+   "infrannuale": "64654.00",
+   "annualizzato": "129308.00",
+   "proiezione": "129308.00"
+  },
+  "servizi": {
+   "storico": "1108769.67",
+   "infrannuale": "936241.00",
+   "annualizzato": "1872482.00",
+   "proiezione": "1432482.00"
+  },
+  "godimento": {
+   "storico": "221298.32",
+   "infrannuale": "107267.00",
+   "annualizzato": "214534.00",
+   "proiezione": "234534.00"
+  },
+  "personale": {
+   "storico": "2346181.74",
+   "infrannuale": "1012371.22",
+   "annualizzato": "2024742.44",
+   "proiezione": "2344742.00"
+  },
+  "var_rim_materie": {
+   "storico": "319.27",
+   "infrannuale": "-1432.00",
+   "annualizzato": "-2864.00",
+   "proiezione": "-1217.11"
+  },
+  "oneri_diversi": {
+   "storico": "31414.51",
+   "infrannuale": "18765.00",
+   "annualizzato": "37530.00",
+   "proiezione": "37530.00"
+  },
+  "totale_costi_produzione": {
+   "storico": "3930971.76",
+   "infrannuale": "2170498.22",
+   "annualizzato": "4340996.44",
+   "proiezione": "4252642.89"
+  },
+  "ratei_attivi": {
+   "storico": "208869.12",
+   "infrannuale": "216226.30",
+   "proiezione": "216226.30"
+  },
+  "crediti_clienti_breve": {
+   "storico": "686301.63",
+   "infrannuale": "1153958.55",
+   "proiezione": "1068527.42"
+  },
+  "crediti_clienti_lungo": {
+   "storico": "0.00",
+   "infrannuale": "45000.00",
+   "proiezione": "45000.00"
+  },
+  "rimanenze": {
+   "storico": "286094.89",
+   "infrannuale": "287312.00",
+   "proiezione": "287312.00"
+  },
+  "fornitori": {
+   "storico": "600490.77",
+   "infrannuale": "652885.44",
+   "proiezione": "548578.07"
+  },
+  "banche": {
+   "storico": "812762.40",
+   "infrannuale": "960937.42",
+   "proiezione": "960937.42"
+  },
+  "banche_breve": {
+   "storico": "399432.84",
+   "infrannuale": "493408.90",
+   "proiezione": "493408.90"
+  },
+  "banche_lungo": {
+   "storico": "413329.56",
+   "infrannuale": "467528.52",
+   "proiezione": "467528.52"
+  },
+  "altri_finanziatori": {
+   "storico": "39748.42",
+   "infrannuale": "36503.74",
+   "proiezione": "36503.74"
+  },
+  "debiti_previdenziali": {
+   "storico": "87897.08",
+   "infrannuale": "194631.61",
+   "proiezione": "163536.55"
+  },
+  "debiti_tributari": {
+   "storico": "48366.01",
+   "infrannuale": "26179.12",
+   "proiezione": "4227.00"
+  },
+  "immob_finanziarie": {
+   "storico": "116250.00",
+   "infrannuale": "52550.00",
+   "proiezione": "52550.00"
+  },
+  "crediti_clienti": {
+   "storico": "686301.63",
+   "infrannuale": "1198958.55",
+   "proiezione": "1113527.42"
+  },
+  "cc_comm": {
+   "storico": "371905.75",
+   "infrannuale": "833385.11",
+   "proiezione": "852261.35"
+  },
+  "dscr": {
+   "storico": "3.026108514148524",
+   "infrannuale": "2.9758266949902636",
+   "proiezione": "2.939394361833953"
+  },
+  "ebitda_margin": {
+   "storico": "4.04322687787982",
+   "infrannuale": "3.907427705362382",
+   "proiezione": "4.035447291769579",
+   "annualizzato": "3.907427705362382"
+  },
+  "mt": {
+   "storico": "-67802.56",
+   "infrannuale": "26580.79",
+   "proiezione": "109796.61"
+  },
+  "ccn": {
+   "storico": "218292.33",
+   "infrannuale": "313892.79",
+   "proiezione": "397108.61"
+  },
+  "current_ratio": {
+   "storico": "1.1615678595641605",
+   "infrannuale": "1.1968544667969252",
+   "proiezione": "1.2834765703699338"
+  },
+  "ms": {
+   "storico": "-404196.37",
+   "infrannuale": "-289298.23",
+   "proiezione": "-253423.9"
+  },
+  "copertura_immob": {
+   "storico": "106.20419357301859",
+   "infrannuale": "143.85267599025175",
+   "proiezione": "154.83298334165647"
+  },
+  "indipendenza": {
+   "storico": "8.287033688770315",
+   "infrannuale": "8.14371940039954",
+   "proiezione": "8.786544997783551"
+  },
+  "pfn": {
+   "storico": "783495.81",
+   "infrannuale": "939172.71",
+   "proiezione": "960882.6"
+  },
+  "pfn_ebitda": {
+   "storico": "5.15222834903374",
+   "infrannuale": "5.709827231365858",
+   "proiezione": "5.79413497980036"
+  },
+  "roi": {
+   "storico": "3.5015368774582187",
+   "infrannuale": "4.032556326622237",
+   "proiezione": "3.908467431337507"
+  },
+  "roe": {
+   "storico": "4.3554596638762435",
+   "infrannuale": "20.849873094312358",
+   "proiezione": "11.851310563034628"
+  },
+  "ros": {
+   "storico": "2.021022253580881",
+   "infrannuale": "2.357033478955983",
+   "proiezione": "2.203988066703816"
+  },
+  "of_mol": {
+   "storico": "26.793164248591644",
+   "infrannuale": "27.475086263940298",
+   "proiezione": "27.250836679438034"
+  },
+  "of_revenue": {
+   "storico": "1.0833084183335442",
+   "infrannuale": "1.0735691327494175",
+   "proiezione": "1.099693150764933"
+  }
+ },
+ "crisi": {
+  "storico": {
+   "codice": "D",
+   "etichetta": "Crisi",
+   "oltre": 9,
+   "segnali": 0,
+   "indicatori": {
+    "dscr": "3.026108514148524",
+    "ebitda_margin": "4.04322687787982",
+    "mt": "-67802.56",
+    "ccn": "218292.33",
+    "current_ratio": "1.1615678595641605",
+    "ms": "-404196.37",
+    "copertura_immob": "106.20419357301859",
+    "indipendenza": "8.287033688770315",
+    "pfn": "783495.81",
+    "pfn_ebitda": "5.15222834903374",
+    "roi": "3.5015368774582187",
+    "roe": "4.3554596638762435",
+    "ros": "2.021022253580881",
+    "of_mol": "26.793164248591644",
+    "of_revenue": "1.0833084183335442",
+    "materials_revenue": "3.9066187908358097",
+    "services_revenue": "29.480026779380655",
+    "_ebitda_raw": "152069.31",
+    "_quick_ratio": "0.9498163105768739",
+    "_equity_over_fixed": "30.799407560908882",
+    "_revenue_raw": "3761087.73",
+    "_total_assets_raw": "2170830.2",
+    "_equity_raw": "179897.43",
+    "_oneri_finanziari_raw": "40744.18"
+   },
+   "punteggi": {
+    "dscr": "1.0",
+    "ebitda_margin": "0.0",
+    "mt": "0.2996326211537477",
+    "ccn": "0.5165255136630864",
+    "current_ratio": "0.5165255136630864",
+    "ms": "0.0",
+    "copertura_immob": "0.374345622471694",
+    "indipendenza": "0.0",
+    "pfn": "0.14129527516104334",
+    "pfn_ebitda": "0.14129527516104334",
+    "roi": "0.2917947397881849",
+    "roe": "0.36295497198968696",
+    "ros": "0.2021022253580881",
+    "of_mol": "0.12827343005633418",
+    "of_revenue": "0.979172895416614"
+   }
+  },
+  "infrannuale": {
+   "codice": "C2",
+   "etichetta": "Rischio grave",
+   "oltre": 7,
+   "segnali": 0,
+   "indicatori": {
+    "dscr": "2.9758266949902636",
+    "ebitda_margin": "3.907427705362382",
+    "mt": "26580.79",
+    "ccn": "313892.79",
+    "current_ratio": "1.1968544667969252",
+    "ms": "-289298.23",
+    "copertura_immob": "143.85267599025175",
+    "indipendenza": "8.14371940039954",
+    "pfn": "939172.71",
+    "pfn_ebitda": "5.709827231365858",
+    "roi": "4.032556326622237",
+    "roe": "20.849873094312358",
+    "ros": "2.357033478955983",
+    "of_mol": "27.475086263940298",
+    "of_revenue": "1.0735691327494175",
+    "materials_revenue": "3.071806457283627",
+    "services_revenue": "44.482184387256474",
+    "_ebitda_raw": "164483.56",
+    "_quick_ratio": "1.0166698548332092",
+    "_equity_over_fixed": "40.91992990238516",
+    "_revenue_raw": "4209510.0",
+    "_total_assets_raw": "2460463.09",
+    "_equity_raw": "200373.21",
+    "_oneri_finanziari_raw": "45192.0"
+   },
+   "punteggi": {
+    "dscr": "1.0",
+    "ebitda_margin": "0.0",
+    "mt": "0.43333970966641855",
+    "ccn": "0.566934952567036",
+    "current_ratio": "0.566934952567036",
+    "ms": "0.0",
+    "copertura_immob": "0.912181085575025",
+    "indipendenza": "0.0",
+    "pfn": "0.04836212810569032",
+    "pfn_ebitda": "0.04836212810569032",
+    "roi": "0.3360463605518531",
+    "roe": "1.0",
+    "ros": "0.2357033478955983",
+    "of_mol": "0.10099654944238805",
+    "of_revenue": "0.9816077168126457"
+   }
+  },
+  "proiezione": {
+   "codice": "D",
+   "etichetta": "Crisi",
+   "oltre": 8,
+   "segnali": 0,
+   "indicatori": {
+    "dscr": "2.939394361833953",
+    "ebitda_margin": "4.035447291769579",
+    "mt": "109796.61",
+    "ccn": "397108.61",
+    "current_ratio": "1.2834765703699338",
+    "ms": "-253423.9",
+    "copertura_immob": "154.83298334165647",
+    "indipendenza": "8.786544997783551",
+    "pfn": "960882.6",
+    "pfn_ebitda": "5.79413497980036",
+    "roi": "3.908467431337507",
+    "roe": "11.851310563034628",
+    "ros": "2.203988066703816",
+    "of_mol": "27.250836679438034",
+    "of_revenue": "1.099693150764933",
+    "materials_revenue": "3.1465551854113993",
+    "services_revenue": "34.85773243038708",
+    "_ebitda_raw": "165837.11",
+    "_quick_ratio": "1.07837847293476",
+    "_equity_over_fixed": "44.55097791997995",
+    "_revenue_raw": "4109510.0",
+    "_total_assets_raw": "2317356.14",
+    "_equity_raw": "203615.54",
+    "_oneri_finanziari_raw": "45192.0"
+   },
+   "punteggi": {
+    "dscr": "1.0",
+    "ebitda_margin": "0.0",
+    "mt": "0.5567569458695201",
+    "ccn": "0.6906808148141911",
+    "current_ratio": "0.6906808148141911",
+    "ms": "0.0",
+    "copertura_immob": "1.0",
+    "indipendenza": "0.0",
+    "pfn": "0.03431083669994008",
+    "pfn_ebitda": "0.03431083669994008",
+    "roi": "0.3257056192781256",
+    "roe": "0.9876092135862191",
+    "ros": "0.22039880667038161",
+    "of_mol": "0.10996653282247863",
+    "of_revenue": "0.9750767123087667"
+   }
+  }
+ },
+ "definizioni": [
+  [
+   "dscr",
+   "DSCR",
+   "ratio",
+   true
+  ],
+  [
+   "ebitda_margin",
+   "EBITDA %",
+   "pct",
+   true
+  ],
+  [
+   "mt",
+   "Margine di Tesoreria",
+   "euro",
+   true
+  ],
+  [
+   "ccn",
+   "CCN",
+   "euro",
+   true
+  ],
+  [
+   "current_ratio",
+   "Liquidità Corrente",
+   "ratio",
+   true
+  ],
+  [
+   "ms",
+   "Margine di Struttura",
+   "euro",
+   true
+  ],
+  [
+   "copertura_immob",
+   "Copertura Immobilizzazioni",
+   "pct",
+   true
+  ],
+  [
+   "indipendenza",
+   "Indipendenza Finanziaria",
+   "pct",
+   true
+  ],
+  [
+   "pfn",
+   "PFN",
+   "euro",
+   true
+  ],
+  [
+   "pfn_ebitda",
+   "PFN / EBITDA",
+   "ratio",
+   true
+  ],
+  [
+   "roi",
+   "ROI",
+   "pct",
+   true
+  ],
+  [
+   "roe",
+   "ROE",
+   "pct",
+   true
+  ],
+  [
+   "ros",
+   "ROS",
+   "pct",
+   true
+  ],
+  [
+   "of_mol",
+   "Oneri Finanziari / MOL",
+   "pct",
+   true
+  ],
+  [
+   "of_revenue",
+   "Oneri Finanziari / Fatturato",
+   "pct",
+   false
+  ]
+ ],
+ "segnali": [
+  [
+   "retribuzioni",
+   "Debiti per retribuzione scaduti da almeno 30 giorni pari a oltre il 50% dell'ammontare complessivo mensile delle retribuzioni",
+   false
+  ],
+  [
+   "fornitori",
+   "Debiti verso fornitori scaduti da almeno 90 giorni di ammontare superiore ai debiti non ancora scaduti",
+   false
+  ],
+  [
+   "banche",
+   "Esposizioni nei confronti delle banche e altri intermediari finanziari scadute da più di 60 giorni o che abbiano superato il limite degli affidamenti da più di 60 giorni, purché rappresentino almeno il 5% del totale delle esposizioni",
+   false
+  ],
+  [
+   "inps",
+   "INPS: ritardo di oltre 90 giorni nel versamento di contributi previdenziali di ammontare superiore al 30% di quelli dovuti nell'anno precedente e all'importo di €15.000 (con lavoratori subordinati) o €5.000 (senza lavoratori subordinati)",
+   false
+  ],
+  [
+   "inail",
+   "INAIL: ritardo di oltre 90 giorni nel versamento di premi assicurativi di ammontare superiore a €5.000",
+   false
+  ],
+  [
+   "riscossione",
+   "Agente della Riscossione: crediti affidati per la riscossione, auto dichiarati o definitivamente accertati e scaduti da oltre 90 giorni, superiori a €100.000 (imprese individuali), €200.000 (società di persone), €500.000 (società di capitali)",
+   false
+  ],
+  [
+   "iva",
+   "Agenzia delle Entrate: debiti IVA scaduti e non versati superiori a €20.000, o superiori a €5.000 se di entità pari ad oltre il 10% del volume d'affari dell'anno precedente",
+   false
+  ]
+ ],
+ "annex_ce": [
+  [
+   "A) VALORE DELLA PRODUZIONE",
+   0,
+   "section",
+   [
+    null,
+    null,
+    null,
+    null
+   ]
+  ],
+  [
+   "1) Ricavi delle vendite e delle prestazioni",
+   1,
+   "detail",
+   [
+    "3761087.73",
+    "2104755.00",
+    "4209510.00",
+    "4109510.00"
+   ]
+  ],
+  [
+   "2) Variazioni delle rim. di prodotti in corso di lav., semilav. e finiti",
+   1,
+   "detail",
+   [
+    "0.00",
+    "0.00",
+    "0.00",
+    "0.00"
+   ]
+  ],
+  [
+   "3) Variazioni dei lavori in corso su ordinazione",
+   1,
+   "detail",
+   [
+    "90603.75",
+    "45000.00",
+    "90000.00",
+    "93000.00"
+   ]
+  ],
+  [
+   "4) Incrementi di immobilizzazioni per lavori interni",
+   1,
+   "detail",
+   [
+    "0.00",
+    "0.00",
+    "0.00",
+    "0.00"
+   ]
+  ],
+  [
+   "5) Altri ricavi e proventi",
+   1,
+   "detail",
+   [
+    "155292.70",
+    "70353.00",
+    "140706.00",
+    "140706.00"
+   ]
+  ],
+  [
+   "Totale Valore della Produzione",
+   1,
+   "subtotal",
+   [
+    "4006984.18",
+    "2220108.00",
+    "4440216.00",
+    "4343216.00"
+   ]
+  ],
+  [
+   "B) COSTI DELLA PRODUZIONE",
+   0,
+   "section",
+   [
+    null,
+    null,
+    null,
+    null
+   ]
+  ],
+  [
+   "6) Materie prime, sussidiarie, di consumo e di merci",
+   1,
+   "detail",
+   [
+    "146931.36",
+    "64654.00",
+    "129308.00",
+    "129308.00"
+   ]
+  ],
+  [
+   "7) Servizi",
+   1,
+   "detail",
+   [
+    "1108769.67",
+    "936241.00",
+    "1872482.00",
+    "1432482.00"
+   ]
+  ],
+  [
+   "8) Godimento di beni di terzi",
+   1,
+   "detail",
+   [
+    "221298.32",
+    "107267.00",
+    "214534.00",
+    "234534.00"
+   ]
+  ],
+  [
+   "9) Personale",
+   1,
+   "detail",
+   [
+    "2346181.74",
+    "1012371.22",
+    "2024742.44",
+    "2344742.00"
+   ]
+  ],
+  [
+   "a) Salari e stipendi",
+   2,
+   "detail",
+   [
+    "1773435.02",
+    "789843.00",
+    "1579686.00",
+    "1772346.75"
+   ]
+  ],
+  [
+   "b) Oneri sociali",
+   2,
+   "detail",
+   [
+    "453305.71",
+    "178846.64",
+    "357693.28",
+    "453027.54"
+   ]
+  ],
+  [
+   "c) Trattamento di fine rapporto",
+   2,
+   "detail",
+   [
+    "94682.97",
+    "33673.36",
+    "67346.72",
+    "81014.85"
+   ]
+  ],
+  [
+   "d) Trattamento di quiescenza e simili",
+   2,
+   "detail",
+   [
+    null,
+    null,
+    null,
+    null
+   ]
+  ],
+  [
+   "e) Altri costi del personale",
+   2,
+   "detail",
+   [
+    "24758.04",
+    "10008.22",
+    "20016.44",
+    "38352.86"
+   ]
+  ],
+  [
+   "10) Ammortamenti e svalutazioni:",
+   1,
+   "group",
+   [
+    null,
+    null,
+    null,
+    null
+   ]
+  ],
+  [
+   "a) Ammortamento delle immobilizzazioni immateriali",
+   2,
+   "detail",
+   [
+    "36888.73",
+    "14612.00",
+    "29224.00",
+    "29224.00"
+   ]
+  ],
+  [
+   "b) Ammortamento delle immobilizzazioni materiali",
+   2,
+   "detail",
+   [
+    "36715.93",
+    "18020.00",
+    "36040.00",
+    "36040.00"
+   ]
+  ],
+  [
+   "c) Altre svalutazioni delle immobilizzazioni",
+   2,
+   "detail",
+   [
+    "0.00",
+    "0.00",
+    "0.00",
+    "0.00"
+   ]
+  ],
+  [
+   "d) Sval. dei crediti compresi nell'attivo circ. e delle disp. liquide",
+   2,
+   "detail",
+   [
+    "2452.23",
+    "0.00",
+    "0.00",
+    "10000.00"
+   ]
+  ],
+  [
+   "Totale ammortamenti e svalutazioni",
+   2,
+   "detail",
+   [
+    "76056.89",
+    "32632.00",
+    "65264.00",
+    "75264.00"
+   ]
+  ],
+  [
+   "11) Variazioni delle rim. di materie prime, sussidiarie, di cons. e merci",
+   1,
+   "detail",
+   [
+    "319.27",
+    "-1432.00",
+    "-2864.00",
+    "-1217.11"
+   ]
+  ],
+  [
+   "12) Accantonamenti per rischi",
+   1,
+   "detail",
+   [
+    "0.00",
+    "0.00",
+    "0.00",
+    "0.00"
+   ]
+  ],
+  [
+   "13) Altri accantonamenti",
+   1,
+   "detail",
+   [
+    "0.00",
+    "0.00",
+    "0.00",
+    "0.00"
+   ]
+  ],
+  [
+   "14) Oneri diversi di gestione",
+   1,
+   "detail",
+   [
+    "31414.51",
+    "18765.00",
+    "37530.00",
+    "37530.00"
+   ]
+  ],
+  [
+   "Totale Costi della Produzione",
+   1,
+   "subtotal",
+   [
+    "3930971.76",
+    "2170498.22",
+    "4340996.44",
+    "4252642.89"
+   ]
+  ],
+  [
+   "EBITDA (MOL)",
+   0,
+   "subtotal",
+   [
+    "152069.31",
+    "82241.78",
+    "164483.56",
+    "165837.11"
+   ]
+  ],
+  [
+   "EBIT (Risultato Operativo)",
+   0,
+   "subtotal",
+   [
+    "76012.42",
+    "49609.78",
+    "99219.56",
+    "90573.11"
+   ]
+  ],
+  [
+   "C) PROVENTI E ONERI FINANZIARI",
+   0,
+   "section",
+   [
+    null,
+    null,
+    null,
+    null
+   ]
+  ],
+  [
+   "15) Proventi da partecipazioni",
+   1,
+   "detail",
+   [
+    "0.00",
+    "0.00",
+    "0.00",
+    "0.00"
+   ]
+  ],
+  [
+   "16) Altri proventi finanziari",
+   1,
+   "detail",
+   [
+    "1340.12",
+    "8875.00",
+    "17750.00",
+    "11750.00"
+   ]
+  ],
+  [
+   "17) Interessi e altri oneri finanziari",
+   1,
+   "detail",
+   [
+    "40744.18",
+    "22596.00",
+    "45192.00",
+    "45192.00"
+   ]
+  ],
+  [
+   "17-bis) Utili e perdite su cambi",
+   1,
+   "detail",
+   [
+    "0.00",
+    "0.00",
+    "0.00",
+    "0.00"
+   ]
+  ],
+  [
+   "Totale Proventi/Oneri Finanziari",
+   1,
+   "subtotal",
+   [
+    "-39404.06",
+    "-13721.00",
+    "-27442.00",
+    "-33442.00"
+   ]
+  ],
+  [
+   "D) RETTIFICHE DI VALORE ATTIVITA' FINANZIARIE",
+   0,
+   "section",
+   [
+    null,
+    null,
+    null,
+    null
+   ]
+  ],
+  [
+   "18) Rivalutazioni",
+   1,
+   "detail",
+   [
+    "0.00",
+    "0.00",
+    "0.00",
+    "0.00"
+   ]
+  ],
+  [
+   "19) Svalutazioni",
+   1,
+   "detail",
+   [
+    "0.00",
+    "0.00",
+    "0.00",
+    "0.00"
+   ]
+  ],
+  [
+   "Totale rettifiche di valore",
+   1,
+   "subtotal",
+   [
+    "0.00",
+    "0.00",
+    "0.00",
+    "0.00"
+   ]
+  ],
+  [
+   "E) PROVENTI E ONERI STRAORDINARI",
+   0,
+   "section",
+   [
+    null,
+    null,
+    null,
+    null
+   ]
+  ],
+  [
+   "20) Proventi straordinari",
+   1,
+   "detail",
+   [
+    "0.00",
+    "0.00",
+    "0.00",
+    "0.00"
+   ]
+  ],
+  [
+   "21) Oneri straordinari",
+   1,
+   "detail",
+   [
+    "0.00",
+    "0.00",
+    "0.00",
+    "0.00"
+   ]
+  ],
+  [
+   "Totale Proventi/Oneri Straordinari",
+   1,
+   "subtotal",
+   [
+    "0.00",
+    "0.00",
+    "0.00",
+    "0.00"
+   ]
+  ],
+  [
+   "Risultato prima delle imposte",
+   0,
+   "subtotal",
+   [
+    "36608.36",
+    "35888.78",
+    "71777.56",
+    "57131.11"
+   ]
+  ],
+  [
+   "22) Imposte sul reddito",
+   0,
+   "detail",
+   [
+    "28773.00",
+    "15000.00",
+    "30000.00",
+    "33000.00"
+   ]
+  ],
+  [
+   "23) UTILE (PERDITA) DELL'ESERCIZIO",
+   0,
+   "total",
+   [
+    "7835.36",
+    "20888.78",
+    "41777.56",
+    "24131.11"
+   ]
+  ]
+ ],
+ "annex_sp": [
+  [
+   "ATTIVO",
+   0,
+   "section",
+   [
+    null,
+    null,
+    null
+   ]
+  ],
+  [
+   "A) Crediti verso soci per versamenti ancora dovuti",
+   1,
+   "detail",
+   [
+    "0.00",
+    "0.00",
+    "0.00"
+   ]
+  ],
+  [
+   "B) IMMOBILIZZAZIONI",
+   1,
+   "section",
+   [
+    null,
+    null,
+    null
+   ]
+  ],
+  [
+   "I - Immobilizzazioni immateriali",
+   2,
+   "detail",
+   [
+    "360916.87",
+    "346304.85",
+    "331692.85"
+   ]
+  ],
+  [
+   "II - Immobilizzazioni materiali",
+   2,
+   "detail",
+   [
+    "106926.93",
+    "90816.59",
+    "72796.59"
+   ]
+  ],
+  [
+   "III - Immobilizzazioni finanziarie",
+   2,
+   "detail",
+   [
+    "116250.00",
+    "52550.00",
+    "52550.00"
+   ]
+  ],
+  [
+   "1) Partecipazioni",
+   3,
+   "detail",
+   [
+    "116250.00",
+    "0.00",
+    "52550.00"
+   ]
+  ],
+  [
+   "2) Crediti entro 12 mesi",
+   3,
+   "detail",
+   [
+    "0.00",
+    "0.00",
+    "0.00"
+   ]
+  ],
+  [
+   "2) Crediti oltre 12 mesi",
+   3,
+   "detail",
+   [
+    "0.00",
+    "0.00",
+    "0.00"
+   ]
+  ],
+  [
+   "Totale crediti immobilizzati",
+   2,
+   "detail",
+   [
+    "0.00",
+    "0.00",
+    "0.00"
+   ]
+  ],
+  [
+   "3) Altri titoli",
+   3,
+   "detail",
+   [
+    "0.00",
+    "52550.00",
+    "0.00"
+   ]
+  ],
+  [
+   "4) Strumenti finanziari derivati attivi",
+   3,
+   "detail",
+   [
+    "0.00",
+    "0.00",
+    "0.00"
+   ]
+  ],
+  [
+   "Totale immobilizzazioni",
+   2,
+   "subtotal",
+   [
+    "584093.80",
+    "489671.44",
+    "457039.44"
+   ]
+  ],
+  [
+   "C) ATTIVO CIRCOLANTE",
+   1,
+   "section",
+   [
+    null,
+    null,
+    null
+   ]
+  ],
+  [
+   "I - Rimanenze",
+   2,
+   "detail",
+   [
+    "286094.89",
+    "287312.00",
+    "287312.00"
+   ]
+  ],
+  [
+   "materie prime",
+   3,
+   "detail",
+   [
+    "286094.89",
+    "287312.00",
+    "287312.00"
+   ]
+  ],
+  [
+   "prodotti in corso",
+   3,
+   "detail",
+   [
+    "0.00",
+    "0.00",
+    "0.00"
+   ]
+  ],
+  [
+   "lavori in corso",
+   3,
+   "detail",
+   [
+    "0.00",
+    "0.00",
+    "0.00"
+   ]
+  ],
+  [
+   "prodotti finiti",
+   3,
+   "detail",
+   [
+    "0.00",
+    "0.00",
+    "0.00"
+   ]
+  ],
+  [
+   "acconti",
+   3,
+   "detail",
+   [
+    "0.00",
+    "0.00",
+    "0.00"
+   ]
+  ],
+  [
+   "II - Crediti entro 12 mesi",
+   2,
+   "detail",
+   [
+    "1045149.32",
+    "1383132.16",
+    "1294367.10"
+   ]
+  ],
+  [
+   "Clienti",
+   3,
+   "detail",
+   [
+    "686301.63",
+    "1153958.55",
+    "1068527.42"
+   ]
+  ],
+  [
+   "Controllate",
+   3,
+   "detail",
+   [
+    "0.00",
+    "0.00",
+    "0.00"
+   ]
+  ],
+  [
+   "Collegate",
+   3,
+   "detail",
+   [
+    "0.00",
+    "0.00",
+    "0.00"
+   ]
+  ],
+  [
+   "Controllanti",
+   3,
+   "detail",
+   [
+    "0.00",
+    "0.00",
+    "0.00"
+   ]
+  ],
+  [
+   "Crediti tributari",
+   3,
+   "detail",
+   [
+    "301127.73",
+    "184140.58",
+    "184140.58"
+   ]
+  ],
+  [
+   "Imposte anticipate",
+   3,
+   "detail",
+   [
+    "0.00",
+    "0.00",
+    "0.00"
+   ]
+  ],
+  [
+   "Altri",
+   3,
+   "detail",
+   [
+    "57719.96",
+    "45033.03",
+    "41699.10"
+   ]
+  ],
+  [
+   "II - Crediti oltre 12 mesi",
+   2,
+   "detail",
+   [
+    "17356.48",
+    "62356.48",
+    "62356.48"
+   ]
+  ],
+  [
+   "Clienti",
+   3,
+   "detail",
+   [
+    "0.00",
+    "45000.00",
+    "45000.00"
+   ]
+  ],
+  [
+   "Controllate",
+   3,
+   "detail",
+   [
+    "0.00",
+    "0.00",
+    "0.00"
+   ]
+  ],
+  [
+   "Collegate",
+   3,
+   "detail",
+   [
+    "0.00",
+    "0.00",
+    "0.00"
+   ]
+  ],
+  [
+   "Controllanti",
+   3,
+   "detail",
+   [
+    "0.00",
+    "0.00",
+    "0.00"
+   ]
+  ],
+  [
+   "Crediti tributari",
+   3,
+   "detail",
+   [
+    "17356.48",
+    "17356.48",
+    "17356.48"
+   ]
+  ],
+  [
+   "Imposte anticipate",
+   3,
+   "detail",
+   [
+    "0.00",
+    "0.00",
+    "0.00"
+   ]
+  ],
+  [
+   "Altri",
+   3,
+   "detail",
+   [
+    "0.00",
+    "0.00",
+    "0.00"
+   ]
+  ],
+  [
+   "III - Attività finanziarie non immobilizzate",
+   2,
+   "detail",
+   [
+    "0.00",
+    "0.00",
+    "0.00"
+   ]
+  ],
+  [
+   "IV - Disponibilità liquide",
+   2,
+   "detail",
+   [
+    "29266.59",
+    "21764.71",
+    "54.82"
+   ]
+  ],
+  [
+   "Totale attivo circolante",
+   2,
+   "subtotal",
+   [
+    "1377867.28",
+    "1754565.35",
+    "1644090.40"
+   ]
+  ],
+  [
+   "D) Ratei e risconti attivi",
+   1,
+   "detail",
+   [
+    "208869.12",
+    "216226.30",
+    "216226.30"
+   ]
+  ],
+  [
+   "TOTALE ATTIVO",
+   1,
+   "total",
+   [
+    "2170830.20",
+    "2460463.09",
+    "2317356.14"
+   ]
+  ],
+  [
+   "PASSIVO E PATRIMONIO NETTO",
+   0,
+   "section",
+   [
+    null,
+    null,
+    null
+   ]
+  ],
+  [
+   "A) PATRIMONIO NETTO",
+   1,
+   "section",
+   [
+    null,
+    null,
+    null
+   ]
+  ],
+  [
+   "I - Capitale",
+   2,
+   "detail",
+   [
+    "110000.00",
+    "110000.00",
+    "110000.00"
+   ]
+  ],
+  [
+   "Sovrapprezzo azioni",
+   2,
+   "detail",
+   [
+    "0.00",
+    "0.00",
+    "0.00"
+   ]
+  ],
+  [
+   "Rivalutazione",
+   2,
+   "detail",
+   [
+    "0.00",
+    "0.00",
+    "0.00"
+   ]
+  ],
+  [
+   "Riserva legale",
+   2,
+   "detail",
+   [
+    "3135.40",
+    "3506.40",
+    "3506.40"
+   ]
+  ],
+  [
+   "Riserve statutarie",
+   2,
+   "detail",
+   [
+    "0.00",
+    "0.00",
+    "0.00"
+   ]
+  ],
+  [
+   "Altre riserve",
+   2,
+   "detail",
+   [
+    "58926.67",
+    "65978.03",
+    "65978.03"
+   ]
+  ],
+  [
+   "Copertura flussi",
+   2,
+   "detail",
+   [
+    "0.00",
+    "0.00",
+    "0.00"
+   ]
+  ],
+  [
+   "Utili/perdite portati",
+   2,
+   "detail",
+   [
+    "0.00",
+    "0.00",
+    "0.00"
+   ]
+  ],
+  [
+   "Riserva negativa azioni proprie",
+   2,
+   "detail",
+   [
+    "0.00",
+    "0.00",
+    "0.00"
+   ]
+  ],
+  [
+   "IX - Utile (perdita) dell'esercizio",
+   2,
+   "detail",
+   [
+    "7835.36",
+    "20888.78",
+    "24131.11"
+   ]
+  ],
+  [
+   "Totale patrimonio netto",
+   2,
+   "subtotal",
+   [
+    "179897.43",
+    "200373.21",
+    "203615.54"
+   ]
+  ],
+  [
+   "B) Fondi per rischi e oneri",
+   1,
+   "detail",
+   [
+    "0.00",
+    "0.00",
+    "0.00"
+   ]
+  ],
+  [
+   "Quiescenza",
+   2,
+   "detail",
+   [
+    "0.00",
+    "0.00",
+    "0.00"
+   ]
+  ],
+  [
+   "Imposte, anche differite",
+   2,
+   "detail",
+   [
+    "0.00",
+    "0.00",
+    "0.00"
+   ]
+  ],
+  [
+   "Derivati passivi",
+   2,
+   "detail",
+   [
+    "0.00",
+    "0.00",
+    "0.00"
+   ]
+  ],
+  [
+   "Altri fondi",
+   2,
+   "detail",
+   [
+    "0.00",
+    "0.00",
+    "0.00"
+   ]
+  ],
+  [
+   "C) Trattamento di fine rapporto",
+   1,
+   "detail",
+   [
+    "178598.33",
+    "122852.24",
+    "170193.73"
+   ]
+  ],
+  [
+   "D) DEBITI",
+   1,
+   "section",
+   [
+    null,
+    null,
+    null
+   ]
+  ],
+  [
+   "Banche",
+   2,
+   "detail",
+   [
+    "812762.40",
+    "960937.42",
+    "960937.42"
+   ]
+  ],
+  [
+   "entro 12 mesi",
+   3,
+   "detail",
+   [
+    "399432.84",
+    "493408.90",
+    "493408.90"
+   ]
+  ],
+  [
+   "oltre 12 mesi",
+   3,
+   "detail",
+   [
+    "413329.56",
+    "467528.52",
+    "467528.52"
+   ]
+  ],
+  [
+   "Altri finanziatori",
+   2,
+   "detail",
+   [
+    "39748.42",
+    "36503.74",
+    "36503.74"
+   ]
+  ],
+  [
+   "entro 12 mesi",
+   3,
+   "detail",
+   [
+    "0.00",
+    "0.00",
+    "0.00"
+   ]
+  ],
+  [
+   "oltre 12 mesi",
+   3,
+   "detail",
+   [
+    "39748.42",
+    "36503.74",
+    "36503.74"
+   ]
+  ],
+  [
+   "Obbligazioni",
+   2,
+   "detail",
+   [
+    "0.00",
+    "0.00",
+    "0.00"
+   ]
+  ],
+  [
+   "entro 12 mesi",
+   3,
+   "detail",
+   [
+    "0.00",
+    "0.00",
+    "0.00"
+   ]
+  ],
+  [
+   "oltre 12 mesi",
+   3,
+   "detail",
+   [
+    "0.00",
+    "0.00",
+    "0.00"
+   ]
+  ],
+  [
+   "Fornitori",
+   2,
+   "detail",
+   [
+    "600490.77",
+    "652885.44",
+    "548578.07"
+   ]
+  ],
+  [
+   "entro 12 mesi",
+   3,
+   "detail",
+   [
+    "600490.77",
+    "652885.44",
+    "548578.07"
+   ]
+  ],
+  [
+   "oltre 12 mesi",
+   3,
+   "detail",
+   [
+    "0.00",
+    "0.00",
+    "0.00"
+   ]
+  ],
+  [
+   "Debiti tributari",
+   2,
+   "detail",
+   [
+    "48366.01",
+    "26179.12",
+    "4227.00"
+   ]
+  ],
+  [
+   "entro 12 mesi",
+   3,
+   "detail",
+   [
+    "48366.01",
+    "26179.12",
+    "4227.00"
+   ]
+  ],
+  [
+   "oltre 12 mesi",
+   3,
+   "detail",
+   [
+    "0.00",
+    "0.00",
+    "0.00"
+   ]
+  ],
+  [
+   "Debiti previdenziali",
+   2,
+   "detail",
+   [
+    "87897.08",
+    "194631.61",
+    "163536.55"
+   ]
+  ],
+  [
+   "entro 12 mesi",
+   3,
+   "detail",
+   [
+    "87897.08",
+    "194631.61",
+    "163536.55"
+   ]
+  ],
+  [
+   "oltre 12 mesi",
+   3,
+   "detail",
+   [
+    "0.00",
+    "0.00",
+    "0.00"
+   ]
+  ],
+  [
+   "Altri debiti",
+   2,
+   "detail",
+   [
+    "202257.59",
+    "227437.31",
+    "191101.09"
+   ]
+  ],
+  [
+   "entro 12 mesi",
+   3,
+   "detail",
+   [
+    "214900.89",
+    "227437.31",
+    "191101.09"
+   ]
+  ],
+  [
+   "oltre 12 mesi",
+   3,
+   "detail",
+   [
+    "-12643.30",
+    "0.00",
+    "0.00"
+   ]
+  ],
+  [
+   "Totale debiti",
+   2,
+   "subtotal",
+   [
+    "1791522.27",
+    "2098574.64",
+    "1904883.87"
+   ]
+  ],
+  [
+   "E) Ratei e risconti passivi",
+   1,
+   "detail",
+   [
+    "20812.17",
+    "38663.00",
+    "38663.00"
+   ]
+  ],
+  [
+   "TOTALE PASSIVO E PATRIMONIO NETTO",
+   1,
+   "total",
+   [
+    "2170830.20",
+    "2460463.09",
+    "2317356.14"
+   ]
+  ],
+  [
+   "DIFFERENZA (Attivo - Passivo)",
+   0,
+   "subtotal",
+   [
+    "0.00",
+    "0.00",
+    "0.00"
+   ]
+  ]
+ ]
+}

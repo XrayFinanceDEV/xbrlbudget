@@ -72,13 +72,15 @@ def ipotesi(data: BusinessPlanData, pages: dict) -> list:
     s = layout.section_head("SEZIONE 10", "Assunzioni del piano", "Driver dichiarati per ciascun anno di piano.")
     g = data.growth
     rev = narrative.growth_list(data, "revenue_growth_pct")
+    forzati = rev is None and data.growth.get("revenue_growth_pct") is not None
     pers = g.get("personnel_growth_pct")
     inv = [sum((x or Decimal(0)) for x in pair) for pair in
            zip(g.get("tangible_investments", (None,) * len(years)), g.get("intangible_investments", (None,) * len(years)))]
     inv_years = [str(y) for y, v in zip(years, inv) if v]
     tax = g.get("tax_rate")
     s += [layout.tiles([
-        (rev or fmt.ND, "Crescita ricavi", " / ".join(str(y) for y in years)),
+        (rev or ("da CE" if forzati else fmt.ND), "Crescita ricavi",
+         "ricavi forzati nel CE previsionale" if forzati else " / ".join(str(y) for y in years)),
         (fmt.pct_short(pers[0]) if pers and _uniform(pers) else (narrative.growth_list(data, "personnel_growth_pct") or fmt.ND),
          "Crescita costo del personale", "tutti gli anni di piano" if pers and _uniform(pers) else "per anno"),
         (fmt.compact_eur(sum(inv, Decimal(0))), "Investimenti",
@@ -89,11 +91,12 @@ def ipotesi(data: BusinessPlanData, pages: dict) -> list:
     s += [layout.fin_table([f"{y} P" for y in years],
                            [(r.label, [fmt.value(v, r.unit) for v in r.values], "") for r in data.assumptions],
                            first="Driver"), Spacer(0, 10)]
-    s += layout.h2("Aree del piano", after=6)
+    head = layout.h2("Aree del piano", after=6)
     rows = [[Paragraph("Area", layout.ST["cellh"]), Paragraph("Contenuto delle ipotesi", layout.ST["cellh"])]] + \
         [[Paragraph(a, layout.ST["cellb"]), Paragraph(b, layout.ST["cell"])] for a, b in _AREE]
     t = Table(rows, colWidths=[150, CW - 150])
     t.setStyle(TableStyle([("BACKGROUND", (0, 0), (-1, 0), C(theme.NAVY)),
                            ("LINEBELOW", (0, 1), (-1, -1), 0.4, C(theme.RULE)),
                            ("TOPPADDING", (0, 0), (-1, -1), 4.6), ("BOTTOMPADDING", (0, 0), (-1, -1), 4.6)]))
-    return s + [t]
+    # indivisibile: sul piano a 5 anni la tabella si spezzava lasciando la sola riga «Imposte» su una pagina
+    return s + [KeepTogether(head + [t])]

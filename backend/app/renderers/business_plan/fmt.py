@@ -1,7 +1,7 @@
 """Formati italiani del Business plan. Il segno meno delle tabelle è U+2212, quello dei grafici è ASCII."""
 from __future__ import annotations
 
-from decimal import ROUND_HALF_UP, Decimal
+from decimal import ROUND_FLOOR, ROUND_HALF_UP, Decimal
 from typing import Optional
 
 ND = "n.d."
@@ -39,6 +39,13 @@ def pct(v: Num, dec: int = 2) -> str:
 
 def ratio(v: Num, dec: int = 2) -> str:
     return _signed(v, dec, "×")
+
+
+def floor_ratio(v: Num, dec: int = 1) -> str:
+    """Rapporto arrotondato per difetto: per «sempre superiore a …», che non deve mai promettere più del minimo."""
+    if v is None:
+        return ND
+    return _signed(_dec(v).quantize(Decimal(1).scaleb(-dec), rounding=ROUND_FLOOR), dec, "×")
 
 
 def days(v: Num, dec: int = 1) -> str:
@@ -117,6 +124,8 @@ def prep(word: str, value_str: str) -> str:
     """«del 5%», «dell'1%», «dall'8,61%»: elisione davanti ai numeri che si leggono con vocale."""
     bare = value_str.lstrip(MINUS)
     integer = bare.split(",")[0].rstrip("%").replace(".", "")
+    if integer == "0":  # «dello 0%», «dallo 0%», «allo 0,5%»
+        return {"del": "dello", "dal": "dallo", "al": "allo"}[word] + " " + value_str
     elide = integer.startswith("8") or integer in ("1", "11", "18")
     if not elide:
         return f"{word} {value_str}"

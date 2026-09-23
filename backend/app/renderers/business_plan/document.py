@@ -6,11 +6,12 @@ from dataclasses import dataclass
 from typing import Callable, Optional
 
 from reportlab.lib.colors import HexColor, white
+from reportlab.pdfbase import pdfmetrics
 from reportlab.platypus import BaseDocTemplate, Frame, NextPageTemplate, PageBreak, PageTemplate
 
 from . import theme
 from .data import BusinessPlanData, legend
-from .layout import SectionStart
+from .layout import SectionStart, fit
 from .theme import BOLD, LM, PAGE_H, PAGE_W, REGULAR
 
 C = HexColor
@@ -43,7 +44,8 @@ def _body_page(data: BusinessPlanData):
         canvas.rect(0, PAGE_H - theme.HEADER_H, PAGE_W, theme.HEADER_H, stroke=0, fill=1)
         canvas.setFillColor(white)
         canvas.setFont(BOLD, 9)
-        canvas.drawString(LM, PAGE_H - 20.5, data.company_name)
+        room = PAGE_W - 2 * LM - pdfmetrics.stringWidth(right, REGULAR, 9) - 16
+        canvas.drawString(LM, PAGE_H - 20.5, fit(data.company_name, BOLD, 9, room))
         canvas.setFont(REGULAR, 9)
         canvas.drawRightString(PAGE_W - LM, PAGE_H - 20.5, right)
         canvas.setStrokeColor(C(theme.RULE))

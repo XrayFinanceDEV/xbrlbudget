@@ -60,7 +60,9 @@ def allegato_c(data: BusinessPlanData, pages: dict) -> list:
 
 
 def allegato_d(data: BusinessPlanData, pages: dict) -> list:
-    sub = f"R = progressivo rettificato {data.partial_label[:-2]}." if data.partial_label else "Indicatori della pratica."
+    sub = (f"R = progressivo rettificato {data.partial_label[:-2]}."
+           if data.partial_label and data.partial_label in data.indicators_practice_headers
+           else "Indicatori della pratica.")
     s = layout.section_head("ALLEGATO D", "Indicatori di sintesi", sub)
     rows = [(r.label, [fmt.value(v, r.unit) for v in r.values], "") for r in data.indicators_practice]
     return s + [layout.fin_table(list(data.indicators_practice_headers), rows, first="Indicatore")]

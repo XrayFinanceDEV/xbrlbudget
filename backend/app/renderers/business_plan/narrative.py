@@ -60,16 +60,37 @@ def _join(items: list) -> str:
     return items[0] if len(items) == 1 else ", ".join(items[:-1]) + " e " + items[-1]
 
 
+#: scarto massimo, in punti percentuali, fra la crescita dei ricavi dichiarata e quella che i ricavi mostrano
+SCARTO_CRESCITA_PP = Decimal("2")
+
+
+def revenue_growth_coherent(data: BusinessPlanData) -> bool:
+    """La crescita dichiarata è quella che muove i ricavi? No quando un override del CE (o l'input a importi della
+    startup) li forza: allora stampare «crescita dello 0%» accanto a ricavi che raddoppiano contraddice il report."""
+    if data.revenue_overridden:
+        return False
+    vals, ricavi = data.growth.get("revenue_growth_pct"), data.v("ricavi")
+    for g, i in zip(vals or (), data.plan_idx):
+        prev, cur = (ricavi[i - 1] if i > 0 else None), ricavi[i]
+        if g is None or prev is None or cur is None or prev <= 0:
+            continue
+        if abs((cur / prev - 1) * 100 - g) > SCARTO_CRESCITA_PP:
+            return False
+    return True
+
+
 def growth_list(data: BusinessPlanData, field: str) -> Optional[str]:
     vals = data.growth.get(field)
     if not vals or any(v is None for v in vals):
+        return None
+    if field == "revenue_growth_pct" and not revenue_growth_coherent(data):
         return None
     return " / ".join(fmt.pct_short(v) for v in vals)
 
 
 def _growth_phrase(data: BusinessPlanData) -> Optional[str]:
     vals = data.growth.get("revenue_growth_pct")
-    if not vals or any(v is None for v in vals):
+    if not vals or any(v is None for v in vals) or not revenue_growth_coherent(data):
         return None
     parts = [f"{fmt.prep('del', fmt.pct_short(v))} nel {y}" for v, y in zip(vals, data.plan_years)]
     return _join(parts)
@@ -181,7 +202,7 @@ def strengths_weaknesses(data: BusinessPlanData) -> tuple:
         if fn < f0 and pen < pe0:
             txt = f"PFN da € {fmt.eur(f0)} a € {fmt.eur(fn)} e PFN/EBITDA da {fmt.ratio(pe0)} a {fmt.ratio(pen)}."
             if dscr_plan:
-                txt += f" DSCR (proxy) mai inferiore a {fmt.ratio(min(dscr_plan), 1)}."
+                txt += f" DSCR (proxy) mai inferiore a {fmt.floor_ratio(min(dscr_plan), 1)}."
             forza.append(Finding("deleveraging", "Rapido deleveraging", txt))
         if pen > SOGLIE["pfn_ebitda_alto"]:
             debolezza.append(Finding("indebitamento", "Indebitamento elevato",

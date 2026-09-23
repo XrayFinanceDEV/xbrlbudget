@@ -4,6 +4,8 @@ from __future__ import annotations
 from decimal import Decimal
 
 from reportlab.lib.colors import HexColor, white
+from reportlab.lib.utils import simpleSplit
+from reportlab.pdfbase import pdfmetrics
 from reportlab.platypus import Paragraph, Spacer, Table, TableStyle
 
 from . import fmt, layout, narrative, theme
@@ -33,6 +35,19 @@ def _years(data: BusinessPlanData) -> str:
     return f"{y[0]} – {y[-1]}" if len(y) > 1 else str(y[0])
 
 
+def _cover_name(name: str) -> tuple:
+    """Una riga da 40 a 20 pt; sotto i 20 pt il nome va su due righe (fino a 16 pt), poi si tronca con «…»."""
+    w = pdfmetrics.stringWidth(name, BOLD, 40)
+    if w * 20 / 40 <= CW:
+        return (min(40.0, 40 * CW / w), [name])
+    for size in range(24, 15, -1):
+        lines = simpleSplit(name, BOLD, size, CW)
+        if len(lines) <= 2:
+            return (float(size), lines)
+    lines = simpleSplit(name, BOLD, 16, CW)
+    return (16.0, [lines[0], layout.fit(" ".join(lines[1:]), BOLD, 16, CW)])
+
+
 def draw_cover_band(canvas, data: BusinessPlanData) -> None:
     """Fascia navy della copertina (0–283,5 pt dall'alto) con filetto teal, come nel riferimento."""
     theme.register_fonts()
@@ -44,10 +59,13 @@ def draw_cover_band(canvas, data: BusinessPlanData) -> None:
     canvas.setFillColor(white)
     canvas.setFont(BOLD, 10)
     canvas.drawString(LM, PAGE_H - 64, f"REPORT DI BUDGET {_years(data)}" + (" · BOZZA" if data.draft else ""))
-    name = data.company_name
-    size = 40 if canvas.stringWidth(name, BOLD, 40) <= CW else max(20, 40 * CW / canvas.stringWidth(name, BOLD, 40))
+    size, lines = _cover_name(data.company_name)
     canvas.setFont(BOLD, size)
-    canvas.drawString(LM, PAGE_H - 122, name)
+    if len(lines) == 1:
+        canvas.drawString(LM, PAGE_H - 122, lines[0])
+    else:  # due righe nella stessa fascia: l'altezza della copertina non cambia, l'indice resta stabile
+        for n, line in enumerate(lines):
+            canvas.drawString(LM, PAGE_H - 106 - n * size * 1.12, line)
     canvas.setFont(REGULAR, 21)
     canvas.drawString(LM, PAGE_H - 160, f"Piano economico-finanziario {_years(data)}")
     canvas.setFillColor(C(theme.COVER_SUB))
@@ -92,18 +110,19 @@ def _cover_kpis(data: BusinessPlanData) -> list:
     dscr_plan = [v for v in (data.v("dscr")[i] for i in data.plan_idx) if v is not None]
     op = _sum_plan(data, "cf_operativo")
     n = len(data.plan_idx)
-    periodo = {2: "biennio", 3: "triennio"}.get(n, "piano")
+    periodo = {2: "sul biennio", 3: "sul triennio"}.get(n, "negli anni")
     e0, en = data.v("ebitda")[0], data.v("ebitda")[-1]
     last = data.last.label
     return [
         (span, fmt.compact_range(data.v("ricavi")[0], data.v("ricavi")[-1]), "Ricavi delle vendite",
-         f"crescita {g} nel piano" if g else "crescita da ipotesi di piano"),
+         f"crescita {g} nel piano" if g else ("ricavi forzati nel CE previsionale"
+                                                     if data.growth.get("revenue_growth_pct") else "crescita da ipotesi di piano")),
         (span, f"{fmt.pct(data.v('ebitda_margin')[0])} → {fmt.pct(data.v('ebitda_margin')[-1])}", "EBITDA margin",
          f"EBITDA {fmt.compact_eur(e0)} → {fmt.compact_eur(en)}"),
         (span, f"{fmt.ratio(data.v('dscr')[0])} → {fmt.ratio(data.v('dscr')[-1])}", "DSCR (proxy)",
-         f"sempre superiore a {fmt.ratio(min(dscr_plan), 1)}" if dscr_plan else "n.d."),
+         f"mai inferiore a {fmt.floor_ratio(min(dscr_plan), 1)}" if dscr_plan else "n.d."),
         (f"{data.plan_columns[0].label} – {last}", fmt.compact_eur(op), "Flussi di cassa operativi",
-         f"cumulati sul {periodo} di piano"),
+         f"cumulati {periodo} di piano"),
         (span, fmt.compact_range(data.v("pfn")[0], data.v("pfn")[-1]), "Posizione finanziaria netta",
          "debiti finanziari − liquidità"),
         (span, f"{fmt.ratio(data.v('pfn_ebitda')[0])} → {fmt.ratio(data.v('pfn_ebitda')[-1])}", "PFN / EBITDA",

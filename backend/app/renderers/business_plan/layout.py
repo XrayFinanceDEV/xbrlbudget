@@ -6,6 +6,7 @@ import io
 from reportlab.lib.colors import HexColor
 from reportlab.lib.enums import TA_RIGHT
 from reportlab.lib.styles import ParagraphStyle
+from reportlab.pdfbase import pdfmetrics
 from reportlab.platypus import Flowable, Image, Paragraph, Spacer, Table, TableStyle
 
 from . import theme
@@ -149,3 +150,12 @@ class SectionStart(Flowable):
 
     def draw(self):
         self.registry.setdefault(self.key, self.canv.getPageNumber())
+
+
+def fit(text: str, font: str, size: float, width: float) -> str:
+    """Il testo intero se ci sta, altrimenti troncato con «…» alla larghezza data."""
+    if pdfmetrics.stringWidth(text, font, size) <= width:
+        return text
+    while text and pdfmetrics.stringWidth(text + "…", font, size) > width:
+        text = text[:-1]
+    return text.rstrip() + "…"

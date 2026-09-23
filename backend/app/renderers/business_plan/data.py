@@ -80,6 +80,7 @@ class BusinessPlanData:
     base_description: str
     values: dict
     growth: dict = field(default_factory=dict)
+    revenue_overridden: bool = False  # un ce01_override in qualche anno: i ricavi non seguono la crescita
     assumptions: tuple = ()
     partial_label: Optional[str] = None
     partial_dscr: Num = None
@@ -292,6 +293,14 @@ def _numeric(v) -> Num:
     if isinstance(v, (int, float)):
         return Decimal(str(v))
     return None
+
+
+def _ce01_overridden(report) -> bool:
+    for s in report.assumption_sections:
+        for a in s.assumptions:
+            if a.field == "ce_overrides" and a.active:
+                return any(o.field == "ce01_override" for year in a.values if year for o in year)
+    return False
 
 
 def _assumptions(report, plan_n: int) -> tuple:
@@ -527,6 +536,7 @@ def from_report(report, *, draft: bool) -> BusinessPlanData:
     lk = _Lookup(report)
     values = {k: tuple(lk.get(k, c.period_id) for c in cols) for k in VALUE_KEYS}
     growth, rows = _assumptions(report, len(plan))
+    revenue_overridden = _ce01_overridden(report)
     plan_pids = [p.id for p in plan]
     rows.append(AssumptionRow("Costi operativi / ricavi", "percent",
                               tuple(lk.get("opex_ricavi", pid) for pid in plan_pids)))
@@ -562,7 +572,7 @@ def from_report(report, *, draft: bool) -> BusinessPlanData:
         d_pids, d_headers = [adj.id] + d_pids, (partial_label,) + d_headers
     return BusinessPlanData(
         company_name=report.company.name, workflow=wf, columns=cols, base_description=base_description,
-        values=values, growth=growth, assumptions=tuple(rows), partial_label=partial_label,
+        values=values, growth=growth, revenue_overridden=revenue_overridden, assumptions=tuple(rows), partial_label=partial_label,
         partial_dscr=partial_dscr, residual_revenue=residual, starting_point=starting,
         annex=annex, annex_zero_labels=zero,
         indicators_practice_headers=d_headers,
@@ -591,6 +601,7 @@ def dump_json(data: BusinessPlanData) -> dict:
         "columns": [c.__dict__ for c in data.columns], "base_description": data.base_description,
         "values": {k: [_enc(x) for x in v] for k, v in data.values.items()},
         "growth": {k: [_enc(x) for x in v] for k, v in data.growth.items()},
+        "revenue_overridden": data.revenue_overridden,
         "partial_label": data.partial_label, "partial_dscr": _enc(data.partial_dscr),
         "residual_revenue": _enc(data.residual_revenue), "draft": data.draft,
     }
@@ -603,6 +614,7 @@ def load_json(path) -> BusinessPlanData:
         columns=tuple(Column(**c) for c in raw["columns"]), base_description=raw["base_description"],
         values={k: tuple(_dec(x) for x in v) for k, v in raw["values"].items()},
         growth={k: tuple(_dec(x) for x in v) for k, v in raw.get("growth", {}).items()},
+        revenue_overridden=raw.get("revenue_overridden", False),
         partial_label=raw.get("partial_label"), partial_dscr=_dec(raw.get("partial_dscr")),
         residual_revenue=_dec(raw.get("residual_revenue")), draft=raw.get("draft", False),
     )

@@ -3508,25 +3508,33 @@ def extract_pdf_with_llm(
         if not sp_text.strip():
             raise PDFImportError("No text extracted from balance sheet pages")
 
-        # Step 2: Extract balance sheet via Claude Haiku
+        provider = llm_provider.provider_ivcee()
+
+        # Step 2: Extract balance sheet via Claude Haiku (or gx10, see provider_ivcee)
         try:
             sp_result = _extract_with_llm(
                 client, sp_text, SP_SYSTEM_PROMPT,
                 BalanceSheetExtraction, "Stato Patrimoniale",
                 tool_name="balance_sheet",
+                provider=provider,
             )
         except anthropic.APIError as e:
             raise PDFImportError(f"Anthropic API error during SP extraction: {e}")
+        except llm_provider.LLMProviderError as e:
+            raise PDFImportError(f"Errore gx10 durante l'estrazione SP: {e}")
 
-        # Step 3: Extract income statement via Claude Haiku
+        # Step 3: Extract income statement via Claude Haiku (or gx10, see provider_ivcee)
         try:
             ce_result = _extract_with_llm(
                 client, ce_text, CE_SYSTEM_PROMPT,
                 IncomeStatementExtraction, "Conto Economico",
                 tool_name="income_statement",
+                provider=provider,
             )
         except anthropic.APIError as e:
             raise PDFImportError(f"Anthropic API error during CE extraction: {e}")
+        except llm_provider.LLMProviderError as e:
+            raise PDFImportError(f"Errore gx10 durante l'estrazione CE: {e}")
 
     # Step 4: Convert to Decimal dicts and normalize signs
     balance_sheet_data = _reconcile_credit_aggregates_from_source(
@@ -4959,25 +4967,33 @@ def extract_pdf_both_years_with_llm(
         if not sp_text.strip():
             raise PDFImportError("No text extracted from balance sheet pages")
 
-        # Step 2: Extract balance sheet (both years) via Claude Haiku
+        provider = llm_provider.provider_ivcee()
+
+        # Step 2: Extract balance sheet (both years) via Claude Haiku (or gx10)
         try:
             sp_result = _extract_with_llm(
                 client, sp_text, SP_BOTH_YEARS_SYSTEM_PROMPT,
                 TwoYearBalanceSheetExtraction, "Stato Patrimoniale (both years)",
                 tool_name="balance_sheet_both_years",
+                provider=provider,
             )
         except anthropic.APIError as e:
             raise PDFImportError(f"Anthropic API error during SP extraction: {e}")
+        except llm_provider.LLMProviderError as e:
+            raise PDFImportError(f"Errore gx10 durante l'estrazione SP: {e}")
 
-        # Step 3: Extract income statement (both years) via Claude Haiku
+        # Step 3: Extract income statement (both years) via Claude Haiku (or gx10)
         try:
             ce_result = _extract_with_llm(
                 client, ce_text, CE_BOTH_YEARS_SYSTEM_PROMPT,
                 TwoYearIncomeStatementExtraction, "Conto Economico (both years)",
                 tool_name="income_statement_both_years",
+                provider=provider,
             )
         except anthropic.APIError as e:
             raise PDFImportError(f"Anthropic API error during CE extraction: {e}")
+        except llm_provider.LLMProviderError as e:
+            raise PDFImportError(f"Errore gx10 durante l'estrazione CE: {e}")
 
     # Step 4: Convert to Decimal dicts and normalize signs
     current_bs = _reconcile_credit_aggregates_from_source(

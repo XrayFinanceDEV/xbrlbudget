@@ -302,7 +302,7 @@ def dscr_pfn(labels, dscr: Values, pfn_ebitda: Values) -> bytes:
 
 def circolante(labels, dso: Values, dio: Values, dpo: Values, cc_comm: Values) -> bytes:
     fig, (a1, a2) = _fig("circolante", ncols=2)
-    fig.subplots_adjust(left=0.06, right=0.99, top=0.88, bottom=0.10, wspace=0.14)
+    fig.subplots_adjust(left=0.06, right=0.99, top=0.88, bottom=0.10, wspace=0.22)
     x = list(range(len(labels)))
     lines = []
     for vals, color, label, below in ((_f(dso), theme.NAVY, "DSO – giorni credito", True),
@@ -315,11 +315,13 @@ def circolante(labels, dso: Values, dio: Values, dpo: Values, cc_comm: Values) -
                 _text(a1, i, v + (-4 if below else 3), chart_num(v), ha="center", va="top" if below else "bottom",
                       color=color, fontsize=SMALL)
     alld = _finite(_f(dso), _f(dio), _f(dpo))
-    a1.set_ylim(min([0.0] + alld), max([10.0] + alld) * 1.15)
+    a1.set_ylim(min([0.0] + alld), max([10.0] + alld) * 1.2)
+    a1.yaxis.set_major_locator(MaxNLocator(nbins=6, steps=[1, 2.5, 5, 10]))
     _xticks(a1, labels)
     a1.tick_params(labelsize=SMALL)
     _panel_title(a1, "Giorni del circolante")
-    a1.legend([h for h, _ in lines], [lab for _, lab in lines], loc="center right", frameon=False,
+    # «best» evita le linee: con i giorni di AMBIENTA «center right» copriva il DSO e la sua etichetta.
+    a1.legend([h for h, _ in lines], [lab for _, lab in lines], loc="best", frameon=False,
               prop=FontProperties(family=FAMILY, size=SMALL))
     ck = _k(cc_comm)
     a2.bar(x, ck, 0.55, color=theme.NAVY, zorder=2)

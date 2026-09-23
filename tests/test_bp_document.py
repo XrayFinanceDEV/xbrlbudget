@@ -40,3 +40,13 @@ def test_sezione_uno_ambienta(db):  # noqa: F811
     i = next(n for n, t in enumerate(testi) if "Punti chiave del piano" in t)
     assert "Cruscotto degli indicatori" in testi[i]
     assert all(s in testi[i + 1] for s in ("Punti di forza", "Punti di debolezza", "Azioni prioritarie"))
+
+
+def test_sezione_nove_indicatori_interi_e_fonti(db):  # noqa: F811
+    """Riferimento p. 12: la tabella indicatori non si spezza e sotto ci sono «Fonti e controlli di quadratura»."""
+    pdf = fitz.open(stream=render_business_plan(_data(db, "infrannuale")), filetype="pdf")
+    testi = [p.get_text() for p in pdf]
+    i = next(n for n, t in enumerate(testi) if "Indicatori di partenza" in t)
+    assert "EBITDA margin" in testi[i] and "PFN / EBITDA" in testi[i]
+    assert "Fonti e controlli di quadratura" in testi[i]
+    assert all(s in testi[i] for s in ("Fonte", "Registro rettifiche", "Cassa iniziale + flussi = cassa finale"))

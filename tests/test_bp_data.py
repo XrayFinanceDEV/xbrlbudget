@@ -56,6 +56,12 @@ def test_from_report_infrannuale_ambienta(db):
     assert data.partial_label == "6M 2026 R"
     assert data.starting_point.kind == "infrannuale"
     assert data.starting_point.tables[0].headers == ("Prima", "Rettifiche", "Dopo")
+    # la tabella «Fonte / Periodo / Stato» del riferimento, a pagina 12
+    assert [f for f, _, _ in data.starting_point.sources] == [
+        "Bilancio di verifica", "Registro rettifiche", "Forecast 2026", "Assunzioni del piano"]
+    assert data.starting_point.sources[0][1:] == ("6M 2026", "disponibile")
+    assert data.starting_point.sources[2][1:] == ("31.12.2026", "stimato")
+    assert data.starting_point.sources[3][1:] == ("2027–2029", "disponibile")
     assert data.residual_revenue == data.v("ricavi")[0] - D("2104755")
     assert data.base_description.startswith("Base: bilancio infrannuale al 30.06.2026 (6 mesi)")
     assert set(VALUE_KEYS) <= set(data.values)
@@ -72,6 +78,7 @@ def test_from_report_bilancio(db):
     assert data.workflow == "bilancio"
     assert data.columns[0].label.endswith(" C") and data.columns[0].is_base
     assert data.starting_point.kind == "bilancio"
+    assert data.starting_point.sources[0][2] == "consuntivo"
     assert data.partial_label is None
 
 
@@ -80,6 +87,7 @@ def test_from_report_startup(db):
     assert data.workflow == "startup"
     assert not any(c.is_base for c in data.columns)
     assert data.starting_point.kind == "startup"
+    assert data.starting_point.sources[-1][0] == "Assunzioni del piano"
     assert data.base_description.startswith("Startup")
 
 

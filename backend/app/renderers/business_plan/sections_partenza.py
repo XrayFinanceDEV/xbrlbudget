@@ -4,7 +4,7 @@ from __future__ import annotations
 from decimal import Decimal
 
 from reportlab.lib.colors import HexColor
-from reportlab.platypus import Paragraph, Spacer, Table, TableStyle
+from reportlab.platypus import KeepTogether, Paragraph, Spacer, Table, TableStyle
 
 from . import fmt, layout, narrative, theme
 from .data import BusinessPlanData
@@ -27,20 +27,31 @@ def partenza(data: BusinessPlanData, pages: dict) -> list:
             s += [Spacer(0, 4), layout.note(block.note)]
         s += [Spacer(0, 10)]
     if sp.indicators:
-        s += layout.h2("Indicatori di partenza", after=4)
+        # indivisibile, come a p. 12 del riferimento: titolo e tabella stanno insieme
+        block = layout.h2("Indicatori di partenza", after=4)
         if sp.note:
-            s += [layout.note(sp.note), Spacer(0, 4)]
-        s += [layout.fin_table(list(sp.indicator_headers),
-                               [(r.label, [fmt.value(v, r.unit) for v in r.values], "") for r in sp.indicators],
-                               first="Indicatore"), Spacer(0, 10)]
-    s += layout.h2("Controlli di quadratura", after=4)
-    rows = [[Paragraph("Controllo", layout.ST["cellh"]), Paragraph("Esito", layout.ST["cellh"])]] + \
-        [[Paragraph(a, layout.ST["cellb"]), Paragraph(b, layout.ST["cell"])] for a, b in sp.checks]
-    t = Table(rows, colWidths=[180, CW - 180])
+            block += [layout.note(sp.note), Spacer(0, 4)]
+        block += [layout.fin_table(list(sp.indicator_headers),
+                                   [(r.label, [fmt.value(v, r.unit) for v in r.values], "") for r in sp.indicators],
+                                   first="Indicatore")]
+        s += [KeepTogether(block), Spacer(0, 10)]
+    block = layout.h2("Fonti e controlli di quadratura" if sp.sources else "Controlli di quadratura", after=4)
+    if sp.sources:
+        block += [_grid(("Fonte", "Periodo", "Stato"), sp.sources, (180, 150, CW - 330), bold_first=False),
+                  Spacer(0, 6)]
+    block += [_grid(("Controllo", "Esito"), sp.checks, (180, CW - 180), bold_first=True)]
+    return s + [KeepTogether(block)]
+
+
+def _grid(headers, rows, widths, *, bold_first: bool) -> Table:
+    first = layout.ST["cellb"] if bold_first else layout.ST["cell"]
+    data = [[Paragraph(h, layout.ST["cellh"]) for h in headers]] + \
+        [[Paragraph(r[0], first)] + [Paragraph(x, layout.ST["cell"]) for x in r[1:]] for r in rows]
+    t = Table(data, colWidths=list(widths))
     t.setStyle(TableStyle([("BACKGROUND", (0, 0), (-1, 0), C(theme.NAVY)),
                            ("LINEBELOW", (0, 1), (-1, -1), 0.4, C(theme.RULE)),
                            ("TOPPADDING", (0, 0), (-1, -1), 4.6), ("BOTTOMPADDING", (0, 0), (-1, -1), 4.6)]))
-    return s + [t]
+    return t
 
 
 _AREE = (("Scenario", "Inflazione e ipotesi di scenario generale."),

@@ -69,6 +69,7 @@ class StartingPoint:
     indicators: tuple
     checks: tuple
     note: str
+    sources: tuple = ()  # (fonte, periodo, stato): la tabella «Fonti» della sezione 9
 
 
 @dataclass(frozen=True)
@@ -393,6 +394,14 @@ def _checks(lk: _Lookup, cols, report) -> tuple:
     return tuple(out)
 
 
+def _plan_sources(periods) -> tuple:
+    years = [p.year for p in periods if p.basis == "forecast"]
+    if not years:
+        return ()
+    span = f"{years[0]}–{years[-1]}" if len(years) > 1 else str(years[0])
+    return (("Assunzioni del piano", span, "disponibile"),)
+
+
 def _starting_infrannuale(report, lk, cols, periods) -> StartingPoint:
     obs = next(p for p in periods if p.basis == "observed")
     adj = next(p for p in periods if p.basis == "adjusted")
@@ -433,6 +442,10 @@ def _starting_infrannuale(report, lk, cols, periods) -> StartingPoint:
         checks=_checks(lk, cols, report),
         note=f"Periodi di durata diversa ({m} mesi e 12 mesi): gli indicatori reddituali vanno letti tenendo conto "
              "di questa differenza.",
+        sources=(("Bilancio di verifica", f"{m}M {y}", "disponibile"),
+                 ("Registro rettifiche", f"{n_rett} eventi",
+                  "confermato" if report.adjustments.confirmed else "da confermare"),
+                 (f"Forecast {y}", f"31.12.{y}", "stimato")) + _plan_sources(periods),
     )
 
 
@@ -466,6 +479,8 @@ def _starting_bilancio(report, lk, cols, periods) -> StartingPoint:
         indicators=tuple(IndicatorRow(label, UNITS.get(k, "eur"), tuple(g(k, p) for p in ind_pids))
                          for label, k in _START_IND),
         checks=_checks(lk, cols, report), note="",
+        sources=tuple((f"Bilancio {p.year}", f"31.12.{p.year}", "consuntivo") for p in ind_pids)
+        + _plan_sources(periods),
     )
 
 
@@ -490,7 +505,9 @@ def _starting_startup(report, lk, cols, periods) -> StartingPoint:
     return StartingPoint(kind="startup", title="Punto di partenza: apertura della startup",
                          intro="La startup parte dal bilancio d'apertura: non esiste un esercizio precedente.",
                          tiles=tiles, tables=tables, indicator_headers=(), indicators=(),
-                         checks=_checks(lk, cols, report), note="")
+                         checks=_checks(lk, cols, report), note="",
+                         sources=((f"Bilancio d'apertura {hist[-1].year}", str(hist[-1].year), "disponibile"),)
+                         * bool(hist) + _plan_sources(periods))
 
 
 # ------------------------------------------------------------------ ingresso

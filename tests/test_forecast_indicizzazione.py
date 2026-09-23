@@ -108,6 +108,28 @@ def test_details_declare_the_two_keys_without_any_indexing(monkeypatch):
         engine.dispose()
 
 
+def test_importi_manuali_sp_sono_saldi_assoluti_per_anno(monkeypatch):
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    engine, sessions = memory_sessions()
+    try:
+        with sessions() as db:
+            company_id, _ = seed_base_year(db, user_id=USER)
+            rows = [
+                dict(forecast_year=2027, revenue_growth_pct=5,
+                     sp_overrides={"sp04_immob_finanziarie": 52550, "sp10_ratei_risconti_attivi": 10000},
+                     **MANUAL_TAX),
+                dict(forecast_year=2028, revenue_growth_pct=5,
+                     sp_overrides={"sp04_immob_finanziarie": 60000, "sp10_ratei_risconti_attivi": 12000},
+                     **MANUAL_TAX),
+            ]
+            sc, _ = _run(db, company_id, rows)
+            balances = [bs for _, bs, _ in read_forecast_maps(db, sc.id)]
+            assert [bs["sp04_immob_finanziarie"] for bs in balances] == [D("52550.00"), D("60000.00")]
+            assert [bs["sp10_ratei_risconti_attivi"] for bs in balances] == [D("10000.00"), D("12000.00")]
+    finally:
+        engine.dispose()
+
+
 # ── (a) Il driver moltiplica lo stock dell'anno BASE, e non compone ──
 
 def test_ricavi_driver_multiplies_the_base_stock_year_after_year(monkeypatch):

@@ -63,7 +63,7 @@ const assumptionScalar = (value: unknown): value is AssumptionScalar => decimal(
 // tenute in parità da `tests/test_final_report_contract_parity.py`. Erano divergite in silenzio: il backend
 // aveva aggiunto i due «segue l'inflazione» e la regola dei fidi, questo file no, e ogni dossier con
 // quelle ipotesi veniva rifiutato intero («Unsupported or invalid FinalReportModel v2 payload»).
-export const BOOLEAN_ASSUMPTION_FIELDS: ReadonlySet<string> = new Set(["cash_sweep_enabled", "overdraft_allowed", "previdenza_scales_with_personnel", "tfr_accrual_suspended", "fixed_materials_growth_auto", "fixed_services_growth_auto"]);
+export const BOOLEAN_ASSUMPTION_FIELDS: ReadonlySet<string> = new Set(["cash_sweep_enabled", "overdraft_allowed", "previdenza_scales_with_personnel", "tfr_accrual_suspended", "fixed_materials_growth_auto", "fixed_services_growth_auto", "variable_materials_growth_auto", "variable_services_growth_auto"]);
 /** Il solo campo testuale: `bank_lines_rule`, «costante» / «ricavi». Una stringa altrove resta un errore. */
 export const STRING_ASSUMPTION_FIELDS: ReadonlySet<string> = new Set(["bank_lines_rule"]);
 const booleanAssumptionFields = BOOLEAN_ASSUMPTION_FIELDS;

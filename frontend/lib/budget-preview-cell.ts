@@ -7,17 +7,16 @@ import { days1, pct1 } from "@/lib/budget-format";
 import type { PreviewCell, PreviewRowKind } from "@/lib/budget-preview-rows";
 
 export function describeCell(cell: PreviewCell): { main: string; sub: string | null; note: string | null } {
-  // `value === null` and "no pct/days" are independent facts: a percentage-
-  // or-days-only row (rowsFatturato's "cumulata", rowsCircolante's
-  // "ccn-pct") carries value: null on purpose and still has a real pct to
-  // show — value nullity must never swallow pct/days/note.
-  const main = cell.value === null ? "—" : formatCurrency(cell.value);
   const hasPct = cell.pct !== undefined && cell.pct !== null;
   const hasDays = cell.days !== undefined && cell.days !== null;
+  // Nelle righe solo percentuali il valore principale e' la percentuale:
+  // una riga con un trattino sopra non aggiunge alcuna informazione.
+  const pctOnly = cell.value === null && hasPct;
+  const main = pctOnly ? pct1(cell.pct!) : cell.value === null ? "—" : formatCurrency(cell.value);
   // Un decimale, la precisione di tutte le schede dei passi: col default a
   // due, nello stesso pannello del passo 3 si leggeva «40,00%» in tabella e
   // «peso dei fissi: 60,5%» due centimetri sotto.
-  const sub = hasPct ? pct1(cell.pct!) : hasDays ? `${days1(cell.days!)} gg` : null;
+  const sub = pctOnly ? null : hasPct ? pct1(cell.pct!) : hasDays ? `${days1(cell.days!)} gg` : null;
   const note = cell.note ?? null;
   return { main, sub, note };
 }

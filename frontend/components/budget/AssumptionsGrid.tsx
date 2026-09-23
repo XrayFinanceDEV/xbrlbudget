@@ -9,6 +9,7 @@ import { Badge } from "@/components/ui/badge";
 import type { BalanceSheet, BudgetAssumptionsCreate, IncomeStatement } from "@/types/api";
 import { AssumptionRowDef } from "./assumption-rows";
 import { computeAutoDays } from "@/lib/budget-turnover";
+import { PercentInput } from "./PercentInput";
 
 type Historical = Record<number, { income: IncomeStatement; balance: BalanceSheet }>;
 
@@ -108,31 +109,42 @@ export function AssumptionsGrid({
                     </div>
                   ) : (
                     <div className="relative">
-                      <input
-                        type="number"
-                        step={row.step ?? "1"}
-                        min={row.min}
-                        max={row.max}
-                        value={valueOf(year, row)}
-                        placeholder={
-                          row.autoPlaceholder
-                            ? `auto: ${computeAutoDays(row.autoPlaceholder, historicalData[baseYear]?.income, historicalData[baseYear]?.balance) ?? "—"}`
-                            : row.nullable ? "auto" : "0"
-                        }
-                        // Select the current value on focus so typing REPLACES it instead
-                        // of appending — the user no longer has to clear the cell first.
-                        onFocus={(e) => e.target.select()}
-                        onChange={(e) => {
-                          const raw = e.target.value;
-                          if (raw === "") {
-                            writeAll(year, row, row.nullable ? null : 0);
-                          } else {
-                            const v = parseFloat(raw);
-                            writeAll(year, row, isNaN(v) ? (row.nullable ? null : 0) : v);
+                      {row.kind === "pct" ? (
+                        <PercentInput
+                          value={valueOf(year, row)}
+                          allowNegative={(row.min ?? 0) < 0}
+                          onRawChange={(raw) =>
+                            writeAll(year, row, raw === "" ? (row.nullable ? null : 0) : parseFloat(raw.replace(",", ".")))
                           }
-                        }}
-                        className={INPUT_CLS}
-                      />
+                          placeholder={row.nullable ? "auto" : "0"}
+                          ariaLabel={`${row.label} ${year}`}
+                          className={INPUT_CLS}
+                        />
+                      ) : (
+                        <input
+                          type="number"
+                          step={row.step ?? "1"}
+                          min={row.min}
+                          max={row.max}
+                          value={valueOf(year, row)}
+                          placeholder={
+                            row.autoPlaceholder
+                              ? `auto: ${computeAutoDays(row.autoPlaceholder, historicalData[baseYear]?.income, historicalData[baseYear]?.balance) ?? "—"}`
+                              : row.nullable ? "auto" : "0"
+                          }
+                          onFocus={(e) => e.target.select()}
+                          onChange={(e) => {
+                            const raw = e.target.value;
+                            if (raw === "") {
+                              writeAll(year, row, row.nullable ? null : 0);
+                            } else {
+                              const v = parseFloat(raw);
+                              writeAll(year, row, isNaN(v) ? (row.nullable ? null : 0) : v);
+                            }
+                          }}
+                          className={INPUT_CLS}
+                        />
+                      )}
                       {diverges(year, row) && (
                         <Badge
                           variant="outline"

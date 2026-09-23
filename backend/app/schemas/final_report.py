@@ -89,6 +89,7 @@ _BOOLEAN_ASSUMPTION_FIELDS = frozenset({
     "cash_sweep_enabled", "overdraft_allowed",
     "previdenza_scales_with_personnel", "tfr_accrual_suspended",
     "fixed_materials_growth_auto", "fixed_services_growth_auto",
+    "variable_materials_growth_auto", "variable_services_growth_auto",
 })
 #: I campi del catalogo la cui scalarita' e' una stringa, non un importo.
 _STRING_ASSUMPTION_FIELDS = frozenset({"bank_lines_rule"})

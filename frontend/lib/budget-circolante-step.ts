@@ -130,12 +130,12 @@ const MINOR_FIELDS: readonly {
     code: null, governata: "dalla posizione tributaria" },
   // Le imposte anticipate sono COSTANTI (commercialista, 2026-09-18): non
   // passano dal conto economico e non hanno una percentuale; si cambiano solo
-  // a mano nello SP previsionale, con contropartita le riserve. Entrambe le
+  // a mano nello SP previsionale, con effetto sulla cassa. Entrambe le
   // righe sono quindi di sola lettura (`inerte`).
   { field: "sp06f", label: "Imposte anticipate entro", baseField: "sp06f_imposte_anticipate_breve",
-    code: null, governata: "a mano nello SP previsionale: costanti, contro riserve", inerte: true },
+    code: null, governata: "a mano nello SP previsionale: costanti, effetto sulla cassa", inerte: true },
   { field: "sp07f", label: "Imposte anticipate oltre", baseField: "sp07f_imposte_anticipate_lungo",
-    code: null, governata: "a mano nello SP previsionale: costanti, contro riserve", inerte: true },
+    code: null, governata: "a mano nello SP previsionale: costanti, effetto sulla cassa", inerte: true },
   { field: "sp08_growth_pct", label: "Attività finanziarie", baseField: "sp08_attivita_finanziarie", code: "sp08" },
   { field: "sp10_growth_pct", label: "Ratei e risconti attivi", baseField: "sp10_ratei_risconti_attivi", code: "sp10" },
   { field: "sp14_growth_pct", label: "Fondi per rischi e oneri", baseField: "sp14_fondi_rischi", code: "sp14" },
@@ -185,6 +185,9 @@ export function pianiPregressoOf(
 }
 
 export interface MinorFieldRow extends CircolanteTableRow {
+  balanceField: string;
+  /** Saldo storico, usato per separare le voci a zero senza leggere l'etichetta formattata. */
+  baseAmount: number | null;
   /** Il codice SP, `null` quando nessun driver puo' agganciare la voce. */
   code: string | null;
   /** Il driver scelto per questa voce, `null` se nessuno. */
@@ -243,7 +246,8 @@ export function minorFieldsRows(
     // del runoff: la percentuale e' inerte tanto quanto il driver.
     const inerte = Boolean(driver) || switchOwned || conPiano || v.inerte === true;
     return {
-      field: v.field, label: v.label, baseLabel: b(v.baseField),
+      field: v.field, label: v.label, baseLabel: b(v.baseField), balanceField: v.baseField,
+      baseAmount: baseBs ? numOrNull((baseBs as unknown as Record<string, unknown>)[v.baseField]) : null,
       code: switchOwned || conPiano ? null : v.code, driver, andamento,
       agganciata: Boolean(driver) || switchOwned,
       sub: andamento,

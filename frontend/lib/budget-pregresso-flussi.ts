@@ -96,7 +96,7 @@ export function flussiPregresso(years: ForecastPreviewYear[], breve: Record<Oltr
       years.map((y, i) => -chiuso(y, "debiti_previdenziali") - altri[i]!),
     ),
     riga("banche", "Finanziamenti bancari esistenti", years.map((y) => -contrattiPregressi(y).reduce((a, c) => a + num(c.rimborso), 0))),
-    riga("fidi", "Fidi e anticipi · variazione", years.map((y) => {
+    riga("fidi", "Fidi, Anticipi Ft e Scoperti CC · variazione", years.map((y) => {
       const f = y.details?.debito_bancario?.fidi;
       return f ? num(f.residuo) - num(f.apertura) : 0;
     })),

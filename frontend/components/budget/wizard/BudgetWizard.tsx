@@ -258,7 +258,8 @@ export function BudgetWizard({
     updateAll: s.updateAll,
     updateFinancingLoans: s.updateFinancingLoans,
     updateTemporaryDifferences: s.updateTemporaryDifferences,
-    updateSpIndexing: s.updateSpIndexing,
+    updateSpRule: s.updateSpRule,
+    updateManualSpAmount: s.updateManualSpAmount,
     updatePregresso: s.updatePregresso,
     updateOtherLenders: s.updateOtherLenders,
   };

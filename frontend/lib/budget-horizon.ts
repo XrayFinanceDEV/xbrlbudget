@@ -30,7 +30,7 @@ import type {
 } from "@/types/api";
 import { isPlanEmpty, normalizePregresso } from "@/lib/budget-pregresso-circolante";
 import { normalizeFinancingLoans, normalizeOtherLenders } from "@/lib/budget-finanziamenti-pregresso";
-import { numOrNull } from "@/lib/budget-format";
+import { num, numOrNull } from "@/lib/budget-format";
 
 export type AssumptionsMap = Record<number, Partial<BudgetAssumptionsCreate>>;
 
@@ -108,14 +108,19 @@ export function hydrateAssumptions(
 ): AssumptionsMap {
   const out: AssumptionsMap = {};
   rows.forEach((a) => {
+    const revenue = num(a.revenue_growth_pct ?? 0);
+    const variableMode = (growth: number, marker: boolean | null | undefined) =>
+      marker ?? (num(growth) === 0 || num(growth) === revenue);
+    const materialsAuto = variableMode(a.variable_materials_growth_pct, a.variable_materials_growth_auto);
+    const servicesAuto = variableMode(a.variable_services_growth_pct, a.variable_services_growth_auto);
     out[a.forecast_year] = {
       scenario_id: scenarioId,
       forecast_year: a.forecast_year,
       revenue_growth_pct: a.revenue_growth_pct,
       other_revenue_growth_pct: a.other_revenue_growth_pct,
-      variable_materials_growth_pct: a.variable_materials_growth_pct,
+      variable_materials_growth_pct: materialsAuto ? revenue : a.variable_materials_growth_pct,
       fixed_materials_growth_pct: a.fixed_materials_growth_pct,
-      variable_services_growth_pct: a.variable_services_growth_pct,
+      variable_services_growth_pct: servicesAuto ? revenue : a.variable_services_growth_pct,
       fixed_services_growth_pct: a.fixed_services_growth_pct,
       rent_growth_pct: a.rent_growth_pct,
       personnel_growth_pct: a.personnel_growth_pct,
@@ -139,11 +144,13 @@ export function hydrateAssumptions(
       inflation_pct: a.inflation_pct ?? null,
       fixed_materials_growth_auto: a.fixed_materials_growth_auto ?? false,
       fixed_services_growth_auto: a.fixed_services_growth_auto ?? false,
+      variable_materials_growth_auto: materialsAuto,
+      variable_services_growth_auto: servicesAuto,
       // Numeri veri, non le stringhe dei `Decimal` di Pydantic: stessa ragione di `pregresso`
       // più sotto. Fidi e finanziamenti entrano in somme (`fidi + residui`, le rate per anno),
       // e da stringhe davano NaN e una concatenazione (AMBIENTA, 2026-09-17).
       bank_lines_amount: numOrNull(a.bank_lines_amount),
-      bank_lines_rule: a.bank_lines_rule ?? null,
+      bank_lines_rule: a.bank_lines_amount == null ? null : "costante",
       bank_lines_rate: numOrNull(a.bank_lines_rate),
       other_lenders: normalizeOtherLenders(a.other_lenders),
       tfr_payments: a.tfr_payments ?? 0,
@@ -265,11 +272,13 @@ export function defaultAssumption(
     revenue_growth_pct: 0,
     other_revenue_growth_pct: 0,
     variable_materials_growth_pct: 0,
+    variable_materials_growth_auto: true,
     // 2, non 0: uno scenario nuovo parte dall'inflazione attesa (spec
     // 2026-09-15 §4.3), e `*_growth_auto = true` la tiene agganciata finche'
     // l'utente non scrive un valore proprio.
     fixed_materials_growth_pct: 2,
     variable_services_growth_pct: 0,
+    variable_services_growth_auto: true,
     fixed_services_growth_pct: 2,
     rent_growth_pct: 0,
     personnel_growth_pct: 0,
@@ -473,8 +482,8 @@ export function withPregresso(
 }
 
 /**
- * I ricavi trascinano la parte variabile di materie e servizi (spec 2026-09-15 §4.2): il
- * motore non cambia, le due percentuali seguono i ricavi per costruzione.
+ * Le quote variabili seguono i ricavi con scostamento zero. Se l'utente ha
+ * impostato uno scostamento, questo resta invariato quando cambia i ricavi.
  *
  * `revenue_growth_pct` non e' nullable in `BudgetAssumptionsCreate` (nessuna schermata lo
  * svuota oggi), ma il tipo di `value` resta `number | null` per coerenza con la firma
@@ -482,11 +491,20 @@ export function withPregresso(
  */
 export function withRevenueGrowth(map: AssumptionsMap, year: number, value: number | null): AssumptionsMap {
   const v = value === null ? 0 : value;
+  const oldRevenue = Number(map[year]?.revenue_growth_pct ?? 0);
+  const materials = map[year]?.variable_materials_growth_pct;
+  const services = map[year]?.variable_services_growth_pct;
+  const materialsAuto = map[year]?.variable_materials_growth_auto
+    ?? (materials == null || Number(materials) === oldRevenue);
+  const servicesAuto = map[year]?.variable_services_growth_auto
+    ?? (services == null || Number(services) === oldRevenue);
   const row: Record<string, unknown> = {
     ...map[year],
     revenue_growth_pct: value,
-    variable_materials_growth_pct: v,
-    variable_services_growth_pct: v,
+    variable_materials_growth_pct: materialsAuto ? v : Math.max(-100, Math.min(100, v + Number(materials ?? oldRevenue) - oldRevenue)),
+    variable_services_growth_pct: servicesAuto ? v : Math.max(-100, Math.min(100, v + Number(services ?? oldRevenue) - oldRevenue)),
+    variable_materials_growth_auto: materialsAuto,
+    variable_services_growth_auto: servicesAuto,
   };
   return { ...map, [year]: row as Partial<BudgetAssumptionsCreate> };
 }

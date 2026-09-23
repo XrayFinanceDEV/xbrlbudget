@@ -78,7 +78,7 @@ export function StepImposte(p: StepProps): JSX.Element {
 
   const preview = useMemo(() => impostePreview(baseInc, p.preview.data), [baseInc, p.preview.data]);
 
-  // La via manuale (percentuale di crescita su sp06e/sp16e) e' un'alternativa
+  // La via manuale (percentuale di crescita sul debito sp16e) e' un'alternativa
   // al piano, non un suo complemento: e' lei a decidere se «Debiti tributari
   // oltre %» sia a schermo, perche' fuori di li' non governa nulla. Il motore
   // decide PER ANNO (`manualTaxYears`): su un piano misto la riga resta a
@@ -98,6 +98,11 @@ export function StepImposte(p: StepProps): JSX.Element {
     () => spTributariRows(baseBs, manual, automaticYears),
     [baseBs, manual, automaticYears],
   );
+  const variazioniCreditiStorici = p.forecastYears.flatMap((year) => {
+    const raw = p.assumptions[year]?.sp06e_growth_pct;
+    const value = raw == null ? 0 : Number(raw);
+    return Number.isFinite(value) && value !== 0 ? [{ year, value }] : [];
+  });
 
   // Il piano e' UNO per scenario e vive nelle ipotesi del PRIMO anno di piano
   // (spec §4.5): il motore lo legge da li', e scriverlo su ogni anno lo
@@ -111,8 +116,12 @@ export function StepImposte(p: StepProps): JSX.Element {
   // Lo zero salvato e' «non dichiarato»: la casella resta vuota e dice
   // l'acconto che il motore applica (lib/budget-imposte-step.ts:accontiRow).
   const advancesRows: YearInputRow[] = useMemo(
-    () => [accontiRow(p.preview.data, accontoPctValue(pregresso))],
-    [p.preview.data, pregresso],
+    () => [{
+      ...accontiRow(p.preview.data, accontoPctValue(pregresso)),
+      offYears: yearsManuali,
+      offYearsNote: "La crescita manuale dei debiti tributari non calcola gli acconti. Svuota Debiti tributari entro % per riattivarli.",
+    }],
+    [p.preview.data, pregresso, yearsManuali],
   );
   const setPregresso = (next: Pregresso) => {
     p.updatePregresso(next);
@@ -197,16 +206,6 @@ export function StepImposte(p: StepProps): JSX.Element {
               </div>
             )}
 
-            <div>
-              <YearInputTable
-                forecastYears={p.forecastYears}
-                baseYear={p.baseYear}
-                assumptions={p.assumptions}
-                update={p.update}
-                rows={advancesRows}
-                yearsAsRows
-              />
-            </div>
           </CardContent>
         </Card>
 
@@ -218,6 +217,34 @@ export function StepImposte(p: StepProps): JSX.Element {
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-3">
+            {variazioniCreditiStorici.length > 0 && (
+              <div className="flex flex-wrap items-center justify-between gap-2 rounded-md bg-amber-500/10 p-3 text-xs text-amber-800 dark:text-amber-300">
+                <span>
+                  Crediti tributari storici modificati nel piano: {variazioniCreditiStorici.map(({ year, value }) => `${year}: ${pct1(value)}`).join(" · ")}.
+                  Questa ipotesi cambia anche la cassa. Puoi correggerla in Patrimoniale pregresso.
+                </span>
+                <Button
+                  type="button" variant="outline" size="sm"
+                  onClick={() => variazioniCreditiStorici.forEach(({ year }) => p.update(year, "sp06e_growth_pct", null))}
+                >
+                  Ripristina crediti storici
+                </Button>
+              </div>
+            )}
+            {manual && (
+              <div className="flex flex-wrap items-center justify-between gap-2 rounded-md bg-amber-500/10 p-3 text-xs text-amber-800 dark:text-amber-300">
+                <span>La crescita manuale dei debiti tributari disattiva i pagamenti negli anni selezionati.</span>
+                <Button
+                  type="button" variant="outline" size="sm"
+                  onClick={() => p.forecastYears.forEach((year) => {
+                    p.update(year, "sp16e_growth_pct", null);
+                    p.update(year, "sp17e_growth_pct", null);
+                  })}
+                >
+                  Ripristina saldo e acconti
+                </Button>
+              </div>
+            )}
             {baseBs && firstYear !== undefined ? (
               <TribRow label="Acconto sull'imposta dell'anno prima" small={ACCONTO_CHIOSA}>
                 <div className="flex items-center gap-1">
@@ -245,6 +272,15 @@ export function StepImposte(p: StepProps): JSX.Element {
                 scadenziare.
               </p>
             )}
+
+            <YearInputTable
+              forecastYears={p.forecastYears}
+              baseYear={p.baseYear}
+              assumptions={p.assumptions}
+              update={p.update}
+              rows={advancesRows}
+              yearsAsRows
+            />
 
             {/* Saldo, rateizzato e rate si scadenziano al passo 5, non qui
                 (decisione del proprietario, 2026-09-15, Task 13b/16): questo

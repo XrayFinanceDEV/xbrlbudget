@@ -28,6 +28,7 @@ import {
   type AssumptionsMap,
 } from "@/lib/budget-horizon";
 import { applicaInflazioneAlleAuto, withInflazione } from "@/lib/budget-inflazione";
+import { withManualSpAmount, withSpRule } from "@/lib/budget-sp-manuale";
 import { isScenarioPrecedente, migraScenario, type EsitoMigrazione } from "@/lib/budget-migrazione";
 import type { HistoricalData } from "@/lib/budget-trend";
 import type {
@@ -53,19 +54,14 @@ export interface ScenarioAssumptionsState {
   setAssumptions: React.Dispatch<React.SetStateAction<AssumptionsMap>>;
   idratato: boolean;
   isNew: boolean; // isNew = nessuna ipotesi salvata
-  // `string` (Task 14, revisione: `bank_lines_rule` e' la prima voce del
-  // wizard che scrive un enum testuale — le altre sono tutte scalari
-  // numeriche o booleane) e' allargato solo qui e nella firma gemella di
-  // `StepProps.update` (components/budget/wizard/types.ts): a runtime la
-  // funzione sotto scrive `[field]: value` senza controllare il tipo, quindi
-  // nessun comportamento cambia per i chiamanti esistenti.
+  // `string` resta ammesso per le ipotesi enum testuali del wizard;
+  // la firma coincide con `StepProps.update`.
   updateAssumption: (year: number, field: string, value: number | boolean | string | null) => void;
   updateAll: (field: string, value: number | boolean | null) => void; // tutti i forecastYears
   updateFinancingLoans: (year: number, loans: FinancingLoanInput[]) => void;
   updateTemporaryDifferences: (year: number, lines: TemporaryDifferenceInput[]) => void;
-  /** Aggancia una voce minore dello SP a un driver di volume su tutti gli anni
-   *  di piano; `null` la slega. */
-  updateSpIndexing: (code: string, driver: SpIndexingDriver | null) => void;
+  updateSpRule: (code: string, field: string, growthField: string, driver: SpIndexingDriver | null, projected: Record<number, number | null>) => void;
+  updateManualSpAmount: (year: number, code: string, field: string, growthField: string, amount: number, projected: Record<number, number | null>) => void;
   /** Il setter tipizzato del piano di pregresso (conflitto B della revisione
    *  del task 7): scrive SEMPRE nel primo anno di piano (`withPregresso`,
    *  `lib/budget-horizon.ts`), mai su un anno scelto dal chiamante — `update`
@@ -320,10 +316,9 @@ export function useScenarioAssumptions({
   const chiudiMigrazione = useCallback(() => setMigrazione(null), []);
 
   const updateAssumption = useCallback((year: number, field: string, value: number | boolean | string | null) => {
-    // I ricavi trascinano la parte variabile di materie e servizi (spec
-    // 2026-09-15 §4.2, Task 10): il motore non cambia, le due percentuali
-    // seguono i ricavi per costruzione — la regola sta in `withRevenueGrowth`
-    // (lib/budget-horizon.ts), con la sua prova, non qui.
+    // Le quote variabili ancora automatiche seguono i ricavi; una crescita
+    // modificata nel passo Costi resta indipendente. La regola sta in
+    // `withRevenueGrowth` (lib/budget-horizon.ts).
     if (field === "revenue_growth_pct") {
       setAssumptions((prev) => withRevenueGrowth(prev, year, value as number | null));
       return;
@@ -372,28 +367,18 @@ export function useScenarioAssumptions({
     }));
   }, []);
 
-  /**
-   * L'aggancio di una voce minore dello SP a un driver di volume (Task 15).
-   * Scrive TUTTI gli anni di piano: il modello e' per anno — il motore legge
-   * `sp_indexing` riga per riga — ma la scelta e' una sola, come per gli
-   * interruttori e come per la quota fissa dei costi. Passare `null` toglie
-   * la chiave invece di lasciarla a un valore vuoto: al motore una chiave
-   * assente significa «costante», che e' esattamente cio' che l'utente ha
-   * appena chiesto.
-   */
-  const updateSpIndexing = useCallback((code: string, driver: SpIndexingDriver | null) => {
-    setAssumptions((prev) => {
-      const next = { ...prev };
-      for (const y of forecastYears) {
-        const { [code]: _tolto, ...resto } = next[y]?.sp_indexing ?? {};
-        const mappa = driver ? { ...resto, [code]: driver } : resto;
-        next[y] = {
-          ...(next[y] ?? {}),
-          sp_indexing: Object.keys(mappa).length > 0 ? mappa : null,
-        };
-      }
-      return next;
-    });
+  const updateSpRule = useCallback((
+    code: string, field: string, growthField: string, driver: SpIndexingDriver | null,
+    projected: Record<number, number | null>,
+  ) => {
+    setAssumptions((prev) => withSpRule(prev, forecastYears, code, field, growthField, driver, projected));
+  }, [forecastYears]);
+
+  const updateManualSpAmount = useCallback((
+    year: number, code: string, field: string, growthField: string, amount: number,
+    projected: Record<number, number | null>,
+  ) => {
+    setAssumptions((prev) => withManualSpAmount(prev, forecastYears, year, code, field, growthField, amount, projected));
   }, [forecastYears]);
 
   const isNew = idratato && existingAssumptionYears.size === 0;
@@ -456,7 +441,8 @@ export function useScenarioAssumptions({
     updateAll,
     updateFinancingLoans,
     updateTemporaryDifferences,
-    updateSpIndexing,
+    updateSpRule,
+    updateManualSpAmount,
     updatePregresso,
     updateOtherLenders,
     migrazione,

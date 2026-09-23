@@ -100,7 +100,6 @@ import {
 } from "@/lib/pratica-rehydration";
 import {
   MONTH_LABELS,
-  SECTOR_OPTIONS,
   formatEuro,
   formatPct,
 } from "@/lib/pratica-format";
@@ -157,10 +156,6 @@ export default function InfraannualePage() {
   const [fileResetKey, setFileResetKey] = useState(0);
   const [fiscalYear, setFiscalYear] = useState(new Date().getFullYear());
   const [periodMonths, setPeriodMonths] = useState(9);
-  const [companyMode, setCompanyMode] = useState<"new" | "existing">("new");
-  const [selectedCompany, setSelectedCompany] = useState<number | null>(null);
-  const [newCompanyName, setNewCompanyName] = useState("");
-  const [sector, setSector] = useState(1);
   const [importing, setImporting] = useState(false);
   const [activeImportMethod, setActiveImportMethod] = useState<
     "pdf" | "pdf_ocr" | "xbrl" | null
@@ -440,27 +435,6 @@ export default function InfraannualePage() {
     return () => window.removeEventListener("focus", handleFocus);
   }, [refreshCompanies]);
 
-  // Auto-select first company if needed
-  useEffect(() => {
-    if (companies.length > 0 && !selectedCompany) {
-      setSelectedCompany(companies[0].id);
-    }
-  }, [companies, selectedCompany]);
-
-  // Preseleziona l'azienda già stabilita in Anagrafiche: senza questo il
-  // picker dell'Import riparte da "Nuova azienda" con nome vuoto e invita a
-  // crearne un duplicato. Tenuto sullo scalare pratica?.companyId (mai
-  // sull'oggetto pratica) e SENZA dipendere da selectedCompany, così vince
-  // sempre sull'effetto "auto-seleziona la prima azienda" qui sopra
-  // indipendentemente dall'ordine di flush, e non riparte più dopo — il
-  // picker resta comunque modificabile dall'utente.
-  useEffect(() => {
-    if (pratica?.companyId != null) {
-      setCompanyMode("existing");
-      setSelectedCompany(pratica.companyId);
-    }
-  }, [pratica?.companyId]);
-
   // Riidratazione dopo refresh (F5). Il progresso del wizard vive in useState
   // locali (importResult, scenario, fiscalYear, periodMonths, …) che NON
   // sopravvivono a un refresh, mentre il context (persistito in localStorage)
@@ -611,13 +585,9 @@ export default function InfraannualePage() {
       return;
     }
 
-    if (companyMode === "new" && !newCompanyName.trim()) {
-      toast.error("Inserisci il nome dell'azienda");
-      return;
-    }
-
-    if (companyMode === "existing" && !selectedCompany) {
-      toast.error("Seleziona un'azienda");
+    const targetCompanyId = pratica?.companyId;
+    if (targetCompanyId == null) {
+      toast.error("Completa prima l'anagrafica dell'azienda");
       return;
     }
 
@@ -645,10 +615,10 @@ export default function InfraannualePage() {
         const result = await importFn(
           file,
           fiscalYear,
-          companyMode === "new" ? newCompanyName : undefined,
-          companyMode === "existing" ? selectedCompany : undefined,
-          companyMode === "new",
-          companyMode === "new" ? sector : undefined,
+          undefined,
+          targetCompanyId,
+          false,
+          undefined,
           periodMonths
         );
         companyId = result.company_id;
@@ -665,9 +635,9 @@ export default function InfraannualePage() {
       } else {
         const result = await importXBRL(
           file,
-          companyMode === "existing" ? selectedCompany : undefined,
-          companyMode === "new",
-          companyMode === "new" ? sector : undefined,
+          targetCompanyId,
+          false,
+          undefined,
           periodMonths
         );
         companyId = result.company_id;
@@ -1450,74 +1420,13 @@ export default function InfraannualePage() {
                 </div>
               </div>
 
-              {/* Company */}
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <Label>Azienda</Label>
-                  <Select
-                    value={companyMode}
-                    onValueChange={(v) => setCompanyMode(v as "new" | "existing")}
-                  >
-                    <SelectTrigger>
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="existing">Azienda esistente</SelectItem>
-                      <SelectItem value="new">Nuova azienda</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-                {companyMode === "existing" ? (
-                  <div>
-                    <Label>Seleziona azienda</Label>
-                    <Select
-                      value={selectedCompany?.toString() || ""}
-                      onValueChange={(v) => setSelectedCompany(parseInt(v))}
-                    >
-                      <SelectTrigger>
-                        <SelectValue placeholder="Seleziona..." />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {companies.map((c) => (
-                          <SelectItem key={c.id} value={c.id.toString()}>
-                            {c.name}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </div>
-                ) : (
-                  <div>
-                    <Label>Nome azienda</Label>
-                    <Input
-                      value={newCompanyName}
-                      onChange={(e) => setNewCompanyName(e.target.value)}
-                      placeholder="Ragione sociale"
-                    />
-                  </div>
-                )}
+              <div className="rounded-lg border bg-muted/30 px-4 py-3">
+                <p className="text-sm text-muted-foreground">Azienda della pratica</p>
+                <p className="font-medium">
+                  {companies.find((company) => company.id === pratica?.companyId)?.name ??
+                    (pratica?.companyId != null ? `Azienda #${pratica.companyId}` : "Completa prima l'anagrafica")}
+                </p>
               </div>
-
-              {companyMode === "new" && (
-                <div className="w-1/2">
-                  <Label>Settore</Label>
-                  <Select
-                    value={sector.toString()}
-                    onValueChange={(v) => setSector(parseInt(v))}
-                  >
-                    <SelectTrigger>
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {Object.entries(SECTOR_OPTIONS).map(([value, label]) => (
-                        <SelectItem key={value} value={value}>
-                          {value}. {label}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-              )}
 
               {importResult && missingRefYear ? (
                 <div className="space-y-4">
@@ -2343,4 +2252,3 @@ export default function InfraannualePage() {
     </>
   );
 }
-

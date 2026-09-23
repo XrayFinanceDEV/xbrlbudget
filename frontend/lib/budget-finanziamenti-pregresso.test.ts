@@ -111,8 +111,9 @@ describe("budget-finanziamenti-pregresso", () => {
   it("serveInizializzareFidi: solo a riga presente e senza valore", () => {
     expect(serveInizializzareFidi(undefined)).toBe(false);
     expect(serveInizializzareFidi(null)).toBe(false);
-    expect(serveInizializzareFidi({ bank_lines_amount: null, bank_lines_rule: null })).toBe(true);
-    expect(serveInizializzareFidi({ bank_lines_amount: 0, bank_lines_rule: null })).toBe(false);
-    expect(serveInizializzareFidi({ bank_lines_amount: null, bank_lines_rule: "costante" })).toBe(false);
+    expect(serveInizializzareFidi({ bank_lines_amount: null })).toBe(true);
+    expect(serveInizializzareFidi({ bank_lines_amount: 0 })).toBe(false);
+    const legacy = { bank_lines_amount: null, bank_lines_rule: "costante" };
+    expect(serveInizializzareFidi(legacy)).toBe(true);
   });
 });

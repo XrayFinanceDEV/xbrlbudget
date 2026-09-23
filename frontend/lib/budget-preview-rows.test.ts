@@ -103,7 +103,10 @@ describe("rowsCosti", () => {
       margine_sicurezza: 458333.33, margine_sicurezza_pct: 41.67,
     };
     const rows = rowsCosti(baseInc, { materials: 32.5, services: 60 }, [y]);
-    expect(rows.map((r) => r.key)).toEqual(["ricavi", "variabili", "fissi", "personale", "mol"]);
+    expect(rows.map((r) => r.key)).toEqual([
+      "ricavi", "variabili", "mat-variabili", "serv-variabili",
+      "fissi", "mat-fissi", "serv-fissi", "personale", "mol",
+    ]);
     expect(rows.find((r) => r.key === "variabili")!.years[0].value).toBe(300);
     expect(rows.find((r) => r.key === "fissi")!.years[0].value).toBe(385);
     expect(rows.find((r) => r.key === "personale")!.years[0].value).toBe(155);
@@ -115,6 +118,22 @@ describe("rowsCosti", () => {
     // base: quote dallo slider, oneri diversi (ce12) compresi nei fissi da questo giro di rilievi
     expect(rows.find((r) => r.key === "fissi")!.base.value).toBe(400 * 0.325 + 200 * 0.6 + 150 + 30 + 20);
     expect(rows.find((r) => r.key === "variabili")!.base.value).toBeCloseTo(600 - (400 * 0.325 + 200 * 0.6), 6);
+    expect(rows.find((r) => r.key === "mat-fissi")!.base).toMatchObject({ value: 130, pct: 13 });
+    expect(rows.find((r) => r.key === "mat-variabili")!.base).toMatchObject({ value: 270, pct: 27 });
+    expect(rows.find((r) => r.key === "serv-fissi")!.base).toMatchObject({ value: 120, pct: 12 });
+    expect(rows.find((r) => r.key === "serv-variabili")!.base).toMatchObject({ value: 80, pct: 8 });
+    expect(rows.find((r) => r.key === "mat-fissi")!.years[0]).toMatchObject({ value: 130, pct: 130 / 1100 * 100 });
+    expect(rows.find((r) => r.key === "serv-variabili")!.years[0]).toMatchObject({ value: 90, pct: 90 / 1100 * 100 });
+  });
+  it("un override materie prime nasconde solo la loro ripartizione, non quella dei servizi", () => {
+    const y = year(2029);
+    y.details.ce05_fixed = null;
+    y.details.ce05_variable = null;
+    const rows = rowsCosti(baseInc, { materials: 0, services: 50 }, [y]);
+    expect(rows.find((r) => r.key === "mat-fissi")!.years[0]).toEqual({ value: null, pct: null, note: "forzato in CE Prev." });
+    expect(rows.find((r) => r.key === "mat-variabili")!.years[0].value).toBeNull();
+    expect(rows.find((r) => r.key === "serv-fissi")!.years[0].value).toBe(120);
+    expect(rows.find((r) => r.key === "serv-variabili")!.years[0].value).toBe(90);
   });
   it("senza pareggio definito (override di CE Prev.) le celle sono null con la nota, il MOL canonico resta calcolabile", () => {
     const y = year(2027);

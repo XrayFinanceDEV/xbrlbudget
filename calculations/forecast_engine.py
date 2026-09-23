@@ -1041,15 +1041,15 @@ class ForecastEngine:
         """Se questa riga di ipotesi governa la posizione tributaria a mano.
 
         E' la stessa condizione del calcolatore (`manual_tax_position`):
-        percentuali esplicite su `sp06e`/`sp16e`. In quel ramo `sp17e` segue
+        una percentuale esplicita sul debito `sp16e`. La variazione del credito
+        `sp06e` non deve spegnere i pagamenti delle imposte. In quel ramo `sp17e` segue
         `_prev × (1 + crescita)` e il piano e' dichiarato ignorato
         (`pregresso_ignored`), quindi l'override SUPERVIVE all'anno dopo —
         rifiutarlo significherebbe negare una liberta' che il motore onora
         (rilievo M-1; la sonda `X2` della revisione misura il base che porta
         avanti 250,25 dal 2027 al 2030).
         """
-        return (getattr(assumption, 'sp06e_growth_pct', None) is not None
-                or getattr(assumption, 'sp16e_growth_pct', None) is not None)
+        return getattr(assumption, 'sp16e_growth_pct', None) is not None
 
     @classmethod
     def _rifiuto_override_governati(cls, pregresso, assumptions) -> None:
@@ -2079,8 +2079,7 @@ class ForecastEngine:
         return Decimal('0'), Decimal('0')
 
     @staticmethod
-    def _apply_sp_overrides(result: Dict, assumption, *, overdraft: "Optional[_Overdraft]" = None,
-                            anticipate_contro_riserve: bool = False) -> Dict:
+    def _apply_sp_overrides(result: Dict, assumption, *, overdraft: "Optional[_Overdraft]" = None) -> Dict:
         """Apply absolute balance-sheet overrides and rebuild affected totals.
 
         Overrides target persisted forecast field names.  Detail edits win over
@@ -2096,10 +2095,9 @@ class ForecastEngine:
         e' il chiamante INFRANNUALE (`intra_year_engine`), il cui plug negativo
         va clampato a zero con la propria diagnostica e non alza mai.
 
-        `anticipate_contro_riserve` (previsionale budget, commercialista
-        2026-09-18): un override delle imposte anticipate (`sp06f`/`sp07f`) ha
-        contropartita `sp12e` altre riserve, non la cassa — le anticipate non
-        passano dal conto economico e non sono un incasso.
+        Tutte le forzature SP, comprese le imposte anticipate, hanno come
+        contropartita la cassa. Le variazioni di riserve devono essere ipotesi
+        esplicite o forzature della relativa voce SP.
         """
         raw_overrides = getattr(assumption, 'sp_overrides', None) or {}
         if not isinstance(raw_overrides, dict):
@@ -2107,20 +2105,13 @@ class ForecastEngine:
 
         applied = set()
         signed_fields = {'sp13_utile_perdita', 'sp12h_riserva_neg_azioni_proprie'}
-        riserva_anticipate = Decimal('0')
         for field, raw_value in raw_overrides.items():
             if field not in result or raw_value is None:
                 continue
             value = Decimal(str(raw_value))
             new_value = value if field in signed_fields else max(Decimal('0'), value)
-            if anticipate_contro_riserve and field in ('sp06f_imposte_anticipate_breve',
-                                                       'sp07f_imposte_anticipate_lungo'):
-                riserva_anticipate += new_value - result.get(field, Decimal('0'))
             result[field] = new_value
             applied.add(field)
-        if riserva_anticipate and 'sp12e_altre_riserve' not in applied:
-            result['sp12e_altre_riserve'] = result.get('sp12e_altre_riserve', Decimal('0')) + riserva_anticipate
-            applied.add('sp12e_altre_riserve')
 
         detail_groups = {
             'sp04_immob_finanziarie': (
@@ -2419,7 +2410,6 @@ class ForecastEngine:
         # L'apertura della prima riga (validata in `assemble_financing`) e poi il
         # residuo dichiarato l'anno prima: mai una ri-derivazione dal saldo.
         fidi_prima_riga = getattr(assumptions[0], 'bank_lines_amount', None)
-        fidi_regola = getattr(assumptions[0], 'bank_lines_rule', None) or 'costante'
         fidi_tasso = Decimal(str(getattr(assumptions[0], 'bank_lines_rate', None) or 0))
         # Il settore comanda SOLO la soglia dei giorni di magazzino dedotti
         # (Task 10): nessun altro punto del motore budget legge il settore.
@@ -2498,6 +2488,7 @@ class ForecastEngine:
                     year_index=year_index,
                     details=details,
                     prev_details=prev_details,
+                    previous_assumption=(assumptions[year_index - 1] if year_index else None),
                     fidi_apertura=fidi_apertura,
                     fidi_tasso=fidi_tasso,
                     altri_finanziatori=contratti_altri,
@@ -2535,10 +2526,7 @@ class ForecastEngine:
                     sweep=sweep,
                     debito_bancario=debito,
                     fidi_apertura=fidi_apertura,
-                    fidi_regola=fidi_regola,
                     altri_finanziatori=contratti_altri,
-                    prev_revenue=(getattr(prev_inc, 'ce01_ricavi_vendite', None)
-                                  if fidi_apertura is not None else None),
                 )
                 forecast_bs = self._normalize_balance_sheet_cents(
                     forecast_bs,
@@ -2849,8 +2837,8 @@ class ForecastEngine:
         # Le imposte anticipate non passano piu' dal conto economico
         # (commercialista, 2026-09-18): nessuna differenza temporanea, nessuna
         # imposta differita in `ce20`. La griglia salvata si ignora; le
-        # anticipate restano costanti e si cambiano solo con un override SP, con
-        # contropartita le riserve (`_apply_sp_overrides`).
+        # anticipate restano costanti e si cambiano solo con un override SP,
+        # che segue la regola generale delle forzature SP: contropartita cassa.
         deferred = deferred_tax_position(None, assumption.tax_rate)
         if assumption.ce20_override is not None:
             total_tax = Decimal(str(assumption.ce20_override))
@@ -2879,6 +2867,7 @@ class ForecastEngine:
         year_index: int = 0,
         details=None,
         prev_details=None,
+        previous_assumption=None,
         fidi_apertura=None,
         fidi_tasso=Decimal('0'),
         altri_finanziatori=None,
@@ -2894,8 +2883,9 @@ class ForecastEngine:
         `year_index`, che e' una svalutazione crediti (ce09d).
 
         `prev_details` sono i `details` dell'anno precedente (`None` sul primo):
-        di questo prospetto riguarda solo `scoperto_residuo`, il saldo su cui
-        maturano gli oneri dello scoperto di c/c.
+        portano le componenti fissa/variabile dei costi e lo scoperto residuo.
+        `previous_assumption` consente di riconoscere un cambio della quota
+        fissa nell'anno corrente, che richiede una nuova ripartizione.
 
         `fidi_apertura`/`fidi_tasso` (regime esplicito, spec 2026-09-15 §5.2):
         il saldo dei fidi in apertura d'anno e il loro tasso %. `None` = regime
@@ -2927,6 +2917,21 @@ class ForecastEngine:
         else:
             ce04 = _pinc('ce04_altri_ricavi') * (Decimal('1') + assumption.other_revenue_growth_pct / Decimal('100'))
 
+        # Split the first year (or a year with a changed slider) from the
+        # previous total. Otherwise carry each previous component forward on
+        # its own growth rate: re-splitting the total every year moves part of
+        # fixed services into the variable base and breaks its promised
+        # proportionality to revenue.
+        def _cost_component_bases(total, share, previous_share, fixed_key, variable_key):
+            previous_fixed = (prev_details or {}).get(fixed_key)
+            previous_variable = (prev_details or {}).get(variable_key)
+            if (previous_assumption is not None
+                    and previous_fixed is not None and previous_variable is not None
+                    and previous_share == share):
+                return Decimal(str(previous_variable)), Decimal(str(previous_fixed))
+            fixed = total * share / Decimal('100')
+            return total - fixed, fixed
+
         # Calculate costs - split between variable and fixed components based on user-defined percentages
 
         # Materials
@@ -2937,10 +2942,11 @@ class ForecastEngine:
             ce05_fixed_part = ce05_variable_part = None
         else:
             base_materials = _pinc('ce05_materie_prime')
-            fixed_pct_materials = assumption.fixed_materials_percentage / Decimal('100')
-            variable_pct_materials = Decimal('1') - fixed_pct_materials
-            variable_materials = base_materials * variable_pct_materials
-            fixed_materials = base_materials * fixed_pct_materials
+            variable_materials, fixed_materials = _cost_component_bases(
+                base_materials, assumption.fixed_materials_percentage,
+                (previous_assumption.fixed_materials_percentage if previous_assumption else None),
+                'ce05_fixed', 'ce05_variable',
+            )
             ce05_variable_part = variable_materials * (Decimal('1') + assumption.variable_materials_growth_pct / Decimal('100'))
             ce05_fixed_part = fixed_materials * (Decimal('1') + assumption.fixed_materials_growth_pct / Decimal('100'))
             ce05 = ce05_variable_part + ce05_fixed_part
@@ -2951,10 +2957,11 @@ class ForecastEngine:
             ce06_fixed_part = ce06_variable_part = None
         else:
             base_services = _pinc('ce06_servizi')
-            fixed_pct_services = assumption.fixed_services_percentage / Decimal('100')
-            variable_pct_services = Decimal('1') - fixed_pct_services
-            variable_services = base_services * variable_pct_services
-            fixed_services = base_services * fixed_pct_services
+            variable_services, fixed_services = _cost_component_bases(
+                base_services, assumption.fixed_services_percentage,
+                (previous_assumption.fixed_services_percentage if previous_assumption else None),
+                'ce06_fixed', 'ce06_variable',
+            )
             ce06_variable_part = variable_services * (Decimal('1') + assumption.variable_services_growth_pct / Decimal('100'))
             ce06_fixed_part = fixed_services * (Decimal('1') + assumption.fixed_services_growth_pct / Decimal('100'))
             ce06 = ce06_variable_part + ce06_fixed_part
@@ -3282,8 +3289,6 @@ class ForecastEngine:
         debito_bancario: "Optional[_DebitoBancarioAnno]" = None,
         settore: Optional[int] = None,
         fidi_apertura=None,
-        fidi_regola: Optional[str] = None,
-        prev_revenue=None,
         altri_finanziatori=None,
     ) -> Dict:
         """
@@ -3318,10 +3323,8 @@ class ForecastEngine:
         Assenti (`None`), come li passano i chiamanti diretti e l'infrannuale,
         non cambia nulla: nessun perimetro dichiarato, nessuna componente.
 
-        `fidi_apertura`/`fidi_regola`/`prev_revenue` (regime esplicito, spec
-        2026-09-15 §5.2): il saldo dei fidi in apertura d'anno, la regola
-        (`costante` | `ricavi`) e i ricavi dell'anno precedente, necessari per
-        applicarla. `fidi_apertura = None` = regime di sempre, nessun cambio.
+        `fidi_apertura` (regime esplicito): il saldo dei fidi in apertura
+        d'anno resta costante, salvo rimborsi sweep. `None` = regime di prima.
 
         `altri_finanziatori` (spec 2026-09-15 §5.3): i contratti della lista
         `other_lenders` assemblati da `assemble_financing`. Con la lista,
@@ -3648,14 +3651,9 @@ class ForecastEngine:
         sp12b = _base('sp12b_riserve_rivalutazione')
         sp12c = _base('sp12c_riserva_legale')
         sp12d = _base('sp12d_riserve_statutarie')
-        # `sp12e` riparte dall'anno base, piu' la contropartita cumulata degli
-        # override delle anticipate: costanti per regola (2026-09-18), si scostano
-        # dalla base solo per override, e quello scostamento e' la riserva che
-        # `_apply_sp_overrides` ha scritto. Senza, l'anno dopo la riserva
-        # tornerebbe alla base e la cassa assorbirebbe la differenza.
-        sp12e = _base('sp12e_altre_riserve') + (
-            _prev('sp06f_imposte_anticipate_breve') + _prev('sp07f_imposte_anticipate_lungo')
-            - _base('sp06f_imposte_anticipate_breve') - _base('sp07f_imposte_anticipate_lungo'))
+        # Le imposte anticipate restano costanti; un override SP mantiene
+        # la cassa come contropartita anche negli anni successivi.
+        sp12e = _base('sp12e_altre_riserve')
         sp12f = _base('sp12f_riserva_copertura_flussi')
         sp12g = _prev('sp12g_utili_perdite_portati') + previous_profit
         sp12h = _base('sp12h_riserva_neg_azioni_proprie')
@@ -3774,8 +3772,7 @@ class ForecastEngine:
         apertura_pregresso = sp16a + sp17a_pregresso
 
         # ── FIDI E ANTICIPI (spec 2026-09-15 §5.2): uno stato, separato dai contratti ──
-        # La regola `ricavi` li fa seguire il giro d'affari; la regola
-        # `costante` li lascia fermi. Il rimborso loro proprio e' SOLO lo sweep
+        # Il saldo resta costante. Il rimborso loro proprio e' SOLO lo sweep
         # (sotto): nessun piano di ammortamento, nessuna rata.
         fidi_residuo = None
         fidi_prev = ZERO
@@ -3783,9 +3780,6 @@ class ForecastEngine:
         if fidi_apertura is not None:
             fidi_prev = Decimal(str(fidi_apertura))
             fidi_residuo = fidi_prev
-            if fidi_regola == 'ricavi' and prev_revenue is not None and prev_revenue > ZERO:
-                fidi_residuo = fidi_prev * forecast_revenue / prev_revenue
-                fidi_variazione = fidi_residuo - fidi_prev
             # I fidi stanno dentro `sp16a` pregresso: la rata dei contratti non li tocca.
             sp16a = max(ZERO, sp16a - fidi_prev)
 
@@ -3863,10 +3857,7 @@ class ForecastEngine:
         # sull'automatismo; se c'e' anche un piano, i details lo dichiarano
         # ignorato invece di applicarlo a meta'.
         plan_tax = (pregresso or {}).get('debiti_tributari')
-        manual_tax_position = (
-            getattr(assumption, 'sp06e_growth_pct', None) is not None
-            or getattr(assumption, 'sp16e_growth_pct', None) is not None
-        )
+        manual_tax_position = getattr(assumption, 'sp16e_growth_pct', None) is not None
         tax_year = None
         tax_generated_short = None
         if manual_tax_position:
@@ -3905,6 +3896,11 @@ class ForecastEngine:
                     prev_tax_details.get('crediti_tributari_consuntivo') or 0))
             else:
                 crediti_consuntivo = _base('sp06e_crediti_tributari_breve')
+            # L'utente puo' cambiare il credito tributario storico senza
+            # disattivare la liquidazione di saldo e acconti. La crescita si
+            # applica solo alla quota del consuntivo; il credito da acconti
+            # resta distinto e non viene moltiplicato una seconda volta.
+            crediti_consuntivo *= D('1') + _sp_growth('sp06e_growth_pct')
             if prev_tax_details.get('mode') == 'saldo_acconto':
                 # L'anno prima e' passato di qui: sa dire quanto di se' e' saldo
                 # e quanto e' rata, e lo consegna gia' scomposto.
@@ -4361,7 +4357,7 @@ class ForecastEngine:
                     'variazione_ricavi': fidi_variazione,
                     'rimborso_sweep': ZERO,
                     'residuo': fidi_residuo,
-                    'regola': fidi_regola or 'costante',
+                    'regola': 'costante',
                 }
 
         # ── DETAIL BREAKDOWNS ──
@@ -4607,8 +4603,7 @@ class ForecastEngine:
             'sp17g_altri_debiti_lungo': sp17g,
             'sp18_ratei_risconti_passivi': sp18
         }
-        return self._apply_sp_overrides(result, assumption, overdraft=overdraft,
-                                        anticipate_contro_riserve=True)
+        return self._apply_sp_overrides(result, assumption, overdraft=overdraft)
 
 
 def generate_forecast_for_scenario(scenario_id: int, db_session: Session) -> Dict:

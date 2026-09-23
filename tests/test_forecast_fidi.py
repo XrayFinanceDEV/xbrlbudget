@@ -5,7 +5,7 @@ Base: sp16a 172.500 (fidi 90.000 + rata 2027 del mutuo 82.500), sp17a 247.500. U
 - 2027: mutuo 247.500 → a breve la rata 2028 (82.500), a lungo 165.000; fidi 90.000 costanti;
   sp16a = 172.500, sp17a = 165.000; oneri = 12.540 (mutuo) + 4.500 (fidi al 5%) = 17.040.
 - 2028: mutuo 165.000 → breve 82.500, lungo 82.500; sp16a = 172.500; oneri 9.405 + 4.500.
-Con regola «ricavi» e ricavi +10% i fidi 2027 valgono 99.000.
+La vecchia regola «ricavi» resta accettata ma non aumenta più i fidi.
 Con sweep (cassa minima 0) i fidi scendono della cassa in eccesso, il mutuo no.
 """
 from decimal import Decimal as D
@@ -66,11 +66,12 @@ def test_fidi_costanti_e_rata_dell_anno_dopo_a_breve():
     assert D(str(det[2027]["debito_bancario"]["contratti"][0]["breve"])) == D("82500.00")
 
 
-def test_fidi_seguono_i_ricavi():
+def test_la_vecchia_regola_ricavi_non_aumenta_i_fidi():
     res, anni, det, _ = _genera("fidi-ricavi", _rows(bank_lines_rule="ricavi", revenue_growth_pct=10))
     assert res["forecast_generated"] is True, res["message"]
-    assert D(str(det[2027]["debito_bancario"]["fidi"]["residuo"])) == D("99000.00")
-    assert D(str(det[2027]["debito_bancario"]["fidi"]["variazione_ricavi"])) == D("9000.00")
+    assert D(str(det[2027]["debito_bancario"]["fidi"]["residuo"])) == D("90000.00")
+    assert D(str(det[2027]["debito_bancario"]["fidi"]["variazione_ricavi"])) == D("0.00")
+    assert det[2027]["debito_bancario"]["fidi"]["regola"] == "costante"
 
 
 def test_lo_sweep_riduce_solo_i_fidi():

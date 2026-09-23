@@ -13,6 +13,9 @@ import {
   forcedNote,
   forcedSplitYears,
   splitBaseAmount,
+  variableAutoYearsOf,
+  variableGrowthChange,
+  variableGrowthDeviation,
 } from "./budget-costi-step";
 import { euro } from "@/lib/budget-format";
 import { yearCellState, type YearCellOff } from "./budget-year-cell";
@@ -161,6 +164,21 @@ describe("autoYearsOf", () => {
   });
 });
 
+describe("variable growth", () => {
+  it("segue i ricavi finche' le due crescite coincidono", () => {
+    const map = asMap({
+      2027: { revenue_growth_pct: 5, variable_materials_growth_pct: 5, variable_services_growth_pct: 3 },
+      2028: { revenue_growth_pct: 6, variable_materials_growth_pct: 4, variable_services_growth_pct: 6 },
+    });
+    expect(variableAutoYearsOf(map, [2027, 2028], "variable_materials_growth_pct")).toEqual([2027]);
+    expect(variableAutoYearsOf(map, [2027, 2028], "variable_services_growth_pct")).toEqual([2028]);
+    expect(variableGrowthChange(null, 6)).toBe(6);
+    expect(variableGrowthChange(0, 6)).toBe(6);
+    expect(variableGrowthChange(-2, 6)).toBe(4);
+    expect(variableGrowthDeviation(4, 6)).toBe("-2");
+  });
+});
+
 describe("costiTableRows", () => {
   const base = { mat: 1000, serv: 500, pers: 300, god: 100, od: 50 };
   const even = (v: number) => ({ value: v, uneven: false });
@@ -170,25 +188,27 @@ describe("costiTableRows", () => {
   const rows = (m: number, s: number, forced: ForcedSplit = nulla, auto = nessunAuto) =>
     costiTableRows(base, even(m), even(s), forced, auto);
 
-  it("due gruppi: parte fissa (con anni automatici) e ipotesi manuali", () => {
+  it("tre gruppi: parte variabile, parte fissa e ipotesi manuali", () => {
     const rows = costiTableRows({ mat: 1000, serv: 500, pers: 300, god: 100, od: 50 }, { value: 40, uneven: false }, { value: 60, uneven: false },
       { years: [2027, 2028], materials: [], services: [] }, { materials: [2027, 2028], services: [2028] });
     expect(rows.map((r) => ("group" in r ? `#${r.group}` : r.field))).toEqual([
+      "#Parte variabile", "variable_materials_growth_pct", "variable_services_growth_pct",
       "#Parte fissa", "fixed_materials_growth_pct", "fixed_services_growth_pct",
       "#Ipotesi manuali", "personnel_growth_pct", "rent_growth_pct", "other_costs_growth_pct",
     ]);
-    const mat = rows[1] as { autoYears?: number[]; baseLabel: string };
+    const mat = rows[4] as { autoYears?: number[]; baseLabel: string };
     expect(mat.autoYears).toEqual([2027, 2028]);
     expect(mat.baseLabel).toBe(euro(400));
-    const serv = rows[2] as { autoYears?: number[] };
+    const serv = rows[5] as { autoYears?: number[] };
     expect(serv.autoYears).toEqual([2028]);
   });
 
-  it("i due gruppi portano il loro sottotitolo, e solo «Parte fissa» il pallino", () => {
+  it("le quote variabili e fisse hanno gruppi distinti", () => {
     const r = rows(40, 40);
-    expect(r[0]).toMatchObject({ group: "Parte fissa", swatch: "fixed" });
-    expect(r[3]).toMatchObject({ group: "Ipotesi manuali" });
-    expect((r[3] as { swatch?: string }).swatch).toBeUndefined();
+    expect(r[0]).toMatchObject({ group: "Parte variabile", swatch: "variable" });
+    expect(r[3]).toMatchObject({ group: "Parte fissa", swatch: "fixed" });
+    expect(r[6]).toMatchObject({ group: "Ipotesi manuali" });
+    expect((r[6] as { swatch?: string }).swatch).toBeUndefined();
   });
 
   it("le due righe di godimento e oneri diversi portano l'importo base, senza quota", () => {
@@ -224,6 +244,8 @@ describe("costiTableRows", () => {
     expect(off(zero, "personnel_growth_pct").off).toBeUndefined();
     const quaranta = rows(40, 40);
     expect(off(quaranta, "fixed_materials_growth_pct").off).toBe(false);
+    expect(off(rows(100, 100), "variable_materials_growth_pct").off).toBe(true);
+    expect(off(rows(100, 100), "variable_services_growth_pct").off).toBe(true);
   });
 
   it("con gli anni discordi l'estremo non spegne niente: un controllo che non sa non blocca", () => {
@@ -254,6 +276,8 @@ describe("costiTableRows", () => {
     expect(cella(r, "fixed_materials_growth_pct", 2027).disabled).toBe(true);
     expect(cella(r, "fixed_materials_growth_pct", 2027).title).toContain("Forzato in CE Prev.");
     expect(cella(r, "fixed_materials_growth_pct", 2028).disabled).toBe(false);
+    expect(cella(r, "variable_materials_growth_pct", 2027).disabled).toBe(true);
+    expect(cella(r, "variable_materials_growth_pct", 2028).disabled).toBe(false);
     for (const y of PIANO) expect(cella(r, "personnel_growth_pct", y).disabled).toBe(false);
   });
 

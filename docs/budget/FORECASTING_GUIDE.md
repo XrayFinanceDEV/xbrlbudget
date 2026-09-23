@@ -411,7 +411,8 @@ foglio.»
 Il **mastrino delle imposte anticipate e differite** non c'è più: dal 2026-09-18 le anticipate non
 passano dal conto economico (commercialista) e il motore budget le ignora — `sp06f`/`sp07f`
 restano quelle del consuntivo per tutto il piano e si cambiano solo con un override dello SP
-previsionale.
+previsionale. La forzatura modifica la cassa, come le altre forzature SP; non modifica
+automaticamente le riserve.
 
 **Che cosa ne fa il motore**
 

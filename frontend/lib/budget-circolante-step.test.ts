@@ -112,13 +112,13 @@ describe("minorFieldsRows", () => {
   it("le imposte anticipate sono escluse per INTERO, entro e oltre, e di sola lettura", () => {
     // Dal 2026-09-18 (commercialista) sono costanti: nessuna percentuale, ne'
     // entro ne' oltre; si cambiano solo a mano nello SP previsionale, con
-    // contropartita le riserve.
+    // effetto sulla cassa.
     const rows = minorFieldsRows(balance());
     const coppia = rows.filter((r) => r.field.startsWith("sp06f") || r.field === "sp07f");
     expect(coppia).toHaveLength(2);
     for (const r of coppia) {
       expect(r.code).toBeNull();
-      expect(r.andamento).toBe("Governata a mano nello SP previsionale: costanti, contro riserve");
+      expect(r.andamento).toBe("Governata a mano nello SP previsionale: costanti, effetto sulla cassa");
       expect(r.off).toBe(true);
     }
   });

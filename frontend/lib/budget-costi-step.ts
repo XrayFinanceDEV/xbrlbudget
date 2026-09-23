@@ -9,10 +9,8 @@
  *
  * Un solo motore di proiezione, e sta in Python: il pareggio (`lib/budget-pareggio.ts`)
  * e il CE fino all'ante imposte (`rowsCeAnteImposte`, `lib/budget-preview-rows.ts`)
- * leggono solo cio' che il motore ha gia' dichiarato in `details`. La parte VARIABILE
- * di materie prime e servizi non ha piu' una riga qui: segue i ricavi del passo 2 per
- * costruzione (Task 10, `withRevenueGrowth`) — non e' un'ipotesi che si scrive in questo
- * passo, quindi qui non c'e' piu' ne' una riga ne' un pulsante che la scriva.
+ * leggono solo cio' che il motore ha gia' dichiarato in `details`. La parte variabile
+ * segue i ricavi finche' l'utente non imposta una crescita diversa per anno.
  */
 import type { IncomeStatement } from "@/types/api";
 import type { AssumptionsMap } from "@/lib/budget-horizon";
@@ -100,12 +98,16 @@ const FORCED_CELL_NOTE =
 /** Il `title` della riga «… · fissa» quando la quota fissa e' a 0%: non resta parte
  *  fissa su cui la percentuale possa mordere. */
 const OFF_NOTE_FISSA = "Con la quota fissa a 0% non resta parte fissa: questa percentuale non ha effetto.";
+const OFF_NOTE_VARIABILE = "Con la quota variabile a 0% questa percentuale non ha effetto.";
 
 /** Il `title` della cella «azzurra»: segue l'inflazione del passo 1 finche' non la si
  *  scrive a mano (spec §4.3, decisione 2). */
 export const AUTO_NOTE =
   "Segue l'inflazione del passo 1: cambia se la cambi lì. Scrivi un valore per fissarlo; " +
   "svuota la casella per tornare all'inflazione.";
+export const VARIABLE_AUTO_NOTE =
+  "0 = segue la crescita dei ricavi. Un valore negativo riduce la crescita del costo, " +
+  "uno positivo la aumenta. Svuota la casella per tornare a 0.";
 
 export interface CostiBase {
   mat: number | null;
@@ -163,6 +165,31 @@ export function autoYearsOf(
   return years.filter((y) => map[y]?.[field] === true);
 }
 
+/** La quota variabile e' automatica quando cresce come i ricavi dello stesso anno. */
+export function variableAutoYearsOf(
+  map: AssumptionsMap,
+  years: number[],
+  field: "variable_materials_growth_pct" | "variable_services_growth_pct"
+): number[] {
+  return years.filter((y) => {
+    const marker = map[y]?.[field === "variable_materials_growth_pct"
+      ? "variable_materials_growth_auto" : "variable_services_growth_auto"];
+    if (marker !== null && marker !== undefined) return marker;
+    const revenue = num(map[y]?.revenue_growth_pct ?? 0);
+    const variable = map[y]?.[field];
+    return variable == null || num(variable) === revenue;
+  });
+}
+
+/** Lo scostamento in punti si somma alla crescita dei ricavi e diventa il driver del motore. */
+export function variableGrowthChange(deviation: number | null, revenue: number): number {
+  return Math.max(-100, Math.min(100, revenue + (deviation ?? 0)));
+}
+
+export function variableGrowthDeviation(growth: number | null | undefined, revenue: number): string {
+  return String(Math.round(((growth ?? revenue) - revenue) * 100) / 100);
+}
+
 /**
  * Le righe della tabella. Forma strutturalmente compatibile con
  * `YearInputRow | YearInputGroup` di `components/budget/wizard/YearInputTable`
@@ -187,14 +214,11 @@ export interface ForcedSplit {
 }
 
 /**
- * Due gruppi: la parte fissa di materie prime e servizi (precompilata con
- * l'inflazione del passo 1, correggibile anno per anno), poi le tre ipotesi
+ * Tre gruppi: la parte variabile segue i ricavi finche' non e' corretta a mano,
+ * la parte fissa e' precompilata con l'inflazione, poi le tre ipotesi
  * manuali che restano — personale, godimento beni di terzi, oneri diversi di
- * gestione (spostata qui da «Altre voci CE»). La riga «quota fissa, anno per
- * anno» di prima e le due righe della parte variabile SPARISCONO dalla
- * tabella: la quota resta modificabile solo dallo slider (non e' mai stata
- * usata differenziata), e la parte variabile segue i ricavi per costruzione
- * (Task 10) — non e' piu' un'ipotesi che si scrive in questo passo.
+ * gestione (spostata qui da «Altre voci CE»). La quota fissa resta
+ * modificabile dallo slider per tutti gli anni.
  *
  * `auto` (calcolato dal chiamante con `autoYearsOf`, uno per voce) marca le
  * celle ancora automatiche: l'anteprima le rende azzurre con la loro nota,
@@ -214,7 +238,7 @@ export function costiTableRows(
   mat: FixedShare,
   serv: FixedShare,
   forced: ForcedSplit,
-  auto: { materials: number[]; services: number[] }
+  auto: { materials: number[]; services: number[]; variableMaterials?: number[]; variableServices?: number[] }
 ): CostiTableRow[] {
   const matSplit = splitBaseAmount(base.mat, mat.value);
   const servSplit = splitBaseAmount(base.serv, serv.value);
@@ -223,6 +247,29 @@ export function costiTableRows(
   const matForced = { offYears: forced.materials, offYearsNote: FORCED_CELL_NOTE };
   const servForced = { offYears: forced.services, offYearsNote: FORCED_CELL_NOTE };
   return [
+    { group: "Parte variabile", swatch: "variable", sub: "scostamento dalla crescita dei ricavi (punti %) · 0 = proporzionale" },
+    {
+      field: "variable_materials_growth_pct",
+      label: "Materie prime · variabile",
+      sub: matNote,
+      baseLabel: euro(matSplit.variable),
+      autoYears: auto.variableMaterials,
+      autoNote: VARIABLE_AUTO_NOTE,
+      off: mat.value >= 100 && !mat.uneven,
+      offNote: OFF_NOTE_VARIABILE,
+      ...matForced,
+    },
+    {
+      field: "variable_services_growth_pct",
+      label: "Servizi · variabile",
+      sub: servNote,
+      baseLabel: euro(servSplit.variable),
+      autoYears: auto.variableServices,
+      autoNote: VARIABLE_AUTO_NOTE,
+      off: serv.value >= 100 && !serv.uneven,
+      offNote: OFF_NOTE_VARIABILE,
+      ...servForced,
+    },
     { group: "Parte fissa", swatch: "fixed", sub: "precompilata con l'inflazione del passo 1 · correggi se serve, anche a 0" },
     {
       field: "fixed_materials_growth_pct",

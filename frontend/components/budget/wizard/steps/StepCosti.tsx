@@ -1,11 +1,9 @@
 "use client";
 
 // Passo 3 del percorso ipotesi: Costi (spec 2026-09-15 §4.3, giro di rilievi del 14/09).
-// Due slider dividono materie prime e servizi fra quota fissa e quota variabile (invariati);
-// la tabella raccoglie solo le percentuali di crescita che restano da scrivere a mano — la
-// parte fissa (precompilata con l'inflazione del passo 1) e tre ipotesi manuali (personale,
-// godimento beni di terzi, oneri diversi di gestione, spostata qui da «Altre voci CE»). La
-// parte variabile non ha piu' una riga: segue i ricavi del passo 2 per costruzione (Task 10).
+// Due slider dividono materie prime e servizi fra quota fissa e variabile.
+// Le righe variabili seguono i ricavi finche' non vengono corrette a mano;
+// quelle fisse partono dall'inflazione del passo 1.
 //
 // Presentazionale: ogni decisione (quale quota mostrare, quali righe si spengono, quali anni
 // sono ancora automatici) sta in lib/budget-costi-step.ts, provata in environment: node. Il
@@ -17,12 +15,14 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
+import { Info } from "lucide-react";
 import { parseFieldValue } from "@/lib/budget-field-rules";
 import { euro, pct1 } from "@/lib/budget-format";
 import { inflazioneOf } from "@/lib/budget-inflazione";
 import { previewNotice } from "@/lib/budget-preview-notice";
 import { rowsCeAnteImposte, rowsCosti } from "@/lib/budget-preview-rows";
-import { pareggioBarre, pareggioFormula, rowsPareggio } from "@/lib/budget-pareggio";
+import { pareggioAnnoBase, pareggioBarre, pareggioFormula, rowsPareggio } from "@/lib/budget-pareggio";
 import {
   autoYearsOf,
   calcolateAltrove,
@@ -33,6 +33,9 @@ import {
   forcedNote,
   forcedSplitYears,
   splitBaseAmount,
+  variableAutoYearsOf,
+  variableGrowthChange,
+  variableGrowthDeviation,
   type FixedShare,
   type FixedShareField,
   type ForcedSplit,
@@ -179,6 +182,8 @@ export function StepCosti(p: StepProps): JSX.Element {
   const auto = {
     materials: autoYearsOf(p.assumptions, p.forecastYears, "fixed_materials_growth_auto"),
     services: autoYearsOf(p.assumptions, p.forecastYears, "fixed_services_growth_auto"),
+    variableMaterials: variableAutoYearsOf(p.assumptions, p.forecastYears, "variable_materials_growth_pct"),
+    variableServices: variableAutoYearsOf(p.assumptions, p.forecastYears, "variable_services_growth_pct"),
   };
   const inflazione = inflazioneOf(p.assumptions, p.forecastYears);
 
@@ -199,6 +204,15 @@ export function StepCosti(p: StepProps): JSX.Element {
       p.update(year, field === "fixed_materials_growth_pct" ? "fixed_materials_growth_auto" : "fixed_services_growth_auto", isAuto);
     };
 
+  const onVariableRawChange = (field: "variable_materials_growth_pct" | "variable_services_growth_pct") =>
+    (year: number, raw: string) => {
+      const parsed = raw.trim() === "" ? null : parseFieldValue(field, raw);
+      const revenue = Number(p.assumptions[year]?.revenue_growth_pct ?? 0);
+      p.update(year, field, variableGrowthChange(parsed, revenue));
+      p.update(year, field === "variable_materials_growth_pct"
+        ? "variable_materials_growth_auto" : "variable_services_growth_auto", parsed === null || parsed === 0);
+    };
+
   const rows: (YearInputRow | YearInputGroup)[] = useMemo(
     () =>
       costiTableRows(base, mat, serv, forced, auto).map((r): YearInputRow | YearInputGroup => {
@@ -206,10 +220,18 @@ export function StepCosti(p: StepProps): JSX.Element {
         if (r.field === "fixed_materials_growth_pct" || r.field === "fixed_services_growth_pct") {
           return { ...r, onRawChange: onFixedRawChange(r.field) };
         }
+        if (r.field === "variable_materials_growth_pct" || r.field === "variable_services_growth_pct") {
+          return {
+            ...r,
+            onRawChange: onVariableRawChange(r.field),
+            displayValue: (year: number, assumptions: typeof p.assumptions) =>
+              variableGrowthDeviation(assumptions[year]?.[r.field as "variable_materials_growth_pct" | "variable_services_growth_pct"], Number(assumptions[year]?.revenue_growth_pct ?? 0)),
+          };
+        }
         return r;
       }),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [base, mat.value, mat.uneven, serv.value, serv.uneven, forced.materials, forced.services, auto.materials, auto.services, inflazione]
+    [base, mat.value, mat.uneven, serv.value, serv.uneven, forced.materials, forced.services, auto.materials, auto.services, auto.variableMaterials, auto.variableServices, inflazione, p.assumptions]
   );
 
   const riallineaAllInflazione = () => {
@@ -229,9 +251,13 @@ export function StepCosti(p: StepProps): JSX.Element {
     () => (baseInc ? rowsCosti(baseInc, { materials: mat.value, services: serv.value }, previewYears) : []),
     [baseInc, mat.value, serv.value, previewYears]
   );
-  const pareggioRows = useMemo(() => rowsPareggio(previewYears), [previewYears]);
-  const barre = useMemo(() => pareggioBarre(previewYears), [previewYears]);
-  const formula = useMemo(() => pareggioFormula(previewYears[0]), [previewYears]);
+  const basePareggio = useMemo(
+    () => baseInc ? pareggioAnnoBase(p.baseYear, baseInc, { materials: mat.value, services: serv.value }) : null,
+    [baseInc, p.baseYear, mat.value, serv.value]
+  );
+  const pareggioRows = useMemo(() => rowsPareggio(previewYears, basePareggio), [previewYears, basePareggio]);
+  const barre = useMemo(() => pareggioBarre(basePareggio ? [basePareggio, ...previewYears] : previewYears), [previewYears, basePareggio]);
+  const formula = useMemo(() => pareggioFormula(basePareggio ?? previewYears[0]), [previewYears, basePareggio]);
   const ceRows = useMemo(
     () => (baseInc ? rowsCeAnteImposte(baseInc, { materials: mat.value, services: serv.value }, previewYears) : []),
     [baseInc, mat.value, serv.value, previewYears]
@@ -269,7 +295,7 @@ export function StepCosti(p: StepProps): JSX.Element {
             />
             <div className="mt-2.5 flex flex-col gap-1.5">
               <LegendSwatch tone="variable">
-                la parte variabile segue il fatturato in proporzione: nessuna ipotesi da inserire
+                la parte variabile segue i ricavi quando lo scostamento qui sotto è 0
               </LegendSwatch>
               <LegendSwatch tone="fixed">
                 la parte fissa parte dall&apos;inflazione, correggibile qui sotto
@@ -290,6 +316,10 @@ export function StepCosti(p: StepProps): JSX.Element {
               assumptions={p.assumptions}
               update={p.update}
             />
+            <p className="mt-2 text-xs text-muted-foreground">
+              Parte variabile: 0 mantiene costante l&apos;incidenza sui ricavi. Uno scostamento
+              negativo indica economie di scala; uno positivo aumenta l&apos;incidenza.
+            </p>
             <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
               <span>
                 Le caselle azzurre seguono ancora l&apos;inflazione: cambiano se la cambi al passo 1.
@@ -335,18 +365,24 @@ export function StepCosti(p: StepProps): JSX.Element {
           error={previewNotice(p.preview)}
         >
           <p className="mt-1 text-[11px] text-muted-foreground">
-            Le percentuali in tabella sono sui ricavi dell&apos;anno.
+            Tutte le percentuali sono l&apos;incidenza sui ricavi dell&apos;anno. Gli slider
+            ripartiscono gli importi tra parte fissa e variabile.
           </p>
         </PreviewPanel>
 
         <PreviewPanel
-          title="Punto di pareggio sul MOL"
+          title="Break Even Point"
           baseYear={p.baseYear}
           years={previewYears.map((y) => y.year)}
           rows={pareggioRows}
           loading={p.preview.loading}
           error={null}
         >
+          {basePareggio && (
+            <p className="mt-2 text-[11px] text-muted-foreground">
+              {p.baseYear}: ripartizione dei costi storici secondo gli slider impostati.
+            </p>
+          )}
           <div className="space-y-1.5">
             {barre.map((b) => (
               <BepRow key={b.year} b={b} />
@@ -359,17 +395,24 @@ export function StepCosti(p: StepProps): JSX.Element {
             <span className="flex items-center gap-1"><span className="h-2 w-3 rounded-sm bg-red-400/70 dark:bg-red-500/60" />ricavi sotto il pareggio</span>
           </div>
           {formula && (
-            <div className="mt-3 space-y-1 rounded-md bg-muted/40 p-2.5 text-[11px]">
-              <p className="mb-1 text-[10px] uppercase tracking-wider text-muted-foreground">
-                Come si calcola · {formula.anno}
-              </p>
-              {formula.righe.map((r) => (
-                <div key={r.testo} className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-0.5">
-                  <span className="text-muted-foreground">{r.testo}</span>
-                  <span className="font-mono tabular-nums">{r.calcolo}</span>
-                </div>
-              ))}
-            </div>
+            <TooltipProvider>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <button type="button" className="mt-2 inline-flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring">
+                    <Info className="h-3.5 w-3.5" aria-hidden="true" />
+                    Come si calcola · {formula.anno}
+                  </button>
+                </TooltipTrigger>
+                <TooltipContent side="top" align="start" className="w-[min(28rem,calc(100vw-2rem))] max-h-[70vh] space-y-2 overflow-y-auto bg-popover p-3 text-popover-foreground shadow-lg">
+                  {formula.righe.map((r) => (
+                    <div key={r.testo} className="space-y-0.5">
+                      <div className="text-muted-foreground">{r.testo}</div>
+                      <div className="font-mono tabular-nums">{r.calcolo}</div>
+                    </div>
+                  ))}
+                </TooltipContent>
+              </Tooltip>
+            </TooltipProvider>
           )}
         </PreviewPanel>
 

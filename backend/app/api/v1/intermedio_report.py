@@ -16,6 +16,8 @@ from app.core.render_panics import NON_ENTRA
 from app.renderers.typst.runtime import (
     RendererBusy, RendererCompileError, RendererError, RendererTimeout, RendererUnavailable,
 )
+from app.schemas.infrannuale_pdf import InfrannualePdfRequest
+from app.services import infrannuale_pdf_service
 from app.services.intermedio_report_service import nomi_file, render_intermedio_pdf
 
 router = APIRouter()
@@ -83,3 +85,37 @@ def download_intermedio_pdf(
         "Cache-Control": "no-store",
     }
     return Response(content=pdf.data, media_type="application/pdf", headers=headers)
+
+
+@router.post(
+    "/companies/{company_id}/scenarios/{scenario_id}/infrannuale/pdf",
+    response_class=Response,
+    summary="Scarica il report infrannuale (ReportLab) in PDF",
+    responses={
+        400: {"description": "Scenario non infrannuale, o bilanci del periodo mancanti"},
+        404: {"description": "Azienda o scenario non di questo utente"},
+    },
+)
+def download_infrannuale_pdf(
+    company_id: int,
+    scenario_id: int,
+    request: InfrannualePdfRequest,
+    user_id: str = Depends(get_current_user_id),
+    db: Session = Depends(get_db),
+) -> Response:
+    """Il report infrannuale che la Stampa consegna: numeri del motore, testi a regole, nessuna AI, nessuna scrittura."""
+    scenario = validate_scenario_belongs_to_company(scenario_id, company_id, user_id, db)
+    if scenario.scenario_type != "infrannuale":
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST,
+                            detail="Il report infrannuale è disponibile solo per gli scenari infrannuali.")
+    try:
+        result = infrannuale_pdf_service.render(db, scenario)
+    except ValueError as error:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(error)) from None
+    headers = {
+        "Content-Disposition": (f'attachment; filename="{result.ascii_filename}"; '
+                                f"filename*=UTF-8''{quote(result.filename, safe='', encoding='utf-8')}"),
+        "ETag": f'"{result.etag}"',
+        "Cache-Control": "no-store",
+    }
+    return Response(content=result.data, media_type="application/pdf", headers=headers)

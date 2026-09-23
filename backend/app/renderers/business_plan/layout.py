@@ -76,6 +76,38 @@ def tiles(items: list) -> Table:
     return t
 
 
+ST["chip"] = _ps("chip", BOLD, 8.6, 10, "#ffffff")
+ST["kv13"] = _ps("kv13", BOLD, 13, 15.5, theme.NAVY)
+
+
+def tiles_chip(items: list, value_style: str = "kv") -> Table:
+    """Quattro riquadri KPI del report infrannuale: bollino teal col periodo, valore, etichetta, confronto.
+
+    items = [(bollino, valore, etichetta, confronto)]. Misure della p. 4 del riferimento: riquadro alto 65,8 pt,
+    bollino alto 13,5 pt a 6 pt dal bordo superiore.
+    """
+    gap = 8.5
+    w = (CW - 3 * gap) / 4
+    cells = []
+    for chip, v, lab, s in items:
+        badge = Table([[Paragraph(chip, ST["chip"])]], colWidths=[w - 11], rowHeights=[13.5])
+        badge.setStyle(TableStyle([("BACKGROUND", (0, 0), (-1, -1), C(theme.TEAL)),
+                                   ("LEFTPADDING", (0, 0), (-1, -1), 3), ("TOPPADDING", (0, 0), (-1, -1), 1.6),
+                                   ("BOTTOMPADDING", (0, 0), (-1, -1), 0), ("VALIGN", (0, 0), (-1, -1), "MIDDLE")]))
+        cells.append([badge, Spacer(0, 2.5), Paragraph(v, ST[value_style]), Spacer(0, 1.5),
+                      Paragraph(lab, ST["kl"]), Spacer(0, 1), Paragraph(s, ST["ks"])])
+    while len(cells) < 4:
+        cells.append("")
+    t = Table([[cells[0], "", cells[1], "", cells[2], "", cells[3]]], colWidths=[w, gap, w, gap, w, gap, w])
+    style = [("VALIGN", (0, 0), (-1, -1), "TOP"), ("LEFTPADDING", (0, 0), (-1, -1), 5.5),
+             ("RIGHTPADDING", (0, 0), (-1, -1), 5.5), ("TOPPADDING", (0, 0), (-1, -1), 6),
+             ("BOTTOMPADDING", (0, 0), (-1, -1), 4.9)]
+    for c in range(0, 2 * len(items), 2):
+        style += [("BACKGROUND", (c, 0), (c, 0), C(theme.TILE)), ("LINEABOVE", (c, 0), (c, 0), 2.2, C(theme.NAVY))]
+    t.setStyle(TableStyle(style))
+    return t
+
+
 def _value_width(n: int) -> float:
     return {1: 90, 2: 90, 3: 80, 4: 72, 5: 64, 6: 58}.get(n, 52)
 

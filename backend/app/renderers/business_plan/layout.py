@@ -113,14 +113,15 @@ def _value_width(n: int) -> float:
 
 
 def fin_table(headers: list, rows: list, first: str = "Voce (euro)", label_width: float | None = None,
-              value_size: float | None = None, pad: float = 4.6, label_size: float | None = None) -> Table:
+              value_size: float | None = None, pad: float = 4.6, label_size: float | None = None,
+              value_width: float | None = None) -> Table:
     """Tabella finanziaria del riferimento: intestazione navy, filetti sottili, subtotali e righe evidenziate.
 
     `pad` è la spaziatura verticale di cella: 4,6 pt dà le righe da 19,6 pt delle pagine di lettura, 3,8 quelle da
     18,4 della sezione 8, 2,2 quelle degli allegati (tutte misurate sul riferimento).
     """
     n = len(headers)
-    vw = _value_width(n)
+    vw = value_width if value_width is not None else _value_width(n)
     lw = label_width if label_width is not None else CW - n * vw
     vs = ST["value"] if value_size is None else _ps("v2", REGULAR, value_size, value_size * 1.15, alignment=TA_RIGHT)
     cell, cellb = ST["cell"], ST["cellb"]

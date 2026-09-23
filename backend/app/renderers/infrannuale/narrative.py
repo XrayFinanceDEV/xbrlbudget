@@ -116,7 +116,9 @@ def _periodo(d: InfrannualeData, col: str) -> str:
     return _NOMI_PERIODO[col].format(rif=d.reference_year, anno=d.partial_year)
 
 
-def _signed_pct(v: Decimal) -> str:
+def _signed_pct(v: Optional[Decimal]) -> str:
+    if v is None:
+        return fmt.ND
     return ("+" if v > 0 else "") + fmt.pct(v)
 
 

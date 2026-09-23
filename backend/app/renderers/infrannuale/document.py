@@ -104,11 +104,22 @@ def render_infrannuale(data: InfrannualeData, *, only: Optional[tuple] = None) -
 
 def _register() -> None:
     from . import sections as sec
+    from . import sections_allegati as ann
+    from . import sections_sintesi as sin
     SECTIONS.clear()
     SECTIONS.extend([
+        SectionSpec("copertina", None, sin.copertina, cover=True),
+        SectionSpec("sintesi", "Sintesi", sin.sintesi),
+        SectionSpec("forza", None, sin.forza),
         SectionSpec("economia", "Conto economico: infrannuale, annualizzato e forecast", sec.economia),
+        SectionSpec("costi", "EBITDA margin e struttura dei costi", sec.costi),
         SectionSpec("patrimonio", "Stato patrimoniale", sec.patrimonio),
+        SectionSpec("circolante", "Capitale circolante commerciale e liquidità", sec.circolante),
+        SectionSpec("debito", "Indebitamento e sostenibilità del debito", sec.debito),
         SectionSpec("crisi", "Indicatori della crisi d'impresa", sec.crisi),
+        SectionSpec("segnali", "Segnali extracontabili", sec.segnali),
+        SectionSpec("allegato_a", "Allegati A–B", ann.allegato_a),
+        SectionSpec("allegato_b", None, ann.allegato_b),
     ])
 
 

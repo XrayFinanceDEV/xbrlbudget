@@ -194,7 +194,7 @@ export function rowsDebitoCassaPfn(
   const contrattiNuovi = (y: ForecastPreviewYear) => contrattiDi(y).filter((c) => num(c.residuo_iniziale) === 0);
 
   const rows: PreviewRow[] = [];
-  rows.push(mkRow("fidi", "Fidi e anticipi", "value",
+  rows.push(mkRow("fidi", "Fidi, Anticipi Ft e Scoperti CC", "value",
     { value: fidiBase }, years.map((y) => { const f = fidiDi(y); return { value: f ? num(f.residuo) : null }; })));
 
   const rimborsoSweepPerAnno = years.map((y) => { const f = fidiDi(y); return f ? num(f.rimborso_sweep) : 0; });
@@ -312,8 +312,11 @@ export function regoleVociMinori(assumptions: AssumptionsMap, years: number[]): 
       ? "personale"
       : v.code ? indexing[v.code] ?? null : null;
     const crescita = v.growthField ? num(riga?.[v.growthField]) : 0;
+    const haImportoManuale = years.some((year) => assumptions[year]?.sp_overrides?.[v.baseField] != null);
     out[v.baseField] = driver
       ? `segue ${REGOLA_DRIVER[driver]}`
+      : haImportoManuale
+        ? "importo manuale"
       : crescita !== 0
         ? `variazione ${crescita > 0 ? "+" : ""}${formatNumber(crescita, 1)}%`
         : "costante";

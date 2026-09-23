@@ -94,6 +94,7 @@ import {
   AccordionTrigger,
 } from "@/components/ui/accordion";
 import { AssumptionsGrid } from "@/components/budget/AssumptionsGrid";
+import { PercentInput } from "@/components/budget/PercentInput";
 import {
   ADVANCED_GROUPS,
   ESSENTIAL_ROWS,
@@ -231,8 +232,8 @@ export default function BudgetPage() {
     setEditingScenario(null);
     setActiveTab("list");
     if (selectedCompanyId) invalidateScenarios(selectedCompanyId);
-    toast.success("Vai agli Indici per verificare il risultato", {
-      action: { label: "Indici", onClick: () => router.push("/analysis") },
+    toast.success("Apri il CE Previsionale per verificare il risultato", {
+      action: { label: "CE Previsionale", onClick: () => router.push("/forecast/income") },
     });
   };
 
@@ -762,9 +763,13 @@ function StartupSetup({
                   <td className="px-3 py-2 font-medium text-foreground border-r border-border">Margine EBITDA (%)</td>
                   {years.map((year) => (
                     <td key={year} className="px-2 py-1 border-r border-border">
-                      <input type="number" step="0.5" className={cellCls} onPaste={incollaNumeroItaliano}
+                      <PercentInput
                         value={getVal(year, "margine")}
-                        onChange={(e) => setVal(year, "margine", parseFloat(e.target.value) || 0)} />
+                        onRawChange={(raw) => setVal(year, "margine", raw === "" ? 0 : parseFloat(raw.replace(",", ".")))}
+                        allowNegative
+                        ariaLabel={`Margine EBITDA ${year}`}
+                        className={cellCls}
+                      />
                     </td>
                   ))}
                 </tr>
@@ -1511,15 +1516,12 @@ function AutoGeneratorCard({
             <Label htmlFor="inflation-rate" className="text-xs font-medium whitespace-nowrap">
               Inflazione attesa:
             </Label>
-            <Input
+            <PercentInput
               id="inflation-rate"
-              type="number"
-              step="0.1"
-              min="-10"
-              max="50"
               value={inflationRate}
-              onChange={(e) => setInflationRate(parseFloat(e.target.value) || 0)}
-              className="w-24 h-8 text-xs"
+              onRawChange={(raw) => setInflationRate(raw === "" ? 0 : parseFloat(raw.replace(",", ".")))}
+              allowNegative
+              className="flex w-24 h-8 rounded-md border border-input bg-background px-3 py-2 text-xs focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
             />
             <span className="text-xs text-muted-foreground">%</span>
           </div>

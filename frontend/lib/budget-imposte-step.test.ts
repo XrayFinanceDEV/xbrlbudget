@@ -227,8 +227,8 @@ describe("manualTaxPosition — la via manuale, misurata sul motore", () => {
     expect(manualTaxPosition(asMap({ 2027: { sp16e_growth_pct: 0 } }), [2027])).toBe(true);
   });
 
-  it("sp06e_growth_pct (crediti tributari, passo Circolante) la accende allo stesso modo", () => {
-    expect(manualTaxPosition(asMap({ 2027: { sp06e_growth_pct: 3 } }), [2027])).toBe(true);
+  it("sp06e_growth_pct cambia il credito senza spegnere i pagamenti", () => {
+    expect(manualTaxPosition(asMap({ 2027: { sp06e_growth_pct: -100 } }), [2027])).toBe(false);
   });
 
   it("sp17e_growth_pct DA SOLO non accende nulla: nel motore compare una volta, dentro il ramo manuale", () => {
@@ -272,9 +272,8 @@ describe("spTributariRows — sulla via automatica il controllo inerte sparisce"
     expect(SP17E_NOTA_AUTOMATICA).not.toContain("qui sotto");
   });
 
-  it("cita l'etichetta del passo Circolante com'e' a schermo li', senza «%»", () => {
-    expect(SP17E_NOTA_AUTOMATICA).toContain("«Crediti tributari»");
-    expect(SP17E_NOTA_AUTOMATICA).not.toContain("Crediti tributari %");
+  it("non suggerisce più che la modifica dei crediti tributari attivi la via manuale", () => {
+    expect(SP17E_NOTA_AUTOMATICA).not.toContain("Crediti tributari");
   });
 
   // ── fix1 R2: la visibilita' di sp17e_growth_pct e' per ANNO, con la stessa
@@ -311,7 +310,7 @@ describe("manualTaxYears — il complemento per anno di manualTaxPosition", () =
 
   it("tutti gli anni manuali => lista intera", () => {
     const assumptions = asMap({ 2027: { sp16e_growth_pct: 0 }, 2028: { sp06e_growth_pct: 3 } });
-    expect(manualTaxYears(assumptions, [2027, 2028])).toEqual([2027, 2028]);
+    expect(manualTaxYears(assumptions, [2027, 2028])).toEqual([2027]);
   });
 });
 

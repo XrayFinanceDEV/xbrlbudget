@@ -27,12 +27,13 @@ describe("FinalReportModel v1 runtime contract", () => {
   const inflazioneServizi = { field: "fixed_services_growth_auto", label: "Servizi fissi: seguono l'inflazione", values: [false, false, false], provenance: "legacy_unknown", active: true, ...nulls };
   const regolaFidi = { field: "bank_lines_rule", label: "Fidi: regola nel piano", values: ["costante", null, null], provenance: "legacy_unknown", active: true, ...nulls };
 
-  it("accepts the assumptions the backend really emits: inflation switches and the credit-line rule", () => {
-    expect(isFinalReportModel(conIpotesi([inflazioneMaterie, inflazioneServizi], [regolaFidi]))).toBe(true);
+  it("accepts the assumptions the backend emits: inflation switches and existing bank lines", () => {
+    const importoFidi = { ...regolaFidi, field: "bank_lines_amount", label: "Fidi, Anticipi Ft e Scoperti CC", values: ["400000", null, null] };
+    expect(isFinalReportModel(conIpotesi([inflazioneMaterie, inflazioneServizi], [importoFidi]))).toBe(true);
   });
 
-  it("keeps text confined to the credit-line rule, as Python does", () => {
-    // Una stringa su un campo monetario resta un errore: l'eccezione vale per UN campo.
+  it("rejects the retired credit-line rule and text in monetary fields", () => {
+    expect(isFinalReportModel(conIpotesi([], [regolaFidi]))).toBe(false);
     const importoTesto = { ...regolaFidi, field: "bank_lines_amount", values: ["costante", null, null] };
     expect(isFinalReportModel(conIpotesi([], [importoTesto]))).toBe(false);
     // E un sì/no resta vietato fuori dai campi booleani dichiarati.

@@ -11,8 +11,6 @@ import {
   FileSpreadsheet,
   TrendingUp,
   BarChart3,
-  ClipboardList,
-  PieChart,
   Wallet,
   FileText,
   ChevronDown,
@@ -32,11 +30,9 @@ const MAIN_TABS = [
 const FORECAST_TABS = [
   { href: "/forecast/income", label: "CE Previsionale", icon: TrendingUp },
   { href: "/forecast/balance", label: "SP Previsionale", icon: BarChart3 },
-  { href: "/forecast/reclassified", label: "Riclassificato", icon: ClipboardList },
 ];
 
 const ANALYSIS_TABS = [
-  { href: "/analysis", label: "Indici", icon: PieChart, match: (path: string) => path.startsWith("/analysis") },
   { href: "/cashflow", label: "Rendiconto", icon: Wallet, match: (path: string) => path.startsWith("/cashflow") },
   { href: "/report", label: "Report", icon: FileText, match: (path: string) => path.startsWith("/report") },
 ];

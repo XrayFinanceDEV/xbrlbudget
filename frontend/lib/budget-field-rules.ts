@@ -57,6 +57,8 @@ const RULES = {
   // `false` = il valore accanto e' scritto dall'utente.
   fixed_materials_growth_auto: bool,
   fixed_services_growth_auto: bool,
+  variable_materials_growth_auto: bool,
+  variable_services_growth_auto: bool,
   personnel_growth_pct: pct(),
   rent_growth_pct: pct(),
   other_costs_growth_pct: pct(),

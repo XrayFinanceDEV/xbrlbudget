@@ -10,6 +10,7 @@ import { fieldRule, parseFieldValue } from "@/lib/budget-field-rules";
 import type { AssumptionsMap } from "@/lib/budget-horizon";
 import { yearCellState, type YearCellOff } from "@/lib/budget-year-cell";
 import { cn } from "@/lib/utils";
+import { PercentInput } from "@/components/budget/PercentInput";
 import type { StepProps } from "./types";
 
 /**
@@ -47,6 +48,8 @@ export interface YearInputRow extends YearCellOff {
    * task), che per questi due campi non e' `nullable`.
    */
   onRawChange?: (year: number, raw: string) => void;
+  /** Valore mostrato quando la casella rappresenta una trasformazione del campo salvato. */
+  displayValue?: (year: number, assumptions: AssumptionsMap) => string;
   /** Lo zero salvato vuol dire «non dichiarato» (`tax_advances_paid`: il
    *  motore ricade sull'automatico): la casella lo mostra vuota, cosi' il
    *  segnaposto dice che cosa si applica davvero, e svuotarla riscrive 0. */
@@ -90,31 +93,48 @@ function YearCell({ row, year, assumptions, update }: {
   // spiega perche' non si scrive lì.
   const auto = row.autoYears?.includes(year) ?? false;
   const title = cell.title ?? (auto ? row.autoNote : undefined);
+  const shownValue = row.displayValue
+    ? row.displayValue(year, assumptions)
+    : valueOf(assumptions, year, row.field, row.zeroIsEmpty);
+  const className = cn(
+    "w-full rounded border border-input bg-transparent px-2 py-1 text-right text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring disabled:cursor-not-allowed disabled:border-dashed disabled:bg-muted/50 disabled:text-muted-foreground",
+    auto && "bg-blue-50 text-blue-900 dark:bg-blue-950 dark:text-blue-100"
+  );
+  const writeRaw = (raw: string) =>
+    row.onRawChange
+      ? row.onRawChange(year, raw)
+      : row.zeroIsEmpty && raw.trim() === ""
+      ? update(year, row.field, 0)
+      : update(year, row.field, parseFieldValue(row.field, raw));
   return (
     <td className="px-2 py-1.5 align-top" title={title}>
-      <input
-        type="number"
-        inputMode="decimal"
-        step={rule?.step ?? "1"}
-        min={rule?.min}
-        max={rule?.max}
-        disabled={cell.disabled}
-        title={title}
-        aria-label={`${row.label} ${year}`}
-        placeholder={row.placeholder?.(year)}
-        value={valueOf(assumptions, year, row.field, row.zeroIsEmpty)}
-        onChange={(e) =>
-          row.onRawChange
-            ? row.onRawChange(year, e.target.value)
-            : row.zeroIsEmpty && e.target.value.trim() === ""
-            ? update(year, row.field, 0)
-            : update(year, row.field, parseFieldValue(row.field, e.target.value))
-        }
-        className={cn(
-          "w-full rounded border border-input bg-transparent px-2 py-1 text-right text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring disabled:cursor-not-allowed disabled:border-dashed disabled:bg-muted/50 disabled:text-muted-foreground",
-          auto && "bg-blue-50 text-blue-900 dark:bg-blue-950 dark:text-blue-100"
-        )}
-      />
+      {rule?.kind === "pct" ? (
+        <PercentInput
+          value={shownValue}
+          onRawChange={writeRaw}
+          allowNegative={(rule.min ?? 0) < 0}
+          disabled={cell.disabled}
+          title={title}
+          ariaLabel={`${row.label} ${year}`}
+          placeholder={row.placeholder?.(year)}
+          className={className}
+        />
+      ) : (
+        <input
+          type="number"
+          inputMode="decimal"
+          step={rule?.step ?? "1"}
+          min={rule?.min}
+          max={rule?.max}
+          disabled={cell.disabled}
+          title={title}
+          aria-label={`${row.label} ${year}`}
+          placeholder={row.placeholder?.(year)}
+          value={shownValue}
+          onChange={(event) => writeRaw(event.currentTarget.value)}
+          className={className}
+        />
+      )}
     </td>
   );
 }

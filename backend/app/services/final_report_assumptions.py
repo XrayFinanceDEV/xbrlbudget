@@ -134,6 +134,8 @@ FIELD_LABELS: Mapping[str, str] = {
     "inflation_pct": "Inflazione attesa %",
     "fixed_materials_growth_auto": "Materie fissa: segue l'inflazione",
     "fixed_services_growth_auto": "Servizi fissa: segue l'inflazione",
+    "variable_materials_growth_auto": "Materie variabili: seguono i ricavi",
+    "variable_services_growth_auto": "Servizi variabili: seguono i ricavi",
     # altre voci CE
     "other_costs_growth_pct": "Crescita oneri diversi %",
     "ce_overrides": "Override CE",
@@ -176,8 +178,7 @@ FIELD_LABELS: Mapping[str, str] = {
     "cash_sweep_min_cash": "Cassa minima del cash sweep",
     "overdraft_allowed": "Scoperto di conto consentito",
     "overdraft_limit": "Tetto dello scoperto",
-    "bank_lines_amount": "Fidi e anticipi su fatture",
-    "bank_lines_rule": "Fidi: regola nel piano",
+    "bank_lines_amount": "Fidi, Anticipi Ft e Scoperti CC",
     "bank_lines_rate": "Tasso fidi e scoperto %",
     "other_lenders": "Altri finanziatori",
     "tfr_payments": "Liquidazioni TFR",

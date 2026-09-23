@@ -25,9 +25,11 @@ import type { JSX, ReactNode } from "react";
 import { useEffect, useMemo } from "react";
 import { AlertTriangle, Info } from "lucide-react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { NumericDraftInput } from "@/components/budget/PercentInput";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Label } from "@/components/ui/label";
 import { euro, numOrNull } from "@/lib/budget-format";
+import { parseFieldValue } from "@/lib/budget-field-rules";
 import { openingMasses, validatePregresso } from "@/lib/budget-pregresso-circolante";
 import {
   FORNITORI_AVVISO_RIGA, OLTRE_KEYS, OLTRE_NOTA, OLTRE_STATI, PREGRESSO_VUOTO,
@@ -235,8 +237,10 @@ export function StepPatrimonialePregresso(p: StepProps): JSX.Element {
       <div className="mt-4 space-y-4">
         <Card>
           <CardHeader>
-            <CardTitle className="text-base">Altre voci oltre 12 mesi · scadenziamento a mano</CardTitle>
-            <CardDescription>importi incassati o pagati in ciascun anno</CardDescription>
+            <CardTitle className="text-base">Altre voci pregresse · scadenziamento a mano</CardTitle>
+            <CardDescription>
+              Importi incassati o pagati per le voci oltre 12 mesi; variazione del saldo storico per i crediti tributari a breve.
+            </CardDescription>
           </CardHeader>
           <CardContent>
             <div className="overflow-x-auto">
@@ -306,6 +310,70 @@ export function StepPatrimonialePregresso(p: StepProps): JSX.Element {
                       </td>
                     </tr>
                   ))}
+                  {baseBs && (numOrNull(baseBs.sp06e_crediti_tributari_breve) ?? 0) > 0 && (
+                    <tr className="border-b border-border/50">
+                      <td className="px-2 py-1.5 align-top">
+                        <div className="font-medium text-foreground">Crediti tributari pregressi · entro 12 mesi</div>
+                        <div className="text-[11px] text-muted-foreground">
+                          Variazione % del credito storico; gli eventuali crediti da acconti restano separati.
+                        </div>
+                      </td>
+                      <td className="whitespace-nowrap px-2 py-1.5 text-right align-top text-xs tabular-nums">
+                        {euro(numOrNull(baseBs.sp06e_crediti_tributari_breve))}
+                      </td>
+                      {p.forecastYears.map((year) => {
+                        const storico = p.preview.data?.forecast_years.find((item) => item.year === year)
+                          ?.details?.imposte?.crediti_tributari_consuntivo;
+                        return (
+                          <td key={year} className="px-2 py-1.5 align-top">
+                            <div className="flex items-center justify-end gap-1">
+                              <NumericDraftInput
+                                value={p.assumptions[year]?.sp06e_growth_pct ?? 0}
+                                allowNegative
+                                ariaLabel={`Variazione crediti tributari storici ${year}`}
+                                className="w-20 rounded border border-input bg-background px-2 py-1 text-right text-xs tabular-nums focus:outline-none focus:ring-1 focus:ring-ring"
+                                onRawChange={(raw) => p.update(year, "sp06e_growth_pct", parseFieldValue("sp06e_growth_pct", raw))}
+                              />
+                              <span className="text-xs text-muted-foreground">%</span>
+                            </div>
+                            <div className="mt-1 text-right text-[11px] tabular-nums text-muted-foreground">
+                              {euro(numOrNull(storico))}
+                            </div>
+                          </td>
+                        );
+                      })}
+                      <td className="whitespace-nowrap px-2 py-1.5 text-right align-top text-xs tabular-nums">
+                        {euro(numOrNull(p.preview.data?.forecast_years.find(
+                          (item) => item.year === p.forecastYears.at(-1),
+                        )?.details?.imposte?.crediti_tributari_consuntivo))}
+                      </td>
+                    </tr>
+                  )}
+                  {baseBs && (numOrNull(baseBs.sp07e_crediti_tributari_lungo) ?? 0) > 0 && (
+                    <tr className="border-b border-border/50">
+                      <td className="px-2 py-1.5 align-top">
+                        <div className="font-medium text-foreground">Crediti tributari pregressi · oltre 12 mesi</div>
+                        <div className="text-[11px] text-muted-foreground">
+                          Oggi seguono la variazione complessiva dei crediti oltre 12 mesi; non hanno rate dedicate.
+                        </div>
+                      </td>
+                      <td className="whitespace-nowrap px-2 py-1.5 text-right align-top text-xs tabular-nums">
+                        {euro(numOrNull(baseBs.sp07e_crediti_tributari_lungo))}
+                      </td>
+                      {p.forecastYears.map((year) => (
+                        <td key={year} className="px-2 py-1.5 text-right align-top text-xs tabular-nums text-muted-foreground">
+                          {euro(numOrNull(p.preview.data?.forecast_years.find(
+                            (item) => item.year === year,
+                          )?.balance_sheet.sp07e_crediti_tributari_lungo))}
+                        </td>
+                      ))}
+                      <td className="whitespace-nowrap px-2 py-1.5 text-right align-top text-xs tabular-nums">
+                        {euro(numOrNull(p.preview.data?.forecast_years.find(
+                          (item) => item.year === p.forecastYears.at(-1),
+                        )?.balance_sheet.sp07e_crediti_tributari_lungo))}
+                      </td>
+                    </tr>
+                  )}
                   {/* I tributari rateizzati (Task 13b, decisione del
                       proprietario del 2026-09-15, §3/§9.1): saldo, rateizzato
                       e acconto restano al passo 7 (`tributariPlanOrDefault`,
@@ -354,8 +422,8 @@ export function StepPatrimonialePregresso(p: StepProps): JSX.Element {
               </table>
             </div>
             <p className="mt-2 text-xs text-muted-foreground">
-              Quello che non scadenzi resta aperto in bilancio a fine piano: è lecito, la colonna «resta» lo
-              dichiara.
+              Per le voci scadenziabili, ciò che non incassi o paghi resta aperto in bilancio.
+              Per i crediti tributari la colonna «resta» mostra il saldo storico previsto dal motore.
             </p>
             {errori.length > 0 && (
               <div className="mt-3 space-y-1 rounded-md bg-destructive/10 p-3 text-xs text-destructive">

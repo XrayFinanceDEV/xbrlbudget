@@ -7,8 +7,9 @@
 // per-kind row class are decided in lib/budget-preview-cell.ts, testable
 // without a DOM.
 import type { JSX, ReactNode } from "react";
-import { Loader2 } from "lucide-react";
+import { Info, Loader2 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
 import { describeCell, rowClass } from "@/lib/budget-preview-cell";
 import type { PreviewCell, PreviewRow } from "@/lib/budget-preview-rows";
@@ -31,9 +32,13 @@ export function PreviewPanel(props: {
   rows: PreviewRow[];
   loading: boolean;
   error: string | null;
+  baseYearLast?: boolean;
   children?: ReactNode;
 }): JSX.Element {
-  const { title, baseYear, years, rows, loading, error, children } = props;
+  const { title, baseYear, years, rows, loading, error, baseYearLast = false, children } = props;
+  const columns = baseYearLast
+    ? [...years.map((year, index) => ({ year, index })), { year: baseYear, index: -1 }]
+    : [{ year: baseYear, index: -1 }, ...years.map((year, index) => ({ year, index }))];
 
   return (
     <Card className="sticky top-4 border-border/80">
@@ -45,15 +50,15 @@ export function PreviewPanel(props: {
         {loading && <Loader2 className="h-3.5 w-3.5 animate-spin text-muted-foreground" />}
       </CardHeader>
       <CardContent>
+        <TooltipProvider>
         <div className="overflow-x-auto">
           <table className="w-full text-xs">
             <thead>
               <tr className="border-b border-border">
                 <th className="px-2 py-1 text-left font-medium text-muted-foreground"></th>
-                <th className="px-2 py-1 text-right font-medium text-muted-foreground">{baseYear}</th>
-                {years.map((y) => (
-                  <th key={y} className="px-2 py-1 text-right font-medium text-muted-foreground">
-                    {y}
+                {columns.map(({ year }) => (
+                  <th key={year} className="px-2 py-1 text-right font-medium text-muted-foreground">
+                    {year}
                   </th>
                 ))}
               </tr>
@@ -61,16 +66,30 @@ export function PreviewPanel(props: {
             <tbody>
               {rows.map((row) => (
                 <tr key={row.key} className={rowClass(row.kind)}>
-                  <td className={cn("px-2 py-1 align-top", row.kind === "sub" && "pl-4")}>{row.label}</td>
-                  <Cell cell={row.base} />
-                  {row.years.map((c, i) => (
-                    <Cell key={i} cell={c} />
+                  <td className={cn("px-2 py-1 align-top", row.kind === "sub" && "pl-4")}>
+                    <span className="inline-flex items-center gap-1">
+                      {row.label}
+                      {row.hint && (
+                        <Tooltip>
+                          <TooltipTrigger asChild>
+                            <button type="button" aria-label={`Spiegazione: ${row.label}`} className="inline-flex text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring">
+                              <Info className="h-3 w-3" aria-hidden="true" />
+                            </button>
+                          </TooltipTrigger>
+                          <TooltipContent>{row.hint}</TooltipContent>
+                        </Tooltip>
+                      )}
+                    </span>
+                  </td>
+                  {columns.map(({ year, index }) => (
+                    <Cell key={year} cell={index === -1 ? row.base : row.years[index]} />
                   ))}
                 </tr>
               ))}
             </tbody>
           </table>
         </div>
+        </TooltipProvider>
         {error && (
           <div className="mt-2 rounded-md bg-destructive/10 px-2 py-1.5 text-xs text-destructive">{error}</div>
         )}

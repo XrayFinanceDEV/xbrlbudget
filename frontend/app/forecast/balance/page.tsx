@@ -9,6 +9,7 @@ import { BALANCE_STATEMENT_ROWS } from "@/lib/ivcee-catalog";
 import type {
   BudgetScenario,
   ScenarioAnalysis,
+  ScenarioAnalysisYearData,
 } from "@/types/api";
 import {
   LineChart,
@@ -22,7 +23,7 @@ import {
   ComposedChart,
   Area,
 } from "recharts";
-import { BarChart3, AlertTriangle, Loader2, Info, Save } from "lucide-react";
+import { BarChart3, AlertTriangle, Loader2, Info, Save, RotateCcw } from "lucide-react";
 import { cn, getErrorMessage } from "@/lib/utils";
 import { forecastPageState, forecastScenariosEmpty } from "@/lib/forecast-page-status";
 import { ForecastLoadError } from "@/components/budget/ForecastLoadError";
@@ -87,12 +88,7 @@ function computePFN(bs: Record<string, number>): number {
 }
 
 // Type for year data from analysis endpoint
-type YearData = {
-  year: number;
-  type: "historical" | "forecast";
-  income_statement: Record<string, number>;
-  balance_sheet: Record<string, number>;
-};
+type YearData = ScenarioAnalysisYearData;
 
 const SP_EDITABLE_FIELDS = new Set([
   "sp01_crediti_soci", "sp02_immob_immateriali", "sp03_immob_materiali",
@@ -221,6 +217,14 @@ export default function ForecastBalancePage() {
 
   const historicalYears = analysisData?.historical_years ?? [];
   const forecastYears = analysisData?.forecast_years ?? [];
+  const activeSpOverrides = forecastYears.flatMap((yearData) =>
+    Object.keys(yearData.assumptions?.sp_overrides ?? {})
+      .map((field) => `${yearData.year}:${field}`)
+  );
+  const resetSpOverrides = () => {
+    setPendingEdits(Object.fromEntries(activeSpOverrides.map((key) => [key, null])));
+    toast.info("Ripristino preparato: premi Salva modifiche per applicarlo");
+  };
 
   return (
     <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
@@ -266,13 +270,20 @@ export default function ForecastBalancePage() {
                   Le celle di dettaglio previsionali sono modificabili; i totali e la cassa vengono ricalcolati.
                 </p>
               </div>
-              <Button
-                onClick={handleSaveOverrides}
-                disabled={saving || Object.keys(pendingEdits).length === 0}
-              >
-                {saving ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Save className="mr-2 h-4 w-4" />}
-                Salva modifiche
-              </Button>
+              <div className="flex flex-wrap items-center gap-2">
+                {activeSpOverrides.length > 0 && (
+                  <Button variant="outline" onClick={resetSpOverrides} disabled={saving}>
+                    <RotateCcw className="mr-2 h-4 w-4" /> Ripristina tutte le forzature
+                  </Button>
+                )}
+                <Button
+                  onClick={handleSaveOverrides}
+                  disabled={saving || Object.keys(pendingEdits).length === 0}
+                >
+                  {saving ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Save className="mr-2 h-4 w-4" />}
+                  Salva modifiche
+                </Button>
+              </div>
             </CardHeader>
             <CardContent>
               {/* Balance Check Warning */}
@@ -561,6 +572,7 @@ function EditableSpCell({
   year,
   field,
   label,
+  isOverridden,
   onEdit,
 }: {
   value: number;
@@ -568,6 +580,7 @@ function EditableSpCell({
   year: number;
   field: string;
   label: string;
+  isOverridden: boolean;
   onEdit: (year: number, field: string, value: number | null) => void;
 }) {
   const [editing, setEditing] = useState(false);
@@ -628,24 +641,38 @@ function EditableSpCell({
   }
 
   return (
-    <button
-      type="button"
-      onClick={startEdit}
-      aria-label={`${label} ${year}`}
-      className={cn(
-        "cursor-pointer hover:bg-primary/20 rounded px-1 -mx-1 transition-colors",
-        hasPending && "bg-yellow-100 dark:bg-yellow-900/30 border-b-2 border-yellow-500"
-      )}
-      title={
-        hasPending
+    <span className="inline-flex items-center justify-end gap-1">
+      <button
+        type="button"
+        onClick={startEdit}
+        aria-label={`${label} ${year}`}
+        className={cn(
+          "cursor-pointer hover:bg-primary/20 rounded px-1 -mx-1 transition-colors",
+          hasPending && "bg-yellow-100 dark:bg-yellow-900/30 border-b-2 border-yellow-500",
+          !hasPending && isOverridden && "border-b-2 border-primary"
+        )}
+        title={hasPending
           ? pendingValue === null
-            ? "L'override verrà rimosso — clicca \"Salva\" per ricalcolare"
-            : "Modifica in sospeso — clicca \"Salva\" per applicare"
-          : "Clicca per modificare (svuota il campo per ripristinare il calcolato)"
-      }
-    >
-      {formatCurrency(displayValue)}
-    </button>
+            ? "L'override verrà rimosso — clicca \"Salva modifiche\" per ricalcolare"
+            : "Modifica in sospeso — clicca \"Salva modifiche\" per applicare"
+          : isOverridden
+          ? "Valore modificato manualmente"
+          : "Clicca per modificare"}
+      >
+        {formatCurrency(displayValue)}
+      </button>
+      {pendingValue !== null && (isOverridden || hasPending) && (
+        <button
+          type="button"
+          onClick={() => onEdit(year, field, null)}
+          className="rounded p-1 text-muted-foreground hover:bg-muted hover:text-foreground"
+          title="Ripristina il valore calcolato dal budget; poi salva le modifiche"
+          aria-label={`Ripristina ${label} ${year} al valore calcolato`}
+        >
+          <RotateCcw className="h-3.5 w-3.5" />
+        </button>
+      )}
+    </span>
   );
 }
 
@@ -767,6 +794,7 @@ function BalanceSheetTable({
                       year={year}
                       field={row.field!}
                       label={row.label.trim()}
+                      isOverridden={forecastYears[i].assumptions?.sp_overrides?.[row.field!] != null}
                       onEdit={onEdit}
                     />
                   ) : value === null ? "" : (row.isTotal && !value ? "" : formatCurrency(value))}

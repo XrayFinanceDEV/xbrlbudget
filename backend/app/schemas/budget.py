@@ -344,6 +344,8 @@ class BudgetAssumptionsBase(BaseModel):
     inflation_pct: Optional[Decimal] = Field(default=None, ge=-50, le=100)
     fixed_materials_growth_auto: bool = False
     fixed_services_growth_auto: bool = False
+    variable_materials_growth_auto: Optional[bool] = None
+    variable_services_growth_auto: Optional[bool] = None
     bank_lines_amount: Optional[Decimal] = Field(default=None, ge=0)
     bank_lines_rule: Optional[Literal["costante", "ricavi"]] = None
     bank_lines_rate: Optional[Decimal] = Field(default=None, ge=0, le=100)
@@ -487,6 +489,8 @@ class BudgetAssumptionsUpdate(BaseModel):
     inflation_pct: Optional[Decimal] = None
     fixed_materials_growth_auto: Optional[bool] = None
     fixed_services_growth_auto: Optional[bool] = None
+    variable_materials_growth_auto: Optional[bool] = None
+    variable_services_growth_auto: Optional[bool] = None
     bank_lines_amount: Optional[Decimal] = None
     bank_lines_rule: Optional[Literal["costante", "ricavi"]] = None
     bank_lines_rate: Optional[Decimal] = None

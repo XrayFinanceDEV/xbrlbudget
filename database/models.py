@@ -667,6 +667,8 @@ class BudgetAssumptions(Base):
     inflation_pct = Column(Numeric(10, 6), nullable=True)  # inflazione attesa del passo 1; NULL = scenario precedente
     fixed_materials_growth_auto = Column(Boolean, default=False, nullable=False)  # la parte fissa segue l'inflazione
     fixed_services_growth_auto = Column(Boolean, default=False, nullable=False)
+    variable_materials_growth_auto = Column(Boolean, nullable=True)  # NULL = scenario precedente a questa scelta
+    variable_services_growth_auto = Column(Boolean, nullable=True)
     bank_lines_amount = Column(Numeric(15, 2), nullable=True)  # fidi e anticipi su fatture (prima riga); NULL = regime di prima
     bank_lines_rule = Column(String(16), nullable=True)        # 'costante' | 'ricavi'
     bank_lines_rate = Column(Numeric(10, 6), nullable=True)    # tasso % su fidi e scoperto

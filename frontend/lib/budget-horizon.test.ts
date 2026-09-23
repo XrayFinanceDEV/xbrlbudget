@@ -266,13 +266,35 @@ describe("hydrateAssumptions", () => {
     "sp16f_growth_pct", "sp16g_growth_pct", "sp17d_growth_pct", "sp17e_growth_pct",
     "sp17f_growth_pct", "sp17g_growth_pct", "sp18_growth_pct", "sp_indexing", "sp_overrides",
     "tangible_investments", "tax_advances_paid", "tax_rate", "tax_temporary_differences",
-    "tfr_accrual_suspended", "tfr_payments", "variable_materials_growth_pct", "variable_services_growth_pct",
+    "tfr_accrual_suspended", "tfr_payments", "variable_materials_growth_auto", "variable_materials_growth_pct",
+    "variable_services_growth_auto", "variable_services_growth_pct",
   ];
 
-  it("scrive esattamente le 99 chiavi congelate, ordinate", () => {
-    expect(CHIAVI_ATTESE.length).toBe(99);
+  it("scrive esattamente le 101 chiavi congelate, ordinate", () => {
+    expect(CHIAVI_ATTESE.length).toBe(101);
     const out = hydrateAssumptions([fixtureRow({ forecast_year: 2026 })], 1);
     expect(Object.keys(out[2026]).sort()).toEqual([...CHIAVI_ATTESE].sort());
+  });
+
+  it("riallinea gli zeri legacy ai ricavi ma conserva lo zero scelto a mano", () => {
+    const legacy = hydrateAssumptions([fixtureRow({
+      forecast_year: 2027, revenue_growth_pct: 5,
+      variable_materials_growth_pct: 0, variable_services_growth_pct: 0,
+      variable_materials_growth_auto: null, variable_services_growth_auto: null,
+    })], 1)[2027];
+    expect(legacy).toMatchObject({
+      variable_materials_growth_pct: 5, variable_services_growth_pct: 5,
+      variable_materials_growth_auto: true, variable_services_growth_auto: true,
+    });
+    const manual = hydrateAssumptions([fixtureRow({
+      forecast_year: 2027, revenue_growth_pct: 5,
+      variable_services_growth_pct: 0, variable_services_growth_auto: false,
+    })], 1)[2027];
+    expect(manual.variable_services_growth_pct).toBe(0);
+    expect(withRevenueGrowth({ 2027: manual }, 2027, 6)[2027]).toMatchObject({
+      variable_materials_growth_pct: 6, variable_services_growth_pct: 1,
+      variable_materials_growth_auto: true, variable_services_growth_auto: false,
+    });
   });
 
   it("un override sopravvive al salvataggio: round-trip di ce09_override e sp_overrides", () => {
@@ -390,9 +412,9 @@ describe("hydrateAssumptions", () => {
     expect(out.tangible_investments).toBe(150000);
     expect(out.dpo_days).toBe(128);
     expect(out.tax_rate).toBe(27.9);
-    // `null` resta assenza, non diventa uno zero; un testo che numero non è resta testo.
+    // `null` resta assenza; la vecchia regola senza fidi non è più un'ipotesi attiva.
     expect(out.overdraft_limit).toBeNull();
-    expect(out.bank_lines_rule).toBe("costante");
+    expect(out.bank_lines_rule).toBeNull();
   });
 
   it("coerce finanziamenti, altri finanziatori e fidi tornati come STRINGA (AMBIENTA, 2026-09-17)", () => {
@@ -493,7 +515,7 @@ describe("assumptionRowsForSave", () => {
     const attese = Object.keys(map[2026]).sort();
     // Ancorato all'elenco congelato di `hydrateAssumptions`: se il numero si
     // muove, il difetto e' li' e questo test non si aggiorna per zittirlo.
-    expect(attese.length).toBe(99);
+    expect(attese.length).toBe(101);
     const rows = assumptionRowsForSave(map, [2026, 2027], 7);
     expect(rows).toHaveLength(2);
     for (const row of rows) expect(Object.keys(row).sort()).toEqual(attese);
@@ -573,6 +595,10 @@ describe("withRevenueGrowth (Task 10)", () => {
     expect(out[2027]).toMatchObject({ revenue_growth_pct: 4, variable_materials_growth_pct: 4, variable_services_growth_pct: 4 });
     expect(out[2028].revenue_growth_pct).toBe(1);
     expect(withRevenueGrowth(out, 2027, null)[2027]).toMatchObject({ revenue_growth_pct: null, variable_materials_growth_pct: 0, variable_services_growth_pct: 0 });
+    const manual = asMap({ 2027: { revenue_growth_pct: 5, variable_materials_growth_pct: 3, variable_services_growth_pct: 5 } });
+    expect(withRevenueGrowth(manual, 2027, 6)[2027]).toMatchObject({
+      revenue_growth_pct: 6, variable_materials_growth_pct: 4, variable_services_growth_pct: 6,
+    });
   });
 });
 

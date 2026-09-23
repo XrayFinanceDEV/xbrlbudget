@@ -34,11 +34,12 @@ export const STEP_FIELDS: Record<WizardStepKey, readonly string[]> = {
     "variable_materials_growth_pct", "variable_services_growth_pct",
     "fixed_materials_growth_pct", "fixed_services_growth_pct",
     "fixed_materials_growth_auto", "fixed_services_growth_auto",
+    "variable_materials_growth_auto", "variable_services_growth_auto",
     "personnel_growth_pct", "rent_growth_pct", "other_costs_growth_pct",
   ],
   circolante: ["dso_days", "dio_days", "dpo_days", "receivables_long_growth_pct"],
   "patrimoniale-pregresso": [
-    "bank_lines_amount", "bank_lines_rule", "bank_lines_rate", "financing_loans",
+    "bank_lines_amount", "bank_lines_rate", "financing_loans",
     "existing_debt_repayment_years", "altri_finanz_repayment_years",
   ],
   "patrimoniale-piano": [

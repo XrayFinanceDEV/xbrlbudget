@@ -480,7 +480,7 @@ export function breveRows(
     ? pianoTributari.saldo
     : cents(num(bs.sp16e_debiti_tributari_breve) + num(bs.sp17e_debiti_tributari_lungo));
   return [
-    { label: "Crediti verso clienti", importo: b("crediti_commerciali"), dir: "in", small: `incassati nel ${y1}` },
+    { label: "Crediti commerciali e altri a breve", importo: b("crediti_commerciali"), dir: "in", small: `incassati nel ${y1}` },
     {
       label: "Debiti verso fornitori", importo: b("debiti_fornitori"), dir: "out", small: `pagati nel ${y1}`,
       ...(fornitoriAvviso ? { alert: fornitoriAvviso } : {}),

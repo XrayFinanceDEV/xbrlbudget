@@ -22,7 +22,6 @@ import { Plus, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { baseBankDebt } from "@/lib/base-bank-debt";
 import { euro, num } from "@/lib/budget-format";
 // Al centesimo: `euro` arrotonda all'euro e scriverebbe «0 €» proprio sullo scarto da chiudere.
@@ -32,7 +31,6 @@ import {
   contrattiPregressi,
   contrattoRows,
   controlliBanche,
-  ETICHETTE_REGOLA_FIDI,
   nuovoContratto,
   prestitiNuovi,
   quotaMutui,
@@ -83,7 +81,6 @@ export function PregressoBancheCard(p: StepProps): JSX.Element {
   const riga = p.assumptions[firstYear];
 
   const bankLinesAmount = riga?.bank_lines_amount;
-  const bankLinesRule = riga?.bank_lines_rule;
   // La riga del primo anno arriva SOLO dopo l'idratazione delle ipotesi
   // salvate: prima che esista, `riga` e' `undefined`, non "senza fidi". Un
   // booleano scalare nelle dipendenze, mai l'oggetto `riga` intero (regola
@@ -92,8 +89,8 @@ export function PregressoBancheCard(p: StepProps): JSX.Element {
 
   // Scrittura una tantum alla prima visita di questo scenario (stessa
   // convenzione del piano base, Task 13): se lo scenario non ha ancora un
-  // valore per i fidi, si scrivono `bank_lines_amount = 0` e la regola
-  // «costante» UNA VOLTA sola per scenario — mai a ogni render. Il ref si
+  // valore per i fidi, si scrive `bank_lines_amount = 0` UNA VOLTA sola
+  // per scenario — mai a ogni render. Il ref si
   // marca SOLO quando la riga esiste davvero: marcarlo a riga assente (come
   // faceva la prima versione, rilievo del coordinatore su 5dceddb)
   // scriverebbe 0/"costante" su una mappa vuota PRIMA che un fido gia'
@@ -105,10 +102,9 @@ export function PregressoBancheCard(p: StepProps): JSX.Element {
     inizializzatoPer.current = p.scenarioId;
     if (serveInizializzareFidi(riga)) {
       p.update(firstYear, "bank_lines_amount", 0);
-      p.update(firstYear, "bank_lines_rule", "costante");
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [p.scenarioId, firstYear, rigaPronta, bankLinesAmount, bankLinesRule]);
+  }, [p.scenarioId, firstYear, rigaPronta, bankLinesAmount]);
 
   if (!baseBs || firstYear === undefined) {
     return (
@@ -129,7 +125,6 @@ export function PregressoBancheCard(p: StepProps): JSX.Element {
   const debito = baseBankDebt(baseBs as unknown as Record<string, unknown>);
   const sp16a = num(baseBs.sp16a_debiti_banche_breve);
   const fidi = bankLinesAmount ?? 0;
-  const regola = bankLinesRule ?? "costante";
   const tasso = riga?.bank_lines_rate ?? null;
   const quota = quotaMutui(baseBs, fidi);
 
@@ -166,21 +161,10 @@ export function PregressoBancheCard(p: StepProps): JSX.Element {
       <CardContent className="space-y-4">
         <div>
           <p className="text-sm font-medium text-foreground">1 · Dividi i debiti a breve</p>
-          <div className="mt-2 grid grid-cols-1 gap-2 sm:grid-cols-3">
-            <div>
-              <label className="text-xs text-muted-foreground" htmlFor="bank-lines-rule">Regola</label>
-              <Select value={regola} onValueChange={(v) => p.update(firstYear, "bank_lines_rule", v)}>
-                <SelectTrigger id="bank-lines-rule" className="h-8"><SelectValue /></SelectTrigger>
-                <SelectContent>
-                  {Object.entries(ETICHETTE_REGOLA_FIDI).map(([valore, etichetta]) => (
-                    <SelectItem key={valore} value={valore}>{etichetta}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
+          <div className="mt-2 grid grid-cols-1 gap-2 sm:grid-cols-2">
             <div>
               <label className="text-xs text-muted-foreground" htmlFor="bank-lines-amount">
-                Fidi e anticipi su fatture €
+                Fidi, Anticipi Ft e Scoperti CC €
               </label>
               <Input
                 id="bank-lines-amount"
@@ -210,6 +194,11 @@ export function PregressoBancheCard(p: StepProps): JSX.Element {
             <span className="text-muted-foreground">Quota dei mutui entro 12 mesi</span>
             <span className={cn("font-medium", quota < 0 && "text-red-600 dark:text-red-400")}>{euro(quota)}</span>
           </div>
+          <p className="mt-2 text-xs text-muted-foreground">
+            Indica qui solo fidi, anticipi e scoperti di conto corrente già presenti nel bilancio {p.baseYear}. Il saldo
+            resta costante nel piano, salvo eventuali rimborsi con la cassa disponibile. I nuovi
+            finanziamenti si inseriscono nel Patrimoniale piano.
+          </p>
           <p className="mt-2 text-xs text-muted-foreground">
             Se la cassa va in negativo il piano riutilizza i fidi; oltre questo importo compare un avviso.
           </p>

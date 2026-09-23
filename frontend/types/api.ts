@@ -541,6 +541,8 @@ export interface BudgetAssumptions {
   inflation_pct: number | null;
   fixed_materials_growth_auto: boolean;
   fixed_services_growth_auto: boolean;
+  variable_materials_growth_auto?: boolean | null;
+  variable_services_growth_auto?: boolean | null;
   bank_lines_amount: number | null;
   bank_lines_rule: "costante" | "ricavi" | null;
   bank_lines_rate: number | null;
@@ -647,6 +649,8 @@ export interface BudgetAssumptionsCreate {
   inflation_pct?: number | null;
   fixed_materials_growth_auto?: boolean;
   fixed_services_growth_auto?: boolean;
+  variable_materials_growth_auto?: boolean | null;
+  variable_services_growth_auto?: boolean | null;
   bank_lines_amount?: number | null;
   bank_lines_rule?: "costante" | "ricavi" | null;
   bank_lines_rate?: number | null;

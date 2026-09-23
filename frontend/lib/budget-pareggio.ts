@@ -1,7 +1,7 @@
 /**
- * Il punto di pareggio sul MOL (spec 2026-09-15 §4.3, decisione 4): lettura pura di
- * `details.pareggio`, che il motore dichiara anno per anno. Qui non si calcola nulla di
- * finanziario: solo la geometria del mini grafico e le frasi della formula.
+ * Il punto di pareggio sul MOL: gli anni previsti leggono `details.pareggio`
+ * del motore. L'anno base usa il CE storico e le quote scelte dagli slider,
+ * con la stessa formula dichiarata dal motore per gli anni previsti.
  *
  * `details` e' nidificato in `Decimal` nel motore (regole comuni del lotto «rilievi»):
  * l'anteprima converte in float solo il primo livello di `details`, quindi ogni chiave di
@@ -9,7 +9,7 @@
  * l'endpoint la serializza. Si legge sempre con `numOrNull` (mai con un cast, mai
  * assumendo che sia gia' un numero): la stessa regola di `lib/budget-costi-step.ts`.
  */
-import type { ForecastPreviewYear, PareggioDetail } from "@/types/api";
+import type { ForecastPreviewYear, IncomeStatement, PareggioDetail } from "@/types/api";
 import { num, numOrNull } from "@/lib/budget-format";
 import type { PreviewRow } from "@/lib/budget-preview-rows";
 
@@ -21,6 +21,42 @@ const eur0 = (v: number) => new Intl.NumberFormat("it-IT", { maximumFractionDigi
 /** Percentuale a un decimale, it-IT — `v` e' una percentuale assoluta (65 = 65%). */
 const pct1 = (v: number) =>
   new Intl.NumberFormat("it-IT", { style: "percent", minimumFractionDigits: 1, maximumFractionDigits: 1 }).format(v / 100);
+const round2 = (v: number) => Math.sign(v) * Math.round((Math.abs(v) + Number.EPSILON) * 100) / 100;
+
+type PareggioYear = Pick<ForecastPreviewYear, "year" | "income_statement"> & {
+  details?: { pareggio?: PareggioDetail | null };
+};
+
+/** Ripartizione ipotetica del bilancio storico secondo gli slider del piano. */
+export function pareggioAnnoBase(
+  year: number, income: IncomeStatement,
+  fixedShare: { materials: number; services: number },
+): PareggioYear {
+  const inc = income as unknown as Record<string, unknown>;
+  const g = (key: string) => num(inc[key]);
+  const revenue = g("ce01_ricavi_vendite");
+  const materialsFixed = g("ce05_materie_prime") * fixedShare.materials / 100;
+  const servicesFixed = g("ce06_servizi") * fixedShare.services / 100;
+  const variable = g("ce05_materie_prime") + g("ce06_servizi") - materialsFixed - servicesFixed;
+  const fixed = materialsFixed + servicesFixed + g("ce07_godimento_beni")
+    + g("ce08_costi_personale") + g("ce12_oneri_diversi");
+  const operatingFixed = fixed + g("ce10_var_rimanenze_mat_prime") + g("ce11_accantonamenti")
+    + g("ce11b_altri_accantonamenti") - g("ce04_altri_ricavi")
+    - g("ce02_variazioni_rimanenze") - g("ce03_lavori_interni")
+    - g("ce03a_incrementi_immobilizzazioni");
+  const margin = revenue > 0 ? (revenue - variable) / revenue : null;
+  const bep = margin !== null && margin > 0 ? operatingFixed / margin : null;
+  const pareggio: PareggioDetail = {
+    costi_variabili: round2(variable),
+    costi_fissi: round2(fixed),
+    costi_fissi_operativi: round2(operatingFixed),
+    margine_contribuzione_pct: margin === null || margin <= 0 ? null : round2(margin * 100),
+    fatturato_pareggio: bep === null ? null : round2(bep),
+    margine_sicurezza: bep === null ? null : round2(revenue - bep),
+    margine_sicurezza_pct: bep === null ? null : round2((revenue - bep) / revenue * 100),
+  };
+  return { year, income_statement: { ce01_ricavi_vendite: revenue }, details: { pareggio } };
+}
 
 export interface PareggioBarra {
   year: number;
@@ -59,7 +95,7 @@ function leggiPareggio(p: PareggioDetail | undefined | null): PareggioNumeri | n
   };
 }
 
-const ricaviOf = (y: ForecastPreviewYear): number => num((y.income_statement as Record<string, unknown>).ce01_ricavi_vendite);
+const ricaviOf = (y: PareggioYear): number => num((y.income_statement as Record<string, unknown>).ce01_ricavi_vendite);
 
 /**
  * Una riga per anno: la traccia dei ricavi, la tacca del pareggio, il segmento del
@@ -68,7 +104,7 @@ const ricaviOf = (y: ForecastPreviewYear): number => num((y.income_statement as 
  * Un anno `nd` (parte fissa/variabile non definita, override di CE Prev.) non ha una
  * tacca da disegnare: resta a 0, e la tabella sotto lo dichiara con la sua nota.
  */
-export function pareggioBarre(years: ForecastPreviewYear[]): PareggioBarra[] {
+export function pareggioBarre(years: PareggioYear[]): PareggioBarra[] {
   const ricavi = years.map(ricaviOf);
   const letti = years.map((y) => leggiPareggio(y.details?.pareggio));
   const bep = letti.map((p) => p?.fatturatoPareggio ?? null);
@@ -94,11 +130,10 @@ export function pareggioBarre(years: ForecastPreviewYear[]): PareggioBarra[] {
   });
 }
 
-/** La formula dell'anno 1, con i numeri veri sostituiti dentro il testo — sempre
- *  quell'anno: e' il primo anno di piano che rappresenta il modo in cui si calcola,
- *  non un anno scelto dall'utente. `null` quando l'anno non ha un pareggio definito. */
+/** La formula dell'anno mostrato per primo: anno base se disponibile, altrimenti
+ *  primo anno di piano. `null` quando il pareggio non e' definito. */
 export function pareggioFormula(
-  first: ForecastPreviewYear | undefined,
+  first: PareggioYear | undefined,
 ): { anno: number; righe: { testo: string; calcolo: string }[] } | null {
   const p = first ? leggiPareggio(first.details?.pareggio) : null;
   if (!first || !p || p.fatturatoPareggio === null || p.costiVariabili === null
@@ -125,7 +160,7 @@ export function pareggioFormula(
         calcolo: `${eur0(p.costiFissi)} − ${eur0(p.costiFissi - p.costiFissiOperativi)} = ${eur0(p.costiFissiOperativi)}`,
       },
       {
-        testo: "Fatturato di pareggio sul MOL = costi fissi / margine %",
+        testo: "Fatturato di BEP = costi fissi operativi / margine %",
         calcolo: `${eur0(p.costiFissiOperativi)} / ${pct1(mdc)} = ${eur0(bep)}`,
       },
       {
@@ -139,23 +174,31 @@ export function pareggioFormula(
 /** La tabella sotto il mini grafico: ricavi, margine di contribuzione %, pareggio sul
  *  MOL, margine di sicurezza in % e in €. Un anno `nd` porta la nota su ogni cella,
  *  invece di una colonna di trattini senza spiegazione. */
-export function rowsPareggio(years: ForecastPreviewYear[]): PreviewRow[] {
+export function rowsPareggio(years: PareggioYear[], base?: PareggioYear | null): PreviewRow[] {
   const letti = years.map((y) => leggiPareggio(y.details?.pareggio));
+  const basePareggio = leggiPareggio(base?.details?.pareggio);
   const cell = (f: (p: PareggioNumeri) => number | null, pct = false) =>
     letti.map((p) => {
       const nd = !p || p.fatturatoPareggio === null;
       if (nd) return { value: null, note: ND_NOTE };
       return pct ? { value: null, pct: f(p!) } : { value: f(p!) };
     });
-  const none = { value: null };
+  const baseCell = (f: (p: PareggioNumeri) => number | null, pct = false) => {
+    if (!basePareggio || basePareggio.fatturatoPareggio === null) return { value: null };
+    return pct ? { value: null, pct: f(basePareggio) } : { value: f(basePareggio) };
+  };
   return [
     {
-      key: "ricavi", label: "Ricavi del piano", kind: "sub", base: none,
+      key: "ricavi", label: "Ricavi delle vendite", kind: "sub", base: { value: base ? ricaviOf(base) : null },
       years: years.map((y) => ({ value: ricaviOf(y) })),
     },
-    { key: "mdc", label: "Margine di contribuzione", kind: "sub", base: none, years: cell((p) => p.margineContribuzionePct, true) },
-    { key: "pareggio", label: "Pareggio sul MOL", kind: "kpi", base: none, years: cell((p) => p.fatturatoPareggio) },
-    { key: "margine-pct", label: "margine di sicurezza %", kind: "sub", base: none, years: cell((p) => p.margineSicurezzaPct, true) },
-    { key: "margine", label: "margine di sicurezza €", kind: "sub", base: none, years: cell((p) => p.margineSicurezza) },
+    { key: "mdc", label: "Margine di contribuzione", kind: "sub", base: baseCell((p) => p.margineContribuzionePct, true), years: cell((p) => p.margineContribuzionePct, true) },
+    {
+      key: "pareggio", label: "Fatturato di BEP",
+      hint: "Fatturato minimo per coprire i costi arrivando a MOL = 0",
+      kind: "kpi", base: baseCell((p) => p.fatturatoPareggio), years: cell((p) => p.fatturatoPareggio),
+    },
+    { key: "margine-pct", label: "margine di sicurezza %", kind: "sub", base: baseCell((p) => p.margineSicurezzaPct, true), years: cell((p) => p.margineSicurezzaPct, true) },
+    { key: "margine", label: "margine di sicurezza €", kind: "sub", base: baseCell((p) => p.margineSicurezza), years: cell((p) => p.margineSicurezza) },
   ];
 }

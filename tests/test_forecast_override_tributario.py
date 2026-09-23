@@ -115,6 +115,25 @@ def _genera(db, user, overrides=None, extra_per_anno=None, manual_tax=False,
     return {y: (bs, ce, det[y]) for y, bs, ce in read_forecast_maps(db, sc.id)}
 
 
+def test_credito_tributario_azzerato_non_spegne_i_pagamenti(monkeypatch):
+    """AMBIENTA: -100% sul credito storico e 0% dopo non e' una via manuale dei debiti."""
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    engine, sessions = memory_sessions()
+    try:
+        with sessions() as db:
+            out = _genera(db, "credito-senza-manuale", extra_per_anno={
+                2027: {"sp06e_growth_pct": -100},
+                2028: {"sp06e_growth_pct": 0},
+            })
+            for year in (2027, 2028):
+                imposte = out[year][2]["imposte"]
+                assert imposte["mode"] == "saldo_acconto"
+                assert imposte["crediti_tributari_consuntivo"] == 0
+            assert out[2027][2]["imposte"]["saldo_paid"] > 0
+    finally:
+        engine.dispose()
+
+
 def _figlia(righe, y, campo):
     return righe[y][0].get(campo, D("0"))
 
@@ -135,6 +154,28 @@ def test_gemello_piano_credito(monkeypatch):
         for y, atteso in PIANO_CREDITO.items():
             assert _figlia(righe, y, "sp06e_crediti_tributari_breve") == atteso["sp06e"], y
             assert _figlia(righe, y, "sp09_disponibilita_liquide") == atteso["cassa"], y
+    finally:
+        engine.dispose()
+
+
+def test_override_imposte_anticipate_sp_modifica_solo_la_cassa(monkeypatch):
+    """Una forzatura SP non crea automaticamente una variazione delle riserve."""
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    engine, sessions = memory_sessions()
+    try:
+        with sessions() as db:
+            piano = _genera(db, "anticipate-piano")
+            forzato = _genera(db, "anticipate-forzate", overrides={2027: {
+                "sp06f_imposte_anticipate_breve": 10000,
+                "sp07f_imposte_anticipate_lungo": 5000,
+            }})
+        sp_piano, ce_piano, _ = piano[2027]
+        sp_forzato, ce_forzato, _ = forzato[2027]
+        assert sp_forzato["sp06f_imposte_anticipate_breve"] - sp_piano["sp06f_imposte_anticipate_breve"] == D("10000")
+        assert sp_forzato["sp07f_imposte_anticipate_lungo"] - sp_piano["sp07f_imposte_anticipate_lungo"] == D("5000")
+        assert sp_forzato["sp12e_altre_riserve"] == sp_piano["sp12e_altre_riserve"]
+        assert sp_forzato["sp09_disponibilita_liquide"] == sp_piano["sp09_disponibilita_liquide"] - D("15000")
+        assert ce_forzato == ce_piano
     finally:
         engine.dispose()
 

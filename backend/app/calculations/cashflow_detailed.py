@@ -183,7 +183,12 @@ class DetailedCashFlowCalculator:
         delta_receivables = (
             (D(bs_previous.sp06_crediti_breve) - D(bs_previous.sp06e_crediti_tributari_breve))
             - (D(bs_current.sp06_crediti_breve) - D(bs_current.sp06e_crediti_tributari_breve))
-        )
+        ) - write_downs
+        # Lo SP espone i crediti al netto della svalutazione. Il costo ce09d è
+        # già stato aggiunto all'utile fra le rettifiche non monetarie: per
+        # ricostruire la variazione dei crediti lordi va sottratto qui, altrimenti
+        # il rendiconto inventa un flusso operativo pari alla svalutazione e lo
+        # nasconde nel finanziamento calcolato come residuo.
 
         # Debiti e crediti tributari, riga propria (commercialista, 2026-09-18): la
         # posizione tributaria netta, entro e oltre. Esce da crediti, debiti e altre

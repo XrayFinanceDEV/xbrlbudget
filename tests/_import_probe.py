@@ -219,6 +219,7 @@ def probe(
         rec["masked"] = _q.get("masked", vr.get("masked"))
         rec["plug_residual"] = _str_dec(_q.get("plug_residual", vr.get("plug_residual")))
         rec["netted_contra"] = _str_dec(vr.get("netted_contra"))
+        rec["coge_provider"] = vr.get("coge_provider")
         w = list(res.get("warnings") or []) + list(vr.get("warnings") or [])
         rec["warnings"] = [str(x)[:220] for x in w][:10]
 

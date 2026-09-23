@@ -1,5 +1,6 @@
 """Analytical extraction must recover facts without spending the parent twice."""
 from decimal import Decimal as D
+import json
 from pathlib import Path
 
 import fitz
@@ -201,6 +202,61 @@ def test_reader_repairs_invalid_cell_index_or_schema_once(monkeypatch, failure):
     schema = calls[0]['tools'][0]['input_schema']
     assert schema['$defs']['DetailCell']['properties']['row']['enum'] == ['p1Tr1']
     assert calls[1]['messages'][-1]['content'][0]['is_error']
+
+
+def test_gx10_reader_computes_schema_and_repairs_invalid_row(monkeypatch):
+    from importers import llm_provider
+    monkeypatch.setenv('PDF_LLM_PROVIDER_DETTAGLI', 'gx10')
+    monkeypatch.setenv('GX10_API_KEY', 'chiave-di-prova')
+    monkeypatch.delenv('ANTHROPIC_API_KEY', raising=False)
+    calls = []
+
+    def fake(system_prompt, messaggi, schema, *, max_tokens, **kwargs):
+        calls.append({'messaggi': [dict(m) for m in messaggi], 'schema': schema, 'max_tokens': max_tokens})
+        if len(calls) == 1:
+            return de.DetailReading(proposals=[proposal(CREDIT, (TAX, 'id-inesistente', 0))]).model_dump()
+        return de.DetailReading(proposals=[proposal(CREDIT, (TAX, 'p1Tr1', 0))]).model_dump()
+
+    monkeypatch.setattr(llm_provider, 'chiama_gx10_json', fake)
+    result = de.read_details([row('p1Tr1', '20')], {'current': {CREDIT: D('100')}}, 2025)
+    assert len(calls) == 2
+    assert result.proposals[0].items[0].row == 'p1Tr1'
+    schema = calls[0]['schema']
+    assert schema['$defs']['DetailCell']['properties']['row']['enum'] == ['p1Tr1']
+    assert calls[0]['max_tokens'] == 16384
+    second = calls[1]['messaggi']
+    assert [m['role'] for m in second] == ['user', 'assistant', 'user']
+    assert json.loads(second[1]['content'])['proposals'][0]['items'][0]['row'] == 'id-inesistente'
+    assert 'Correggi i riferimenti' in second[2]['content']
+    assert 'id-inesistente' in second[2]['content']
+
+
+def test_gx10_reader_truncated_response_raises_clean_error(monkeypatch):
+    from importers import llm_provider
+    monkeypatch.setenv('PDF_LLM_PROVIDER_DETTAGLI', 'gx10')
+    monkeypatch.setenv('GX10_API_KEY', 'chiave-di-prova')
+    monkeypatch.delenv('ANTHROPIC_API_KEY', raising=False)
+
+    def fake(*args, **kwargs):
+        raise llm_provider.RispostaTroncata('risposta gx10 troncata')
+
+    monkeypatch.setattr(llm_provider, 'chiama_gx10_json', fake)
+    with pytest.raises(de.DetailReadError, match='output_truncated'):
+        de.read_details([row('p1Tr1', '20')], {'current': {CREDIT: D('100')}}, 2025)
+
+
+def test_gx10_provider_lets_enrich_pdf_details_search_without_anthropic_key(monkeypatch):
+    monkeypatch.setenv('PDF_LLM_PROVIDER_DETTAGLI', 'gx10')
+    monkeypatch.setenv('GX10_API_KEY', 'chiave-di-prova')
+    monkeypatch.delenv('ANTHROPIC_API_KEY', raising=False)
+    rows = [ledger_row('soci', '40', '31', 'Soci c/finanziamento', 'R'),
+            ledger_row('suppliers', '50', '33', 'Fornitori', 'R')]
+    monkeypatch.setattr(de, 'collect_source_rows', lambda *a, **kw: rows)
+    calls = []
+    monkeypatch.setattr(de, 'read_details', lambda *a: calls.append(1) or de.DetailReading())
+    current, prior, report = de.enrich_pdf_details('unused', {DEBT: D('100')}, {DEBT: D('80')})
+    assert calls  # search_details ran instead of stopping at "local_only"
+    assert report['status'] != 'local_only'
 
 
 def source_file(name):

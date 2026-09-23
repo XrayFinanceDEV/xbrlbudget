@@ -462,6 +462,28 @@ def _map_sc_keys(data: Dict[str, Decimal]) -> Dict[str, Decimal]:
     return result
 
 
+def _coge_attivo(api_key: str) -> bool:
+    """Il pass CoGe di route C puo' girare? Con il fornitore di default (Haiku) serve la
+    chiave Anthropic, come sempre; con gx10 serve la chiave gx10, e la chiave Anthropic
+    non conta (la route C deve poter girare interamente in locale)."""
+    from importers.llm_provider import gx10_disponibile, provider_coge
+    if provider_coge() == "gx10":
+        return gx10_disponibile()
+    return bool(api_key)
+
+
+def _ivcee_attivo(api_key: str) -> bool:
+    """Il ramo IV-CEE via LLM (route A/B, e l'ultima risorsa di route C) puo' girare?
+    Con il fornitore di default (Haiku) serve la chiave Anthropic, come sempre; con
+    gx10 (PDF_LLM_PROVIDER_IVCEE=gx10) serve la chiave gx10, e la chiave Anthropic non
+    conta per il ramo testuale. La vision resta sempre su Anthropic: i suoi cancelli,
+    dentro pdf_extractor_llm.py, restano un controllo separato e invariato."""
+    from importers.llm_provider import gx10_disponibile, provider_ivcee
+    if provider_ivcee() == "gx10":
+        return gx10_disponibile()
+    return bool(api_key)
+
+
 def _extract_route_c_last_resort(llm_extract):
     """Run the IV-CEE last resort without claiming a gross-vs-net measurement.
 
@@ -1003,7 +1025,7 @@ def import_pdf_balance_sheet(
                     source_err,
                 )
 
-            if not api_key:
+            if not _ivcee_attivo(api_key):
                 raise PDFImportError("ANTHROPIC_API_KEY is required for PDF import")
             if not is_trial_balance and not is_scanned and not _ocr_source:
                 # Prefer source-verified macros, but incomplete coverage must not
@@ -1261,7 +1283,7 @@ def import_pdf_balance_sheet(
             # source coordinates and self-validates against independent SP/CE
             # controls.  Do not let the presence of an API key add a stochastic
             # plain-text OCR candidate that has lost the two-column geometry.
-            if api_key and not local_coordinate_ocr:
+            if _coge_attivo(api_key) and not local_coordinate_ocr:
                 try:
                     from importers.pdf_extractor_llm import extract_trial_balance_with_llm
                     # On a scanned PDF, pass the OCR text so the extractor uses the
@@ -1484,7 +1506,7 @@ def import_pdf_balance_sheet(
                         f"({_pct:.0f}% del totale) non classificato in alcuna voce — "
                         f"correggere in Rettifiche"
                     )
-            elif not api_key:
+            elif not _ivcee_attivo(api_key):
                 raise PDFImportError(
                     "Impossibile estrarre la situazione contabile (nessun dato) "
                     "e ANTHROPIC_API_KEY non impostata."
@@ -1781,6 +1803,25 @@ def import_pdf_balance_sheet(
             logger.warning(f"Reliability non calcolata: {_rel_err}")
 
         _validation_payload = _validation_report_payload(_qd, reliability=_reliability)
+        if is_trial_balance:
+            # Fornitore configurato per il pass CoGe di route C, dichiarato su OGNI import
+            # di route C (non solo quando il pass CoGe ha vinto il confronto col candidato
+            # deterministico). Scritto QUI, prima che il payload sia serializzato in
+            # FinancialYear.validation_report (poco sotto) e la transazione fatta commit:
+            # la provenienza si legge a posteriori da un GET, senza rieseguire l'import
+            # (docs/import/REGOLE-IMPORT-06-PERSISTENZA.md §2) — lo stesso motivo per cui
+            # _rescue_reasons/_rescued_sections sono inizializzati prima che il payload
+            # sia costruito, poco piu' sotto in questa funzione.
+            from importers.llm_provider import provider_coge
+            _validation_payload["coge_provider"] = provider_coge()
+        # Fornitore configurato per l'estrattore testuale di route A/B + lettura delle
+        # macro-voci (provider_ivcee) e per la seconda lettura dei dettagli (provider_dettagli),
+        # dichiarati su OGNI route — non solo su route C come coge_provider sopra, perché
+        # questi due girano anche su A/B. Stesso motivo, stesso punto: prima della
+        # serializzazione, cosi' un GET successivo li rilegge senza rieseguire l'import.
+        from importers.llm_provider import provider_dettagli, provider_ivcee
+        _validation_payload["ivcee_provider"] = provider_ivcee()
+        _validation_payload["dettagli_provider"] = provider_dettagli()
         _validation_payload['residual_finalization'] = _residual_report
         _validation_payload['warnings'].extend(_residual_report['warnings'])
         _validation_payload['warnings'].extend(_detail_report.get('warnings', []))
@@ -1944,6 +1985,17 @@ def import_pdf_balance_sheet(
                         db.flush()
 
                     _prior_validation = _validation_report_payload(_prior_q)
+                    if is_trial_balance:
+                        # Stesso fornitore dichiarato dell'anno corrente (route C legge
+                        # entrambe le colonne con lo stesso pass CoGe): vedi il commento
+                        # gemello su _validation_payload, qualche centinaio di righe sopra.
+                        from importers.llm_provider import provider_coge
+                        _prior_validation["coge_provider"] = provider_coge()
+                    # Stessi due campi dell'anno corrente, stesso motivo: vedi il commento
+                    # gemello su _validation_payload, qualche centinaio di righe sopra.
+                    from importers.llm_provider import provider_dettagli, provider_ivcee
+                    _prior_validation["ivcee_provider"] = provider_ivcee()
+                    _prior_validation["dettagli_provider"] = provider_dettagli()
                     _prior_validation['residual_finalization'] = _prior_residual_report
                     _prior_validation['warnings'].extend(_prior_residual_report.get('warnings', []))
                     _prior_validation['warnings'].extend(_detail_report.get('warnings', []))

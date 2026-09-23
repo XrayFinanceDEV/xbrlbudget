@@ -90,6 +90,7 @@ import { ExtraAccountingAlerts } from "@/components/pratica/ExtraAccountingAlert
 import { ForecastDiagnostics } from "@/components/pratica/ForecastDiagnostics";
 import { IndicatoriTable } from "@/components/pratica/IndicatoriTable";
 import { StampaContent } from "@/components/pratica/StampaContent";
+import { ImportProgressBar } from "@/components/pratica/ImportProgressBar";
 import { ForecastLoadError } from "@/components/budget/ForecastLoadError";
 import { forecastLoadErrorMessage } from "@/lib/forecast-page-status";
 import { praticaIndicatoriStatus } from "@/lib/pratica-indicatori-status";
@@ -173,6 +174,9 @@ export default function InfraannualePage() {
   // Second import (historical year when infra-year PDF has only 1 column)
   const [refFile, setRefFile] = useState<File | null>(null);
   const [importingRef, setImportingRef] = useState(false);
+  // Solo il caricamento del PDF storico, non il «prosegui senza»: la barra
+  // di avanzamento misura un import, non la creazione dello scenario.
+  const [uploadingRefPdf, setUploadingRefPdf] = useState(false);
 
   // Step 1b: Rettifiche (Adjustments) — one hook per FinancialYear.
   // A rettifica on EITHER year invalidates everything computed from it: the
@@ -681,6 +685,7 @@ export default function InfraannualePage() {
     if (!refFile || !importResult || !missingRefYear) return;
 
     setImportingRef(true);
+    setUploadingRefPdf(true);
     try {
       await importPDF(
         refFile,
@@ -691,6 +696,7 @@ export default function InfraannualePage() {
         undefined,                  // sector already set
         undefined                   // no period_months = full 12-month year
       );
+      setUploadingRefPdf(false);
 
       // Verify it worked
       const years = await getCompanyYears(importResult.companyId);
@@ -706,6 +712,7 @@ export default function InfraannualePage() {
       toast.error(msg);
     } finally {
       setImportingRef(false);
+      setUploadingRefPdf(false);
     }
   };
 
@@ -1480,6 +1487,11 @@ export default function InfraannualePage() {
                         )}
                       </Button>
                     </div>
+                    {uploadingRefPdf && (
+                      <div className="mt-3">
+                        <ImportProgressBar />
+                      </div>
+                    )}
                     <div className="mt-3">
                       <Button
                         variant="ghost"
@@ -1515,6 +1527,8 @@ export default function InfraannualePage() {
                   )}
                 </div>
               ) : (
+                <div className="space-y-3">
+                {activeImportMethod === "pdf" && <ImportProgressBar />}
                 <div className="flex flex-wrap justify-end gap-3">
                   {importType === "pdf" ? (
                     /* Il pulsante ImportOCR (MinerU) non si rende: l'endpoint
@@ -1551,6 +1565,7 @@ export default function InfraannualePage() {
                         : "Importa XBRL e Continua"}
                     </Button>
                   )}
+                </div>
                 </div>
               )}
             </CardContent>

@@ -1,6 +1,7 @@
 """Disjoint source facts, semantic constraints and independent cent controls."""
 from dataclasses import replace
 from decimal import Decimal as D
+import json
 from pathlib import Path
 
 import pytest
@@ -170,6 +171,68 @@ def test_missing_reader_marks_supported_ledger_for_review(monkeypatch):
     monkeypatch.setattr(le, 'collect_source_rows', lambda p: rows())
     monkeypatch.delenv('ANTHROPIC_API_KEY', raising=False)
     assert le.extract_ledger_source('unused.pdf')[2]['requires_review']
+
+
+def test_gx10_reader_computes_schema_and_repairs_only_missing_accounts(monkeypatch):
+    from importers import llm_provider
+    monkeypatch.setenv('PDF_LLM_PROVIDER_DETTAGLI', 'gx10')
+    monkeypatch.setenv('GX10_API_KEY', 'chiave-di-prova')
+    monkeypatch.delenv('ANTHROPIC_API_KEY', raising=False)
+    frontier, _ = le.prepare_ledger(rows())
+    expected = {a.row: a.model_dump() for a in assignments(frontier)}
+    requests = []
+
+    def fake(system_prompt, messaggi, schema, *, max_tokens, **kwargs):
+        ids = [c['id'] for c in json.loads(messaggi[0]['content'])['accounts']]
+        requests.append({'ids': ids, 'schema': schema, 'max_tokens': max_tokens})
+        if len(requests) == 1:
+            # One valid row, one duplicated/ambiguous row, everything else missing.
+            data = [expected[ids[0]], expected[ids[1]], expected[ids[1]]]
+        else:
+            data = [expected[i] for i in ids]
+        return {'accounts': data}
+
+    monkeypatch.setattr(llm_provider, 'chiama_gx10_json', fake)
+    result = le.read_accounts(frontier)
+    assert [a.row for a in result] == [r.id for r, _ in frontier]
+    assert len(requests) == 2
+    assert requests[0]['ids'][0] not in requests[1]['ids']
+    assert requests[0]['ids'][1] in requests[1]['ids']
+    assert requests[0]['schema']['$defs']['AccountAssignment']['properties']['row']['enum'] == requests[0]['ids']
+    assert requests[0]['max_tokens'] == 14000
+
+
+def test_gx10_reader_truncated_response_raises_clean_error(monkeypatch):
+    from importers import llm_provider
+    monkeypatch.setenv('PDF_LLM_PROVIDER_DETTAGLI', 'gx10')
+    monkeypatch.setenv('GX10_API_KEY', 'chiave-di-prova')
+    monkeypatch.delenv('ANTHROPIC_API_KEY', raising=False)
+    frontier, _ = le.prepare_ledger(rows())
+
+    def fake(*args, **kwargs):
+        raise llm_provider.RispostaTroncata('risposta gx10 troncata')
+
+    monkeypatch.setattr(llm_provider, 'chiama_gx10_json', fake)
+    with pytest.raises(DetailReadError, match='ledger_output_truncated'):
+        le.read_accounts(frontier)
+
+
+def test_gx10_gate_lets_ledger_reader_run_without_anthropic_key(monkeypatch):
+    from importers import llm_provider
+    monkeypatch.setattr(le, 'collect_source_rows', lambda p: rows())
+    monkeypatch.setenv('PDF_LLM_PROVIDER_DETTAGLI', 'gx10')
+    monkeypatch.setenv('GX10_API_KEY', 'chiave-di-prova')
+    monkeypatch.delenv('ANTHROPIC_API_KEY', raising=False)
+    frontier, _ = le.prepare_ledger(rows())
+    expected = {a.row: a.model_dump() for a in assignments(frontier)}
+
+    def fake(system_prompt, messaggi, schema, *, max_tokens, **kwargs):
+        ids = [c['id'] for c in json.loads(messaggi[0]['content'])['accounts']]
+        return {'accounts': [expected[i] for i in ids]}
+
+    monkeypatch.setattr(llm_provider, 'chiama_gx10_json', fake)
+    bs, ce, report = le.extract_ledger_source('unused.pdf')
+    assert report['status'] == 'verified'
 
 
 @pytest.mark.parametrize('caption,side,proposed,expected,ancestors', [

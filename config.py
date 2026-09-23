@@ -3,6 +3,7 @@ Configuration and Constants for Financial Analysis Application
 """
 from enum import Enum
 from typing import Dict, List
+import os as _os
 
 # Application Settings
 APP_NAME = "Analisi Finanziaria"
@@ -212,6 +213,10 @@ PDF_MARGIN = {
 # PDF LLM Extraction Settings
 PDF_LLM_MODEL = "claude-haiku-4-5-20251001"
 PDF_LLM_MAX_TOKENS = 8192
+# gx10: Qwen locale (vLLM, OpenAI-compatibile), raggiunto via Tailscale. La chiave NON sta
+# qui: GX10_API_KEY si legge al momento della chiamata (importers/llm_provider.py).
+GX10_BASE_URL = _os.environ.get("GX10_BASE_URL", "http://100.65.63.12:18300")
+GX10_MODEL = _os.environ.get("GX10_MODEL", "qwen3.8-flash-next")
 
 # Scenario Types
 SCENARIO_TYPE_BUDGET = "budget"

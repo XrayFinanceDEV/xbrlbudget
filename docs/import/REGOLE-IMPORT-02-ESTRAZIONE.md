@@ -95,10 +95,31 @@ ripetono massa già totalizzata: lasciarle passare la fa contare due volte.
    aggregati patrimoniali** con quelli del parser deterministico, e **solo se il risultato
    quadra**. CE e dettagli tipizzati restano quelli dell'LLM.
 
+**Anche il ramo testuale di route A/B può girare su Qwen locale.** `PDF_LLM_PROVIDER_IVCEE=gx10`
+sposta sia l'estrattore testuale (`extract_pdf_with_llm`, `extract_pdf_both_years_with_llm`, i
+punti 1-6 sopra quando serve l'LLM) sia la lettura delle macro-voci (`read_macros`) su gx10.
+`PDF_LLM_PROVIDER_DETTAGLI=gx10` sposta la seconda lettura — `read_details`/`read_accounts`,
+celle di dettaglio della nota integrativa e classificazione dei sottoconti — sullo stesso gx10,
+indipendentemente da `PDF_LLM_PROVIDER_IVCEE`. **La vision resta su Anthropic in ogni caso**: un
+PDF senza text layer, con uno dei due fornitori impostato su `gx10` e senza
+`ANTHROPIC_API_KEY`, solleva un errore dichiarato invece di chiamare gx10 su un'immagine — gx10
+qui legge solo testo. Il fornitore usato si persiste in
+`FinancialYear.validation_report["ivcee_provider"]`/`["dettagli_provider"]`, su **ogni** route
+(anche C, accanto a `coge_provider`), anno corrente e precedente.
+
 ## 4. Route C: la scelta del candidato è la regola più importante
 
 Due candidati concorrono: il **CoGe-LLM** e il **parser deterministico**. Il deterministico gira
 sempre, perché è gratuito e non può peggiorare il risultato.
+
+**Il pass CoGe può girare su Qwen locale (gx10)**, con `PDF_LLM_PROVIDER_COGE=gx10`, invece che
+su Claude Haiku. Stesso prompt e stesso schema Pydantic, usati come vincolo di decodifica invece
+che come tool forzato di Anthropic. La vision resta su Anthropic in ogni caso: un PDF senza text
+layer con gx10 e senza chiave Anthropic solleva un errore dichiarato, e route C tiene il candidato
+deterministico. Un guasto di gx10 qualunque — rete, timeout, risposta fuori schema — è preso dal
+try/except già esistente, e route C ripiega sullo stesso modo: il deterministico. Il fornitore
+usato si persiste in `FinancialYear.validation_report["coge_provider"]` (anno corrente e
+precedente).
 
 Il CoGe-LLM **non** viene lanciato se l'OCR locale a coordinate ha già letto il file: sarebbe
 aggiungere un candidato stocastico a una lettura deterministica riuscita.

@@ -22,6 +22,7 @@ import anthropic
 
 from config import PDF_LLM_MODEL, PDF_LLM_MAX_TOKENS
 from calculations.ce_result import calculate_ce_result
+from importers import llm_provider
 
 logger = logging.getLogger(__name__)
 
@@ -2667,8 +2668,20 @@ def _extract_with_llm(
     section_name: str,
     tool_name: str,
     max_retries: int = 2,
+    provider: str = "anthropic",
 ) -> pydantic.BaseModel:
-    """Call Claude Haiku with tool-use for structured extraction."""
+    """Call Claude Haiku with tool-use for structured extraction.
+
+    provider="gx10": stessa estrazione su Qwen locale (importers/llm_provider.py), con lo
+    schema del modello come vincolo di decodifica; `client` e' ignorato. Il messaggio utente
+    e' lo stesso del ramo Anthropic, meno il riferimento al tool, che su vLLM non esiste.
+    """
+    if provider == "gx10":
+        logger.info(f"Calling gx10 for {section_name} extraction ({len(text)} chars)...")
+        return llm_provider.chiama_gx10_strutturato(
+            system_prompt,
+            f"Extract the {section_name} values from this Italian balance sheet text.\n\n{text}",
+            output_model, max_tokens=PDF_LLM_MAX_TOKENS)
     logger.info(f"Calling Claude Haiku for {section_name} extraction ({len(text)} chars)...")
 
     tool = _build_tool_schema(output_model, tool_name)
@@ -3453,17 +3466,23 @@ def extract_pdf_with_llm(
         # The deterministic parser produces correct values directly.
         return balance_sheet_data, income_data
 
-    api_key = os.environ.get("ANTHROPIC_API_KEY", "")
-    if not api_key:
-        raise PDFImportError("ANTHROPIC_API_KEY environment variable not set")
-
-    try:
-        client = anthropic.Anthropic(api_key=api_key)
-    except Exception as e:
-        raise PDFImportError(f"Failed to initialize Anthropic client: {e}")
-
-    # Step 1: Check if PDF is image-based (no extractable text)
+    # Step 1: Check if PDF is image-based (no extractable text). Vision has no
+    # local provider (vincoli: "la vision resta su Anthropic"); the text branch
+    # can run entirely on gx10 (PDF_LLM_PROVIDER_IVCEE=gx10) without ANTHROPIC_API_KEY.
     use_vision = _is_image_pdf(file_path)
+    api_key = os.environ.get("ANTHROPIC_API_KEY", "")
+    client = None
+    if use_vision or llm_provider.provider_ivcee() != "gx10":
+        if not api_key:
+            if use_vision:
+                raise PDFImportError(
+                    "PDF e' un'immagine: la vision richiede ANTHROPIC_API_KEY (nessun fornitore locale)."
+                )
+            raise PDFImportError("ANTHROPIC_API_KEY environment variable not set")
+        try:
+            client = anthropic.Anthropic(api_key=api_key)
+        except Exception as e:
+            raise PDFImportError(f"Failed to initialize Anthropic client: {e}")
 
     if use_vision:
         logger.info("Image-based PDF detected, using vision extraction")
@@ -3495,25 +3514,33 @@ def extract_pdf_with_llm(
         if not sp_text.strip():
             raise PDFImportError("No text extracted from balance sheet pages")
 
-        # Step 2: Extract balance sheet via Claude Haiku
+        provider = llm_provider.provider_ivcee()
+
+        # Step 2: Extract balance sheet via Claude Haiku (or gx10, see provider_ivcee)
         try:
             sp_result = _extract_with_llm(
                 client, sp_text, SP_SYSTEM_PROMPT,
                 BalanceSheetExtraction, "Stato Patrimoniale",
                 tool_name="balance_sheet",
+                provider=provider,
             )
         except anthropic.APIError as e:
             raise PDFImportError(f"Anthropic API error during SP extraction: {e}")
+        except llm_provider.LLMProviderError as e:
+            raise PDFImportError(f"Errore gx10 durante l'estrazione SP: {e}")
 
-        # Step 3: Extract income statement via Claude Haiku
+        # Step 3: Extract income statement via Claude Haiku (or gx10, see provider_ivcee)
         try:
             ce_result = _extract_with_llm(
                 client, ce_text, CE_SYSTEM_PROMPT,
                 IncomeStatementExtraction, "Conto Economico",
                 tool_name="income_statement",
+                provider=provider,
             )
         except anthropic.APIError as e:
             raise PDFImportError(f"Anthropic API error during CE extraction: {e}")
+        except llm_provider.LLMProviderError as e:
+            raise PDFImportError(f"Errore gx10 durante l'estrazione CE: {e}")
 
     # Step 4: Convert to Decimal dicts and normalize signs
     balance_sheet_data = _reconcile_credit_aggregates_from_source(
@@ -3801,14 +3828,16 @@ def extract_trial_balance_with_llm(
     Raises:
         PDFImportError: if the API key is missing or extraction fails.
     """
+    provider = llm_provider.provider_coge()
+    client = None
     api_key = os.environ.get("ANTHROPIC_API_KEY", "")
-    if not api_key:
-        raise PDFImportError("ANTHROPIC_API_KEY environment variable not set")
-
-    try:
-        client = anthropic.Anthropic(api_key=api_key)
-    except Exception as e:
-        raise PDFImportError(f"Failed to initialize Anthropic client: {e}")
+    if provider == "anthropic":
+        if not api_key:
+            raise PDFImportError("ANTHROPIC_API_KEY environment variable not set")
+        try:
+            client = anthropic.Anthropic(api_key=api_key)
+        except Exception as e:
+            raise PDFImportError(f"Failed to initialize Anthropic client: {e}")
 
     # Scanned PDF already OCR'd by the caller: prefer the TEXT path over vision. Vision
     # mis-parses Italian number formatting on noisy scans (reads "50.704,41" as
@@ -3822,6 +3851,14 @@ def extract_trial_balance_with_llm(
         full_text = ocr_text
     else:
         is_image = _is_image_pdf(file_path)
+        if is_image and provider == "gx10":
+            # La vision non ha un fornitore locale: resta sul cloud (decisione del
+            # proprietario, 2026-09-23). Senza chiave Anthropic si dichiara, e la route C
+            # prosegue col candidato deterministico.
+            if not api_key:
+                raise PDFImportError("PDF solo immagine: il pass CoGe richiede la vision, "
+                                     "che non ha un fornitore locale (ANTHROPIC_API_KEY assente)")
+            client = anthropic.Anthropic(api_key=api_key)
         images = _render_pdf_pages_as_images(file_path) if is_image else None
         full_text = None
         if not is_image:
@@ -3865,7 +3902,8 @@ def extract_trial_balance_with_llm(
                 IncomeStatementExtraction, "Situazione Contabile (CE)", tool_name="income_statement")
         return _extract_with_llm(
             client, full_text, TRIAL_BALANCE_CE_SYSTEM_PROMPT,
-            IncomeStatementExtraction, "Situazione Contabile (CE)", tool_name="income_statement")
+            IncomeStatementExtraction, "Situazione Contabile (CE)", tool_name="income_statement",
+            provider=provider)
 
     def _extract_sp_once():
         if is_image:
@@ -3875,7 +3913,8 @@ def extract_trial_balance_with_llm(
         else:
             res = _extract_with_llm(
                 client, full_text, sp_prompt,
-                BalanceSheetExtraction, "Situazione Contabile (SP)", tool_name="balance_sheet")
+                BalanceSheetExtraction, "Situazione Contabile (SP)", tool_name="balance_sheet",
+                provider=provider)
         bs = _model_to_decimal_dict(res)
         bs = _balance_trial_via_result(bs, "coge")
         try:
@@ -4892,17 +4931,23 @@ def extract_pdf_both_years_with_llm(
     Raises:
         PDFImportError: If extraction fails
     """
-    api_key = os.environ.get("ANTHROPIC_API_KEY", "")
-    if not api_key:
-        raise PDFImportError("ANTHROPIC_API_KEY environment variable not set")
-
-    try:
-        client = anthropic.Anthropic(api_key=api_key)
-    except Exception as e:
-        raise PDFImportError(f"Failed to initialize Anthropic client: {e}")
-
-    # Step 1: Check if PDF is image-based (no extractable text)
+    # Step 1: Check if PDF is image-based (no extractable text). Vision has no
+    # local provider (vincoli: "la vision resta su Anthropic"); the text branch
+    # can run entirely on gx10 (PDF_LLM_PROVIDER_IVCEE=gx10) without ANTHROPIC_API_KEY.
     use_vision = _is_image_pdf(file_path)
+    api_key = os.environ.get("ANTHROPIC_API_KEY", "")
+    client = None
+    if use_vision or llm_provider.provider_ivcee() != "gx10":
+        if not api_key:
+            if use_vision:
+                raise PDFImportError(
+                    "PDF e' un'immagine: la vision richiede ANTHROPIC_API_KEY (nessun fornitore locale)."
+                )
+            raise PDFImportError("ANTHROPIC_API_KEY environment variable not set")
+        try:
+            client = anthropic.Anthropic(api_key=api_key)
+        except Exception as e:
+            raise PDFImportError(f"Failed to initialize Anthropic client: {e}")
 
     if use_vision:
         logger.info("Image-based PDF detected, using vision extraction (both years)")
@@ -4934,25 +4979,33 @@ def extract_pdf_both_years_with_llm(
         if not sp_text.strip():
             raise PDFImportError("No text extracted from balance sheet pages")
 
-        # Step 2: Extract balance sheet (both years) via Claude Haiku
+        provider = llm_provider.provider_ivcee()
+
+        # Step 2: Extract balance sheet (both years) via Claude Haiku (or gx10)
         try:
             sp_result = _extract_with_llm(
                 client, sp_text, SP_BOTH_YEARS_SYSTEM_PROMPT,
                 TwoYearBalanceSheetExtraction, "Stato Patrimoniale (both years)",
                 tool_name="balance_sheet_both_years",
+                provider=provider,
             )
         except anthropic.APIError as e:
             raise PDFImportError(f"Anthropic API error during SP extraction: {e}")
+        except llm_provider.LLMProviderError as e:
+            raise PDFImportError(f"Errore gx10 durante l'estrazione SP: {e}")
 
-        # Step 3: Extract income statement (both years) via Claude Haiku
+        # Step 3: Extract income statement (both years) via Claude Haiku (or gx10)
         try:
             ce_result = _extract_with_llm(
                 client, ce_text, CE_BOTH_YEARS_SYSTEM_PROMPT,
                 TwoYearIncomeStatementExtraction, "Conto Economico (both years)",
                 tool_name="income_statement_both_years",
+                provider=provider,
             )
         except anthropic.APIError as e:
             raise PDFImportError(f"Anthropic API error during CE extraction: {e}")
+        except llm_provider.LLMProviderError as e:
+            raise PDFImportError(f"Errore gx10 durante l'estrazione CE: {e}")
 
     # Step 4: Convert to Decimal dicts and normalize signs
     current_bs = _reconcile_credit_aggregates_from_source(

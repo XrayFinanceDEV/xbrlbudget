@@ -2667,8 +2667,21 @@ def _extract_with_llm(
     section_name: str,
     tool_name: str,
     max_retries: int = 2,
+    provider: str = "anthropic",
 ) -> pydantic.BaseModel:
-    """Call Claude Haiku with tool-use for structured extraction."""
+    """Call Claude Haiku with tool-use for structured extraction.
+
+    provider="gx10": stessa estrazione su Qwen locale (importers/llm_provider.py), con lo
+    schema del modello come vincolo di decodifica; `client` e' ignorato. Il messaggio utente
+    e' lo stesso del ramo Anthropic, meno il riferimento al tool, che su vLLM non esiste.
+    """
+    if provider == "gx10":
+        from importers import llm_provider
+        logger.info(f"Calling gx10 for {section_name} extraction ({len(text)} chars)...")
+        return llm_provider.chiama_gx10_strutturato(
+            system_prompt,
+            f"Extract the {section_name} values from this Italian balance sheet text.\n\n{text}",
+            output_model, max_tokens=PDF_LLM_MAX_TOKENS)
     logger.info(f"Calling Claude Haiku for {section_name} extraction ({len(text)} chars)...")
 
     tool = _build_tool_schema(output_model, tool_name)
@@ -3801,14 +3814,17 @@ def extract_trial_balance_with_llm(
     Raises:
         PDFImportError: if the API key is missing or extraction fails.
     """
+    from importers import llm_provider
+    provider = llm_provider.provider_coge()
+    client = None
     api_key = os.environ.get("ANTHROPIC_API_KEY", "")
-    if not api_key:
-        raise PDFImportError("ANTHROPIC_API_KEY environment variable not set")
-
-    try:
-        client = anthropic.Anthropic(api_key=api_key)
-    except Exception as e:
-        raise PDFImportError(f"Failed to initialize Anthropic client: {e}")
+    if provider == "anthropic":
+        if not api_key:
+            raise PDFImportError("ANTHROPIC_API_KEY environment variable not set")
+        try:
+            client = anthropic.Anthropic(api_key=api_key)
+        except Exception as e:
+            raise PDFImportError(f"Failed to initialize Anthropic client: {e}")
 
     # Scanned PDF already OCR'd by the caller: prefer the TEXT path over vision. Vision
     # mis-parses Italian number formatting on noisy scans (reads "50.704,41" as
@@ -3822,6 +3838,14 @@ def extract_trial_balance_with_llm(
         full_text = ocr_text
     else:
         is_image = _is_image_pdf(file_path)
+        if is_image and provider == "gx10":
+            # La vision non ha un fornitore locale: resta sul cloud (decisione del
+            # proprietario, 2026-09-23). Senza chiave Anthropic si dichiara, e la route C
+            # prosegue col candidato deterministico.
+            if not api_key:
+                raise PDFImportError("PDF solo immagine: il pass CoGe richiede la vision, "
+                                     "che non ha un fornitore locale (ANTHROPIC_API_KEY assente)")
+            client = anthropic.Anthropic(api_key=api_key)
         images = _render_pdf_pages_as_images(file_path) if is_image else None
         full_text = None
         if not is_image:
@@ -3865,7 +3889,8 @@ def extract_trial_balance_with_llm(
                 IncomeStatementExtraction, "Situazione Contabile (CE)", tool_name="income_statement")
         return _extract_with_llm(
             client, full_text, TRIAL_BALANCE_CE_SYSTEM_PROMPT,
-            IncomeStatementExtraction, "Situazione Contabile (CE)", tool_name="income_statement")
+            IncomeStatementExtraction, "Situazione Contabile (CE)", tool_name="income_statement",
+            provider=provider)
 
     def _extract_sp_once():
         if is_image:
@@ -3875,7 +3900,8 @@ def extract_trial_balance_with_llm(
         else:
             res = _extract_with_llm(
                 client, full_text, sp_prompt,
-                BalanceSheetExtraction, "Situazione Contabile (SP)", tool_name="balance_sheet")
+                BalanceSheetExtraction, "Situazione Contabile (SP)", tool_name="balance_sheet",
+                provider=provider)
         bs = _model_to_decimal_dict(res)
         bs = _balance_trial_via_result(bs, "coge")
         try:

@@ -25,20 +25,37 @@ class LLMProviderError(RuntimeError):
     pass
 
 
+class RispostaTroncata(LLMProviderError):
+    pass
+
+
+def _provider_da_env(nome: str) -> str:
+    return "gx10" if os.environ.get(nome) == "gx10" else "anthropic"
+
+
 def provider_coge() -> str:
     """Il fornitore del pass CoGe di route C. Solo il valore esatto "gx10" lo cambia:
     assente o qualunque altra cosa -> "anthropic", cioe' il comportamento di oggi."""
-    return "gx10" if os.environ.get("PDF_LLM_PROVIDER_COGE") == "gx10" else "anthropic"
+    return _provider_da_env("PDF_LLM_PROVIDER_COGE")
+
+
+def provider_ivcee() -> str:
+    """Estrattore testuale di route A/B e lettura delle macro-voci."""
+    return _provider_da_env("PDF_LLM_PROVIDER_IVCEE")
+
+
+def provider_dettagli() -> str:
+    """Seconda lettura: celle di dettaglio (nota integrativa) e classificazione dei sottoconti."""
+    return _provider_da_env("PDF_LLM_PROVIDER_DETTAGLI")
 
 
 def gx10_disponibile() -> bool:
     return bool(os.environ.get("GX10_API_KEY"))
 
 
-def chiama_gx10_strutturato(system_prompt: str, testo_utente: str,
-                            output_model: type[pydantic.BaseModel], *, max_tokens: int,
-                            timeout: float = 900.0,
-                            transport: httpx.BaseTransport | None = None) -> pydantic.BaseModel:
+def chiama_gx10_json(system_prompt: str, messaggi: list[dict], schema: dict, *,
+                     max_tokens: int, timeout: float = 900.0,
+                     transport: httpx.BaseTransport | None = None) -> dict:
     chiave = os.environ.get("GX10_API_KEY", "")
     if not chiave:
         raise LLMProviderError("GX10_API_KEY non impostata: il fornitore gx10 non e' disponibile")
@@ -47,9 +64,8 @@ def chiama_gx10_strutturato(system_prompt: str, testo_utente: str,
         "temperature": 0,
         "max_tokens": max_tokens,
         "chat_template_kwargs": {"enable_thinking": False},
-        "structured_outputs": {"json": output_model.model_json_schema()},
-        "messages": [{"role": "system", "content": system_prompt},
-                     {"role": "user", "content": testo_utente}],
+        "structured_outputs": {"json": schema},
+        "messages": [{"role": "system", "content": system_prompt}, *messaggi],
     }
     try:
         with httpx.Client(timeout=timeout, transport=transport) as client:
@@ -62,13 +78,26 @@ def chiama_gx10_strutturato(system_prompt: str, testo_utente: str,
     try:
         scelta = r.json()["choices"][0]
         if scelta.get("finish_reason") == "length":
-            raise LLMProviderError("risposta gx10 troncata: max_tokens insufficiente")
+            raise RispostaTroncata("risposta gx10 troncata: max_tokens insufficiente")
         testo = scelta["message"].get("content") or ""
-    except LLMProviderError:
+    except RispostaTroncata:
         raise
     except (ValueError, KeyError, IndexError, TypeError):
         raise LLMProviderError("risposta gx10 non valida: formato inatteso") from None
     try:
-        return output_model.model_validate(json.loads(testo))
-    except (json.JSONDecodeError, pydantic.ValidationError):
+        return json.loads(testo)
+    except json.JSONDecodeError:
+        raise LLMProviderError("risposta gx10 non valida: JSON non decodificabile") from None
+
+
+def chiama_gx10_strutturato(system_prompt: str, testo_utente: str,
+                            output_model: type[pydantic.BaseModel], *, max_tokens: int,
+                            timeout: float = 900.0,
+                            transport: httpx.BaseTransport | None = None) -> pydantic.BaseModel:
+    dati = chiama_gx10_json(system_prompt, [{"role": "user", "content": testo_utente}],
+                            output_model.model_json_schema(), max_tokens=max_tokens,
+                            timeout=timeout, transport=transport)
+    try:
+        return output_model.model_validate(dati)
+    except pydantic.ValidationError:
         raise LLMProviderError(f"risposta gx10 non valida per {output_model.__name__}") from None

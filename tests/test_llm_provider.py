@@ -136,3 +136,52 @@ def test_gx10_disponibile(monkeypatch):
     assert llm_provider.gx10_disponibile() is True
     monkeypatch.setenv("GX10_API_KEY", "")
     assert llm_provider.gx10_disponibile() is False
+
+
+def test_provider_ivcee_e_dettagli_default_anthropic(monkeypatch):
+    monkeypatch.delenv("PDF_LLM_PROVIDER_IVCEE", raising=False)
+    monkeypatch.delenv("PDF_LLM_PROVIDER_DETTAGLI", raising=False)
+    assert llm_provider.provider_ivcee() == "anthropic"
+    assert llm_provider.provider_dettagli() == "anthropic"
+    monkeypatch.setenv("PDF_LLM_PROVIDER_IVCEE", "gx10")
+    monkeypatch.setenv("PDF_LLM_PROVIDER_DETTAGLI", "GX10")
+    assert llm_provider.provider_ivcee() == "gx10"
+    assert llm_provider.provider_dettagli() == "anthropic"
+
+
+def test_chiama_gx10_json_manda_schema_e_messaggi_come_dati(monkeypatch):
+    monkeypatch.setenv("GX10_API_KEY", "k-segreta")
+    visto = {}
+    def handler(request):
+        visto["body"] = json.loads(request.content)
+        visto["auth"] = request.headers["authorization"]
+        return httpx.Response(200, json={"choices": [{"finish_reason": "stop",
+            "message": {"content": '{"a": 1}'}}]})
+    schema = {"type": "object", "properties": {"a": {"enum": [1, 2]}}}
+    out = llm_provider.chiama_gx10_json(
+        "sys", [{"role": "user", "content": "u1"}, {"role": "assistant", "content": "{}"},
+                {"role": "user", "content": "u2"}],
+        schema, max_tokens=100, transport=httpx.MockTransport(handler))
+    assert out == {"a": 1}
+    assert visto["auth"] == "Bearer k-segreta"
+    assert visto["body"]["structured_outputs"] == {"json": schema}
+    assert [m["role"] for m in visto["body"]["messages"]] == ["system", "user", "assistant", "user"]
+    assert visto["body"]["temperature"] == 0
+    assert visto["body"]["chat_template_kwargs"] == {"enable_thinking": False}
+
+
+def test_chiama_gx10_json_troncata_e_risposta_non_json(monkeypatch):
+    monkeypatch.setenv("GX10_API_KEY", "k-segreta")
+    def tronca(request):
+        return httpx.Response(200, json={"choices": [{"finish_reason": "length",
+            "message": {"content": '{"a": '}}]})
+    with pytest.raises(llm_provider.RispostaTroncata):
+        llm_provider.chiama_gx10_json("s", [{"role": "user", "content": "u"}], {},
+                                      max_tokens=5, transport=httpx.MockTransport(tronca))
+    def rotta(request):
+        return httpx.Response(200, json={"choices": [{"finish_reason": "stop",
+            "message": {"content": "non json"}}]})
+    with pytest.raises(llm_provider.LLMProviderError) as exc:
+        llm_provider.chiama_gx10_json("s", [{"role": "user", "content": "u"}], {},
+                                      max_tokens=5, transport=httpx.MockTransport(rotta))
+    assert "k-segreta" not in str(exc.value)

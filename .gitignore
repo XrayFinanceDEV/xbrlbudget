@@ -155,3 +155,6 @@ docs/examples/
 
 # Banco del report Business plan: PDF del committente e PNG di confronto, mai in git
 tests/.banco-business-plan/
+
+# Banco del report infrannuale: PDF del committente e PNG di confronto, mai in git
+tests/.banco-infrannuale/

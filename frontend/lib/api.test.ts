@@ -149,6 +149,15 @@ describe("downloadFinalReportPdf", () => {
     setAuthToken(null);
   });
 
+  it("con model business_plan chiama la rotta del Business plan e manda solo document_state", async () => {
+    const blob = new Blob(["%PDF-1.4"], { type: "application/pdf" });
+    fetchMock.mockResolvedValue({ ok: true, status: 200, headers: { get: () => null }, blob: async () => blob, json: async () => ({}) });
+    await downloadFinalReportPdf(1, 2, { documentState: "draft", model: "business_plan" });
+    const [url, init] = fetchMock.mock.calls[0];
+    expect(url).toContain("/companies/1/scenarios/2/business-plan/pdf");
+    expect(JSON.parse(init.body)).toEqual({ document_state: "draft" });
+  });
+
   it("posta document_state e grayscale, con Bearer quando il token è impostato, e legge blob e nome file dagli header", async () => {
     setAuthToken("un-jwt");
     const blob = new Blob(["%PDF-1.4"], { type: "application/pdf" });

@@ -21,8 +21,10 @@ import { parseEditorialSession, type EditorialNoteUpdate, type EditorialSession 
 import {
   FinalReportDownloadError,
   resolveDownloadErrorMessage,
+  reportPdfPath,
   resolveDownloadFilename,
   type FinalReportDocumentState,
+  type ReportModel,
 } from '@/lib/final-report-download';
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || (typeof window !== 'undefined' ? '/api/v1' : 'http://localhost:8000/api/v1');
@@ -875,20 +877,21 @@ export interface DownloadFinalReportPdfResult {
 export const downloadFinalReportPdf = async (
   companyId: number,
   scenarioId: number,
-  options: { documentState: FinalReportDocumentState; grayscale?: boolean },
+  options: { documentState: FinalReportDocumentState; grayscale?: boolean; model?: ReportModel },
 ): Promise<DownloadFinalReportPdfResult> => {
+  const model = options.model ?? "dossier";
+  const body = model === "business_plan"
+    ? { document_state: options.documentState }
+    : { document_state: options.documentState, grayscale: options.grayscale ?? false };
   const response = await fetch(
-    `${API_BASE_URL}/companies/${companyId}/scenarios/${scenarioId}/final-report/pdf`,
+    `${API_BASE_URL}/companies/${companyId}/scenarios/${scenarioId}/${reportPdfPath(model)}`,
     {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
         ...(_authToken ? { Authorization: `Bearer ${_authToken}` } : {}),
       },
-      body: JSON.stringify({
-        document_state: options.documentState,
-        grayscale: options.grayscale ?? false,
-      }),
+      body: JSON.stringify(body),
     },
   );
 

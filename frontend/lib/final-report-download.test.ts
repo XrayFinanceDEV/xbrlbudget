@@ -1,6 +1,8 @@
 import { describe, expect, it, vi } from "vitest";
 import {
   FinalReportDownloadError,
+  REPORT_MODELS,
+  reportPdfPath,
   PREVIEW_BLOCKED_MESSAGE,
   PREVIEW_REVOKE_DELAY_MS,
   closePreviewTabOnError,
@@ -369,5 +371,15 @@ describe("nextInlinePreviewUrl", () => {
     const { revoked, sink: downloadSink } = sink();
     expect(nextInlinePreviewUrl(null, new Blob(["%PDF"]), downloadSink)).toBe("blob:nuovo-1");
     expect(revoked).toEqual([]);
+  });
+});
+
+describe("modelli di report", () => {
+  it("il Business plan è il primo, ed è il default", () => {
+    expect(REPORT_MODELS.map((m) => m.value)).toEqual(["business_plan", "dossier"]);
+  });
+  it("ogni modello ha la sua rotta", () => {
+    expect(reportPdfPath("dossier")).toBe("final-report/pdf");
+    expect(reportPdfPath("business_plan")).toBe("business-plan/pdf");
   });
 });

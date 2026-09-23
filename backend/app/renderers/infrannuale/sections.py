@@ -291,7 +291,7 @@ def circolante(d: InfrannualeData, pages: dict) -> list:
     if d.has_forecast:
         t.append((d.forecast_label, fmt.compact_eur(kl), "Circolante commerciale", f"{delta_txt} sul {rif}"))
     t.append((d.label_of(last), fmt.compact_eur(d.v("liquidita", last)), "Disponibilità liquide",
-              f"da {fmt.compact_eur(d.v('liquidita', STORICO))} nel {rif}"))
+              f"da € {fmt.eur(d.v('liquidita', STORICO))} nel {rif}"))
     s += [layout.tiles_chip(t[:4]), Spacer(0, 5)]
     forn = [d.v("fornitori", c) for c in sp]
     s += [chart(charts.circolante([d.label_of(c) for c in sp], [d.v("crediti_clienti", c) for c in sp],
@@ -315,6 +315,19 @@ def circolante(d: InfrannualeData, pages: dict) -> list:
 
 
 # ------------------------------------------------------------------ sezione 6
+def _scadenza(d: InfrannualeData, key: str, cs) -> str:
+    """« (oltre 12 mesi)» quando il debito sta tutto da una parte in ogni periodo, come nel riferimento."""
+    b = [d.v(f"{key}_breve", c) for c in cs]
+    lo = [d.v(f"{key}_lungo", c) for c in cs]
+    if any(x is None for x in b + lo):
+        return ""
+    if all(x == 0 for x in b) and any(x for x in lo):
+        return " (oltre 12 mesi)"
+    if all(x == 0 for x in lo) and any(x for x in b):
+        return " (entro 12 mesi)"
+    return ""
+
+
 def debito(d: InfrannualeData, pages: dict) -> list:
     s = layout.section_head("SEZIONE 6", "Indebitamento e sostenibilità del debito",
                             f"PFN = debiti finanziari meno disponibilità liquide. Per il {d.partial_label} PFN/EBITDA è "
@@ -323,8 +336,8 @@ def debito(d: InfrannualeData, pages: dict) -> list:
     last = PROIEZIONE if d.has_forecast else INFRANNUALE
     ll, rif = d.label_of(last), d.reference_label
     r2 = lambda k, c: fmt.ratio(d.v(k, c), 2)  # noqa: E731
-    storia = lambda k: f"{r2(k, STORICO)} nel {rif}" + (  # noqa: E731
-        f" · {r2(k, INFRANNUALE)} nel {d.period_months}M" if d.has_forecast else "")
+    storia = lambda k: f"{rif} {r2(k, STORICO)}" + (  # noqa: E731
+        f" · {d.period_months}M {r2(k, INFRANNUALE)}" if d.has_forecast else "")
     t = [(ll, fmt.compact_eur(d.v("pfn", last)), "PFN", f"da {fmt.compact_eur(d.v('pfn', STORICO))} nel {rif}"),
          (ll, r2("pfn_ebitda", last), "PFN / EBITDA", storia("pfn_ebitda")),
          (ll, r2("dscr", last), "DSCR", storia("dscr")),
@@ -335,7 +348,7 @@ def debito(d: InfrannualeData, pages: dict) -> list:
     breve_altri = [d.v("altri_finanziatori", c) for c in cs]
     rows = [_row(d, "Debiti verso banche", "banche", cs), _row(d, "di cui entro 12 mesi", "banche_breve", cs),
             _row(d, "di cui oltre 12 mesi", "banche_lungo", cs),
-            _row(d, "Debiti verso altri finanziatori", "altri_finanziatori", cs),
+            _row(d, "Debiti verso altri finanziatori" + _scadenza(d, "altri_finanziatori", cs), "altri_finanziatori", cs),
             _row(d, "Disponibilità liquide", "liquidita", cs),
             _row(d, "Posizione finanziaria netta (PFN)", "pfn", cs, "bold"),
             _row(d, "PFN / EBITDA", "pfn_ebitda", cs, "hl", unit="ratio"),

@@ -10,7 +10,7 @@ import calendar
 import json
 import math
 from dataclasses import dataclass, field
-from decimal import Decimal
+from decimal import ROUND_HALF_UP, Decimal
 from pathlib import Path
 from typing import Literal, Optional
 
@@ -48,6 +48,7 @@ class AnnexRow:
     level: int
     kind: str
     values: tuple
+    code: str = ""
 
 
 @dataclass(frozen=True)
@@ -71,7 +72,11 @@ class InfrannualeData:
         return self.values.get(key, {}).get(col)
 
     def var(self, key: str, col: str, base: str = STORICO) -> Num:
-        """Variazione percentuale di `col` su `base` (v/b − 1): None se manca un termine o la base è zero."""
+        """Variazione percentuale di `col` su `base` (v/b − 1): None se manca un termine o la base è zero.
+
+        Sui valori ai centesimi, come il riferimento (1.224,51% sugli altri proventi finanziari di AMBIENTA; sugli
+        importi all'euro verrebbe 1.224,63%).
+        """
         v, b = self.v(key, col), self.v(key, base)
         if v is None or b is None or b == 0:
             return None
@@ -127,6 +132,10 @@ def _dec(x) -> Num:
     return Decimal(str(x))
 
 
+def _euro(x: Num) -> Num:
+    return None if x is None else x.quantize(Decimal(1), rounding=ROUND_HALF_UP)
+
+
 def _add(*xs) -> Num:
     return None if any(x is None for x in xs) else sum(xs, Decimal(0))
 
@@ -150,6 +159,8 @@ _SP_ROWS = {
     "banche": "sp16a_debiti_banche_breve+sp17a_debiti_banche_lungo",
     "banche_breve": "sp16a_debiti_banche_breve", "banche_lungo": "sp17a_debiti_banche_lungo",
     "altri_finanziatori": "sp16b_debiti_altri_finanz_breve+sp17b_debiti_altri_finanz_lungo",
+    "altri_finanziatori_breve": "sp16b_debiti_altri_finanz_breve",
+    "altri_finanziatori_lungo": "sp17b_debiti_altri_finanz_lungo",
     "debiti_previdenziali": "sp16f_debiti_previdenza_breve+sp17f_debiti_previdenza_lungo",
     "debiti_tributari": "sp16e_debiti_tributari_breve+sp17e_debiti_tributari_lungo",
     "immob_finanziarie": "sp04_immob_finanziarie",
@@ -172,7 +183,7 @@ def _statement(st) -> tuple[dict, tuple]:
     for r in st.rows:
         vals = tuple(_dec(x) for x in r.values)
         by_code[r.code] = dict(zip(ids, vals))
-        annex.append(AnnexRow(r.label.strip(), r.level, r.kind, vals))
+        annex.append(AnnexRow(r.label.strip(), r.level, r.kind, vals, r.code))
     return by_code, tuple(annex)
 
 
@@ -213,7 +224,8 @@ def from_intermedio(model) -> InfrannualeData:
     for c in sp_cols:
         g = lambda k: values.get(k, {}).get(c.key)  # noqa: E731
         put("crediti_clienti", c.key, _add(g("crediti_clienti_breve"), g("crediti_clienti_lungo")))
-        cred, rim, forn = g("crediti_clienti"), g("rimanenze"), g("fornitori")
+        # somma degli importi all'euro stampati nelle righe: la tabella si rifà a mano (833.386, non 833.385)
+        cred, rim, forn = (_euro(g(k)) for k in ("crediti_clienti", "rimanenze", "fornitori"))
         put("cc_comm", c.key, None if None in (cred, rim, forn) else cred + rim - forn)
 
     crisi = {}
@@ -253,8 +265,8 @@ def dump_json(d: InfrannualeData) -> dict:
                       "indicatori": {i: _enc(x) for i, x in c.indicatori.items()},
                       "punteggi": {i: _enc(x) for i, x in c.punteggi.items()}} for k, c in d.crisi.items()},
         "definizioni": [list(x) for x in d.definizioni], "segnali": [list(x) for x in d.segnali],
-        "annex_ce": [[r.label, r.level, r.kind, [_enc(x) for x in r.values]] for r in d.annex_ce],
-        "annex_sp": [[r.label, r.level, r.kind, [_enc(x) for x in r.values]] for r in d.annex_sp],
+        "annex_ce": [[r.label, r.level, r.kind, [_enc(x) for x in r.values], r.code] for r in d.annex_ce],
+        "annex_sp": [[r.label, r.level, r.kind, [_enc(x) for x in r.values], r.code] for r in d.annex_sp],
     }
 
 
@@ -271,6 +283,8 @@ def load_json(path) -> InfrannualeData:
                            {i: dec(x) for i, x in c["punteggi"].items()}) for k, c in raw.get("crisi", {}).items()},
         definizioni=tuple(tuple(x) for x in raw.get("definizioni", [])),
         segnali=tuple(tuple(x) for x in raw.get("segnali", [])),
-        annex_ce=tuple(AnnexRow(r[0], r[1], r[2], tuple(dec(x) for x in r[3])) for r in raw.get("annex_ce", [])),
-        annex_sp=tuple(AnnexRow(r[0], r[1], r[2], tuple(dec(x) for x in r[3])) for r in raw.get("annex_sp", [])),
+        annex_ce=tuple(AnnexRow(r[0], r[1], r[2], tuple(dec(x) for x in r[3]), *r[4:5])
+                       for r in raw.get("annex_ce", [])),
+        annex_sp=tuple(AnnexRow(r[0], r[1], r[2], tuple(dec(x) for x in r[3]), *r[4:5])
+                       for r in raw.get("annex_sp", [])),
     )

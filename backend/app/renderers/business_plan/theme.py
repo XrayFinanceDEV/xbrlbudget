@@ -34,4 +34,7 @@ def register_fonts() -> None:
             return
         for name in (REGULAR, BOLD):
             pdfmetrics.registerFont(TTFont(name, str(FONT_DIR / f"{name}.ttf")))
+        # <b> dentro un Paragraph in Lato-Regular deve diventare Lato-Bold, non restare regolare
+        pdfmetrics.registerFontFamily(REGULAR, normal=REGULAR, bold=BOLD, italic=REGULAR, boldItalic=BOLD)
+        pdfmetrics.registerFontFamily(BOLD, normal=BOLD, bold=BOLD, italic=BOLD, boldItalic=BOLD)
         _registered = True

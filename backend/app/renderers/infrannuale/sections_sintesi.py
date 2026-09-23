@@ -177,8 +177,11 @@ def forza(d: InfrannualeData, pages: dict) -> list:
     w = (CW - 11.4) / 2
     pair = Table([[_card("Punti di forza", theme.TEAL, theme.HL, strengths, w),
                    _card("Punti di debolezza", theme.RED, theme.WEAK, weaknesses, w)]], colWidths=[w, w])
+    # le due colonne alte uguali, come nel riferimento: il fondo si allunga alla più alta
     pair.setStyle(TableStyle([("VALIGN", (0, 0), (-1, -1), "TOP"), ("LEFTPADDING", (0, 0), (-1, -1), 0),
-                              ("RIGHTPADDING", (0, 0), (-1, -1), 0)]))
+                              ("RIGHTPADDING", (0, 0), (-1, -1), 0), ("TOPPADDING", (0, 0), (-1, -1), 0),
+                              ("BOTTOMPADDING", (0, 0), (-1, -1), 0),
+                              ("BACKGROUND", (0, 0), (0, 0), C(theme.HL)), ("BACKGROUND", (1, 0), (1, 0), C(theme.WEAK))]))
     pair.hAlign = "CENTER"
     s += [pair]
     azioni = narrative.actions(d, weaknesses)
@@ -190,7 +193,7 @@ def forza(d: InfrannualeData, pages: dict) -> list:
              Paragraph("Contenuto", layout.ST["cellh"]), Paragraph("Indicatori da monitorare", layout.ST["cellh"])]]
     for i, (title, text, kpi) in enumerate(azioni, start=1):
         rows.append([Paragraph(str(i), num), Paragraph(title, layout.ST["cellb"]), Paragraph(text, layout.ST["cell"]),
-                     Paragraph(kpi, layout.ST["cell"])])
+                     Paragraph(kpi, layout.ST["ks"])])
     t = Table(rows, colWidths=[24, 110, CW - 24 - 110 - 120, 120], repeatRows=1)
     t.setStyle(TableStyle([("BACKGROUND", (0, 0), (-1, 0), C(theme.NAVY)), ("VALIGN", (0, 0), (-1, -1), "TOP"),
                            ("ROWBACKGROUNDS", (0, 1), (-1, -1), [C("#ffffff"), C(theme.PANEL)]),

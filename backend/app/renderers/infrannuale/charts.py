@@ -90,16 +90,22 @@ def ricavi_periodi(labels, ricavi: Values, margine: Values, kinds: Sequence[str]
     return _png(fig)
 
 
+#: il grafico dei risultati si stampa a 329 pt invece che a 459: i caratteri si ingrandiscono in proporzione
+BIG = 1.35
+
+
 def risultati(labels, ebitda: Values, ebit: Values, utile: Values) -> bytes:
     fig, ax = _fig("risultati")
-    fig.subplots_adjust(left=0.085, right=0.985, top=0.96, bottom=0.12)
+    fig.subplots_adjust(left=0.085, right=0.985, top=0.96, bottom=0.13)
     series = [(_k(ebitda), theme.NAVY, "EBITDA"), (_k(ebit), theme.TEAL, "EBIT"), (_k(utile), theme.ORANGE, "Utile netto")]
-    handles = _grouped(ax, labels, series, 0.26)
-    _limits(ax, _finite(*[s[0] for s in series]), top_room=1.2)
+    _grouped_labels(ax, labels, series, 0.26, size=SMALL * BIG)
+    _limits(ax, _finite(*[s[0] for s in series]), top_room=1.3)
     _thousands(ax)
-    _ylabel(ax, "€ migliaia")
+    ax.tick_params(labelsize=TICK * BIG)
+    ax.set_ylabel("€ migliaia", fontfamily=FAMILY, fontsize=TICK * BIG, color=theme.AXIS)
     _xticks(ax, labels)
-    _legend(ax, handles, [s[2] for s in series], loc="upper left", ncol=3, columnspacing=2.2)
+    ax.legend([Patch(color=c) for _, c, _ in series], [s[2] for s in series], loc="upper left", ncol=3,
+              columnspacing=2.2, frameon=False, prop=FontProperties(family=FAMILY, size=TICK * BIG))
     return _png(fig)
 
 
@@ -124,7 +130,7 @@ def stato_patrimoniale(labels, attivo: Values, deb_fin: Values, deb_op: Values, 
     series = [(_k(attivo), theme.GREY, "Totale attivo"), (_k(deb_fin), theme.NAVY, "Debiti finanziari"),
               (_k(deb_op), theme.LIGHTBLUE, "Debiti operativi"), (_k(pn), theme.ORANGE, "Patrimonio netto")]
     _grouped_labels(ax, labels, series, 0.2)
-    _limits(ax, _finite(*[s[0] for s in series]), top_room=1.16)
+    _limits(ax, _finite(*[s[0] for s in series]), top_room=1.22)
     _thousands(ax)
     _xticks(ax, labels)
     _ylabel(ax, "€ migliaia")
@@ -156,18 +162,20 @@ def debito(labels, dscr: Values, pfn_ebitda: Values) -> bytes:
     fig.subplots_adjust(left=0.04, right=0.985, top=0.88, bottom=0.12, wspace=0.12)
     for ax, vals, color, title in ((a1, _f(dscr), theme.NAVY, "DSCR"), (a2, _f(pfn_ebitda), theme.RED, "PFN / EBITDA")):
         ax.bar(list(range(len(labels))), vals, 0.55, color=color, zorder=2)
-        _limits(ax, _finite(vals) + [1.2], top_room=1.18)
+        top = max(_finite(vals) + [1.2]) * 1.18
+        ax.set_ylim(min([0.0] + _finite(vals)), math.ceil(top))
         ax.yaxis.set_major_locator(MaxNLocator(nbins=4, integer=True))
         span = ax.get_ylim()[1] - ax.get_ylim()[0]
         for i, v in enumerate(vals):
             if not math.isnan(v):
                 _text(ax, i, v + (0.01 * span if v >= 0 else -0.01 * span), f"{chart_num(v, 2)}×",
-                      ha="center", va="bottom" if v >= 0 else "top", color="black", fontweight="bold", fontsize=LABEL)
+                      ha="center", va="bottom" if v >= 0 else "top", color="black", fontweight="bold",
+                      fontsize=LABEL * 1.2)
         _xticks(ax, labels)
-        ax.tick_params(labelsize=SMALL)
-        _panel_title(ax, title)
-    a1.axhline(1.0, color=theme.RED, linestyle="--", linewidth=1.2, zorder=3)
-    _text(a1, -0.45, 1.05, "soglia 1,0×", color=theme.RED, fontsize=7, va="bottom")
+        ax.tick_params(labelsize=TICK * 1.2)
+        ax.set_title(title, loc="left", fontfamily=FAMILY, fontsize=12.5, color=theme.NAVY)
+    a1.axhline(1.0, color=theme.RED, linestyle="--", linewidth=1.8, zorder=3)
+    _text(a1, -0.45, 1.05, "soglia 1,0×", color=theme.RED, fontsize=9, va="bottom")
     return _png(fig)
 
 

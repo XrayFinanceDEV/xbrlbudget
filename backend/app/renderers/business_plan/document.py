@@ -98,3 +98,17 @@ def render_business_plan(data: BusinessPlanData, *, only: Optional[tuple] = None
     pdf, second = _build(data, specs, pages)
     assert second == pages, "l'indice ha spostato le pagine: la copertina deve avere altezza fissa"
     return pdf
+
+
+def _register() -> None:
+    from . import sections_economia as eco
+    SECTIONS.clear()
+    SECTIONS.extend([
+        SectionSpec("economia", "Evoluzione economica dell'impresa", eco.economia),
+        SectionSpec("costi", "EBITDA margin e struttura dei costi", eco.costi),
+        SectionSpec("pareggio", "Costi fissi e variabili · break even point", eco.pareggio),
+        SectionSpec("flussi", "Flussi di cassa", eco.flussi),
+    ])
+
+
+_register()

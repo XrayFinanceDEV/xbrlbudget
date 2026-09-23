@@ -117,6 +117,11 @@ def _register() -> None:
         SectionSpec("circolante", "Capitale circolante commerciale", fin.circolante),
         SectionSpec("solidita", "Solidità patrimoniale, liquidità e redditività", fin.solidita),
     ])
+    from . import sections_partenza as par
+    SECTIONS.extend([
+        SectionSpec("partenza", "Punto di partenza", par.partenza),
+        SectionSpec("ipotesi", "Assunzioni del piano", par.ipotesi),
+    ])
 
 
 _register()

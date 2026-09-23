@@ -25,7 +25,7 @@ vi.mock("axios", () => {
   };
 });
 
-import { downloadFinalReportPdf, generateEditorialNotes, getEditorialSession, getFinalReport, getFinalReportV2, prepareEditorialSession, previewForecast, saveEditorialNotes, setAuthToken } from "./api";
+import { downloadFinalReportPdf, downloadInfrannualePdf, generateEditorialNotes, getEditorialSession, getFinalReport, getFinalReportV2, prepareEditorialSession, previewForecast, saveEditorialNotes, setAuthToken } from "./api";
 import { FinalReportDownloadError } from "./final-report-download";
 import v1 from "../../tests/fixtures/final_report/bilancio.json";
 import v2 from "../../tests/fixtures/final_report/v2/bilancio.json";
@@ -228,5 +228,30 @@ describe("downloadFinalReportPdf", () => {
     expect(error).toBeInstanceOf(FinalReportDownloadError);
     expect(error.status).toBe(503);
     expect(error.message).toMatch(/disponibile/);
+  });
+});
+
+describe("downloadInfrannualePdf", () => {
+  const fetchMock = vi.fn();
+  beforeEach(() => {
+    fetchMock.mockReset();
+    vi.stubGlobal("fetch", fetchMock);
+    setAuthToken(null);
+  });
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("chiama la rotta del report infrannuale con corpo vuoto e legge il nome file", async () => {
+    const blob = new Blob(["%PDF-1.4"], { type: "application/pdf" });
+    fetchMock.mockResolvedValue({
+      ok: true, status: 200, blob: async () => blob, json: async () => ({}),
+      headers: { get: (n: string) => (n === "Content-Disposition" ? "attachment; filename=\"Report.pdf\"; filename*=UTF-8''Report%20infrannuale%20X%206M%202026.pdf" : null) },
+    });
+    const result = await downloadInfrannualePdf(1, 2);
+    const [url, init] = fetchMock.mock.calls[0];
+    expect(url).toContain("/companies/1/scenarios/2/infrannuale/pdf");
+    expect(JSON.parse(init.body)).toEqual({});
+    expect(result.filename).toBe("Report infrannuale X 6M 2026.pdf");
   });
 });

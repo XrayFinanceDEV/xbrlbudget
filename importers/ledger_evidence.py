@@ -9,11 +9,11 @@ from concurrent.futures import ThreadPoolExecutor
 from decimal import Decimal
 from dataclasses import replace
 import json
-import os
 import re
 
 from pydantic import BaseModel, Field, ValidationError
 
+from importers import llm_provider
 from importers.detail_enrichment import collect_source_rows, DetailReadError
 from importers.iv_cee_hierarchy import detail_fields, _net_profit_from_ce
 
@@ -193,10 +193,11 @@ def read_accounts(frontier):
     allowed = allowed_fields()
     definitions = {name: field.description or name for model in (BalanceSheetExtraction, IncomeStatementExtraction)
                    for name, field in model.model_fields.items() if name in allowed}
+    gx10 = llm_provider.provider_dettagli() == 'gx10'
     def read(batch):
         accepted = {}
         feedback = []
-        client = anthropic.Anthropic(timeout=90, max_retries=1)
+        client = None if gx10 else anthropic.Anthropic(timeout=90, max_retries=1)
         for attempt in range(3):
             pending = [(r, ancestors) for r, ancestors in batch if r.id not in accepted]
             cards = [{'id': r.id, 'statement': r.statement, 'side': r.side,
@@ -204,22 +205,31 @@ def read_accounts(frontier):
             schema = AccountReading.model_json_schema()
             schema['$defs']['AccountAssignment']['properties']['row']['enum'] = [r.id for r,_ in pending]
             schema['$defs']['AccountAssignment']['properties']['field']['enum'] = sorted(allowed)
-            messages = [{'role':'user','content':json.dumps({'accounts':cards,
+            testo_utente = json.dumps({'accounts':cards,
                 'field_definitions':definitions,
-                'repair':feedback, 'instruction':'Classifica tutti e soli questi ID, una volta ciascuno.'}, ensure_ascii=False)}]
-            response = client.messages.create(model=PDF_LLM_MODEL, max_tokens=14000, temperature=0, system=_PROMPT,
-                messages=messages, tools=[{'name':'classifica_conti','description':'One classification per source account',
-                'input_schema':schema}], tool_choice={'type':'tool','name':'classifica_conti'})
-            if response.stop_reason == 'max_tokens':
-                raise DetailReadError('ledger_output_truncated')
-            block = next((b for b in response.content if b.type=='tool_use' and b.name=='classifica_conti'),None)
-            if block is None:
-                raise DetailReadError('ledger_missing_response')
+                'repair':feedback, 'instruction':'Classifica tutti e soli questi ID, una volta ciascuno.'}, ensure_ascii=False)
+            if gx10:
+                try:
+                    dati = llm_provider.chiama_gx10_json(_PROMPT, [{'role': 'user', 'content': testo_utente}],
+                                                         schema, max_tokens=14000)
+                except llm_provider.RispostaTroncata:
+                    raise DetailReadError('ledger_output_truncated') from None
+                raw = dati.get('accounts', []) if isinstance(dati, dict) else []
+            else:
+                messages = [{'role':'user','content':testo_utente}]
+                response = client.messages.create(model=PDF_LLM_MODEL, max_tokens=14000, temperature=0, system=_PROMPT,
+                    messages=messages, tools=[{'name':'classifica_conti','description':'One classification per source account',
+                    'input_schema':schema}], tool_choice={'type':'tool','name':'classifica_conti'})
+                if response.stop_reason == 'max_tokens':
+                    raise DetailReadError('ledger_output_truncated')
+                block = next((b for b in response.content if b.type=='tool_use' and b.name=='classifica_conti'),None)
+                if block is None:
+                    raise DetailReadError('ledger_missing_response')
+                raw = block.input.get('accounts', []) if isinstance(block.input, dict) else []
             # Retain individually valid answers; repair only missing/ambiguous
             # accounts. Never discard sixty correct facts for one omitted ID,
             # and never let a repair overwrite a previously accepted fact.
             feedback, parsed = [], defaultdict(list)
-            raw = block.input.get('accounts', []) if isinstance(block.input, dict) else []
             for item in raw if isinstance(raw, list) else []:
                 try:
                     assignment = AccountAssignment.model_validate(item)
@@ -408,7 +418,7 @@ def extract_ledger_source(file_path, *, reader=None):
     frontier, audit = prepare_ledger(rows)
     if frontier is None:
         return None,None,audit
-    if reader is None and not os.environ.get('ANTHROPIC_API_KEY'):
+    if reader is None and not llm_provider.lettore_dettagli_disponibile():
         return None,None,{**audit,'status':'declined','requires_review':True,
                           'errors':['ledger_semantic_reader_unavailable']}
     try:

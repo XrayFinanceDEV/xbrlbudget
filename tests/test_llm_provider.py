@@ -149,6 +149,18 @@ def test_provider_ivcee_e_dettagli_default_anthropic(monkeypatch):
     assert llm_provider.provider_dettagli() == "anthropic"
 
 
+def test_lettore_dettagli_disponibile(monkeypatch):
+    monkeypatch.delenv("PDF_LLM_PROVIDER_DETTAGLI", raising=False)
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "x")
+    assert llm_provider.lettore_dettagli_disponibile() is True
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    assert llm_provider.lettore_dettagli_disponibile() is False
+    monkeypatch.setenv("PDF_LLM_PROVIDER_DETTAGLI", "gx10")
+    assert llm_provider.lettore_dettagli_disponibile() is True  # GX10_API_KEY from the autouse fixture
+    monkeypatch.setenv("GX10_API_KEY", "")
+    assert llm_provider.lettore_dettagli_disponibile() is False
+
+
 def test_chiama_gx10_json_manda_schema_e_messaggi_come_dati(monkeypatch):
     monkeypatch.setenv("GX10_API_KEY", "k-segreta")
     visto = {}

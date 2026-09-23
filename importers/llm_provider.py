@@ -53,6 +53,13 @@ def gx10_disponibile() -> bool:
     return bool(os.environ.get("GX10_API_KEY"))
 
 
+def lettore_dettagli_disponibile() -> bool:
+    """Le credenziali del fornitore scelto per read_details/read_accounts sono pronte."""
+    if provider_dettagli() == "gx10":
+        return gx10_disponibile()
+    return bool(os.environ.get("ANTHROPIC_API_KEY"))
+
+
 def chiama_gx10_json(system_prompt: str, messaggi: list[dict], schema: dict, *,
                      max_tokens: int, timeout: float = 900.0,
                      transport: httpx.BaseTransport | None = None) -> dict:

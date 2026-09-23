@@ -17,6 +17,7 @@ from typing import Literal
 import fitz
 from pydantic import BaseModel, Field, ValidationError
 
+from importers import llm_provider
 from importers.iv_cee_hierarchy import detail_fields, residual_bucket
 
 logger = logging.getLogger(__name__)
@@ -290,11 +291,33 @@ Conserva segni e saldi negativi: cita la cella originale.
 """
 
 
+def _valida_lettura_dettagli(dati: dict, families: dict, source_rows: dict,
+                             attempt: int) -> tuple[DetailReading | None, list[str]]:
+    """Same validation this reading has always done, shared by both providers."""
+    try:
+        reading = DetailReading.model_validate(dati)
+    except ValidationError as exc:
+        if attempt:
+            raise
+        return None, [f"{e['loc']}: {e['msg']}" for e in exc.errors(include_input=False)]
+    errors = []
+    for p in reading.proposals:
+        if p.aggregate not in families.get(p.period, {}):
+            errors.append(f'{p.period}/{p.aggregate}: famiglia o periodo non ammessi.')
+        for cell in p.items:
+            row = source_rows.get(cell.row)
+            if row is None or not row.amounts:
+                errors.append(f'{cell.row}: ID inesistente o privo di celle. Usa gli ID tra parentesi quadre, non i codici conto.')
+            elif cell.column >= len(row.amounts):
+                errors.append(f'{cell.row}: indice {cell.column} non valido; celle valide ' +
+                              ', '.join(f'{i}:{v}' for i, v in enumerate(row.amounts)))
+            elif cell.field not in ANALYTICAL_FAMILIES.get(p.aggregate, ()):
+                errors.append(f'{cell.field}: campo estraneo alla famiglia {p.aggregate}.')
+    return reading, errors
+
+
 def read_details(rows: list[SourceRow], balances: dict, fiscal_year: int | None) -> DetailReading:
     """One structured reading plus at most one source-reference repair."""
-    import anthropic
-    from config import PDF_LLM_MODEL
-
     families = {
         period: {
             aggregate: {
@@ -309,15 +332,15 @@ def read_details(rows: list[SourceRow], balances: dict, fiscal_year: int | None)
     source = "\n".join(source_line(row) for row in rows)
     if len(source) > MAX_SOURCE_CHARS:
         raise DetailReadError('input_block_too_large')
-    messages = [{"role": "user", "content": (
-            f"Anno corrente richiesto: {fiscal_year}. Precedente: "
-            f"{fiscal_year - 1 if fiscal_year else 'da intestazioni'}.\n"
-            f"Famiglie ammesse e classificazione iniziale:\n{json.dumps(families)}\n"
-            "BLOCCO DEL DOCUMENTO, con eventuale contesto non citabile. "
-            "Non è necessariamente il documento completo. Cerca dettagli per tutte le famiglie ammesse. "
-            "Le righe CONTESTO servono a interpretare intestazioni e continuazioni: non citarle come celle.\n"
-            f"Righe con pagina e lato:\n{source}"
-        )}]
+    testo = (
+        f"Anno corrente richiesto: {fiscal_year}. Precedente: "
+        f"{fiscal_year - 1 if fiscal_year else 'da intestazioni'}.\n"
+        f"Famiglie ammesse e classificazione iniziale:\n{json.dumps(families)}\n"
+        "BLOCCO DEL DOCUMENTO, con eventuale contesto non citabile. "
+        "Non è necessariamente il documento completo. Cerca dettagli per tutte le famiglie ammesse. "
+        "Le righe CONTESTO servono a interpretare intestazioni e continuazioni: non citarle come celle.\n"
+        f"Righe con pagina e lato:\n{source}"
+    )
     schema = DetailReading.model_json_schema()
     schema['$defs']['DetailCell']['properties']['row']['enum'] = [r.id for r in rows if r.amounts]
     schema['$defs']['DetailCell']['properties']['field']['enum'] = sorted({
@@ -325,6 +348,29 @@ def read_details(rows: list[SourceRow], balances: dict, fiscal_year: int | None)
     schema['$defs']['DetailProposal']['properties']['aggregate']['enum'] = sorted({
         aggregate for allowed in families.values() for aggregate in allowed})
     source_rows = {r.id: r for r in rows}
+    correzione = ('Correggi i riferimenti, senza inventare importi. Restituisci tutte le proposte corrette. '
+                 'Gli indici iniziano da ZERO, una sola cella ha indice 0.\n')
+
+    if llm_provider.provider_dettagli() == 'gx10':
+        conversazione = [{'role': 'user', 'content': testo}]
+        for attempt in range(2):
+            try:
+                dati = llm_provider.chiama_gx10_json(_PROMPT, conversazione, schema, max_tokens=16384)
+            except llm_provider.RispostaTroncata:
+                raise DetailReadError('output_truncated') from None
+            reading, errors = _valida_lettura_dettagli(dati, families, source_rows, attempt)
+            if reading is not None and (not errors or attempt):
+                return reading  # any remaining errors are rejected by the reducer
+            conversazione.extend([
+                {'role': 'assistant', 'content': json.dumps(dati, ensure_ascii=False)},
+                {'role': 'user', 'content': correzione + '\n'.join(errors)},
+            ])
+        raise AssertionError('unreachable: the second attempt always returns or raises')
+
+    import anthropic
+    from config import PDF_LLM_MODEL
+
+    messages = [{"role": "user", "content": testo}]
     client = anthropic.Anthropic(timeout=90.0, max_retries=1)
     for attempt in range(2):
         response = client.messages.create(
@@ -337,34 +383,14 @@ def read_details(rows: list[SourceRow], balances: dict, fiscal_year: int | None)
         block = next((b for b in response.content if b.type == 'tool_use' and b.name == 'dettagli_documentati'), None)
         if block is None:
             raise DetailReadError('missing_structured_response')
-        errors = []
-        try:
-            reading = DetailReading.model_validate(block.input)
-        except ValidationError as exc:
-            if attempt:
-                raise
-            errors = [f"{e['loc']}: {e['msg']}" for e in exc.errors(include_input=False)]
-        else:
-            for p in reading.proposals:
-                if p.aggregate not in families.get(p.period, {}):
-                    errors.append(f'{p.period}/{p.aggregate}: famiglia o periodo non ammessi.')
-                for cell in p.items:
-                    row = source_rows.get(cell.row)
-                    if row is None or not row.amounts:
-                        errors.append(f'{cell.row}: ID inesistente o privo di celle. Usa gli ID tra parentesi quadre, non i codici conto.')
-                    elif cell.column >= len(row.amounts):
-                        errors.append(f'{cell.row}: indice {cell.column} non valido; celle valide ' +
-                                      ', '.join(f'{i}:{v}' for i, v in enumerate(row.amounts)))
-                    elif cell.field not in ANALYTICAL_FAMILIES.get(p.aggregate, ()):
-                        errors.append(f'{cell.field}: campo estraneo alla famiglia {p.aggregate}.')
-            if not errors or attempt:
-                return reading  # any remaining errors are rejected by the reducer
+        reading, errors = _valida_lettura_dettagli(block.input, families, source_rows, attempt)
+        if reading is not None and (not errors or attempt):
+            return reading  # any remaining errors are rejected by the reducer
         messages.extend([
             {'role': 'assistant', 'content': [{'type': 'tool_use', 'id': block.id,
                                              'name': block.name, 'input': block.input}]},
             {'role': 'user', 'content': [{'type': 'tool_result', 'tool_use_id': block.id, 'is_error': True,
-                'content': 'Correggi i riferimenti, senza inventare importi. Restituisci tutte le proposte corrette. '
-                           'Gli indici iniziano da ZERO, una sola cella ha indice 0.\n' + '\n'.join(errors)}]},
+                'content': correzione + '\n'.join(errors)}]},
         ])
 
 
@@ -821,7 +847,7 @@ def enrich_pdf_details(file_path: str, current: dict, prior: dict | None = None,
         report['local_search_completed'] = True
         reading = DetailReading()
         report["status"] = "local_only"
-        if os.environ.get("ANTHROPIC_API_KEY"):
+        if llm_provider.lettore_dettagli_disponibile():
             try:
                 reading, report['search'] = search_details(rows, {"current": current, "prior": prior}, fiscal_year)
                 report["status"] = ('completed' if report['search']['status'] == 'complete' else

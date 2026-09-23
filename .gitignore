@@ -152,3 +152,6 @@ docs/examples/
 /tools/typst/download/
 /tools/typst/spike/.packages/
 /tools/typst/spike/output/
+
+# Banco del report Business plan: PDF del committente e PNG di confronto, mai in git
+tests/.banco-business-plan/

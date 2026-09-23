@@ -101,8 +101,10 @@ def render_business_plan(data: BusinessPlanData, *, only: Optional[tuple] = None
 
 
 def _register() -> None:
+    from . import sections_allegati as ann
     from . import sections_economia as eco
     from . import sections_finanza as fin
+    from . import sections_partenza as par
     from . import sections_sintesi as sin
     SECTIONS.clear()
     SECTIONS.extend([
@@ -116,11 +118,13 @@ def _register() -> None:
         SectionSpec("debito", "Sostenibilità del debito · DSCR e PFN", fin.debito),
         SectionSpec("circolante", "Capitale circolante commerciale", fin.circolante),
         SectionSpec("solidita", "Solidità patrimoniale, liquidità e redditività", fin.solidita),
-    ])
-    from . import sections_partenza as par
-    SECTIONS.extend([
         SectionSpec("partenza", "Punto di partenza", par.partenza),
         SectionSpec("ipotesi", "Assunzioni del piano", par.ipotesi),
+        SectionSpec("allegato_a", "Allegati A–E", ann.allegato_a),
+        SectionSpec("allegato_b", None, ann.allegato_b),
+        SectionSpec("allegato_c", None, ann.allegato_c),
+        SectionSpec("allegato_d", None, ann.allegato_d),
+        SectionSpec("allegato_e", None, ann.allegato_e),
     ])
 
 

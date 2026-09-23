@@ -102,12 +102,20 @@ def render_business_plan(data: BusinessPlanData, *, only: Optional[tuple] = None
 
 def _register() -> None:
     from . import sections_economia as eco
+    from . import sections_finanza as fin
+    from . import sections_sintesi as sin
     SECTIONS.clear()
     SECTIONS.extend([
+        SectionSpec("copertina", None, sin.copertina, cover=True),
+        SectionSpec("sintesi", "Sintesi del piano", sin.sintesi),
+        SectionSpec("forza", None, sin.forza),
         SectionSpec("economia", "Evoluzione economica dell'impresa", eco.economia),
         SectionSpec("costi", "EBITDA margin e struttura dei costi", eco.costi),
         SectionSpec("pareggio", "Costi fissi e variabili · break even point", eco.pareggio),
         SectionSpec("flussi", "Flussi di cassa", eco.flussi),
+        SectionSpec("debito", "Sostenibilità del debito · DSCR e PFN", fin.debito),
+        SectionSpec("circolante", "Capitale circolante commerciale", fin.circolante),
+        SectionSpec("solidita", "Solidità patrimoniale, liquidità e redditività", fin.solidita),
     ])
 
 

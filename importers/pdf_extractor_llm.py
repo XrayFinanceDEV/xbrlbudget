@@ -3466,17 +3466,23 @@ def extract_pdf_with_llm(
         # The deterministic parser produces correct values directly.
         return balance_sheet_data, income_data
 
-    api_key = os.environ.get("ANTHROPIC_API_KEY", "")
-    if not api_key:
-        raise PDFImportError("ANTHROPIC_API_KEY environment variable not set")
-
-    try:
-        client = anthropic.Anthropic(api_key=api_key)
-    except Exception as e:
-        raise PDFImportError(f"Failed to initialize Anthropic client: {e}")
-
-    # Step 1: Check if PDF is image-based (no extractable text)
+    # Step 1: Check if PDF is image-based (no extractable text). Vision has no
+    # local provider (vincoli: "la vision resta su Anthropic"); the text branch
+    # can run entirely on gx10 (PDF_LLM_PROVIDER_IVCEE=gx10) without ANTHROPIC_API_KEY.
     use_vision = _is_image_pdf(file_path)
+    api_key = os.environ.get("ANTHROPIC_API_KEY", "")
+    client = None
+    if use_vision or llm_provider.provider_ivcee() != "gx10":
+        if not api_key:
+            if use_vision:
+                raise PDFImportError(
+                    "PDF e' un'immagine: la vision richiede ANTHROPIC_API_KEY (nessun fornitore locale)."
+                )
+            raise PDFImportError("ANTHROPIC_API_KEY environment variable not set")
+        try:
+            client = anthropic.Anthropic(api_key=api_key)
+        except Exception as e:
+            raise PDFImportError(f"Failed to initialize Anthropic client: {e}")
 
     if use_vision:
         logger.info("Image-based PDF detected, using vision extraction")
@@ -4925,17 +4931,23 @@ def extract_pdf_both_years_with_llm(
     Raises:
         PDFImportError: If extraction fails
     """
-    api_key = os.environ.get("ANTHROPIC_API_KEY", "")
-    if not api_key:
-        raise PDFImportError("ANTHROPIC_API_KEY environment variable not set")
-
-    try:
-        client = anthropic.Anthropic(api_key=api_key)
-    except Exception as e:
-        raise PDFImportError(f"Failed to initialize Anthropic client: {e}")
-
-    # Step 1: Check if PDF is image-based (no extractable text)
+    # Step 1: Check if PDF is image-based (no extractable text). Vision has no
+    # local provider (vincoli: "la vision resta su Anthropic"); the text branch
+    # can run entirely on gx10 (PDF_LLM_PROVIDER_IVCEE=gx10) without ANTHROPIC_API_KEY.
     use_vision = _is_image_pdf(file_path)
+    api_key = os.environ.get("ANTHROPIC_API_KEY", "")
+    client = None
+    if use_vision or llm_provider.provider_ivcee() != "gx10":
+        if not api_key:
+            if use_vision:
+                raise PDFImportError(
+                    "PDF e' un'immagine: la vision richiede ANTHROPIC_API_KEY (nessun fornitore locale)."
+                )
+            raise PDFImportError("ANTHROPIC_API_KEY environment variable not set")
+        try:
+            client = anthropic.Anthropic(api_key=api_key)
+        except Exception as e:
+            raise PDFImportError(f"Failed to initialize Anthropic client: {e}")
 
     if use_vision:
         logger.info("Image-based PDF detected, using vision extraction (both years)")

@@ -472,6 +472,18 @@ def _coge_attivo(api_key: str) -> bool:
     return bool(api_key)
 
 
+def _ivcee_attivo(api_key: str) -> bool:
+    """Il ramo IV-CEE via LLM (route A/B, e l'ultima risorsa di route C) puo' girare?
+    Con il fornitore di default (Haiku) serve la chiave Anthropic, come sempre; con
+    gx10 (PDF_LLM_PROVIDER_IVCEE=gx10) serve la chiave gx10, e la chiave Anthropic non
+    conta per il ramo testuale. La vision resta sempre su Anthropic: i suoi cancelli,
+    dentro pdf_extractor_llm.py, restano un controllo separato e invariato."""
+    from importers.llm_provider import gx10_disponibile, provider_ivcee
+    if provider_ivcee() == "gx10":
+        return gx10_disponibile()
+    return bool(api_key)
+
+
 def _extract_route_c_last_resort(llm_extract):
     """Run the IV-CEE last resort without claiming a gross-vs-net measurement.
 
@@ -1013,7 +1025,7 @@ def import_pdf_balance_sheet(
                     source_err,
                 )
 
-            if not api_key:
+            if not _ivcee_attivo(api_key):
                 raise PDFImportError("ANTHROPIC_API_KEY is required for PDF import")
             if not is_trial_balance and not is_scanned and not _ocr_source:
                 # Prefer source-verified macros, but incomplete coverage must not
@@ -1494,7 +1506,7 @@ def import_pdf_balance_sheet(
                         f"({_pct:.0f}% del totale) non classificato in alcuna voce — "
                         f"correggere in Rettifiche"
                     )
-            elif not api_key:
+            elif not _ivcee_attivo(api_key):
                 raise PDFImportError(
                     "Impossibile estrarre la situazione contabile (nessun dato) "
                     "e ANTHROPIC_API_KEY non impostata."

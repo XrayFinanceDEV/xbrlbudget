@@ -79,16 +79,16 @@ def test_le_anticipate_non_passano_dal_conto_economico(monkeypatch):
             assert _figlia(con, y, campo) == _figlia(piano, y, campo), (y, campo)
 
 
-def test_un_override_delle_anticipate_va_a_riserva_non_in_cassa(monkeypatch):
+def test_un_override_delle_anticipate_modifica_la_cassa_non_la_riserva(monkeypatch):
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
     piano = _run("ic-ov-piano")
     con = _run("ic-ov-ant", overrides={2027: {"sp06f_imposte_anticipate_breve": 5000}})
     base_f = _figlia(piano, 2027, "sp06f_imposte_anticipate_breve")
     delta = D("5000") - base_f
-    for y in (2027, 2028):   # l'override si porta avanti, e la riserva con lui
+    for y in (2027, 2028):   # l'override si porta avanti, con la cassa come contropartita
         assert _figlia(con, y, "sp06f_imposte_anticipate_breve") == D("5000.00"), y
         assert _figlia(con, y, "sp12e_altre_riserve") \
-            == _figlia(piano, y, "sp12e_altre_riserve") + delta, y
+            == _figlia(piano, y, "sp12e_altre_riserve"), y
         assert _figlia(con, y, "sp09_disponibilita_liquide") \
-            == _figlia(piano, y, "sp09_disponibilita_liquide"), y
+            == _figlia(piano, y, "sp09_disponibilita_liquide") - delta, y
         assert con[y][1]["ce20_imposte"] == piano[y][1]["ce20_imposte"], y

@@ -64,16 +64,16 @@ def test_l_anno_dopo_lo_sweep_rimborsa_il_tiraggio():
     assert _quadra(anni, 2028)
 
 
-def test_regola_ricavi_oltre_affidamento_anche_senza_fabbisogno():
+def test_fidi_pregressi_restano_costanti_anche_con_regola_ricavi_legacy():
     res, anni, det, _ = _genera(
         "tiraggio-ricavi", _rows(bank_lines_rule="ricavi", revenue_growth_pct=20)
     )
     assert res["forecast_generated"] is True, res["message"]
     fidi = _fidi(det, 2027)
     assert D(str(fidi["tiraggio"])) == D("0.00")
-    assert D(str(fidi["residuo"])) == D("108000.00")
-    assert D(str(fidi["oltre_affidamento"])) == D("18000.00")
-    assert det[2027]["avviso_fidi"] is not None and "18.000" in det[2027]["avviso_fidi"]
+    assert D(str(fidi["residuo"])) == D("90000.00")
+    assert D(str(fidi["oltre_affidamento"])) == D("0.00")
+    assert det[2027]["avviso_fidi"] is None
     assert anni[2027][0][SP09] >= D("0.00")
 
 

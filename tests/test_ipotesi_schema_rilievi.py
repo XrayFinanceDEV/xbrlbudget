@@ -39,7 +39,7 @@ def test_build_assumption_row_porta_i_campi_nuovi():
     assert riga.inflation_pct == Decimal("2.5")
     assert riga.fixed_materials_growth_auto is True
     assert riga.bank_lines_amount == Decimal("90000")
-    assert riga.bank_lines_rule == "ricavi"
+    assert riga.bank_lines_rule == "costante"
     assert riga.other_lenders[0]["repayments"] == [0, 50000]
     assert riga.tfr_payments == Decimal("50000")
 
@@ -57,13 +57,8 @@ def test_other_lender_e_non_incassato():
         BudgetAssumptionsBulkRow(forecast_year=2027, bank_lines_rule="altro")
 
 
-def test_il_read_model_del_report_riporta_altri_finanziatori_regola_fidi_e_non_incassato():
-    """Le due chiavi JSON nuove passano dal catalogo del report, non da una copia.
-
-    `bank_lines_rule` e' l'unico campo scalare che non e' un importo: se il read
-    model lo trattasse come tale, `_decimal` solleverebbe e l'intero report
-    cadrebbe su una riga di catalogo.
-    """
+def test_il_read_model_del_report_riporta_altri_finanziatori_e_non_incassato():
+    """Le due chiavi JSON passano dal catalogo; la vecchia regola fidi no."""
     from backend.app.services import final_report_assumptions as fra
 
     row = BudgetAssumptions(
@@ -82,7 +77,7 @@ def test_il_read_model_del_report_riporta_altri_finanziatori_regola_fidi_e_non_i
     assert lenders[0].repayments == [Decimal("0"), Decimal("50000.00")]
     assert values["other_lenders"].provenance == "user"
     assert values["pregresso"].pregresso.crediti_commerciali.non_incassato is True
-    assert values["bank_lines_rule"].values == ["ricavi"]
+    assert "bank_lines_rule" not in values
     assert read_model.diagnostics == []
 
 

@@ -3651,14 +3651,9 @@ class ForecastEngine:
         sp12b = _base('sp12b_riserve_rivalutazione')
         sp12c = _base('sp12c_riserva_legale')
         sp12d = _base('sp12d_riserve_statutarie')
-        # `sp12e` riparte dall'anno base, piu' la contropartita cumulata degli
-        # override delle anticipate: costanti per regola (2026-09-18), si scostano
-        # dalla base solo per override, e quello scostamento e' la riserva che
-        # `_apply_sp_overrides` ha scritto. Senza, l'anno dopo la riserva
-        # tornerebbe alla base e la cassa assorbirebbe la differenza.
-        sp12e = _base('sp12e_altre_riserve') + (
-            _prev('sp06f_imposte_anticipate_breve') + _prev('sp07f_imposte_anticipate_lungo')
-            - _base('sp06f_imposte_anticipate_breve') - _base('sp07f_imposte_anticipate_lungo'))
+        # Le imposte anticipate restano costanti; un override SP mantiene
+        # la cassa come contropartita anche negli anni successivi.
+        sp12e = _base('sp12e_altre_riserve')
         sp12f = _base('sp12f_riserva_copertura_flussi')
         sp12g = _prev('sp12g_utili_perdite_portati') + previous_profit
         sp12h = _base('sp12h_riserva_neg_azioni_proprie')

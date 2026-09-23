@@ -15,6 +15,7 @@ from typing import Literal
 from pydantic import BaseModel, Field, ValidationError
 
 from calculations.ce_result import calculate_ce_result
+from importers import llm_provider
 from importers.detail_enrichment import collect_source_rows, source_line
 from importers.detail_search import plan_chunks
 from importers.source_reconciliation import AGG
@@ -119,24 +120,33 @@ Seleziona tutti i campi richiesti, anche quelli in pagine successive.
 
 def read_macros(rows, periods, feedback=()):
     """One bounded request, no SDK retry on exhausted credit or API failures."""
-    import anthropic
-    from config import PDF_LLM_MODEL
-
-    if not os.environ.get('ANTHROPIC_API_KEY'):
-        raise RuntimeError('api_key_unavailable')
     schema = MacroReading.model_json_schema()
     schema['$defs']['MacroFact']['properties']['field']['enum'] = list(FIELDS)
     schema['$defs']['MacroAbsence']['properties']['fields']['items']['enum'] = list(FIELDS)
     schema['$defs']['MacroUnresolved']['properties']['field']['enum'] = list(FIELDS)
     schema['$defs']['MacroCell']['properties']['row']['enum'] = [
         r.id for r in rows if r.amounts and not r.id.startswith('context:')]
+    testo = ('Campi: ' + json.dumps(FIELDS) + '\nPeriodi: ' + json.dumps(periods)
+             + '\nProblemi della lettura precedente: ' + json.dumps(list(feedback))
+             + '\n' + '\n'.join('statement=' + r.statement + ' ' + source_line(r) for r in rows))
+    if llm_provider.provider_ivcee() == 'gx10':
+        if not llm_provider.gx10_disponibile():
+            raise RuntimeError('api_key_unavailable')
+        try:
+            dati = llm_provider.chiama_gx10_json(PROMPT, [{'role': 'user', 'content': testo}],
+                                                 schema, max_tokens=12000)
+        except llm_provider.RispostaTroncata:
+            raise RuntimeError('macro_response_truncated') from None
+        return MacroReading.model_validate(dati)
+    import anthropic
+    from config import PDF_LLM_MODEL
+
+    if not os.environ.get('ANTHROPIC_API_KEY'):
+        raise RuntimeError('api_key_unavailable')
     with anthropic.Anthropic(max_retries=0, timeout=60.0) as client:
         response = client.messages.create(
             model=PDF_LLM_MODEL, max_tokens=12000, system=PROMPT,
-            messages=[{'role': 'user', 'content': (
-                'Campi: ' + json.dumps(FIELDS) + '\nPeriodi: ' + json.dumps(periods)
-                + '\nProblemi della lettura precedente: ' + json.dumps(list(feedback))
-                + '\n' + '\n'.join('statement=' + r.statement + ' ' + source_line(r) for r in rows))}],
+            messages=[{'role': 'user', 'content': testo}],
             tools=[{'name': 'macros', 'description': 'Macrovoci con prove nella fonte',
                     'input_schema': schema}],
             tool_choice={'type': 'tool', 'name': 'macros'},

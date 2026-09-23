@@ -204,6 +204,69 @@ def test_provider_contract_has_no_sdk_retries_and_excludes_context_citations(mon
         assert ma.read_macros([context, primary], ['current']).facts[0].field == primary.id
 
 
+def _expected_text(rows, periods, feedback=()):
+    return ('Campi: ' + json.dumps(ma.FIELDS) + '\nPeriodi: ' + json.dumps(periods)
+            + '\nProblemi della lettura precedente: ' + json.dumps(list(feedback))
+            + '\n' + '\n'.join('statement=' + r.statement + ' ' + ma.source_line(r) for r in rows))
+
+
+def test_gx10_provider_reads_macros_with_computed_schema_and_original_text(monkeypatch):
+    from importers import llm_provider
+    monkeypatch.setenv('PDF_LLM_PROVIDER_IVCEE', 'gx10')
+    monkeypatch.setenv('GX10_API_KEY', 'chiave-di-prova')
+    monkeypatch.delenv('ANTHROPIC_API_KEY', raising=False)
+    primary = fixture_rows()[0]
+    context = replace(primary, id='context:header', amounts=())
+    rows, periods, feedback = [context, primary], ['current'], ('problema precedente',)
+    captured = {}
+    def fake(system_prompt, messaggi, schema, *, max_tokens, **kwargs):
+        captured.update(system_prompt=system_prompt, messaggi=messaggi, schema=schema, max_tokens=max_tokens)
+        return fixture_reader([primary], periods).model_dump()
+    monkeypatch.setattr(llm_provider, 'chiama_gx10_json', fake)
+    reading = ma.read_macros(rows, periods, feedback)
+    assert isinstance(reading, ma.MacroReading)
+    assert reading.facts[0].field == primary.id
+    assert captured['schema']['$defs']['MacroCell']['properties']['row']['enum'] == [primary.id]
+    assert captured['schema']['$defs']['MacroFact']['properties']['field']['enum'] == list(ma.FIELDS)
+    assert captured['max_tokens'] == 12000
+    assert captured['messaggi'] == [{'role': 'user', 'content': _expected_text(rows, periods, feedback)}]
+
+
+def test_gx10_provider_truncated_response_raises_clean_error(monkeypatch):
+    from importers import llm_provider
+    monkeypatch.setenv('PDF_LLM_PROVIDER_IVCEE', 'gx10')
+    monkeypatch.setenv('GX10_API_KEY', 'chiave-di-prova')
+    monkeypatch.delenv('ANTHROPIC_API_KEY', raising=False)
+    def fake(*args, **kwargs):
+        raise llm_provider.RispostaTroncata('risposta gx10 troncata')
+    monkeypatch.setattr(llm_provider, 'chiama_gx10_json', fake)
+    with pytest.raises(RuntimeError, match='macro_response_truncated'):
+        ma.read_macros(fixture_rows(), ['current'])
+
+
+def test_gx10_provider_without_key_raises_clean_error_and_never_calls_gx10(monkeypatch):
+    from importers import llm_provider
+    monkeypatch.setenv('PDF_LLM_PROVIDER_IVCEE', 'gx10')
+    monkeypatch.delenv('GX10_API_KEY', raising=False)
+    monkeypatch.delenv('ANTHROPIC_API_KEY', raising=False)
+    calls = []
+    monkeypatch.setattr(llm_provider, 'chiama_gx10_json', lambda *a, **kw: calls.append(1))
+    with pytest.raises(RuntimeError, match='api_key_unavailable'):
+        ma.read_macros(fixture_rows(), ['current'])
+    assert not calls
+
+
+def test_default_provider_still_raises_on_missing_anthropic_key_and_never_calls_gx10(monkeypatch):
+    from importers import llm_provider
+    monkeypatch.delenv('PDF_LLM_PROVIDER_IVCEE', raising=False)
+    monkeypatch.delenv('ANTHROPIC_API_KEY', raising=False)
+    calls = []
+    monkeypatch.setattr(llm_provider, 'chiama_gx10_json', lambda *a, **kw: calls.append(1))
+    with pytest.raises(RuntimeError, match='api_key_unavailable'):
+        ma.read_macros(fixture_rows(), ['current'])
+    assert not calls
+
+
 def test_time_budget_never_looks_like_a_complete_read():
     with pytest.raises(ma.MacroAnalysisError, match='time_budget_exhausted'):
         ma.analyze_pdf_macros('unused', rows=fixture_rows(), reader=fixture_reader, max_seconds=0)

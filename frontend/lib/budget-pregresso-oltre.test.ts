@@ -33,7 +33,7 @@ describe("budget-pregresso-oltre", () => {
   });
   it("oltreRows: righe con massa oltre, stati neutri", () => {
     const rows = oltreRows(bs, pianoBase(bs, anni, {}), anni);
-    expect(rows.map((r) => r.key)).toEqual(["crediti_commerciali", "altri_debiti"]);
+    expect(rows.map((r) => r.key)).toEqual(["crediti_commerciali", "crediti_tributari_breve", "altri_debiti"]);
     expect(rows[0]).toMatchObject({ opening: 30000, amounts: [0, 0, 0], resta: 30000, stato: "nessun movimento nel piano", dir: "in" });
   });
   it("withOltreAmount scrive nell'anno la sola parte oltre e aggiorna resta e stato", () => {

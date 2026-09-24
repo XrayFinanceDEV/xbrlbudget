@@ -1,5 +1,5 @@
 import type { PraticaState } from "@/contexts/PraticaContext";
-import type { BudgetScenario, ScenarioSummary } from "@/types/api";
+import type { BudgetScenario, ExistingBalanceOption, ScenarioSummary } from "@/types/api";
 
 /**
  * I tre ingressi al percorso, come dato puro.
@@ -34,7 +34,7 @@ export interface IngressoPratica {
     budgetScenarioId: number | null;
   };
   /** Dove atterrare dopo `startPratica`. */
-  route: "/pratica" | "/budget";
+  route: "/pratica" | "/budget" | `/budget?open=${number}`;
 }
 
 /**
@@ -100,6 +100,30 @@ export function ingressoNuovaPratica(
       budgetScenarioId: null,
     },
     route: workflow === "startup" ? "/budget" : "/pratica",
+  };
+}
+
+/** A fresh budget from an imported annual statement, without returning to Import. */
+export function ingressoDaBilancioEsistente(
+  companyId: number,
+  balance: ExistingBalanceOption,
+  scenarioId: number,
+): IngressoPratica {
+  if (balance.period_months != null && balance.period_months !== 12) {
+    throw new Error("Il budget deve partire da un bilancio annuale");
+  }
+  return {
+    startupMode: false,
+    pratica: {
+      workflow: "bilancio",
+      companyId,
+      fiscalYear: balance.year,
+      periodMonths: 12,
+      infrannualeScenarioId: null,
+      budgetScenarioId: scenarioId,
+      analysisStep: "anagrafiche",
+    },
+    route: `/budget?open=${scenarioId}`,
   };
 }
 

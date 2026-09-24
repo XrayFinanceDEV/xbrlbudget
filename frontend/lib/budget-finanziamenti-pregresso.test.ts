@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { BalanceSheet, FinancingLoanInput } from "@/types/api";
 import {
-  chiusuraResidui, contrattiPregressi, contrattoRows, controlliBanche, controlloAltri, nuovoContratto,
+  chiusuraResidui, contrattiPregressi, contrattoRows, controlliBanche, controlloAltri, finanziatoreDalBilancio, nuovoContratto,
   prestitiNuovi, quotaMutui, restaStato, serveInizializzareFidi, unisciContratti, withRimborso,
 } from "./budget-finanziamenti-pregresso";
 
@@ -45,6 +45,19 @@ describe("budget-finanziamenti-pregresso", () => {
   });
   it("nuovoContratto e' vuoto e nominato in sequenza", () => {
     expect(nuovoContratto(3, 3)).toEqual({ name: "Finanziamento C", amount: 0, opening_residual: 0, interest_rate: 4, grace_years: 0, balloon_pct: 0, duration_years: null, repayments: [0, 0, 0] });
+  });
+  it("precompila il residuo degli altri finanziatori dal bilancio, senza rate inventate", () => {
+    const base = {
+      sp16b_debiti_altri_finanz_breve: "12503.74",
+      sp17b_debiti_altri_finanz_lungo: "24000",
+    } as unknown as BalanceSheet;
+    const iniziale = finanziatoreDalBilancio(base, 5);
+    expect(iniziale).toEqual({
+      name: "Finanziatore 1", opening_residual: 36503.74,
+      interest_rate: 0, repayments: [0, 0, 0, 0, 0],
+    });
+    expect(controlloAltri(base, [iniziale!]).ok).toBe(true);
+    expect(finanziatoreDalBilancio({} as BalanceSheet, 3)).toBeNull();
   });
   it("quota dei mutui e controlli sulle banche", () => {
     expect(quotaMutui(bs, 90000)).toBe(82500);

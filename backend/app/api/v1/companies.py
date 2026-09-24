@@ -4,6 +4,7 @@ Company API endpoints
 from datetime import datetime
 from typing import List, Optional
 from fastapi import APIRouter, Depends, HTTPException, status
+from sqlalchemy import or_
 from sqlalchemy.orm import Session, joinedload
 import sys
 import os
@@ -154,3 +155,26 @@ def get_company_years(
 
     # Deduplicate (partial + full-year records can coexist for same year)
     return sorted(set(year[0] for year in years), reverse=True)
+
+
+@router.get("/companies/{company_id}/existing-balances", response_model=List[schemas.ExistingBalanceOption])
+def get_existing_balances(
+    company_id: int,
+    user_id: str = Depends(get_current_user_id),
+    db: Session = Depends(get_db),
+):
+    """Complete annual statements available as the base of a new budget."""
+    validate_company_owned_by_user(db, company_id, user_id)
+    rows = (
+        db.query(models.FinancialYear)
+        .filter(
+            models.FinancialYear.company_id == company_id,
+            or_(models.FinancialYear.period_months.is_(None), models.FinancialYear.period_months == 12),
+        )
+        .order_by(models.FinancialYear.year.desc(), models.FinancialYear.period_months.desc())
+        .all()
+    )
+    return [
+        schemas.ExistingBalanceOption(id=fy.id, year=fy.year, period_months=fy.period_months)
+        for fy in rows if fy.balance_sheet is not None and fy.income_statement is not None
+    ]

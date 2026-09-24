@@ -28,6 +28,7 @@ import {
   type AssumptionsMap,
 } from "@/lib/budget-horizon";
 import { applicaInflazioneAlleAuto, withInflazione } from "@/lib/budget-inflazione";
+import { finanziatoreDalBilancio } from "@/lib/budget-finanziamenti-pregresso";
 import { withManualSpAmount, withSpRule } from "@/lib/budget-sp-manuale";
 import { isScenarioPrecedente, migraScenario, type EsitoMigrazione } from "@/lib/budget-migrazione";
 import type { HistoricalData } from "@/lib/budget-trend";
@@ -139,6 +140,7 @@ export function useScenarioAssumptions({
   // al posto di quelle vere, e il bulk cancella e reinserisce. Il salvataggio
   // resta chiuso, e resta chiuso anche se la lettura fallisce.
   const [idratato, setIdratato] = useState(false);
+  const idratatoPer = useRef<number | null>(null);
 
   // Migrazione degli scenari salvati PRIMA del giro di rilievi del 14/09
   // (Task 9, spec §4.8). `migrazione` e' lo stato mostrato (card + badge);
@@ -170,6 +172,7 @@ export function useScenarioAssumptions({
   // dopo ~230 ms — il piano a 5 anni non era impostabile da nessuna schermata.
   useEffect(() => {
     if (scenarioId === null) {
+      idratatoPer.current = null;
       // Scenario nuovo: la mappa la riempie di default l'effetto qui sotto.
       // Non c'e' nulla da migrare — `defaultAssumption` scrive gia'
       // `inflation_pct: 2`, la firma di uno scenario nato dopo questo lotto.
@@ -182,6 +185,7 @@ export function useScenarioAssumptions({
       return;
     }
     let annullato = false;
+    idratatoPer.current = null;
     setIdratato(false);
     getBudgetAssumptions(companyId, scenarioId).then((data) => {
       if (annullato) return;
@@ -230,6 +234,7 @@ export function useScenarioAssumptions({
       );
       setExistingAssumptionYears(existingYears);
       setNumYears(nextNumYears);
+      idratatoPer.current = scenarioId;
       setIdratato(true);
     }).catch((err) => {
       if (annullato) return;
@@ -382,6 +387,25 @@ export function useScenarioAssumptions({
   }, [forecastYears]);
 
   const isNew = idratato && existingAssumptionYears.size === 0;
+
+  // Il bilancio annuale conosce il debito complessivo verso gli altri
+  // finanziatori, ma non i singoli contratti: un nuovo piano parte con una
+  // riga aggregata, poi l'utente puo' dividerla e scadenziare i rimborsi.
+  // Una riga salvata (o gia' compilata in questa sessione) non si sostituisce.
+  const inizializzatoAltriPer = useRef<number | null>(null);
+  const bilancioBase = historicalData[baseYear]?.balance;
+  const primoAnno = forecastYears[0];
+  const primaRigaPronta = primoAnno !== undefined && assumptions[primoAnno] !== undefined;
+  useEffect(() => {
+    if (!isNew || scenarioId === null || idratatoPer.current !== scenarioId || !bilancioBase || !primaRigaPronta) return;
+    if (inizializzatoAltriPer.current === scenarioId) return;
+    inizializzatoAltriPer.current = scenarioId;
+    const iniziale = finanziatoreDalBilancio(bilancioBase, forecastYears.length);
+    if (!iniziale) return;
+    setAssumptions((prev) => prev[primoAnno]?.other_lenders != null
+      ? prev
+      : withOtherLenders(prev, forecastYears, [iniziale]));
+  }, [isNew, scenarioId, bilancioBase, primaRigaPronta, primoAnno, forecastYears]);
 
   // Uno scenario NUOVO nasce con l'aliquota proposta dall'ultimo consuntivo
   // depositato (commercialista, 2026-09-18), una volta sola per scenario: da

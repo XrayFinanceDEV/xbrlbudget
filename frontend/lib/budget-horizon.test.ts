@@ -376,6 +376,8 @@ describe("hydrateAssumptions", () => {
       // superano il rateizzato".
       const masses: Record<PregressoKey, number> = {
         crediti_commerciali: p.crediti_commerciali!.opening,
+        crediti_tributari_breve: 0,
+        crediti_tributari_lungo: 0,
         debiti_fornitori: 0,
         debiti_tributari: p.debiti_tributari!.opening,
         debiti_previdenziali: 0,

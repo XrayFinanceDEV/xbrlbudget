@@ -17,8 +17,8 @@ export const WIZARD_STEPS: readonly WizardStep[] = [
   { n: 2, key: "fatturato", title: "Fatturato", subtitle: "ricavi e altri ricavi", group: "Conto economico" },
   { n: 3, key: "costi", title: "Costi", subtitle: "quota fissa, inflazione, ipotesi manuali", group: "Conto economico" },
   { n: 4, key: "circolante", title: "Capitale circolante", subtitle: "giorni medi", group: "Stato patrimoniale" },
-  { n: 5, key: "patrimoniale-pregresso", title: "Patrimoniale pregresso", subtitle: "come si chiude ciò che c'è già", group: "Stato patrimoniale", badge: "nuovo" },
-  { n: 6, key: "patrimoniale-piano", title: "Patrimoniale piano", subtitle: "ciò che il previsionale genera", group: "Stato patrimoniale", badge: "nuovo" },
+  { n: 5, key: "patrimoniale-pregresso", title: "Patrimoniale pregresso", subtitle: "come si chiude ciò che c'è già", group: "Stato patrimoniale" },
+  { n: 6, key: "patrimoniale-piano", title: "Patrimoniale piano", subtitle: "ciò che il previsionale genera", group: "Stato patrimoniale" },
   { n: 7, key: "imposte", title: "Imposte", subtitle: "aliquota e pagamento", group: "Stato patrimoniale" },
 ];
 

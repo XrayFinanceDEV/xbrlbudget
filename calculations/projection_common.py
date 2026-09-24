@@ -277,6 +277,8 @@ def new_financing_schedule(loans, target_year):
 # quando quel saldo si chiude.
 PREGRESSO_KEYS = (
     "crediti_commerciali",
+    "crediti_tributari_breve",
+    "crediti_tributari_lungo",
     "debiti_fornitori",
     "debiti_tributari",
     "debiti_previdenziali",
@@ -284,6 +286,8 @@ PREGRESSO_KEYS = (
 )
 PREGRESSO_LABELS = {
     "crediti_commerciali": "crediti commerciali",
+    "crediti_tributari_breve": "crediti tributari entro 12 mesi",
+    "crediti_tributari_lungo": "crediti tributari oltre 12 mesi",
     "debiti_fornitori": "debiti verso fornitori",
     "debiti_tributari": "debiti tributari",
     "debiti_previdenziali": "debiti previdenziali",
@@ -291,7 +295,7 @@ PREGRESSO_LABELS = {
 }
 
 
-def pregresso_opening_masses(getter: Callable[[str], Decimal]):
+def pregresso_opening_masses(getter: Callable[[str], Decimal], acconti_tributari=ZERO):
     """Le cinque masse di apertura del pregresso, dall'anno base.
 
     I crediti commerciali sono i soli crediti COMMERCIALI: crediti tributari e
@@ -304,6 +308,8 @@ def pregresso_opening_masses(getter: Callable[[str], Decimal]):
             g('sp06_crediti_breve') - g('sp06e_crediti_tributari_breve') - g('sp06f_imposte_anticipate_breve')
             + g('sp07_crediti_lungo') - g('sp07e_crediti_tributari_lungo') - g('sp07f_imposte_anticipate_lungo')
         ),
+        "crediti_tributari_breve": g('sp06e_crediti_tributari_breve') - Decimal(str(acconti_tributari)),
+        "crediti_tributari_lungo": g('sp07e_crediti_tributari_lungo'),
         "debiti_fornitori": g('sp16d_debiti_fornitori_breve') + g('sp17d_debiti_fornitori_lungo'),
         "debiti_tributari": g('sp16e_debiti_tributari_breve') + g('sp17e_debiti_tributari_lungo'),
         "debiti_previdenziali": g('sp16f_debiti_previdenza_breve') + g('sp17f_debiti_previdenza_lungo'),
@@ -432,15 +438,16 @@ class TaxYear:
     rate_paid: Decimal
     generated_debt: Decimal
     generated_credit: Decimal
-    # Sempre zero dal 2026-09-18: il credito d'apertura si compensa per intero
-    # (`credito_compensato`). Il campo resta perche' dettagli e reti lo leggono.
+    # Per gli acconti gia' nel bilancio base, l'eccedenza non compensabile
+    # resta disponibile negli anni seguenti.
     opening_credit_left: Decimal
     cash_out: Decimal
     credito_compensato: Decimal = ZERO
 
 
 def tax_settlement_saldo_acconto(*, opening_credit, saldo_due, rate_due, current_tax,
-                                 previous_tax, acconto_pct, explicit_advances) -> TaxYear:
+                                 previous_tax, acconto_pct, explicit_advances,
+                                 carry_excess_credit=False) -> TaxYear:
     """Imposte a saldo + acconto (spec lotto 2 §3.2). La regola degli acconti e' `acconti_dovuti`, condivisa con
     `posizione_tributaria_fine_anno` dell'infrannuale.
 
@@ -454,12 +461,9 @@ def tax_settlement_saldo_acconto(*, opening_credit, saldo_due, rate_due, current
     opening_credit, saldo_due, rate_due = d(opening_credit), d(saldo_due), d(rate_due)
     current_tax, previous_tax = d(current_tax), d(previous_tax)
     acconti = acconti_dovuti(explicit_advances, previous_tax, acconto_pct)
-    # Commercialista, 2026-09-18: debito e credito dell'anno prima si chiudono
-    # sempre, non si accumulano. Il debito esce come saldo; il credito si
-    # compensa per intero (F24) e riduce le uscite per imposte, anche oltre gli
-    # acconti — `cash_out` puo' quindi essere negativo. Prima il credito si
-    # consumava solo contro il saldo, che e' zero proprio quando l'anno prima
-    # chiude a credito: il resto si trascinava da un anno all'altro.
+    # Il credito generato dal piano segue la regola esistente di compensazione
+    # integrale. Gli acconti storici, se distinti dall'utente, si compensano
+    # fino ai pagamenti dell'anno; l'eccedenza resta credito.
     saldo_paid = saldo_due
     net = current_tax - acconti
     # This is not diagnostic precision: year N+1 pays ``generated_debt`` as
@@ -468,12 +472,14 @@ def tax_settlement_saldo_acconto(*, opening_credit, saldo_due, rate_due, current
     # (for example 5760.04707000 behind a 5760.05 cell) changes next year's
     # cash while remaining invisible in the persisted accounts (#51).
     generated_debt = max(ZERO, net).quantize(CENT, rounding=ROUND_HALF_UP)
+    payable = max(ZERO, saldo_paid + acconti + rate_due)
+    compensated = min(opening_credit, payable) if carry_excess_credit else opening_credit
     return TaxYear(
         saldo_paid=saldo_paid, acconti_paid=acconti, rate_paid=rate_due,
         generated_debt=generated_debt, generated_credit=max(ZERO, -net),
-        opening_credit_left=ZERO,
-        cash_out=saldo_paid + acconti + rate_due - opening_credit,
-        credito_compensato=opening_credit,
+        opening_credit_left=opening_credit - compensated,
+        cash_out=saldo_paid + acconti + rate_due - compensated,
+        credito_compensato=compensated,
     )
 
 

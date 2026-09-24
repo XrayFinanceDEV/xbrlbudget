@@ -3,6 +3,7 @@ import type {
   Company,
   CompanyWithScenarios,
   FinancialYear,
+  ExistingBalanceOption,
   BalanceSheet,
   IncomeStatement,
   AllRatios,
@@ -825,6 +826,11 @@ export const getFinalReport = async (
     `/companies/${companyId}/scenarios/${scenarioId}/final-report`,
   );
   return parseFinalReportModel(data);
+};
+
+export const getExistingBalances = async (companyId: number): Promise<ExistingBalanceOption[]> => {
+  const { data } = await api.get<ExistingBalanceOption[]>(`/companies/${companyId}/existing-balances`);
+  return data;
 };
 
 export const getFinalReportV2 = async (

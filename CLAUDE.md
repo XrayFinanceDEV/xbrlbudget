@@ -882,7 +882,9 @@ crisi d'impresa, segnali, allegati A/B), sullo stesso motore del Business plan. 
 `assemble_intermedio`, testi a regole: **non legge i commenti AI**, che restano a schermo. Il vecchio
 **report intermedio** Typst (`POST …/infrannuale/report/pdf`, `intermedio_catalog.py`,
 `templates/intermedio/`, che legge `dossier-base` senza modificarlo) resta nel codice ma
-l'interfaccia non lo chiama più. → [docs/budget/REPORT-INFRANNUALE-PDF.md](docs/budget/REPORT-INFRANNUALE-PDF.md)
+l'interfaccia non lo chiama più. Accanto c'è «Scarica Word» (`…/infrannuale/docx`): lo stesso report in
+`.docx`, tradotto dagli stessi flowable (`renderers/docx_export.py`), per correggere i testi prima di consegnarlo.
+→ [docs/budget/REPORT-INFRANNUALE-PDF.md](docs/budget/REPORT-INFRANNUALE-PDF.md)
 **I 14 indicatori della crisi, il
 punteggio e la classe A3→D si calcolano solo sul server** (`calculations/crisi_impresa.py`,
 `GET /scenarios/{id}/infrannuale/crisi`); il client sceglie il rating dal numero di segnali in
@@ -963,7 +965,7 @@ and `/aziende` redirect here) · `/budget` (scenario assumptions, and the Startu
 `/forecast/income` (**editable** P&L: cells → batch save → BS adapts) · `/forecast/balance`
 (**editable**: cells write `sp_overrides`, not `*_override` columns) · `/forecast/reclassified`
 (read-only) · `/analysis` (Indici) · `/cashflow` (rendiconto) · `/report` (selettore «Modello»:
-**Business plan** — ReportLab, default — oppure il dossier Typst; →
+**Business plan** — ReportLab, default, anche in Word con «Scarica Word» — oppure il dossier Typst; →
 [docs/budget/BUSINESS-PLAN-PDF.md](docs/budget/BUSINESS-PLAN-PDF.md)) · `/import`
 (works, but unlinked from the nav — the pratica Import step is the normal way in).
 

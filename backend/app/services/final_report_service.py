@@ -213,10 +213,14 @@ def _narrative(
                 freshness=item.get("freshness", "fresh"),
             ))
         else:
-            # Keep M1-06's draft signal, but only once: subsequent freshness
-            # projection must remain a pure hash-independent read operation.
+            # Declared once (freshness projection stays a pure read) and only as
+            # information: the prose belongs to the Typst dossier, detached from
+            # /report since 2026-09-24, and the Business plan writes its texts by
+            # rule. As a warning it kept every report in draft and refused the
+            # Business plan's «final» for texts nobody reads. The dossier keeps
+            # its own gate (EditorialPlanRequired) if it is ever called again.
             if current_source_hash is None:
-                diagnostics.append(_diagnostic("narrative_missing", "warning", "narrative", f"Blocco narrativo {ident} non disponibile."))
+                diagnostics.append(_diagnostic("narrative_missing", "info", "narrative", f"Blocco narrativo {ident} non disponibile."))
             output.append(NarrativeBlock(id=ident, text="", provenance="migrated", updated_at=generated_at,
                                          source_hash="0" * 64, freshness="missing"))
     return output

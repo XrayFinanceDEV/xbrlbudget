@@ -377,7 +377,8 @@ describe("nextInlinePreviewUrl", () => {
 
 describe("modelli di report", () => {
   it("il Business plan è il primo, ed è il default", () => {
-    expect(REPORT_MODELS.map((m) => m.value)).toEqual(["business_plan", "dossier"]);
+    // Il dossier Typst è staccato da /report (2026-09-24): resta nel codice, pronto a tornare come prodotto a sé.
+    expect(REPORT_MODELS.map((m) => m.value)).toEqual(["business_plan"]);
   });
   it("ogni modello ha la sua rotta", () => {
     expect(reportPdfPath("dossier")).toBe("final-report/pdf");

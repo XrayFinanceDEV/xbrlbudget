@@ -21,6 +21,7 @@ rapidocr-onnxruntime>=1.4.4
 
 # PDF report generation
 reportlab==4.2.5
+python-docx==1.2.0
 matplotlib==3.9.3
 
 # Authentication

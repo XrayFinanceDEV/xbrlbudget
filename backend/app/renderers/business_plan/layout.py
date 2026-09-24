@@ -168,6 +168,7 @@ def panel(title: str, bullets: list) -> Table:
 def chart(png: bytes, height_in: float, width_pt: float = CW) -> Image:
     img = Image(io.BytesIO(png), width=width_pt, height=width_pt * height_in / 7.2)
     img.hAlign = "CENTER"
+    img.png = png  # il Word riusa il PNG del grafico, non l'immagine già decodificata
     return img
 
 

@@ -57,6 +57,8 @@ def _twin(ax):
 def ricavi_periodi(labels, ricavi: Values, margine: Values, kinds: Sequence[str]) -> bytes:
     """Ricavi per periodo (C grigio, 6M azzurro tratteggiato, Ann. azzurro, F navy) e linea dell'EBITDA margin."""
     fig, ax = _fig("ricavi_periodi")
+    fm = _finite(_f(margine))
+    pct = lambda v, _=None: f"{v:,.0f}%".replace(",", ".")  # noqa: E731
     fig.subplots_adjust(left=0.105, right=0.935, top=0.95, bottom=0.12)
     k = _k(ricavi)
     style = {"C": (theme.GREY, None, "white"), "6M": (theme.LIGHTBLUE, "//", theme.NAVY),
@@ -76,14 +78,21 @@ def ricavi_periodi(labels, ricavi: Values, margine: Values, kinds: Sequence[str]
     ax2 = _twin(ax)
     m = _f(margine)
     ax2.plot(list(range(len(labels))), m, color=theme.ORANGE, linewidth=2.2, marker="o", markersize=6, zorder=3)
-    fm = _finite(m)
     top = max(5.0, math.ceil(max(fm + [0.0]) * 1.12))
-    ax2.set_ylim(min([0.0] + [x * 1.25 for x in fm]), top)
-    ax2.yaxis.set_major_formatter(FuncFormatter(lambda v, _: f"{v:.0f}%"))
+    lo2 = min([0.0] + [x * 1.25 for x in fm])
+    if fm and not math.isnan(m[0]) and m[0] - lo2 > 0.78 * (top - lo2):  # la prima etichetta finirebbe sulla legenda
+        top = lo2 + (m[0] - lo2) / 0.78
+    ax2.set_ylim(lo2, top)
+    ax2.yaxis.set_major_formatter(FuncFormatter(pct))
+    lo2, top = ax2.get_ylim()
+    largo = max([len(pct(t)) for t in ax2.get_yticks() if lo2 <= t <= top] + [3])
+    fig.subplots_adjust(right=min(0.935, 0.985 - 0.0105 * largo))  # 80.000% su AIC 12M: il margine segue l'etichetta
     span = ax2.get_ylim()[1] - ax2.get_ylim()[0]
     for i, v in enumerate(m):
         if not math.isnan(v):
-            _text(ax2, i, v + 0.035 * span, chart_num(v, 2) + "%", ha="center", va="bottom",
+            # sotto il punto quando il margine è negativo: sopra finirebbe sulle etichette delle barre
+            _text(ax2, i, v + (0.035 if v >= 0 else -0.035) * span, chart_num(v, 2) + "%", ha="center",
+                  va="bottom" if v >= 0 else "top",
                   color=theme.ORANGE_DARK, fontweight="bold", fontsize=LABEL)
     _legend(ax, [Line2D([], [], color=theme.ORANGE, linewidth=2.2, marker="o", markersize=6)], ["EBITDA margin %"],
             loc="upper left", bbox_to_anchor=(0, 1.035))
@@ -96,10 +105,15 @@ BIG = 1.35
 
 def risultati(labels, ebitda: Values, ebit: Values, utile: Values) -> bytes:
     fig, ax = _fig("risultati")
-    fig.subplots_adjust(left=0.085, right=0.985, top=0.96, bottom=0.13)
+    fig.subplots_adjust(left=0.105, right=0.985, top=0.96, bottom=0.13)
     series = [(_k(ebitda), theme.NAVY, "EBITDA"), (_k(ebit), theme.TEAL, "EBIT"), (_k(utile), theme.ORANGE, "Utile netto")]
     _grouped_labels(ax, labels, series, 0.26, size=SMALL * BIG)
-    _limits(ax, _finite(*[s[0] for s in series]), top_room=1.3)
+    vals = _finite(*[s[0] for s in series])
+    _limits(ax, vals, top_room=1.3)
+    lo, hi = ax.get_ylim()
+    cima = max([0.0] + vals)
+    if hi - cima < 0.25 * (hi - lo):  # tutto negativo: la cima è lo zero e la legenda starebbe sulle barre
+        ax.set_ylim(lo, cima + (hi - lo) * 0.25 / 0.75)
     _thousands(ax)
     ax.tick_params(labelsize=TICK * BIG)
     ax.set_ylabel("€ migliaia", fontfamily=FAMILY, fontsize=TICK * BIG, color=theme.AXIS)
@@ -159,11 +173,16 @@ def circolante(labels, crediti: Values, rimanenze: Values, fornitori_neg: Values
 def debito(labels, dscr: Values, pfn_ebitda: Values) -> bytes:
     """Due pannelli: DSCR con la soglia 1,0× e PFN / EBITDA."""
     fig, (a1, a2) = _fig("debito", ncols=2)
-    fig.subplots_adjust(left=0.04, right=0.985, top=0.88, bottom=0.12, wspace=0.12)
+    fig.subplots_adjust(left=0.065, right=0.985, top=0.88, bottom=0.12, wspace=0.16)
     for ax, vals, color, title in ((a1, _f(dscr), theme.NAVY, "DSCR"), (a2, _f(pfn_ebitda), theme.RED, "PFN / EBITDA")):
         ax.bar(list(range(len(labels))), vals, 0.55, color=color, zorder=2)
-        top = max(_finite(vals) + [1.2]) * 1.18
-        ax.set_ylim(min([0.0] + _finite(vals)), math.ceil(top))
+        top = math.ceil(max(_finite(vals) + [1.2]) * 1.18)
+        lo = min([0.0] + _finite(vals))
+        if lo < 0:  # spazio sotto per l'etichetta della barra negativa, sopra le date
+            lo -= 0.18 * (top - lo)
+        if ax is a1:  # «soglia 1,0×» sta sopra la linea e sotto il titolo
+            top = max(top, math.ceil(1.0 + 0.16 * (top - lo)))
+        ax.set_ylim(lo, top)
         ax.yaxis.set_major_locator(MaxNLocator(nbins=4, integer=True))
         span = ax.get_ylim()[1] - ax.get_ylim()[0]
         for i, v in enumerate(vals):
@@ -172,6 +191,11 @@ def debito(labels, dscr: Values, pfn_ebitda: Values) -> bytes:
                       ha="center", va="bottom" if v >= 0 else "top", color="black", fontweight="bold",
                       fontsize=LABEL * 1.2)
         _xticks(ax, labels)
+        ax.set_xlim(-0.5, len(labels) - 0.5)  # senza barre matplotlib stringe l'asse e taglia l'ultima data
+        if not _finite(vals):
+            ax.set_yticks([])
+            _text(ax, (len(labels) - 1) / 2, sum(ax.get_ylim()) / 2, "n.d. in tutti i periodi", ha="center",
+                  va="center", color=theme.GREY, fontsize=TICK * 1.2)
         ax.tick_params(labelsize=TICK * 1.2)
         ax.set_title(title, loc="left", fontfamily=FAMILY, fontsize=12.5, color=theme.NAVY)
     a1.axhline(1.0, color=theme.RED, linestyle="--", linewidth=1.8, zorder=3)

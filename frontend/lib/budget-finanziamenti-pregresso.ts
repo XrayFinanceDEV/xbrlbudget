@@ -234,6 +234,13 @@ export function nuovoFinanziatore(n: number, horizon: number): OtherLenderInput 
   };
 }
 
+/** Per un nuovo piano, riporta il debito storico degli altri finanziatori in
+ * una sola riga modificabile. Non inventa rate o tassi non presenti nel bilancio. */
+export function finanziatoreDalBilancio(baseBs: FonteBilancio, horizon: number): OtherLenderInput | null {
+  const residuo = v(baseBs, "sp16b_debiti_altri_finanz_breve") + v(baseBs, "sp17b_debiti_altri_finanz_lungo");
+  return residuo > 0 ? { ...nuovoFinanziatore(1, horizon), opening_residual: residuo } : null;
+}
+
 /** Un solo finanziamento: somma dei residui, tasso medio ponderato sui residui (un decimale),
  *  rimborsi sommati anno per anno. «Per fare in fretta»: uno scadenziario invece di N. */
 export function unisciContratti(items: FinancingLoanInput[], horizon: number): FinancingLoanInput[] {

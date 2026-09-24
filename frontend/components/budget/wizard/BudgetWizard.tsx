@@ -46,6 +46,7 @@ import {
 } from "@/lib/budget-wizard-steps";
 import { getErrorMessage } from "@/lib/utils";
 import { righeErroriIpotesi } from "@/lib/budget-bulk-errors";
+import { previewRowsForStep } from "@/lib/budget-preview-stage";
 import type { BudgetScenario } from "@/types/api";
 import { WizardRail } from "./WizardRail";
 import { MigrazioneCard } from "./MigrazioneCard";
@@ -131,15 +132,17 @@ export function BudgetWizard({
     window.scrollTo({ top: 0 });
   }, [ripristinatoPer, scenario.id, step]);
 
-  // Le righe che vanno all'anteprima sono le stesse che vanno al salvataggio,
-  // e vengono sempre dalla mappa IDRATATA: prima che le ipotesi salvate siano
-  // atterrate la mappa non rappresenta lo scenario, e il bulk cancella e
-  // reinserisce. `null` = «non ancora», non «nessuna riga».
+  // Le righe da salvare vengono sempre dalla mappa IDRATATA: prima che le
+  // ipotesi salvate siano arrivate, il bulk potrebbe sovrascriverle.
   const rows = useMemo(
     () =>
       s.idratato ? assumptionRowsForSave(s.assumptions, s.forecastYears, scenario.id) : null,
     [s.idratato, s.forecastYears, s.assumptions, scenario.id],
   );
+
+  // Nei passi economici un pregresso incompleto non deve fermare l'anteprima;
+  // nessun campo viene rimosso dalle righe usate dal salvataggio finale.
+  const previewRows = useMemo(() => rows && previewRowsForStep(rows, step), [rows, step]);
 
   // Il passo 1 non ha nulla da proiettare (la sua scheda ricapitola lo
   // storico gia' caricato): niente chiamata di anteprima finche' non si entra
@@ -147,7 +150,7 @@ export function BudgetWizard({
   const preview = useForecastPreview({
     companyId,
     scenarioId: scenario.id,
-    rows,
+    rows: previewRows,
     enabled: step !== "scenario",
   });
 
@@ -248,6 +251,7 @@ export function BudgetWizard({
   const stepProps: StepProps = {
     companyId,
     scenarioId: scenario.id,
+    isNew: s.isNew,
     baseYear: s.baseYear,
     forecastYears: s.forecastYears,
     assumptions: s.assumptions,

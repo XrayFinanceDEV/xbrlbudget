@@ -444,6 +444,7 @@ export default function BudgetPage() {
         // percorso a sette passi (spec 2026-09-08). Lo scenario puo' essere
         // gia' salvato oppure appena creato da un bilancio base esistente.
         <BudgetWizard
+          key={`${selectedCompanyId}:${editingScenario.id}`}
           companyId={selectedCompanyId}
           years={years}
           scenario={editingScenario}

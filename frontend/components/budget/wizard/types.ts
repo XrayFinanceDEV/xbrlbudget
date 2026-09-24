@@ -14,6 +14,7 @@ export type { PreviewState };
 export interface StepProps {
   companyId: number;
   scenarioId: number | null;
+  isNew: boolean;
   baseYear: number;
   forecastYears: number[];
   assumptions: AssumptionsMap;

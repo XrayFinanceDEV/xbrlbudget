@@ -13,7 +13,7 @@
 // Resa da StepPatrimonialePregresso.tsx
 // (Task 13): riceve le stesse props di ogni altro passo (StepProps), che
 // gia' porta updateOtherLenders.
-import type { JSX } from "react";
+import { useEffect, useRef, type JSX } from "react";
 import { Plus, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -22,6 +22,7 @@ import { euro } from "@/lib/budget-format";
 import {
   contrattoRows,
   controlloAltri,
+  finanziatoreDalBilancio,
   nuovoFinanziatore,
   type ContrattoRow,
 } from "@/lib/budget-finanziamenti-pregresso";
@@ -52,6 +53,20 @@ export function PregressoAltriFinanziatoriCard(p: StepProps): JSX.Element {
   const baseBs = p.historical[p.baseYear]?.balance;
   const firstYear = p.forecastYears[0];
   const horizon = p.forecastYears.length;
+  const riga = p.assumptions[firstYear];
+  const rigaPronta = riga !== undefined;
+  const haFinanziatori = riga?.other_lenders != null;
+  const inizializzatoPer = useRef<number | null>(null);
+  // Solo quando si arriva al Patrimoniale pregresso: prima il motore deve
+  // poter mostrare Fatturato e Costi senza richiedere la divisione dei fidi.
+  useEffect(() => {
+    if (!p.isNew || p.scenarioId === null || !baseBs || !rigaPronta) return;
+    if (inizializzatoPer.current === p.scenarioId) return;
+    inizializzatoPer.current = p.scenarioId;
+    if (haFinanziatori) return;
+    const iniziale = finanziatoreDalBilancio(baseBs, horizon);
+    if (iniziale) p.updateOtherLenders([iniziale]);
+  }, [p.isNew, p.scenarioId, p.updateOtherLenders, baseBs, rigaPronta, haFinanziatori, horizon]);
 
   if (!baseBs || firstYear === undefined) {
     return (

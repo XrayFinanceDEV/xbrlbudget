@@ -175,6 +175,28 @@ _SP_AGG = {"immobilizzazioni": "immobilizzazioni", "attivo_circolante": "attivo_
 CRISI_KEYS = ("dscr", "ebitda_margin", "mt", "ccn", "current_ratio", "ms", "copertura_immob", "indipendenza", "pfn",
               "pfn_ebitda", "roi", "roe", "ros", "of_mol", "of_revenue")
 
+#: rapporto → grezzo del suo denominatore (come `DENOMINATORE_DEL_RAPPORTO` in frontend/lib/pratica-indicators.ts).
+#: `crisi_impresa._div` restituisce 0 su denominatore nullo: zero oneri finanziari è copertura infinita, non un DSCR
+#: di 0,000×, e un ROE su patrimonio netto negativo cambia segno per il denominatore, non per la redditività.
+DENOMINATORE = {"pfn_ebitda": "_ebitda_raw", "of_mol": "_ebitda_raw",
+                "ebitda_margin": "_revenue_raw", "of_revenue": "_revenue_raw", "ros": "_revenue_raw",
+                "materials_revenue": "_revenue_raw", "services_revenue": "_revenue_raw",
+                "roi": "_total_assets_raw", "roe": "_equity_raw", "dscr": "_oneri_finanziari_raw"}
+_NEUTRO = Decimal("0.5")
+
+
+def senza_denominatore(indicatori: dict, punteggi: dict) -> tuple[dict, dict]:
+    """Un rapporto senza denominatore positivo è n.d. Il suo esito cade quando il motore ha dato il NEUTRO (il «non
+    lo so»); resta quando ha dato un verdetto, come la PFN positiva senza EBITDA."""
+    ind, pun = dict(indicatori), dict(punteggi)
+    for k, den in DENOMINATORE.items():
+        raw = ind.get(den)
+        if k in ind and raw is not None and raw <= 0:
+            ind[k] = None
+            if pun.get(k) == _NEUTRO:
+                pun[k] = None
+    return ind, pun
+
 
 def _statement(st) -> tuple[dict, tuple]:
     """Indice codice → {colonna: valore} e righe d'allegato di un prospetto dettagliato."""
@@ -233,11 +255,11 @@ def from_intermedio(model) -> InfrannualeData:
         col = getattr(model.crisi, key, None)
         if col is None:
             continue
-        crisi[key] = CrisiCol(col.rating.codice, col.rating.etichetta, col.rating.oltre, col.rating.segnali,
-                              {k: _dec(v) for k, v in col.indicatori.items()},
-                              {k: _dec(v) for k, v in col.punteggi.items()})
+        ind, pun = senza_denominatore({k: _dec(v) for k, v in col.indicatori.items()},
+                                      {k: _dec(v) for k, v in col.punteggi.items()})
+        crisi[key] = CrisiCol(col.rating.codice, col.rating.etichetta, col.rating.oltre, col.rating.segnali, ind, pun)
         for k in CRISI_KEYS:
-            put(k, key, col.indicatori.get(k))
+            put(k, key, ind.get(k))
     if INFRANNUALE in crisi and any(c.key == ANNUALIZZATO for c in ce_cols):
         put("ebitda_margin", ANNUALIZZATO, values.get("ebitda_margin", {}).get(INFRANNUALE))
 

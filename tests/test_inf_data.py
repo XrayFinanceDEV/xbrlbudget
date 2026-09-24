@@ -66,3 +66,27 @@ def test_periodo_di_tre_mesi_senza_annualizzato():
     assert d.legend == "C = consuntivo · 3M = infrannuale al 31.03.2026"
     assert d.header_title == "Report infrannuale 3M 2026"
     assert d.var("ricavi", "infrannuale") is None
+
+
+def test_rapporto_senza_denominatore_non_e_un_numero():
+    """Rilievo 1 della revisione finale: `_div` del motore dà 0 su denominatore nullo, e 0 oneri finanziari è
+    copertura infinita, non DSCR 0,000× «attenzione». Senza denominatore positivo il valore è n.d.; l'esito cade
+    quando il motore dà il NEUTRO del «non lo so», resta quando dà un verdetto (PFN positiva senza EBITDA)."""
+    from app.renderers.infrannuale.data import senza_denominatore
+    ind = {"dscr": D("0"), "_oneri_finanziari_raw": D("0"), "pfn_ebitda": D("-1.12"), "_ebitda_raw": D("-5"),
+           "roe": D("12"), "_equity_raw": D("-3"), "ros": D("0"), "_revenue_raw": D("0"),
+           "roi": D("4"), "_total_assets_raw": D("100"), "ms": D("7")}
+    pun = {"dscr": D("0.5"), "pfn_ebitda": D("0"), "roe": D("0.5"), "ros": D("0.5"), "roi": D("0.8"),
+           "ms": D("1")}
+    i2, p2 = senza_denominatore(ind, pun)
+    assert i2["dscr"] is None and p2["dscr"] is None
+    assert i2["pfn_ebitda"] is None and p2["pfn_ebitda"] == D("0")
+    assert i2["roe"] is None and i2["ros"] is None
+    assert i2["roi"] == D("4") and i2["ms"] == D("7") and p2["roi"] == D("0.8")
+
+
+def test_d2m_pfn_ebitda_non_stampato(db):
+    d = _data(db, 23)
+    for col in d.crisi:
+        if d.crisi[col].indicatori.get("_ebitda_raw") is not None and d.crisi[col].indicatori["_ebitda_raw"] <= 0:
+            assert d.v("pfn_ebitda", col) is None, col

@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import io
+from dataclasses import dataclass
 
 from reportlab.lib.colors import HexColor
 from reportlab.lib.enums import TA_RIGHT
@@ -170,6 +171,15 @@ def chart(png: bytes, height_in: float, width_pt: float = CW) -> Image:
     img.hAlign = "CENTER"
     img.png = png  # il Word riusa il PNG del grafico, non l'immagine già decodificata
     return img
+
+
+@dataclass(frozen=True)
+class CoverLines:
+    """I testi della fascia di copertina, gli stessi che `draw_cover_band` disegna nel PDF e il Word scrive."""
+    eyebrow: str
+    name: str
+    title: str
+    lines: tuple
 
 
 class SectionStart(Flowable):

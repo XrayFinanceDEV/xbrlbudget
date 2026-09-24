@@ -8,7 +8,6 @@ from __future__ import annotations
 
 import io
 import re
-from dataclasses import dataclass
 
 from docx import Document
 from docx.enum.table import WD_TABLE_ALIGNMENT
@@ -19,21 +18,13 @@ from docx.shared import Pt, RGBColor
 from reportlab.platypus import CondPageBreak, Image, KeepTogether, NextPageTemplate, PageBreak, Paragraph, Spacer, Table
 
 from app.renderers.business_plan import theme
+from app.renderers.business_plan.layout import CoverLines  # noqa: F401  (riesportata)
 
 FONT = "Lato"
 _ALIGN = {0: WD_ALIGN_PARAGRAPH.LEFT, 1: WD_ALIGN_PARAGRAPH.CENTER, 2: WD_ALIGN_PARAGRAPH.RIGHT,
           4: WD_ALIGN_PARAGRAPH.JUSTIFY, "LEFT": WD_ALIGN_PARAGRAPH.LEFT, "CENTER": WD_ALIGN_PARAGRAPH.CENTER,
           "CENTRE": WD_ALIGN_PARAGRAPH.CENTER, "RIGHT": WD_ALIGN_PARAGRAPH.RIGHT}
 _IGNORATI = (NextPageTemplate, CondPageBreak)
-
-
-@dataclass(frozen=True)
-class CoverLines:
-    """I testi della fascia di copertina, gli stessi che `draw_cover_band` disegna nel PDF."""
-    eyebrow: str
-    name: str
-    title: str
-    lines: tuple
 
 
 def _hex(color) -> str | None:
@@ -208,3 +199,68 @@ def docx_text(data: bytes) -> list:
         if txt:
             out.append(txt)
     return out
+
+
+def _page_field(p) -> None:
+    for kind, text in (("begin", None), (None, "PAGE"), ("end", None)):
+        r = p.add_run()
+        if kind:
+            el = OxmlElement("w:fldChar"); el.set(qn("w:fldCharType"), kind)
+        else:
+            el = OxmlElement("w:instrText"); el.set(qn("xml:space"), "preserve"); el.text = text
+        r._element.append(el)
+        _font(r, "", 7.8, None, False)
+
+
+def _two_sided(p, left: str, right: str, size: float, color: str, bold_left: bool, page: bool = False) -> None:
+    p.paragraph_format.tab_stops.add_tab_stop(Pt(theme.CW), WD_TAB_ALIGNMENT.RIGHT)
+    c = RGBColor.from_string(color[1:])
+    r = p.add_run(left); _font(r, "", size, None, bold_left); r.font.color.rgb = c
+    r = p.add_run("\t" + right); _font(r, "", size, None, False); r.font.color.rgb = c
+    if page:
+        _page_field(p)
+
+
+def _cover(doc, cover: CoverLines) -> None:
+    band = doc.add_table(rows=1, cols=1)
+    cell = band.cell(0, 0)
+    cell.width = Pt(theme.CW)
+    _shade(cell, theme.NAVY[1:])
+    _border(cell, "bottom", 5.6, theme.TEAL[1:])
+    white = RGBColor(0xFF, 0xFF, 0xFF)
+    first = True
+    for text, size, bold, color, after in ((cover.eyebrow, 10, True, white, 18), (cover.name, 30, True, white, 6),
+                                          (cover.title, 21, False, white, 14)) + tuple(
+            (line, 11, False, RGBColor.from_string(theme.COVER_SUB[1:]), 4) for line in cover.lines):
+        p = cell.paragraphs[0] if first else cell.add_paragraph()
+        first = False
+        p.paragraph_format.space_after = Pt(after)
+        r = p.add_run(text); _font(r, "", size, None, bold); r.font.color.rgb = color
+    doc.add_paragraph().paragraph_format.space_after = Pt(12)
+
+
+def build(sections: list, *, cover: CoverLines, header_left: str, header_right: str, footer: str,
+          title: str) -> bytes:
+    """Documento A4 coi margini del PDF: fascia di copertina, poi una sezione per pagina."""
+    doc = Document()
+    normal = doc.styles["Normal"]
+    normal.font.name, normal.font.size = FONT, Pt(9.3)
+    normal.paragraph_format.space_after = Pt(0)
+    sec = doc.sections[0]
+    sec.page_width, sec.page_height = Pt(theme.PAGE_W), Pt(theme.PAGE_H)
+    sec.left_margin = sec.right_margin = Pt(theme.LM)
+    sec.top_margin, sec.bottom_margin = Pt(55), Pt(40)
+    sec.header_distance, sec.footer_distance = Pt(14), Pt(16)
+    sec.different_first_page_header_footer = True
+    _two_sided(sec.header.paragraphs[0], header_left, header_right, 9, theme.NAVY, True)
+    _two_sided(sec.footer.paragraphs[0], footer, "", 7.8, theme.MUTED, False, page=True)
+    _two_sided(sec.first_page_footer.paragraphs[0], "Riservato e confidenziale", "", 7.8, theme.MUTED, False)
+    _cover(doc, cover)
+    for n, flowables in enumerate(sections):
+        if n > 0:
+            doc.add_page_break()
+        translate(doc, flowables)
+    doc.core_properties.title, doc.core_properties.author = title, ""
+    buf = io.BytesIO()
+    doc.save(buf)
+    return buf.getvalue()

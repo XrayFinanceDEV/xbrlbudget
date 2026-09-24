@@ -32,6 +32,16 @@ def _last(d: InfrannualeData) -> str:
     return PROIEZIONE if d.has_forecast else INFRANNUALE
 
 
+def cover_lines(d: InfrannualeData) -> layout.CoverLines:
+    """I testi della fascia di copertina: gli stessi nel PDF e nel Word."""
+    forecast = f"forecast {d.partial_year}" if d.has_forecast else "forecast non ancora generato"
+    return layout.CoverLines(f"REPORT INFRANNUALE {d.partial_label}", d.company_name,
+                      f"Situazione al {d.period_end}" + (" e forecast a fine anno" if d.has_forecast else ""),
+                      (f"Bilancio infrannuale di {d.period_months} mesi · confronto con il consuntivo "
+                       f"{d.reference_year} · {forecast}",
+                       "Andamento economico, struttura patrimoniale, circolante, debito e indicatori della crisi d'impresa"))
+
+
 def draw_cover_band(canvas, d: InfrannualeData) -> None:
     """Fascia navy della copertina (0–283,5 pt dall'alto) con filetto teal: la stessa del Business plan."""
     theme.register_fonts()
@@ -42,8 +52,9 @@ def draw_cover_band(canvas, d: InfrannualeData) -> None:
     canvas.rect(0, PAGE_H - 289.1, PAGE_W, 5.6, stroke=0, fill=1)
     canvas.setFillColor(white)
     canvas.setFont(BOLD, 10)
-    canvas.drawString(LM, PAGE_H - 64, f"REPORT INFRANNUALE {d.partial_label}")
-    size, lines = _cover_name(d.company_name)
+    cl = cover_lines(d)
+    canvas.drawString(LM, PAGE_H - 64, cl.eyebrow)
+    size, lines = _cover_name(cl.name)
     canvas.setFont(BOLD, size)
     if len(lines) == 1:
         canvas.drawString(LM, PAGE_H - 122, lines[0])
@@ -51,15 +62,11 @@ def draw_cover_band(canvas, d: InfrannualeData) -> None:
         for n, line in enumerate(lines):
             canvas.drawString(LM, PAGE_H - 106 - n * size * 1.12, line)
     canvas.setFont(REGULAR, 21)
-    canvas.drawString(LM, PAGE_H - 160, f"Situazione al {d.period_end}" +
-                      (" e forecast a fine anno" if d.has_forecast else ""))
+    canvas.drawString(LM, PAGE_H - 160, cl.title)
     canvas.setFillColor(C(theme.COVER_SUB))
     canvas.setFont(REGULAR, 11)
-    forecast = f"forecast {d.partial_year}" if d.has_forecast else "forecast non ancora generato"
-    canvas.drawString(LM, PAGE_H - 200, f"Bilancio infrannuale di {d.period_months} mesi · confronto con il consuntivo "
-                                        f"{d.reference_year} · {forecast}")
-    canvas.drawString(LM, PAGE_H - 220, "Andamento economico, struttura patrimoniale, circolante, debito e indicatori "
-                                        "della crisi d'impresa")
+    canvas.drawString(LM, PAGE_H - 200, cl.lines[0])
+    canvas.drawString(LM, PAGE_H - 220, cl.lines[1])
     canvas.setFillColor(C(theme.MUTED))
     canvas.setFont(REGULAR, 7.8)
     canvas.drawString(LM, PAGE_H - 820, "Riservato e confidenziale")

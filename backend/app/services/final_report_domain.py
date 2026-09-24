@@ -506,10 +506,9 @@ def reconcile_adjustments(
     - ``sp13_utile_perdita`` moves with the P&L result
       (``calculations.ce_result``), because the tab recomputes it from the CE.
 
-    Three movements are then *declared*, never absorbed, and do not block —
-    the first two as ``info``, because they belong to the import's history and
-    no action removes them (a ``warning`` would keep the report in draft for
-    ever):
+    Three movements are then *declared*, never absorbed, and do not block.
+    They are ``info`` because no action in the journal can remove them (a
+    ``warning`` would keep the report in draft forever):
 
     - ``adjustments_details_realigned`` — details that moved while their
       aggregate did exactly what the journal says: the save realigned a detail
@@ -606,9 +605,9 @@ def reconcile_adjustments(
         diagnostics += (
             _diagnostic(
                 "adjustments_rounding",
-                "warning",
+                "info",
                 "adjustments",
-                f"Scarti di arrotondamento fra giornale e bilancio: {_elenco(rounding)}.",
+                f"Scarti di arrotondamento fra giornale e bilancio, senza intervento richiesto: {_elenco(rounding)}.",
             ),
         )
     if unposted:

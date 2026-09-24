@@ -610,13 +610,12 @@ def test_ambienta_i_riallineamenti_si_dichiarano_e_non_bloccano():
     assert result.balanced, result.differences
     codici = [d.code for d in result.diagnostics]
     assert "adjustments_unreconciled" not in codici
-    # I riallineamenti sono verificati e appartengono alla storia dell'import: nessuna azione li toglie,
-    # quindi sono informazioni (restano nelle Fonti) e non tengono il report in «Bozza». Lo scarto di
-    # arrotondamento non spiegato resta un avviso: lì c'è qualcosa da guardare.
+    # I riallineamenti e gli arrotondamenti dichiarati appartengono alla storia
+    # dell'import: restano nelle Fonti senza tenere il report in «Bozza».
     gravita = {d.code: d.severity for d in result.diagnostics}
     assert gravita["adjustments_details_realigned"] == "info"
     assert gravita["adjustments_profit_realigned"] == "info"
-    assert gravita["adjustments_rounding"] == "warning"
+    assert gravita["adjustments_rounding"] == "info"
 
     per_codice = {d.code: d.message for d in result.diagnostics}
     # I dettagli riallineati al totale: dichiarati, con l'importo in italiano.
@@ -628,6 +627,21 @@ def test_ambienta_i_riallineamenti_si_dichiarano_e_non_bloccano():
     assert "ce08b_salari_stipendi" in per_codice["adjustments_rounding"]
     assert "0,03" in per_codice["adjustments_rounding"]
     assert "ce08_costi_personale" not in per_codice["adjustments_rounding"]
+
+
+def test_tredici_centesimi_di_cassa_sono_informativi_ma_oltre_soglia_blocca():
+    campo = "sp09_disponibilita_liquide"
+    before = {campo: Decimal("1000.00")}
+    piccolo = reconcile_adjustments(before, {campo: Decimal("999.87")}, [_confirm()])
+    assert piccolo.balanced
+    assert piccolo.differences == {}
+    assert [(d.code, d.severity) for d in piccolo.diagnostics] == [("adjustments_rounding", "info")]
+    assert "-0,13" in piccolo.diagnostics[0].message
+
+    grande = reconcile_adjustments(before, {campo: Decimal("997.99")}, [_confirm()])
+    assert not grande.balanced
+    assert grande.differences[campo] == Decimal("-2.01")
+    assert [(d.code, d.severity) for d in grande.diagnostics] == [("adjustments_unreconciled", "error")]
 
 
 def test_un_totale_che_si_muove_senza_rettifica_blocca_ancora():

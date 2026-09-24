@@ -1079,4 +1079,39 @@ export const downloadIntermedioPdf = async (
   return { blob, filename: resolveDownloadFilename(response.headers.get('Content-Disposition')) };
 };
 
+/**
+ * Scarica il report infrannuale (PDF ReportLab): e' il documento che la tab
+ * Stampa consegna. Numeri del motore e testi a regole: non legge i commenti AI.
+ * Il report intermedio Typst (`downloadIntermedioPdf`) resta nel codice ma
+ * l'interfaccia non lo chiama piu'.
+ */
+export const downloadInfrannualePdf = async (
+  companyId: number,
+  scenarioId: number,
+): Promise<DownloadFinalReportPdfResult> => {
+  const response = await fetch(
+    `${API_BASE_URL}/companies/${companyId}/scenarios/${scenarioId}/infrannuale/pdf`,
+    {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...(_authToken ? { Authorization: `Bearer ${_authToken}` } : {}),
+      },
+      body: JSON.stringify({}),
+    },
+  );
+  if (!response.ok) {
+    let detail: string | null = null;
+    try {
+      const data = await response.json();
+      if (data && typeof data.detail === 'string') detail = data.detail;
+    } catch {
+      // Corpo non JSON: si ricade sulla mappa per stato.
+    }
+    throw new FinalReportDownloadError(response.status, resolveDownloadErrorMessage(response.status, detail));
+  }
+  const blob = await response.blob();
+  return { blob, filename: resolveDownloadFilename(response.headers.get('Content-Disposition')) };
+};
+
 export default api;

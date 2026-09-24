@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from typing import Optional
 
-from reportlab.platypus import PageBreak, Paragraph, Spacer, TableStyle
+from reportlab.platypus import Flowable, PageBreak, Paragraph, Spacer, TableStyle
 
 from app.renderers.business_plan import fmt, layout, theme
 from app.renderers.business_plan.layout import ST, _ps
@@ -60,18 +60,46 @@ class _Rows:
         self.out.append((label, [], "group"))
 
 
-def _table(headers, rows, *, compact: bool):
+def _table(headers, rows, *, compact: bool, scale: float = 1.0):
     """Righe da 16,6 pt nel conto economico (intestazione 16,6), da 18,4 nello stato patrimoniale: misure del
-    riferimento, pp. 11–13."""
-    head = 3.05 if compact else 4.0
+    riferimento, pp. 11–13. `scale` stringe le spaziature, mai i caratteri."""
+    head = (3.05 if compact else 4.0) * scale
     t = layout.fin_table(headers, rows, first="Voce", value_size=9.8, label_size=7.6 if compact else 8.0,
-                         pad=2.66 if compact else 3.55)
+                         pad=(2.66 if compact else 3.55) * scale)
     t.setStyle(TableStyle([("TOPPADDING", (0, 0), (-1, 0), head), ("BOTTOMPADDING", (0, 0), (-1, 0), head)]))
     if compact:  # intestazioni di gruppo da 12,8 pt
         for i, (_, _, kind) in enumerate(rows, start=1):
             if kind == "group":
-                t.setStyle(TableStyle([("TOPPADDING", (0, i), (-1, i), 2.0), ("BOTTOMPADDING", (0, i), (-1, i), 2.0)]))
+                t.setStyle(TableStyle([("TOPPADDING", (0, i), (-1, i), 2.0 * scale),
+                                       ("BOTTOMPADDING", (0, i), (-1, i), 2.0 * scale)]))
     return t
+
+
+class _InUnaPagina(Flowable):
+    """La tabella con le spaziature del riferimento; se non entra nella pagina le stringe, così il risultato
+    dell'esercizio non finisce da solo sulla pagina dopo (AIC, sezioni D ed E con dettaglio)."""
+
+    PASSI = (1.0, 0.85, 0.7, 0.55, 0.4)
+
+    def __init__(self, make):
+        super().__init__()
+        self.make, self.t = make, None
+
+    def wrap(self, aw, ah):
+        for scale in self.PASSI:
+            self.t = self.make(scale)
+            w, h = self.t.wrap(aw, ah)
+            if h <= ah:
+                break
+        self.width, self.height = w, h
+        return w, h
+
+    def split(self, aw, ah):
+        self.wrap(aw, ah)
+        return [] if self.height <= ah else self.t.split(aw, ah)
+
+    def draw(self):
+        self.t.drawOn(self.canv, 0, 0)
 
 
 # ------------------------------------------------------------------ Allegato A
@@ -143,7 +171,7 @@ def allegato_a(d: InfrannualeData, pages: dict) -> list:
     sub += " · n.d. = non disponibile."
     heads = [c.label for c in d.ce_cols] + ([f"{'Ann.' if var_col == ANNUALIZZATO else 'F'} / C"]
                                             if var_col in keys else [])
-    return _head("ALLEGATO A", "Conto economico completo", sub) + [_table(heads, r.out, compact=True)]
+    return _head("ALLEGATO A", "Conto economico completo", sub) + [_InUnaPagina(lambda k: _table(heads, r.out, compact=True, scale=k))]
 
 
 # ------------------------------------------------------------------ Allegato B

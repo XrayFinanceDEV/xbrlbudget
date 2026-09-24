@@ -62,3 +62,17 @@ def test_allegato_b_come_il_riferimento(pagine):
               "derivati passivi e altri fondi."):
         assert s in passivo.replace("\n", " ") if " " in s else s in passivo, s
     assert "B) IMMOBILIZZAZIONI" not in attivo and "D) DEBITI" not in passivo
+
+
+@pytest.mark.parametrize("scenario", (3, 5, 17, 23))
+def test_allegato_a_sta_in_una_pagina(db, scenario):  # noqa: F811
+    """Rilievo 4 della revisione finale: con dettaglio in D o E (AIC 3 e 5) imposte e utile finivano da soli sulla
+    pagina dopo, staccati dalla loro tabella."""
+    try:
+        d = _data(db, scenario)
+    except ValueError as e:
+        pytest.skip(f"scenario {scenario} incompleto nel DB locale: {e}")
+    testo = [p.get_text() for p in fitz.open(stream=render_infrannuale(d), filetype="pdf")]
+    a = next(i for i, t in enumerate(testo) if "ALLEGATO A" in t)
+    b = next(i for i, t in enumerate(testo) if "ALLEGATO B" in t)
+    assert b == a + 1, f"Allegato A su {b - a} pagine"

@@ -84,13 +84,9 @@ describe("ingressoDaBilancioEsistente", () => {
     });
   });
 
-  it("apre Rettifiche su una nuova proiezione dello stesso infrannuale", () => {
-    const ingresso = ingressoDaBilancioEsistente(42, { id: 6, year: 2026, period_months: 6 }, 82);
-    expect(ingresso.route).toBe("/pratica");
-    expect(ingresso.pratica).toMatchObject({
-      companyId: 42, fiscalYear: 2026, periodMonths: 6, analysisStep: "rettifiche",
-      budgetScenarioId: null, infrannualeScenarioId: 82,
-    });
+  it("esclude un bilancio infrannuale come base del budget", () => {
+    expect(() => ingressoDaBilancioEsistente(42, { id: 6, year: 2026, period_months: 6 }, 82))
+      .toThrow("Il budget deve partire da un bilancio annuale");
   });
 });
 

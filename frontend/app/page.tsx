@@ -305,7 +305,9 @@ export default function Home() {
     const richiesta = ++richiestaBilanci.current;
     setCaricamentoBilanci(true);
     try {
-      const bilanci = await getExistingBalances(companyId);
+      const bilanci = (await getExistingBalances(companyId)).filter(
+        (bilancio) => bilancio.period_months == null || bilancio.period_months === 12,
+      );
       if (richiesta !== richiestaBilanci.current) return;
       if (bilanci.length === 0) {
         await nuovaPratica(companyId, "bilancio");
@@ -321,29 +323,26 @@ export default function Home() {
   };
 
   const scegliBilancioEsistente = (company: CompanyWithScenarios, bilancio: ExistingBalanceOption) => {
-    const partial = bilancio.period_months != null && bilancio.period_months < 12;
     const count = company.scenarios.filter((s) =>
-      partial
-        ? s.scenario_type === "infrannuale" && s.base_year === bilancio.year - 1 && s.period_months === bilancio.period_months
-        : s.scenario_type === "budget" && s.base_year === bilancio.year
+      s.scenario_type === "budget" && s.base_year === bilancio.year
     ).length;
     setBilancioScelto(bilancio);
-    setNomePratica(partial
-      ? `Infrannuale ${bilancio.period_months}M ${bilancio.year} · proiezione ${count + 1}`
-      : `Budget ${bilancio.year + 1} · piano ${count + 1}`);
+    setNomePratica(`Budget ${bilancio.year + 1} · piano ${count + 1}`);
   };
 
   const creaDaBilancioEsistente = async (companyId: number) => {
     if (!bilancioScelto || !nomePratica.trim() || creazioneDaEsistente) return;
+    if (bilancioScelto.period_months != null && bilancioScelto.period_months !== 12) {
+      toast.error("Il budget deve partire da un bilancio annuale");
+      return;
+    }
     setCreazioneDaEsistente(true);
-    const partial = bilancioScelto.period_months != null && bilancioScelto.period_months < 12;
     try {
       const scenario = await createBudgetScenario(companyId, {
         company_id: companyId,
         name: nomePratica.trim(),
-        base_year: partial ? bilancioScelto.year - 1 : bilancioScelto.year,
-        scenario_type: partial ? "infrannuale" : "budget",
-        ...(partial ? { period_months: bilancioScelto.period_months! } : {}),
+        base_year: bilancioScelto.year,
+        scenario_type: "budget",
       });
       await refreshCompanies();
       entra(ingressoDaBilancioEsistente(companyId, bilancioScelto, scenario.id));
@@ -616,19 +615,16 @@ export default function Home() {
                             </Button>
                           </div>
                           <div className="flex flex-wrap gap-2">
-                            {bilanciEsistenti.map((bilancio) => {
-                              const partial = bilancio.period_months != null && bilancio.period_months < 12;
-                              return (
-                                <Button
-                                  key={bilancio.id}
-                                  size="sm"
-                                  variant={bilancioScelto?.id === bilancio.id ? "default" : "outline"}
-                                  onClick={() => scegliBilancioEsistente(company, bilancio)}
-                                >
-                                  {partial ? `Infrannuale ${bilancio.period_months}M ${bilancio.year}` : `Bilancio annuale ${bilancio.year}`}
-                                </Button>
-                              );
-                            })}
+                            {bilanciEsistenti.map((bilancio) => (
+                              <Button
+                                key={bilancio.id}
+                                size="sm"
+                                variant={bilancioScelto?.id === bilancio.id ? "default" : "outline"}
+                                onClick={() => scegliBilancioEsistente(company, bilancio)}
+                              >
+                                Bilancio annuale {bilancio.year}
+                              </Button>
+                            ))}
                           </div>
                           {bilancioScelto && (
                             <div className="flex flex-wrap items-end gap-2">
@@ -647,8 +643,7 @@ export default function Home() {
                               </div>
                               <Button size="sm" onClick={() => void creaDaBilancioEsistente(company.id)} disabled={!nomePratica.trim() || creazioneDaEsistente}>
                                 {creazioneDaEsistente ? <Loader2 className="mr-1 h-4 w-4 animate-spin" /> : <Plus className="mr-1 h-4 w-4" />}
-                                {bilancioScelto.period_months != null && bilancioScelto.period_months < 12
-                                  ? "Crea proiezione" : "Crea budget"}
+                                Crea budget
                               </Button>
                             </div>
                           )}

@@ -4,6 +4,7 @@ Company API endpoints
 from datetime import datetime
 from typing import List, Optional
 from fastapi import APIRouter, Depends, HTTPException, status
+from sqlalchemy import or_
 from sqlalchemy.orm import Session, joinedload
 import sys
 import os
@@ -162,11 +163,14 @@ def get_existing_balances(
     user_id: str = Depends(get_current_user_id),
     db: Session = Depends(get_db),
 ):
-    """Exact annual and partial periods with both statements, for new practices."""
+    """Complete annual statements available as the base of a new budget."""
     validate_company_owned_by_user(db, company_id, user_id)
     rows = (
         db.query(models.FinancialYear)
-        .filter(models.FinancialYear.company_id == company_id)
+        .filter(
+            models.FinancialYear.company_id == company_id,
+            or_(models.FinancialYear.period_months.is_(None), models.FinancialYear.period_months == 12),
+        )
         .order_by(models.FinancialYear.year.desc(), models.FinancialYear.period_months.desc())
         .all()
     )

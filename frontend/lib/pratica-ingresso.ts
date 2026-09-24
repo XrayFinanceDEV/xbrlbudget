@@ -103,25 +103,27 @@ export function ingressoNuovaPratica(
   };
 }
 
-/** A fresh scenario from an imported statement, without returning to Import. */
+/** A fresh budget from an imported annual statement, without returning to Import. */
 export function ingressoDaBilancioEsistente(
   companyId: number,
   balance: ExistingBalanceOption,
   scenarioId: number,
 ): IngressoPratica {
-  const partial = balance.period_months != null && balance.period_months < 12;
+  if (balance.period_months != null && balance.period_months !== 12) {
+    throw new Error("Il budget deve partire da un bilancio annuale");
+  }
   return {
     startupMode: false,
     pratica: {
       workflow: "bilancio",
       companyId,
       fiscalYear: balance.year,
-      periodMonths: partial ? balance.period_months! : 12,
-      infrannualeScenarioId: partial ? scenarioId : null,
-      budgetScenarioId: partial ? null : scenarioId,
-      analysisStep: partial ? "rettifiche" : "anagrafiche",
+      periodMonths: 12,
+      infrannualeScenarioId: null,
+      budgetScenarioId: scenarioId,
+      analysisStep: "anagrafiche",
     },
-    route: partial ? "/pratica" : `/budget?open=${scenarioId}`,
+    route: `/budget?open=${scenarioId}`,
   };
 }
 

@@ -59,6 +59,9 @@ export default function ReportPage() {
   const [aiPrepMode, setAiPrepMode] = useState<"prepare" | "regenerate_all" | null>(null);
   const [aiPrepStepLabel, setAiPrepStepLabel] = useState<string>("");
   const finalReportDownload = useFinalReportDownload();
+  // Il Business plan anche in Word, per correggere i testi prima di consegnarlo. Sta qui, prima di ogni return:
+  // un hook dopo il return anticipato del componente rompe la build di produzione (react-hooks/rules-of-hooks).
+  const wordDownload = useFileDownload();
   const draftsByScope = useRef<StoredDrafts>({});
   const [, setDraftVersion] = useState(0);
   useEffect(() => setScenarioId((current) => scenarios.some((scenario) => scenario.id === current) ? current : (scenarios.find((scenario) => scenario.is_active === 1)?.id ?? scenarios[0]?.id ?? null)), [scenarios]);
@@ -153,8 +156,6 @@ export default function ReportPage() {
   const finalReportReady = model?.readiness.status === "ready";
   const downloadPdf = () => { if (!selectedCompanyId || !scenarioId) return; finalReportDownload.download(selectedCompanyId, scenarioId, finalReportReady ? "final" : "draft", reportModel); };
   const previewPdf = () => { if (!selectedCompanyId || !scenarioId) return; finalReportDownload.preview(selectedCompanyId, scenarioId, finalReportReady ? "final" : "draft", reportModel); };
-  // Il Business plan anche in Word, per correggere i testi prima di consegnarlo (il dossier Typst resta PDF).
-  const wordDownload = useFileDownload();
   const downloadWord = () => { if (!selectedCompanyId || !scenarioId) return; void wordDownload.download(() => downloadReportDocx(selectedCompanyId, scenarioId, "business-plan", finalReportReady ? "final" : "draft"), "Impossibile scaricare il Word del report"); };
   const pdfRequestBusy = finalReportDownload.downloading || finalReportDownload.previewing || wordDownload.downloading;
   return <div className="mx-auto max-w-7xl px-4 py-6 sm:px-6 lg:px-8 print:max-w-none print:px-0 print:py-0">

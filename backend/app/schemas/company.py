@@ -60,3 +60,10 @@ class ScenarioSummary(BaseModel):
 class CompanyWithScenarios(Company):
     """Company plus its budget/infrannuale scenarios (include=scenarios)."""
     scenarios: List[ScenarioSummary] = []
+
+
+class ExistingBalanceOption(BaseModel):
+    """A complete imported balance available as the source of a new practice."""
+    id: int
+    year: int
+    period_months: Optional[int] = None

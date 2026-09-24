@@ -35,6 +35,12 @@ export interface FinancialYear {
   updated_at: string;
 }
 
+export interface ExistingBalanceOption {
+  id: number;
+  year: number;
+  period_months: number | null;
+}
+
 export interface BalanceSheet {
   id: number;
   financial_year_id: number;

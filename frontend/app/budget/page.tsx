@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { useApp } from "@/contexts/AppContext";
 import { usePratica } from "@/contexts/PraticaContext";
@@ -11,6 +11,7 @@ import {
   createFinancialYear,
   updateBalanceSheet,
   createBudgetScenario,
+  getBudgetScenario,
   updateBudgetScenario,
   deleteBudgetScenario,
   createBudgetAssumptions,
@@ -131,6 +132,29 @@ export default function BudgetPage() {
   const [newPlanFrom, setNewPlanFrom] = useState<BudgetScenario | null>(null);
   const [newPlanName, setNewPlanName] = useState("");
   const [creatingPlan, setCreatingPlan] = useState(false);
+  const aperturaDaHome = useRef(false);
+
+  useEffect(() => {
+    if (!selectedCompanyId || selectedCompanyId !== pratica?.companyId || aperturaDaHome.current) return;
+    const raw = new URLSearchParams(window.location.search).get("open");
+    const scenarioId = Number(raw);
+    if (!raw || !Number.isSafeInteger(scenarioId) || scenarioId <= 0) return;
+    aperturaDaHome.current = true;
+    getBudgetScenario(selectedCompanyId, scenarioId)
+      .then((scenario) => {
+        setEditingScenario(scenario);
+        setActiveTab("info");
+        const patch = patchPraticaPerScenarioAperto(pratica, scenario);
+        if (patch) updatePratica(patch);
+        router.replace("/budget");
+      })
+      .catch((err: unknown) => {
+        toast.error(getErrorMessage(err, "Impossibile aprire il nuovo budget"));
+        router.replace("/budget");
+      });
+    // Il query param e' un comando d'ingresso: una sola lettura per mount.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedCompanyId, pratica?.companyId]);
 
   const handleCreateAdditionalPlan = async () => {
     if (

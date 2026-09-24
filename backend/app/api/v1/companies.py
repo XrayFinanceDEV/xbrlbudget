@@ -154,3 +154,23 @@ def get_company_years(
 
     # Deduplicate (partial + full-year records can coexist for same year)
     return sorted(set(year[0] for year in years), reverse=True)
+
+
+@router.get("/companies/{company_id}/existing-balances", response_model=List[schemas.ExistingBalanceOption])
+def get_existing_balances(
+    company_id: int,
+    user_id: str = Depends(get_current_user_id),
+    db: Session = Depends(get_db),
+):
+    """Exact annual and partial periods with both statements, for new practices."""
+    validate_company_owned_by_user(db, company_id, user_id)
+    rows = (
+        db.query(models.FinancialYear)
+        .filter(models.FinancialYear.company_id == company_id)
+        .order_by(models.FinancialYear.year.desc(), models.FinancialYear.period_months.desc())
+        .all()
+    )
+    return [
+        schemas.ExistingBalanceOption(id=fy.id, year=fy.year, period_months=fy.period_months)
+        for fy in rows if fy.balance_sheet is not None and fy.income_statement is not None
+    ]

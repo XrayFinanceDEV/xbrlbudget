@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useApp } from "@/contexts/AppContext";
 import { usePratica } from "@/contexts/PraticaContext";
@@ -9,15 +9,18 @@ import {
   updateCompany,
   deleteCompany,
   getCompanyYears,
+  getExistingBalances,
+  createBudgetScenario,
 } from "@/lib/api";
 import {
   ingressoNuovaPratica,
+  ingressoDaBilancioEsistente,
   ingressoRiprendi,
   rifiutoIngressoStartup,
   type IngressoPratica,
   type WorkflowPratica,
 } from "@/lib/pratica-ingresso";
-import type { CompanyWithScenarios, ScenarioSummary } from "@/types/api";
+import type { CompanyWithScenarios, ExistingBalanceOption, ScenarioSummary } from "@/types/api";
 import { getSectorName } from "@/lib/formatters";
 import { toast } from "sonner";
 import {
@@ -89,19 +92,21 @@ function SceltaTipoPratica({
   onScegli,
   onAnnulla,
   attesa = false,
+  attesaBilanci = false,
 }: {
   onScegli: (workflow: WorkflowPratica) => void;
   onAnnulla?: () => void;
   /** Un controllo è in corso: le voci restano ferme finché non si sa. */
   attesa?: boolean;
+  attesaBilanci?: boolean;
 }) {
   return (
     <div className="flex flex-wrap items-center gap-2 border-t border-dashed border-border py-3">
       <span className="text-sm text-muted-foreground">Che tipo di pratica?</span>
-      <Button size="sm" variant="outline" disabled={attesa} onClick={() => onScegli("bilancio")}>
-        <CalendarRange className="h-4 w-4 mr-1" /> Da bilancio
+      <Button size="sm" variant="outline" disabled={attesa || attesaBilanci} onClick={() => onScegli("bilancio")}>
+        {attesaBilanci ? <Loader2 className="mr-1 h-4 w-4 animate-spin" /> : <CalendarRange className="mr-1 h-4 w-4" />} Da bilancio
       </Button>
-      <Button size="sm" variant="outline" disabled={attesa} onClick={() => onScegli("startup")}>
+      <Button size="sm" variant="outline" disabled={attesa || attesaBilanci} onClick={() => onScegli("startup")}>
         {attesa ? <Loader2 className="h-4 w-4 mr-1 animate-spin" /> : <Rocket className="h-4 w-4 mr-1" />} Startup
       </Button>
       {onAnnulla && (
@@ -134,6 +139,13 @@ export default function Home() {
   const [openCompanyId, setOpenCompanyId] = useState<number | null>(null);
   // Quale «Nuova pratica» sta chiedendo il tipo.
   const [chooserCompanyId, setChooserCompanyId] = useState<number | null>(null);
+  const [chooserStage, setChooserStage] = useState<"tipo" | "origine" | "esistente">("tipo");
+  const [bilanciEsistenti, setBilanciEsistenti] = useState<ExistingBalanceOption[]>([]);
+  const [caricamentoBilanci, setCaricamentoBilanci] = useState(false);
+  const [bilancioScelto, setBilancioScelto] = useState<ExistingBalanceOption | null>(null);
+  const [nomePratica, setNomePratica] = useState("");
+  const [creazioneDaEsistente, setCreazioneDaEsistente] = useState(false);
+  const richiestaBilanci = useRef(0);
   // Il controllo degli anni prima di entrare in Startup: tiene ferme le due
   // voci finché non si sa, così un secondo clic non parte in parallelo.
   const [verificaStartup, setVerificaStartup] = useState(false);
@@ -287,6 +299,59 @@ export default function Home() {
     setCreatedCompanyId(null);
     setShowCreateForm(false);
     entra(ingressoNuovaPratica(companyId, workflow));
+  };
+
+  const scegliDaBilancio = async (companyId: number) => {
+    const richiesta = ++richiestaBilanci.current;
+    setCaricamentoBilanci(true);
+    try {
+      const bilanci = await getExistingBalances(companyId);
+      if (richiesta !== richiestaBilanci.current) return;
+      if (bilanci.length === 0) {
+        await nuovaPratica(companyId, "bilancio");
+        return;
+      }
+      setBilanciEsistenti(bilanci);
+      setChooserStage("origine");
+    } catch (err: unknown) {
+      toast.error(err instanceof Error ? err.message : "Impossibile leggere i bilanci esistenti");
+    } finally {
+      if (richiesta === richiestaBilanci.current) setCaricamentoBilanci(false);
+    }
+  };
+
+  const scegliBilancioEsistente = (company: CompanyWithScenarios, bilancio: ExistingBalanceOption) => {
+    const partial = bilancio.period_months != null && bilancio.period_months < 12;
+    const count = company.scenarios.filter((s) =>
+      partial
+        ? s.scenario_type === "infrannuale" && s.base_year === bilancio.year - 1 && s.period_months === bilancio.period_months
+        : s.scenario_type === "budget" && s.base_year === bilancio.year
+    ).length;
+    setBilancioScelto(bilancio);
+    setNomePratica(partial
+      ? `Infrannuale ${bilancio.period_months}M ${bilancio.year} · proiezione ${count + 1}`
+      : `Budget ${bilancio.year + 1} · piano ${count + 1}`);
+  };
+
+  const creaDaBilancioEsistente = async (companyId: number) => {
+    if (!bilancioScelto || !nomePratica.trim() || creazioneDaEsistente) return;
+    setCreazioneDaEsistente(true);
+    const partial = bilancioScelto.period_months != null && bilancioScelto.period_months < 12;
+    try {
+      const scenario = await createBudgetScenario(companyId, {
+        company_id: companyId,
+        name: nomePratica.trim(),
+        base_year: partial ? bilancioScelto.year - 1 : bilancioScelto.year,
+        scenario_type: partial ? "infrannuale" : "budget",
+        ...(partial ? { period_months: bilancioScelto.period_months! } : {}),
+      });
+      await refreshCompanies();
+      entra(ingressoDaBilancioEsistente(companyId, bilancioScelto, scenario.id));
+    } catch (err: unknown) {
+      toast.error(err instanceof Error ? err.message : "Impossibile creare la pratica");
+    } finally {
+      setCreazioneDaEsistente(false);
+    }
   };
 
   const riprendi = (companyId: number, s: ScenarioSummary) => {
@@ -520,14 +585,83 @@ export default function Home() {
                       </div>
                     ))}
                     {chooserCompanyId === company.id ? (
-                      <SceltaTipoPratica
-                        attesa={verificaStartup}
-                        onScegli={(workflow) => nuovaPratica(company.id, workflow)}
-                        onAnnulla={() => setChooserCompanyId(null)}
-                      />
+                      chooserStage === "tipo" ? (
+                        <SceltaTipoPratica
+                          attesa={verificaStartup}
+                          attesaBilanci={caricamentoBilanci}
+                          onScegli={(workflow) => workflow === "bilancio"
+                            ? void scegliDaBilancio(company.id)
+                            : void nuovaPratica(company.id, workflow)}
+                          onAnnulla={() => { richiestaBilanci.current++; setChooserCompanyId(null); }}
+                        />
+                      ) : chooserStage === "origine" ? (
+                        <div className="flex flex-wrap items-center gap-2 border-t border-dashed border-border py-3">
+                          <span className="text-sm text-muted-foreground">Da quale bilancio?</span>
+                          <Button size="sm" variant="outline" onClick={() => void nuovaPratica(company.id, "bilancio")}>
+                            <Plus className="mr-1 h-4 w-4" /> Nuovo bilancio
+                          </Button>
+                          <Button size="sm" variant="outline" onClick={() => setChooserStage("esistente")}>
+                            <CalendarRange className="mr-1 h-4 w-4" /> Bilancio esistente
+                          </Button>
+                          <Button size="sm" variant="ghost" onClick={() => setChooserStage("tipo")} aria-label="Torna al tipo di pratica">
+                            <X className="h-4 w-4" />
+                          </Button>
+                        </div>
+                      ) : (
+                        <div className="space-y-3 border-t border-dashed border-border py-3">
+                          <div className="flex items-center justify-between gap-2">
+                            <span className="text-sm font-medium">Scegli il bilancio già importato</span>
+                            <Button size="sm" variant="ghost" onClick={() => { setBilancioScelto(null); setChooserStage("origine"); }} aria-label="Torna alla scelta del bilancio">
+                              <X className="h-4 w-4" />
+                            </Button>
+                          </div>
+                          <div className="flex flex-wrap gap-2">
+                            {bilanciEsistenti.map((bilancio) => {
+                              const partial = bilancio.period_months != null && bilancio.period_months < 12;
+                              return (
+                                <Button
+                                  key={bilancio.id}
+                                  size="sm"
+                                  variant={bilancioScelto?.id === bilancio.id ? "default" : "outline"}
+                                  onClick={() => scegliBilancioEsistente(company, bilancio)}
+                                >
+                                  {partial ? `Infrannuale ${bilancio.period_months}M ${bilancio.year}` : `Bilancio annuale ${bilancio.year}`}
+                                </Button>
+                              );
+                            })}
+                          </div>
+                          {bilancioScelto && (
+                            <div className="flex flex-wrap items-end gap-2">
+                              <div className="min-w-64 flex-1 space-y-1">
+                                <Label htmlFor={`nome-pratica-${company.id}`}>Nome della nuova pratica</Label>
+                                <Input
+                                  id={`nome-pratica-${company.id}`}
+                                  value={nomePratica}
+                                  onChange={(event) => setNomePratica(event.target.value)}
+                                  onKeyDown={(event) => {
+                                    if (event.key === "Enter") { event.preventDefault(); void creaDaBilancioEsistente(company.id); }
+                                  }}
+                                  maxLength={255}
+                                  disabled={creazioneDaEsistente}
+                                />
+                              </div>
+                              <Button size="sm" onClick={() => void creaDaBilancioEsistente(company.id)} disabled={!nomePratica.trim() || creazioneDaEsistente}>
+                                {creazioneDaEsistente ? <Loader2 className="mr-1 h-4 w-4 animate-spin" /> : <Plus className="mr-1 h-4 w-4" />}
+                                {bilancioScelto.period_months != null && bilancioScelto.period_months < 12
+                                  ? "Crea proiezione" : "Crea budget"}
+                              </Button>
+                            </div>
+                          )}
+                        </div>
+                      )
                     ) : (
                       <div className="border-t border-dashed border-border pt-3">
-                        <Button size="sm" variant="outline" onClick={() => setChooserCompanyId(company.id)}>
+                        <Button size="sm" variant="outline" onClick={() => {
+                          richiestaBilanci.current++;
+                          setChooserCompanyId(company.id);
+                          setChooserStage("tipo");
+                          setBilancioScelto(null);
+                        }}>
                           <Plus className="h-4 w-4 mr-1" /> Nuova pratica
                         </Button>
                       </div>

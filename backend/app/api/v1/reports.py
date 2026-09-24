@@ -19,6 +19,7 @@ from app.schemas.final_report import FinalReportModel, NarrativeSaveRequest
 from app.schemas.final_report_pdf import FinalReportPdfRequest
 from app.schemas.business_plan import BusinessPlanPdfRequest
 from app.services import business_plan_pdf_service
+from app.services.infrannuale_pdf_service import DOCX_MEDIA_TYPE
 from app.core.render_panics import NON_ENTRA
 from app.renderers.typst.runtime import (
     RendererBusy, RendererCompileError, RendererError, RendererTimeout, RendererUnavailable,
@@ -215,6 +216,41 @@ def download_business_plan_pdf(
         "Cache-Control": "no-store",
     }
     return Response(content=result.data, media_type="application/pdf", headers=headers)
+
+
+@router.post(
+    "/companies/{company_id}/scenarios/{scenario_id}/business-plan/docx",
+    response_class=Response,
+    summary="Scarica il Business plan in Word",
+    responses={
+        404: {"description": "Azienda o scenario non di questo utente"},
+        409: {"description": "«final» su una pratica non pronta, o catena infrannuale incoerente"},
+    },
+)
+def download_business_plan_docx(
+    company_id: int,
+    scenario_id: int,
+    request: BusinessPlanPdfRequest,
+    user_id: str = Depends(get_current_user_id),
+    db: Session = Depends(get_db),
+) -> Response:
+    """Lo stesso Business plan in Word, per correggere i testi prima di consegnarlo: stessi cancelli della PDF."""
+    validate_scenario_belongs_to_company(scenario_id, company_id, user_id, db)
+    try:
+        result = business_plan_pdf_service.render_docx(db, company_id, scenario_id,
+                                                       document_state=request.document_state)
+    except FinalReportNotFound as error:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(error)) from None
+    except (FinalReportChainConflict, FinalReportPeriodUnavailable, FinalNotReady) as error:
+        db.rollback()
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(error)) from None
+    headers = {
+        "Content-Disposition": (f'attachment; filename="{result.ascii_filename}"; '
+                                f"filename*=UTF-8''{quote(result.filename, safe='', encoding='utf-8')}"),
+        "ETag": f'"{result.etag}"',
+        "Cache-Control": "no-store",
+    }
+    return Response(content=result.data, media_type=DOCX_MEDIA_TYPE, headers=headers)
 
 
 @router.get(

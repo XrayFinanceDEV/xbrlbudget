@@ -55,7 +55,7 @@ def lettura_patrimonio(d: InfrannualeData) -> list:
         deltas = [(v(k, INFRANNUALE) - v(k, STORICO), txt) for k, txt in _VOCI_ATTIVO
                   if _all(v(k, INFRANNUALE), v(k, STORICO))]
         verbo = "cresce" if a6 > a0 else "scende"
-        s = f"L'attivo {verbo} nel semestre"
+        s = f"L'attivo {verbo} {_periodo(d, INFRANNUALE)}"
         if deltas:
             top = max(deltas, key=lambda x: x[0]) if a6 > a0 else min(deltas, key=lambda x: x[0])
             s += f" soprattutto per {top[1]}"
@@ -140,6 +140,10 @@ def _esito(d: InfrannualeData, key: str, col: str) -> Optional[str]:
     return esito(c.punteggi.get(key)) if c else None
 
 
+def nome_periodo(d: InfrannualeData) -> str:
+    return "semestre" if d.period_months == 6 else "periodo"
+
+
 def _semestre(d: InfrannualeData) -> str:
     return "Il semestre" if d.period_months == 6 else f"Il periodo di {d.period_months} mesi"
 
@@ -211,16 +215,19 @@ def strengths_weaknesses(d: InfrannualeData) -> tuple:
     v, last, rif = d.v, _last(d), d.reference_year
     if not d.has_forecast:
         last = INFRANNUALE
-    fl = "forecast" if d.has_forecast else _periodo(d, INFRANNUALE)
+    fl = "nel forecast" if d.has_forecast else _periodo(d, INFRANNUALE)
     # ---- forza
-    vr = d.var("ricavi", last) if d.has_forecast else d.var("ricavi", ANNUALIZZATO)
+    # senza forecast si confronta l'annualizzato; a 12 mesi l'annualizzato non c'è e il periodo è già un anno
+    col_r, nome_r = ((PROIEZIONE, "forecast") if d.has_forecast else
+                     (ANNUALIZZATO, "annualizzati") if d.has_annualized else (INFRANNUALE, f"dei {d.period_months} mesi"))
+    vr = d.var("ricavi", col_r)
     if vr is not None and vr > 0:
-        base = v("ricavi", PROIEZIONE if d.has_forecast else ANNUALIZZATO)
-        txt = f"Ricavi delle vendite {'forecast' if d.has_forecast else 'annualizzati'} € {fmt.eur(base)}, " \
+        base = v("ricavi", col_r)
+        txt = f"Ricavi delle vendite {nome_r} € {fmt.eur(base)}, " \
               f"{_signed_pct(vr)} sul {rif}"
         va = d.var("ricavi", ANNUALIZZATO)
         if d.has_forecast and va is not None and va > 0:
-            txt += f"; il semestre (€ {fmt.eur(v('ricavi', INFRANNUALE))}) è coerente con il percorso di crescita"
+            txt += f"; {_semestre(d).lower()} (€ {fmt.eur(v('ricavi', INFRANNUALE))}) è coerente con il percorso di crescita"
         forza.append(Finding("ricavi", "Crescita dei ricavi", txt + "."))
     ve, vb = d.var("ebitda", last), d.var("ebit", last)
     if d.has_forecast and _all(ve, vb) and ve > 0 and vb > 0:
@@ -284,7 +291,7 @@ def strengths_weaknesses(d: InfrannualeData) -> tuple:
         txt = f"Indipendenza finanziaria {fmt.prep('al', fmt.pct(ind))}"
         if ms is not None and ms < 0:
             txt += f" e margine di struttura negativo ({fmt.MINUS}€ {fmt.eur(abs(ms))})"
-        debolezza.append(Finding("patrimonio", "Sottocapitalizzazione", txt + f" nel {fl}."))
+        debolezza.append(Finding("patrimonio", "Sottocapitalizzazione", txt + f" {fl}."))
     vc = d.var("crediti_clienti_breve", last)
     k0, kf, lf, rf = v("cc_comm", STORICO), v("cc_comm", last), v("liquidita", last), v("ricavi", last)
     if vc is not None and vc > SOGLIE["circolante_pct"] and _all(k0, kf):
@@ -296,7 +303,7 @@ def strengths_weaknesses(d: InfrannualeData) -> tuple:
     vp = d.var("debiti_previdenziali", last)
     if vp is not None and vp > SOGLIE["previdenziali_pct"]:
         p0, p6, pf = (v("debiti_previdenziali", c) for c in (STORICO, INFRANNUALE, PROIEZIONE))
-        txt = f"Da € {fmt.eur(p0)} ({d.reference_label}) a € {fmt.eur(p6)} nel semestre"
+        txt = f"Da € {fmt.eur(p0)} ({d.reference_label}) a € {fmt.eur(p6)} {_periodo(d, INFRANNUALE)}"
         if d.has_forecast:
             txt += f" e € {fmt.eur(pf)} nel forecast"
         debolezza.append(Finding("previdenziali", "Debiti previdenziali in aumento", txt + f" ({_signed_pct(vp)})."))
@@ -384,7 +391,7 @@ def lettura_costi(d: InfrannualeData) -> list:
              for k, nome in top]
         if all(_all(a, b, c) for _, a, b, c in f):
             mezzo = all(min(b, c) <= a <= max(b, c) for _, a, b, c in f)
-            livello = "su livelli intermedi" if mezzo else "su livelli diversi da semestre e consuntivo"
+            livello = "su livelli intermedi" if mezzo else f"su livelli diversi da {nome_periodo(d)} e consuntivo"
             resto = "sul secondo semestre" if d.period_months == 6 else "sui mesi restanti"
             out.append(f"Il forecast riporta l'incidenza di {f[0][0]} ({fmt.pct(f[0][1])}) e {f[1][0]} "
                        f"({fmt.pct(f[1][1])}) {livello}: questa ipotesi {resto} è il principale fattore che "

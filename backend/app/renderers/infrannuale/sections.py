@@ -53,6 +53,12 @@ def _row(d, label, key, cs, style="", unit="eur", var_cols=()) -> tuple:
 
 
 # ------------------------------------------------------------------ sezione 2
+def titolo_economia(d: InfrannualeData) -> str:
+    """Il titolo nomina solo le colonne che ci sono: a 12 mesi non c'è annualizzato, senza proiezione non c'è forecast."""
+    nomi = ["infrannuale"] + (["annualizzato"] if d.has_annualized else []) + (["forecast"] if d.has_forecast else [])
+    return "Conto economico: " + (", ".join(nomi[:-1]) + " e " + nomi[-1] if len(nomi) > 1 else nomi[0])
+
+
 def economia(d: InfrannualeData, pages: dict) -> list:
     m, anno, rif = d.period_months, d.partial_year, d.reference_label
     ce = cols(d, (STORICO, INFRANNUALE, ANNUALIZZATO, PROIEZIONE))
@@ -66,7 +72,7 @@ def economia(d: InfrannualeData, pages: dict) -> list:
                      "l'annualizzazione aritmetica")
     sub = ("; ".join(parts) + ".") if parts else f"Conto economico dei {m} mesi a confronto con il consuntivo {d.reference_year}."
     sub = sub[0].upper() + sub[1:]
-    s = layout.section_head("SEZIONE 2", "Conto economico: infrannuale, annualizzato e forecast", sub)
+    s = layout.section_head("SEZIONE 2", titolo_economia(d), sub)
 
     t = [(d.partial_label, fmt.compact_eur(d.v("ricavi", INFRANNUALE)), "Ricavi del semestre" if m == 6 else "Ricavi del periodo",
           f"EBITDA {fmt.compact_eur(d.v('ebitda', INFRANNUALE))}")]
@@ -143,7 +149,7 @@ def patrimonio(d: InfrannualeData, pages: dict) -> list:
         _row(d, "Disponibilità liquide", "liquidita", sp, var_cols=var),
         _row(d, "Capitale circolante netto", "ccn_sp", sp, var_cols=var),
     ]
-    heads = [d.label_of(c) for c in sp] + [f"{'6M' if c == INFRANNUALE else 'F'} / C" for c in var]
+    heads = [d.label_of(c) for c in sp] + [f"{d.period_months}M / C" if c == INFRANNUALE else "F / C" for c in var]
     r0, r6, rf = (d.v("ratei_attivi", c) for c in (STORICO, INFRANNUALE, PROIEZIONE))
     ratei = f"€ {fmt.eur(r0)} nel {rif}"
     if d.has_forecast and r6 == rf:
@@ -217,8 +223,9 @@ def crisi(d: InfrannualeData, pages: dict) -> list:
         s += [chart(charts.crisi([d.label_of(c) for c in cc], [d.crisi[c].oltre for c in cc], tot,
                                  [d.crisi[c].classe for c in cc]), "crisi", CHART_W_CRISI)]
     s += [crisi_table(d), Spacer(0, 5),
-          layout.note(f"¹ Riportato per completezza: non entra nella determinazione della classe di rischio. Per il "
-                      f"{d.partial_label} gli indicatori reddituali sono su base annualizzata.")]
+          layout.note("¹ Riportato per completezza: non entra nella determinazione della classe di rischio."
+                      + (f" Per il {d.partial_label} gli indicatori reddituali sono su base annualizzata."
+                         if d.has_annualized else ""))]
     return s
 
 
@@ -260,14 +267,16 @@ def costi(d: InfrannualeData, pages: dict) -> list:
              _incidenza_row(d, "Oneri diversi di gestione", "oneri_diversi", inc),
              _incidenza_row(d, "Costi operativi (esclusi ammortamenti)", "costi_operativi", inc, "bold"),
              _incidenza_row(d, "Oneri finanziari", "oneri_finanziari", inc)]
-    note = f"Per il {'semestre' if d.period_months == 6 else 'periodo'} l'incidenza coincide con quella dell'annualizzato."
+    note = (f"Per il {narrative.nome_periodo(d)} l'incidenza coincide con quella dell'annualizzato."
+            if d.has_annualized else "")
     over = [c for c in inc if d.v("costi_operativi", c) is not None and d.v("ricavi", c)
             and d.v("costi_operativi", c) > d.v("ricavi", c)]
     if over:
         note += (" Costi operativi oltre il 100% dei ricavi delle vendite: il margine è sostenuto da variazione dei "
                  "lavori in corso e altri ricavi, inclusi nel valore della produzione.")
-    s += [table([d.label_of(c) for c in inc], irows, first="Incidenza su ricavi delle vendite"), Spacer(0, 5),
-          layout.note(note)]
+    s += [table([d.label_of(c) for c in inc], irows, first="Incidenza su ricavi delle vendite"), Spacer(0, 5)]
+    if note:
+        s += [layout.note(note.strip())]
     lettura = narrative.lettura_costi(d)
     if lettura:
         s += [Spacer(0, 4.6), layout.panel("Lettura", [("", x) for x in lettura])]
@@ -330,8 +339,9 @@ def _scadenza(d: InfrannualeData, key: str, cs) -> str:
 
 def debito(d: InfrannualeData, pages: dict) -> list:
     s = layout.section_head("SEZIONE 6", "Indebitamento e sostenibilità del debito",
-                            f"PFN = debiti finanziari meno disponibilità liquide. Per il {d.partial_label} PFN/EBITDA è "
-                            "calcolato sull'EBITDA annualizzato.")
+                            "PFN = debiti finanziari meno disponibilità liquide."
+                            + (f" Per il {d.partial_label} PFN/EBITDA è calcolato sull'EBITDA annualizzato."
+                               if d.has_annualized else ""))
     cs = cols(d, (STORICO, INFRANNUALE, PROIEZIONE))
     last = PROIEZIONE if d.has_forecast else INFRANNUALE
     ll, rif = d.label_of(last), d.reference_label
@@ -384,7 +394,8 @@ def segnali(d: InfrannualeData, pages: dict) -> list:
     stato = (f"Nessuno dei {'sette' if n == 7 else n} segnali risulta attivo." if not attivi else
              f"{len(attivi)} {'segnale risulta attivo' if len(attivi) == 1 else 'segnali risultano attivi'} su {n}.")
     s = layout.section_head("SEZIONE 8", "Segnali extracontabili",
-                            "Ogni segnale attivo peggiora la classe di rischio del semestre e del forecast. " + stato)
+                            f"Ogni segnale attivo peggiora la classe di rischio del {narrative.nome_periodo(d)}"
+                            + (" e del forecast. " if d.has_forecast else ". ") + stato)
     num = _ps("sn", theme.BOLD, 9.8, 11.5, theme.TEAL)
     area = _ps("sa", theme.BOLD, 9.0, 11)
     txt = _ps("st", theme.REGULAR, 8.8, 11)

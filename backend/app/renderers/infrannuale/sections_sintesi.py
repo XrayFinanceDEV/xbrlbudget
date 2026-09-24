@@ -9,6 +9,7 @@ from app.renderers.business_plan.sections_sintesi import _card, _chip_tiles, _co
 from app.renderers.business_plan.theme import BOLD, CW, LM, PAGE_H, PAGE_W, REGULAR
 
 from . import narrative
+from . import sections as sec
 from .data import INFRANNUALE, PROIEZIONE, STORICO, InfrannualeData
 from .sections import VALUE, signed_pct
 
@@ -111,11 +112,11 @@ def _cover_kpis(d: InfrannualeData) -> list:
     return items
 
 
-def _index_table(pages: dict) -> Table:
+def _index_table(d: InfrannualeData, pages: dict) -> Table:
     num = layout._ps("in", BOLD, 9.8, 12, theme.TEAL)
     tit = layout._ps("it", REGULAR, 9.8, 12, theme.INK)
     pg = layout._ps("ip", REGULAR, 9.8, 12, theme.MUTED, alignment=2)
-    rows = [[Paragraph(n, num), Paragraph(title, tit), Paragraph(str(pages.get(key, "")), pg)]
+    rows = [[Paragraph(n, num), Paragraph(sec.titolo_economia(d) if key == "economia" else title, tit), Paragraph(str(pages.get(key, "")), pg)]
             for n, title, key in INDEX]
     t = Table(rows, colWidths=[22, CW - 22 - 40, 40], rowHeights=19.2)
     t.setStyle(TableStyle([("LINEBELOW", (0, 0), (-1, -1), 0.4, C(theme.RULE)), ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
@@ -125,7 +126,7 @@ def _index_table(pages: dict) -> Table:
 
 def copertina(d: InfrannualeData, pages: dict) -> list:
     return layout.h2("I numeri chiave", after=6) + [_chip_tiles(_cover_kpis(d)), Spacer(0, 14)] + \
-        layout.h2("Indice", after=4) + [_index_table(pages)]
+        layout.h2("Indice", after=4) + [_index_table(d, pages)]
 
 
 def _cruscotto(d: InfrannualeData) -> Table:
@@ -153,7 +154,9 @@ def _cruscotto(d: InfrannualeData) -> Table:
 def sintesi(d: InfrannualeData, pages: dict) -> list:
     m = d.period_months
     periodo = "semestre" if m == 6 else f"periodo di {m} mesi"
-    sub = (f"Il {periodo} al {d.period_end}, " + ("il forecast a fine anno " if d.has_forecast else "") +
+    testa = f"Il {periodo} al {d.period_end}, il forecast a fine anno " if d.has_forecast else \
+        f"Il {periodo} al {d.period_end} "
+    sub = testa + (
            f"e il consuntivo {d.reference_year} sono tenuti distinti in tutto il documento. Ricavi e risultati del "
            f"{m}M si riferiscono a {'sei' if m == 6 else m} mesi; lo stato patrimoniale è puntuale alla data.")
     s = layout.section_head("SEZIONE 1", "Sintesi", sub)
@@ -161,7 +164,8 @@ def sintesi(d: InfrannualeData, pages: dict) -> list:
     if kp:
         s += [layout.panel("Punti chiave", [(a, b) for a, b in kp]), Spacer(0, 12)]
     s += layout.h2("Cruscotto", after=6) + [_cruscotto(d), Spacer(0, 5),
-          layout.note(f"¹ Per il {d.partial_label} gli indicatori reddituali sono calcolati su base annualizzata. "
+          layout.note((f"¹ Per il {d.partial_label} gli indicatori reddituali sono calcolati su base annualizzata. "
+                       if d.has_annualized else f"¹ Indicatori reddituali calcolati sui {m} mesi del periodo. ") +
                       "² Crediti verso clienti + rimanenze − debiti verso fornitori, calcolato sui saldi dello stato "
                       "patrimoniale (Sezione 5).")]
     return s

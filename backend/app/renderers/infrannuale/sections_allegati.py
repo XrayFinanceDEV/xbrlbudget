@@ -53,7 +53,7 @@ class _Rows:
         vals = vals if vals is not None else (self.values(code) if code else None)
         if vals is None:
             vals = (None,) * len(self.keys)
-        cells = [fmt.eur(v) for v in vals] + [self._var(vals)]
+        cells = [fmt.eur(v) for v in vals] + ([self._var(vals)] if self.var_col in self.keys else [])
         self.out.append(("&nbsp;" * 3 * indent + label, cells, style))
 
     def group(self, label: str):
@@ -141,7 +141,8 @@ def allegato_a(d: InfrannualeData, pages: dict) -> list:
     if zero_sections:
         sub += " · " + " ed ".join(zero_sections) + " pari a zero"
     sub += " · n.d. = non disponibile."
-    heads = [c.label for c in d.ce_cols] + [f"{'Ann.' if var_col == ANNUALIZZATO else 'F'} / C"]
+    heads = [c.label for c in d.ce_cols] + ([f"{'Ann.' if var_col == ANNUALIZZATO else 'F'} / C"]
+                                            if var_col in keys else [])
     return _head("ALLEGATO A", "Conto economico completo", sub) + [_table(heads, r.out, compact=True)]
 
 
@@ -187,7 +188,7 @@ def _elenco(nomi: list, e_finale: bool) -> str:
 def allegato_b(d: InfrannualeData, pages: dict) -> list:
     keys = [c.key for c in d.sp_cols]
     var_col = PROIEZIONE if d.has_forecast else INFRANNUALE
-    heads = [c.label for c in d.sp_cols] + [f"{'F' if var_col == PROIEZIONE else '6M'} / C"]
+    heads = [c.label for c in d.sp_cols] + [f"{'F' if var_col == PROIEZIONE else f'{d.period_months}M'} / C"]
     r = _Rows(d.annex_sp, keys, var_col)
     nota: list = []
 

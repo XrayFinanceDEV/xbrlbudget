@@ -1,7 +1,7 @@
 // Reconcile sub-fields with imported aggregates.
 // When imported aggregates don't match the sum of detail sub-fields,
 // allocate the gap to the designated plug field.
-export function reconcileSubfields(data: Record<string, number>) {
+export function reconcileSubfields(data: Record<string, number>, { adjustBalance = true }: { adjustBalance?: boolean } = {}) {
   // `noDetailPlug`: dove va il divario quando la famiglia non ha alcun dettaglio
   // (stessa regola di `residual_bucket` in importers/iv_cee_hierarchy.py).
   const reconcile = (details: string[], parent: string, plug: string, noDetailPlug?: string) => {
@@ -76,7 +76,7 @@ export function reconcileSubfields(data: Record<string, number>) {
   const attivo = attivoKeys.reduce((s, k) => s + (data[k] ?? 0), 0);
   const passivo = passivoKeys.reduce((s, k) => s + (data[k] ?? 0), 0);
   const bsGap = attivo - passivo;
-  if (Math.abs(bsGap) > 0.01 && Math.abs(bsGap) <= 5) {
+  if (adjustBalance && Math.abs(bsGap) > 0.01 && Math.abs(bsGap) <= 5) {
     data["sp09_disponibilita_liquide"] = (data["sp09_disponibilita_liquide"] ?? 0) - bsGap;
   }
 }

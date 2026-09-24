@@ -137,4 +137,14 @@ describe("reconcileSubfields", () => {
     expect(data.sp06g_crediti_altri_breve).toBe(45_000);
     expect(data.sp06a_crediti_clienti_breve).toBeUndefined();
   });
+
+  it("nelle Rettifiche lascia visibile lo scarto di bilancio fino alla conferma", () => {
+    const data: Record<string, number> = {
+      sp09_disponibilita_liquide: 100,
+      sp16_debiti_breve: 100.23,
+      sp16g_altri_debiti_breve: 100.23,
+    };
+    reconcileSubfields(data, { adjustBalance: false });
+    expect(data.sp09_disponibilita_liquide).toBe(100);
+  });
 });

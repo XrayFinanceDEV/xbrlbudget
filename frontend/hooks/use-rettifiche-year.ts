@@ -5,6 +5,8 @@ import { toast } from "sonner";
 import { getAdjustableFinancialYear, saveAdjustments } from "@/lib/api";
 import { getErrorMessage } from "@/lib/utils";
 import { reconcileSubfields } from "@/lib/pratica-reconcile";
+import { preparaConfermaRettifiche } from "@/lib/pratica-conferma-rettifiche";
+import { formatEuroPreciso } from "@/lib/pratica-format";
 import type { AdjustableFinancialYear, RettificaEntry } from "@/types/api";
 
 export interface RettificheYear {
@@ -81,7 +83,7 @@ export function useRettificheYear(
       const initial: Record<string, number> = {};
       for (const [k, v] of Object.entries(result.balance_sheet)) initial[k] = v;
       for (const [k, v] of Object.entries(result.income_statement)) initial[k] = v;
-      reconcileSubfields(initial);
+      reconcileSubfields(initial, { adjustBalance: false });
       setCorrections(initial);
       const hasExisting =
         result.original_balance_sheet &&
@@ -170,7 +172,7 @@ export function useRettificheYear(
       const initial: Record<string, number> = {};
       for (const [k, v] of Object.entries(result.balance_sheet)) initial[k] = v;
       for (const [k, v] of Object.entries(result.income_statement)) initial[k] = v;
-      reconcileSubfields(initial);
+      reconcileSubfields(initial, { adjustBalance: false });
       setCorrections(initial);
       setApplied(false);
       setConfirmed(false);
@@ -204,25 +206,21 @@ export function useRettificheYear(
 
   const confirm = useCallback(async (): Promise<boolean> => {
     if (companyId === null || !data) return false;
-    const log = data.rettifiche_log ?? [];
-    // Idempotente: una seconda conferma non aggiunge una riga né consuma il cap.
-    if (log.some((e) => e.entry_type === "confirm")) {
+    const prepared = preparaConfermaRettifiche(data, year, periodMonths);
+    if (prepared.kind === "limit") {
+      toast.error("Massimo 20 rettifiche: eliminane una per chiudere lo scarto di quadratura");
+      return false;
+    }
+    if (prepared.kind === "already_confirmed") {
       setConfirmed(true);
       return true;
     }
-    const marker: RettificaEntry = {
-      id: `confirm-${year}-${periodMonths ?? 12}`,
-      entry_type: "confirm",
-      edited_field: "",
-      edited_label: "Rettifiche confermate",
-      edit_delta: 0,
-      counterpart_field: "",
-      counterpart_label: "",
-      counterpart_delta: 0,
-      created_at: new Date().toISOString(),
-    };
-    const ok = await save(undefined, [...log, marker]);
+    const ok = await save(prepared.values, prepared.log);
     if (!ok) return false;
+    if (prepared.values) setCorrections(prepared.values);
+    if (prepared.closedAmount != null) {
+      toast.success(`Scarto di quadratura ${formatEuroPreciso(prepared.closedAmount)} chiuso nelle Rettifiche`);
+    }
     setConfirmed(true);
     return true;
   }, [companyId, data, year, periodMonths, save]);

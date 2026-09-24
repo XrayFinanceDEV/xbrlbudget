@@ -19,13 +19,13 @@ const y = (year: number): ForecastPreviewYear => ({
   } as never,
 } as unknown as ForecastPreviewYear);
 
-const breve = { crediti_commerciali: 422000, debiti_fornitori: 322000, debiti_previdenziali: 28000, altri_debiti: 45000 };
+const breve = { crediti_tributari_breve: 0, crediti_tributari_lungo: 0, crediti_commerciali: 422000, debiti_fornitori: 322000, debiti_previdenziali: 28000, altri_debiti: 45000 };
 
 describe("flussiPregresso", () => {
   it("una riga per flusso, segno per direzione, totale netto e debito aperto", () => {
     const rows = flussiPregresso([y(2027), y(2028)], breve);
     const by = (k: string) => rows.find((r) => r.key === k)!;
-    expect(rows.map((r) => r.key)).toEqual(["h-breve", "crediti", "fornitori", "trib-saldo", "previd-altri", "h-oltre", "banche", "fidi", "altri-fin", "trib-rate", "altri-oltre", "crediti-oltre", "netto", "aperto"]);
+    expect(rows.map((r) => r.key)).toEqual(["h-breve", "crediti", "fornitori", "trib-saldo", "previd-altri", "h-oltre", "banche", "fidi", "altri-fin", "trib-rate", "altri-oltre", "crediti-oltre", "tributari-entro", "tributari-oltre", "netto", "aperto"]);
     expect(by("crediti").years.map((c) => c.value)).toEqual([422000, 0]);
     expect(by("crediti-oltre").years.map((c) => c.value)).toEqual([10000, 0]);
     expect(by("fornitori").years[0].value).toBe(-322000);

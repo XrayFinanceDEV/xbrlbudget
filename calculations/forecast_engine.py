@@ -640,7 +640,7 @@ def prune_out_of_plan_forecast_years(db: Session, scenario_id: int, planned_year
     return len(stale)
 
 
-def validate_pregresso(pregresso, base_bs, horizon: int) -> Dict[str, Dict[str, Any]]:
+def validate_pregresso(pregresso, base_bs, horizon: int) -> Dict[str, Any]:
     """Normalizza lo scadenziamento del pregresso in Decimal, o alza ValueError.
 
     Tre controlli, tutti con messaggi in italiano perche' li legge l'utente:
@@ -656,8 +656,11 @@ def validate_pregresso(pregresso, base_bs, horizon: int) -> Dict[str, Dict[str, 
     if not pregresso:
         return {}
     cent = Decimal('0.01')
-    masses = pregresso_opening_masses(lambda field: getattr(base_bs, field, None))
-    out: Dict[str, Dict[str, Any]] = {}
+    acconti_storici = Decimal(str(pregresso.get('acconti_tributari_storici') or 0))
+    if acconti_storici < 0 or acconti_storici > Decimal(str(getattr(base_bs, 'sp06e_crediti_tributari_breve', None) or 0)):
+        raise ValueError("Gli acconti tributari storici devono essere compresi nei crediti tributari entro 12 mesi del bilancio base")
+    masses = pregresso_opening_masses(lambda field: getattr(base_bs, field, None), acconti_storici)
+    out: Dict[str, Any] = {'acconti_tributari_storici': acconti_storici}
     for key in PREGRESSO_KEYS:
         plan = pregresso.get(key)
         if not plan:
@@ -3598,6 +3601,7 @@ class ForecastEngine:
             sp07 = sp07_non_deferred + sp07f
         else:
             sp07 = _prev('sp07_crediti_lungo') * long_growth
+            sp07_non_deferred = sp07 - _prev('sp07f_imposte_anticipate_lungo') * long_growth
 
         # ── PREGRESSO: il circolante e' generato + residuo (spec lotto 2 §3.1) ──
         # `generated` conserva il lato breve PRIMA del residuo: e' il numero che il
@@ -3605,6 +3609,36 @@ class ForecastEngine:
         # Senza piano non si entra in nessuno di questi rami e i saldi restano
         # identici al centesimo a quelli di prima del lotto.
         pregresso_runoff: Dict[str, Any] = {}
+        acconti_tributari_storici = (pregresso or {}).get('acconti_tributari_storici') or ZERO
+        piano_crediti_tributari_breve = (pregresso or {}).get('crediti_tributari_breve')
+        credito_tributario_altro_precedente = None
+        if piano_crediti_tributari_breve:
+            credito_tributario_altro_precedente = (
+                piano_crediti_tributari_breve['opening'] if year_index == 0
+                else runoff_schedule(
+                    piano_crediti_tributari_breve['opening'],
+                    piano_crediti_tributari_breve['amounts'], [], year_index - 1, horizon,
+                ).residual
+            )
+            r = runoff_schedule(
+                piano_crediti_tributari_breve['opening'],
+                piano_crediti_tributari_breve['amounts'], [], year_index, horizon,
+            )
+            pregresso_runoff['crediti_tributari_breve'] = r
+        piano_crediti_tributari_lungo = (pregresso or {}).get('crediti_tributari_lungo')
+        if piano_crediti_tributari_lungo:
+            r = runoff_schedule(
+                piano_crediti_tributari_lungo['opening'],
+                piano_crediti_tributari_lungo['amounts'], [], year_index, horizon,
+            )
+            pregresso_runoff['crediti_tributari_lungo'] = r
+            # Il piano governa la sola componente tributaria del lungo; le
+            # altre componenti conservano la loro regola di crescita.
+            sp07_non_deferred += r.residual - _prev('sp07e_crediti_tributari_lungo') * long_growth
+            sp07 = (
+                sp07_non_deferred + sp07f if tax_difference_lines
+                else sp07 + r.residual - _prev('sp07e_crediti_tributari_lungo') * long_growth
+            )
         generated: Dict[str, Decimal] = {'crediti_commerciali': sp06_trade}
         crediti_plan = (pregresso or {}).get('crediti_commerciali')
         if crediti_plan:
@@ -3620,7 +3654,10 @@ class ForecastEngine:
             # fuori dal piano, esattamente come restano fuori dal DSO.
             sp06_trade = sp06_trade + runoff_crediti.residual_short
             sp06 = sp06_trade + sp06e + sp06f
-            sp07e_long = _prev('sp07e_crediti_tributari_lungo') * long_growth
+            sp07e_long = (
+                pregresso_runoff['crediti_tributari_lungo'].residual
+                if piano_crediti_tributari_lungo else _prev('sp07e_crediti_tributari_lungo') * long_growth
+            )
             if tax_difference_lines:
                 sp07_non_deferred = runoff_crediti.residual_long + sp07e_long
                 sp07 = sp07_non_deferred + sp07f
@@ -3863,6 +3900,10 @@ class ForecastEngine:
         if manual_tax_position:
             sp16e = _prev('sp16e_debiti_tributari_breve') * (D('1') + _sp_growth('sp16e_growth_pct'))
             sp17e = _prev('sp17e_debiti_tributari_lungo') * (D('1') + _sp_growth('sp17e_growth_pct'))
+            if piano_crediti_tributari_breve:
+                credito_da_imposte = max(ZERO, _prev('sp06e_crediti_tributari_breve') - credito_tributario_altro_precedente)
+                sp06e = pregresso_runoff['crediti_tributari_breve'].residual + credito_da_imposte
+                sp06 = sp06_trade + sp06e + sp06f
             if plan_tax and details is not None:
                 details.setdefault('pregresso_ignored', []).append('debiti_tributari')
         else:
@@ -3887,20 +3928,21 @@ class ForecastEngine:
             previous_tax = prev_tax_details.get('current_tax')
             if previous_tax is None:
                 previous_tax = _base_inc('ce20_imposte')
-            # I crediti tributari del consuntivo (IVA, ritenute, …) restano FUORI
-            # dal meccanismo acconti/saldo: costanti per tutto il piano, il credito
-            # da acconti si somma sopra (decisione del proprietario, 2026-09-18).
+            # Gli altri crediti tributari restano fuori dal meccanismo
+            # acconti/saldo e seguono il calendario, quando dichiarato.
             # Si leggono dall'anno prima per portare avanti un override di `sp06e`.
             if prev_tax_details.get('mode') == 'saldo_acconto':
                 crediti_consuntivo = D(str(
                     prev_tax_details.get('crediti_tributari_consuntivo') or 0))
             else:
-                crediti_consuntivo = _base('sp06e_crediti_tributari_breve')
+                crediti_consuntivo = _base('sp06e_crediti_tributari_breve') - acconti_tributari_storici if year_index == 0 else _base('sp06e_crediti_tributari_breve')
             # L'utente puo' cambiare il credito tributario storico senza
             # disattivare la liquidazione di saldo e acconti. La crescita si
             # applica solo alla quota del consuntivo; il credito da acconti
             # resta distinto e non viene moltiplicato una seconda volta.
             crediti_consuntivo *= D('1') + _sp_growth('sp06e_growth_pct')
+            if piano_crediti_tributari_breve:
+                crediti_consuntivo = pregresso_runoff['crediti_tributari_breve'].residual
             if prev_tax_details.get('mode') == 'saldo_acconto':
                 # L'anno prima e' passato di qui: sa dire quanto di se' e' saldo
                 # e quanto e' rata, e lo consegna gia' scomposto.
@@ -3978,8 +4020,11 @@ class ForecastEngine:
                 # quindi non c'e' nulla da compensare. Dopo un anno manuale conta
                 # solo cio' che quell'anno porta OLTRE la quota del consuntivo.
                 opening_credit = (
-                    ZERO if year_index == 0
-                    else max(ZERO, _prev('sp06e_crediti_tributari_breve') - crediti_consuntivo)
+                    acconti_tributari_storici if year_index == 0
+                    else max(ZERO, _prev('sp06e_crediti_tributari_breve') - (
+                        credito_tributario_altro_precedente
+                        if credito_tributario_altro_precedente is not None else crediti_consuntivo
+                    ))
                 )
             # Solo un piano vero mette il saldo in `mode: runoff` (spec §5.3):
             # senza piano non c'e' nulla di scadenziato da dichiarare, e l'unica
@@ -3997,11 +4042,12 @@ class ForecastEngine:
                 # kernel ricade allora sulla percentuale. Chi vuole zero acconti
                 # mette `acconto_pct = 0`.
                 explicit_advances=getattr(assumption, 'tax_advances_paid', None),
+                carry_excess_credit=acconti_tributari_storici > ZERO,
             )
             tax_generated_short = tax_year.generated_debt
             sp16e = tax_year.generated_debt + r.residual_short
             sp17e = r.residual_long
-            sp06e = crediti_consuntivo + tax_year.generated_credit
+            sp06e = crediti_consuntivo + tax_year.generated_credit + tax_year.opening_credit_left
             sp06 = sp06_trade + sp06e + sp06f
         # Con un piano l'indicizzazione e' gia' stata scartata (Ruling 17),
         # quindi l'ancora torna a essere `_prev` e lo scorporo resta quello di
@@ -4426,7 +4472,15 @@ class ForecastEngine:
             'sp07c_crediti_collegate_lungo', 'sp07d_crediti_controllanti_lungo',
             'sp07e_crediti_tributari_lungo', 'sp07g_crediti_altri_lungo',
         ]
-        if tax_difference_lines:
+        if piano_crediti_tributari_lungo:
+            sp07e = pregresso_runoff['crediti_tributari_lungo'].residual
+            campi_commerciali_lunghi = sp07_non_deferred_fields[:4] + sp07_non_deferred_fields[5:]
+            sp07a, sp07b, sp07c, sp07d, sp07g = _alloc(
+                sp07_non_deferred - sp07e, campi_commerciali_lunghi
+            )
+            if not tax_difference_lines:
+                sp07f = sp07 - sp07_non_deferred
+        elif tax_difference_lines:
             sp07a, sp07b, sp07c, sp07d, sp07e, sp07g = _alloc(
                 sp07_non_deferred, sp07_non_deferred_fields
             )
@@ -4457,7 +4511,7 @@ class ForecastEngine:
         # massa intera faceva della riga tributaria l'unica delle cinque che non
         # torna: 90.000 di apertura con 60.000 di rate a spiegarla.
         if details is not None:
-            masses = pregresso_opening_masses(_base)
+            masses = pregresso_opening_masses(_base, acconti_tributari_storici)
             details['pregresso'] = {}
             for key in PREGRESSO_KEYS:
                 r = pregresso_runoff.get(key)

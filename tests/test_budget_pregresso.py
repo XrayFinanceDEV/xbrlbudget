@@ -147,6 +147,93 @@ def test_short_plan_pushes_the_rest_long_and_writeoff_hits_ce09d(monkeypatch):
         engine.dispose()
 
 
+def test_altri_crediti_tributari_scheduled_by_amount_without_regeneration(monkeypatch):
+    """Gli incassi cambiano la cassa e il residuo tributario, non l'utile."""
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    engine, sessions = memory_sessions()
+    try:
+        with sessions() as db:
+            company_id, _ = seed_base_year(db, user_id=USER)
+            fy = db.query(models.FinancialYear).filter_by(company_id=company_id).one()
+            bs = db.query(models.BalanceSheet).filter_by(financial_year_id=fy.id).one()
+            bs.sp06a_crediti_clienti_breve = D("100000")
+            bs.sp06e_crediti_tributari_breve = D("20000")
+            bs.sp07_crediti_lungo = D("10000")
+            bs.sp07e_crediti_tributari_lungo = D("10000")
+            bs.sp09_disponibilita_liquide = D("20000")
+            db.commit()
+
+            rows = [dict(forecast_year=y, revenue_growth_pct=0, **MANUAL_TAX) for y in (2027, 2028, 2029)]
+            rows[0]["pregresso"] = {
+                "acconti_tributari_storici": 5000,
+                "crediti_tributari_breve": {"opening": 15000, "amounts": [5000, 10000, 0]},
+                "crediti_tributari_lungo": {"opening": 10000, "amounts": [0, 4000, 6000]},
+            }
+            sc, _ = _run(db, company_id, rows)
+            years = read_forecast_maps(db, sc.id)
+            assert [b["sp07e_crediti_tributari_lungo"] for _, b, _ in years] == [D("10000"), D("6000"), D("0")]
+            assert [b["sp06e_crediti_tributari_breve"] for _, b, _ in years] == [D("15000"), D("5000"), D("5000")]
+            assert all(b["_total_assets"] == b["_total_liabilities"] for _, b, _ in years)
+    finally:
+        engine.dispose()
+
+
+def test_acconti_storici_compensano_imposte_senza_ridurre_altri_crediti(monkeypatch):
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    engine, sessions = memory_sessions()
+    try:
+        with sessions() as db:
+            company_id, _ = seed_base_year(db, user_id=USER)
+            fy = db.query(models.FinancialYear).filter_by(company_id=company_id).one()
+            bs = db.query(models.BalanceSheet).filter_by(financial_year_id=fy.id).one()
+            bs.sp06a_crediti_clienti_breve = D("100000")
+            bs.sp06e_crediti_tributari_breve = D("20000")
+            db.commit()
+
+            rows = [dict(forecast_year=y, revenue_growth_pct=0) for y in (2027, 2028)]
+            rows[0]["pregresso"] = {
+                "acconti_tributari_storici": 5000,
+                "crediti_tributari_breve": {"opening": 15000, "amounts": [0, 0]},
+            }
+            sc, _ = _run(db, company_id, rows)
+            out = budget_scenarios.preview_forecast_route(
+                company_id, sc.id, request={"assumptions": rows}, user_id=USER, db=db)
+            first = out["forecast_years"][0]
+            assert first["details"]["imposte"]["credito_compensato"] == D("5000")
+            assert first["details"]["imposte"]["crediti_tributari_consuntivo"] == D("15000")
+            assert first["details"]["pregresso"]["crediti_tributari_breve"]["residual_short"] + first["details"]["pregresso"]["crediti_tributari_breve"]["residual_long"] == D("15000")
+    finally:
+        engine.dispose()
+
+
+def test_passaggio_da_imposte_manuali_non_confonde_incasso_con_acconto(monkeypatch):
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    engine, sessions = memory_sessions()
+    try:
+        with sessions() as db:
+            company_id, _ = seed_base_year(db, user_id=USER)
+            fy = db.query(models.FinancialYear).filter_by(company_id=company_id).one()
+            bs = db.query(models.BalanceSheet).filter_by(financial_year_id=fy.id).one()
+            bs.sp06a_crediti_clienti_breve = D("100000")
+            bs.sp06e_crediti_tributari_breve = D("20000")
+            db.commit()
+            rows = [
+                dict(forecast_year=2027, **MANUAL_TAX, pregresso={
+                    "acconti_tributari_storici": 5000,
+                    "crediti_tributari_breve": {"opening": 15000, "amounts": [5000, 10000]},
+                }),
+                dict(forecast_year=2028),
+            ]
+            sc, _ = _run(db, company_id, rows)
+            out = budget_scenarios.preview_forecast_route(
+                company_id, sc.id, request={"assumptions": rows}, user_id=USER, db=db)
+            second = out["forecast_years"][1]
+            assert second["details"]["imposte"]["credito_compensato"] == D("5000")
+            assert second["details"]["imposte"]["crediti_tributari_consuntivo"] == D("0")
+    finally:
+        engine.dispose()
+
+
 def _split_base_payables(db, company_id):
     """Riparte i debiti dell'anno base su fornitori, previdenziali e altri debiti.
 

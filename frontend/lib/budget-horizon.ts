@@ -458,7 +458,8 @@ export function baseYearNote(baseYear: number, years: number[]): string | null {
 // `firstYear` (conflitto A della revisione del task 7).
 
 const PREGRESSO_KEYS: readonly PregressoKey[] = [
-  "crediti_commerciali", "debiti_fornitori", "debiti_tributari", "debiti_previdenziali", "altri_debiti",
+  "crediti_commerciali", "crediti_tributari_breve", "crediti_tributari_lungo",
+  "debiti_fornitori", "debiti_tributari", "debiti_previdenziali", "altri_debiti",
 ];
 
 /**

@@ -275,6 +275,9 @@ class PregressoTributariInput(PregressoPlanInput):
 class PregressoInput(BaseModel):
     """Opening balances and runoff schedules for working capital items and tax payables."""
     crediti_commerciali: Optional[PregressoPlanInput] = None
+    crediti_tributari_breve: Optional[PregressoPlanInput] = None
+    crediti_tributari_lungo: Optional[PregressoPlanInput] = None
+    acconti_tributari_storici: Decimal = Field(default=Decimal("0"), ge=0)
     debiti_fornitori: Optional[PregressoPlanInput] = None
     debiti_tributari: Optional[PregressoTributariInput] = None
     debiti_previdenziali: Optional[PregressoPlanInput] = None

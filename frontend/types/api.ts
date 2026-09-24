@@ -453,7 +453,7 @@ export interface TemporaryDifferenceInput {
   tax_rate?: number | null;
 }
 
-export type PregressoKey = "crediti_commerciali" | "debiti_fornitori" | "debiti_tributari" | "debiti_previdenziali" | "altri_debiti";
+export type PregressoKey = "crediti_commerciali" | "crediti_tributari_breve" | "crediti_tributari_lungo" | "debiti_fornitori" | "debiti_tributari" | "debiti_previdenziali" | "altri_debiti";
 
 export interface PregressoPlan {
   opening: number;
@@ -472,6 +472,9 @@ export interface PregressoTributari extends PregressoPlan {
 
 export interface Pregresso {
   crediti_commerciali?: PregressoPlan | null;
+  crediti_tributari_breve?: PregressoPlan | null;
+  crediti_tributari_lungo?: PregressoPlan | null;
+  acconti_tributari_storici?: number;
   debiti_fornitori?: PregressoPlan | null;
   debiti_tributari?: PregressoTributari | null;
   debiti_previdenziali?: PregressoPlan | null;

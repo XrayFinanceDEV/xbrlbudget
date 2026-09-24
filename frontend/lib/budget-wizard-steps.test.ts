@@ -7,7 +7,7 @@ import {
 } from "./budget-wizard-steps";
 
 describe("budget-wizard-steps", () => {
-  it("ha sette passi numerati in ordine, in tre gruppi, con i due passi nuovi marcati", () => {
+  it("ha sette passi numerati in ordine, in tre gruppi, senza badge nuovo", () => {
     expect(WIZARD_STEPS.map((s) => s.key)).toEqual([
       "scenario", "fatturato", "costi", "circolante", "patrimoniale-pregresso", "patrimoniale-piano", "imposte",
     ]);
@@ -15,7 +15,7 @@ describe("budget-wizard-steps", () => {
       "Impostazione", "Conto economico", "Conto economico",
       "Stato patrimoniale", "Stato patrimoniale", "Stato patrimoniale", "Stato patrimoniale",
     ]);
-    expect(WIZARD_STEPS.filter((s) => s.badge === "nuovo").map((s) => s.n)).toEqual([5, 6]);
+    expect(WIZARD_STEPS.filter((s) => s.badge === "nuovo").map((s) => s.n)).toEqual([]);
     expect(WIZARD_STEPS.map((s) => s.title)).toEqual([
       "Scenario", "Fatturato", "Costi", "Capitale circolante", "Patrimoniale pregresso", "Patrimoniale piano", "Imposte",
     ]);
@@ -297,10 +297,10 @@ describe("stepForErrorMessage · piano dei tributari al passo 5, non al passo 7 
 });
 
 describe("railBadges (Task 9)", () => {
-  it("«da integrare» sovrascrive «nuovo» del catalogo, gli altri passi «nuovo» restano", () => {
-    expect(railBadges(["scenario"])).toEqual({ scenario: "da integrare", "patrimoniale-pregresso": "nuovo", "patrimoniale-piano": "nuovo" });
+  it("mostra il badge da integrare dove necessario", () => {
+    expect(railBadges(["scenario"])).toEqual({ scenario: "da integrare" });
   });
-  it("senza migrazione restano solo i badge «nuovo» del catalogo", () => {
-    expect(railBadges([])).toEqual({ "patrimoniale-pregresso": "nuovo", "patrimoniale-piano": "nuovo" });
+  it("senza migrazione non mostra badge", () => {
+    expect(railBadges([])).toEqual({});
   });
 });

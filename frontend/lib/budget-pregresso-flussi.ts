@@ -104,6 +104,8 @@ export function flussiPregresso(years: ForecastPreviewYear[], breve: Record<Oltr
     riga("trib-rate", "Tributari rateizzati", years.map((y) => -num(y.details?.imposte?.rate_paid))),
     riga("altri-oltre", "Altri debiti oltre 12 mesi", years.map((y, i) => altri[i]! - chiuso(y, "altri_debiti"))),
     riga("crediti-oltre", "Incasso crediti oltre 12 mesi", years.map((y, i) => chiuso(y, "crediti_commerciali") - cred[i]!)),
+    riga("tributari-entro", "Incasso crediti tributari pregressi entro 12 mesi", years.map((y) => chiuso(y, "crediti_tributari_breve"))),
+    riga("tributari-oltre", "Incasso crediti tributari pregressi oltre 12 mesi", years.map((y) => chiuso(y, "crediti_tributari_lungo"))),
   ];
 
   const somma = (i: number) => flussi.reduce((a, r) => a + num(r.years[i]?.value), 0);

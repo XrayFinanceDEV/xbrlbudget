@@ -37,17 +37,20 @@ const cents = (v: number) => Math.round(v * 100) / 100;
  *  (`TributariOltreRow`) perche' l'apertura della riga e' il rateizzato del
  *  piano tributario, non una massa letta dal bilancio — vedi
  *  `tributariOltreRow` piu' sotto. */
-export type OltreKey = "crediti_commerciali" | "altri_debiti" | "debiti_fornitori" | "debiti_previdenziali";
+export type OltreKey = "crediti_commerciali" | "crediti_tributari_breve" | "crediti_tributari_lungo" | "altri_debiti" | "debiti_fornitori" | "debiti_previdenziali";
 
 /** L'ordine delle righe della card (spec §4.5): i due saldi che hanno SEMPRE
  *  una riga per primi, poi gli altri due, che una riga la hanno solo con
  *  massa oltre. `budget-pregresso-flussi.ts` prende da qui la chiave. */
 export const OLTRE_KEYS: readonly OltreKey[] = [
-  "crediti_commerciali", "altri_debiti", "debiti_fornitori", "debiti_previdenziali",
+  "crediti_commerciali", "crediti_tributari_breve", "crediti_tributari_lungo",
+  "altri_debiti", "debiti_fornitori", "debiti_previdenziali",
 ];
 
 export const OLTRE_LABELS: Record<OltreKey, string> = {
   crediti_commerciali: "Crediti oltre 12 mesi",
+  crediti_tributari_breve: "Altri crediti tributari · entro 12 mesi",
+  crediti_tributari_lungo: "Altri crediti tributari · oltre 12 mesi",
   altri_debiti: "Altri debiti oltre 12 mesi",
   debiti_fornitori: "Debiti fornitori oltre 12 mesi",
   debiti_previdenziali: "Debiti previdenziali oltre 12 mesi",
@@ -57,6 +60,8 @@ export const OLTRE_LABELS: Record<OltreKey, string> = {
  *  segno dell'anteprima e il colore del chip a schermo. */
 export const OLTRE_DIREZIONI: Record<OltreKey, "in" | "out"> = {
   crediti_commerciali: "in",
+  crediti_tributari_breve: "in",
+  crediti_tributari_lungo: "in",
   altri_debiti: "out",
   debiti_fornitori: "out",
   debiti_previdenziali: "out",
@@ -81,12 +86,15 @@ const RIGA_SEMPRE: readonly OltreKey[] = ["crediti_commerciali", "altri_debiti"]
  */
 export function massaBreve(baseBs: BalanceSheet | undefined | null, key: OltreKey): number {
   if (!baseBs) return 0;
+  if (key === "crediti_tributari_breve" || key === "crediti_tributari_lungo") return 0;
   return cents(openingMasses(baseBs)[key] - openingMassLong(baseBs, key));
 }
 
 /** La parte OLTRE l'esercizio: `openingMassLong` cosi' com'e', niente di suo. */
-export function massaOltre(baseBs: BalanceSheet | undefined | null, key: OltreKey): number {
-  return baseBs ? cents(openingMassLong(baseBs, key)) : 0;
+export function massaOltre(baseBs: BalanceSheet | undefined | null, key: OltreKey, accontiTributari = 0): number {
+  if (!baseBs) return 0;
+  if (key === "crediti_tributari_breve") return cents(openingMasses(baseBs, accontiTributari)[key]);
+  return cents(openingMassLong(baseBs, key));
 }
 
 /** Il ripiego perche' `pianoBase` vuole un oggetto, non `undefined`: l'identita'
@@ -103,15 +111,17 @@ export const PREGRESSO_VUOTO: Pregresso = {};
  *  `opening` NON puo' essere uno zero qualsiasi, perche' `validatePregresso`
  *  la confronta con `openingMasses` e un'apertura falsa e' un errore che
  *  blocca il salvataggio senza che l'utente possa correggerlo da qui. */
-function pianoDiPartenza(baseBs: BalanceSheet, years: number[], key: OltreKey): PregressoPlan {
+function pianoDiPartenza(baseBs: BalanceSheet, years: number[], key: OltreKey, accontiTributari = 0): PregressoPlan {
   const breve = massaBreve(baseBs, key);
+  const oltre = massaOltre(baseBs, key, accontiTributari);
   const n = Math.max(1, years.length);
   return {
-    opening: cents(breve + massaOltre(baseBs, key)),
+    opening: cents(breve + oltre),
     // Un importo per anno di piano, il primo gia' riempito dal breve: la forma
     // che `runoff_schedule` si aspetta, e che `validatePregresso` confronta
     // contro l'orizzonte.
-    amounts: [breve, ...new Array<number>(n - 1).fill(0)],
+    amounts: [key === "crediti_tributari_breve" ? cents(breve + oltre) : breve,
+      ...new Array<number>(n - 1).fill(0)],
     writeoff: null,
     // Il flag vive SOLO sui crediti: su un debito «non incassato» non
     // significa nulla, e lo schema del motore lo legge solo li'.
@@ -158,15 +168,18 @@ function tributariDiPartenza(baseBs: BalanceSheet, years: number[]): PregressoTr
  * Nulla da riallineare ⇒ restituisce l'oggetto ricevuto (identita', vedi sotto).
  */
 export function riallineaAperture(baseBs: BalanceSheet, pregresso: Pregresso): Pregresso {
-  const masses = openingMasses(baseBs);
+  const acconti = pregresso.acconti_tributari_storici ?? 0;
+  const masses = openingMasses(baseBs, acconti);
   const patch: Pregresso = {};
   for (const key of OLTRE_KEYS) {
     const plan = pregresso[key] as PregressoPlan | null | undefined;
     if (plan == null || Math.abs(num(plan.opening) - masses[key]) <= 0.01) continue;
-    const breveAllora = num(plan.opening) - massaOltre(baseBs, key);
+    const breveAllora = num(plan.opening) - massaOltre(baseBs, key, acconti);
     const oltrePrimoAnno = Math.max(0, num(plan.amounts[0]) - breveAllora);
     const amounts = plan.amounts.length ? [...plan.amounts] : [0];
-    amounts[0] = cents(massaBreve(baseBs, key) + oltrePrimoAnno);
+    amounts[0] = key === "crediti_tributari_breve"
+      ? cents(Math.max(0, num(amounts[0]) + masses[key] - num(plan.opening)))
+      : cents(massaBreve(baseBs, key) + oltrePrimoAnno);
     (patch as Record<string, unknown>)[key] = { ...plan, opening: masses[key], amounts };
   }
   const trib = tributariPlan(pregresso);
@@ -204,15 +217,16 @@ export function riallineaAperture(baseBs: BalanceSheet, pregresso: Pregresso): P
 export function pianoBase(baseBs: BalanceSheet | undefined | null, years: number[], pregresso: Pregresso): Pregresso {
   if (!baseBs) return pregresso;
   pregresso = riallineaAperture(baseBs, pregresso);
+  const acconti = pregresso.acconti_tributari_storici ?? 0;
   const missing = OLTRE_KEYS.filter((key) => {
-    const vuolePiano = key === "crediti_commerciali" || key === "debiti_fornitori" || massaOltre(baseBs, key) > 0;
+    const vuolePiano = key === "crediti_commerciali" || key === "debiti_fornitori" || massaOltre(baseBs, key, acconti) > 0;
     return vuolePiano && (pregresso[key] as PregressoPlan | null | undefined) == null;
   });
   const vuoleTributari =
     tributariPlan(pregresso) == null && cents(num((baseBs as unknown as Record<string, unknown>).sp17e_debiti_tributari_lungo)) > 0;
   if (missing.length === 0 && !vuoleTributari) return pregresso;
   const piani: Record<string, PregressoPlan> = {};
-  for (const key of missing) piani[key] = pianoDiPartenza(baseBs, years, key);
+  for (const key of missing) piani[key] = pianoDiPartenza(baseBs, years, key, acconti);
   return {
     ...pregresso,
     ...piani,
@@ -227,6 +241,10 @@ export function pianoBase(baseBs: BalanceSheet | undefined | null, years: number
 export const OLTRE_NOTA: Record<OltreKey, string> = {
   crediti_commerciali:
     "Il lato a breve si rigenera dai giorni medi; la parte oltre no: cio' che scadenzi qui va a zero e ci resta.",
+  crediti_tributari_breve:
+    "Scadenza iniziale nel primo anno: modifica gli importi se prevedi un incasso diverso. Il credito incassato va a zero e ci resta.",
+  crediti_tributari_lungo:
+    "Inserisci gli incassi previsti anno per anno. Il credito incassato va a zero e ci resta.",
   debiti_fornitori:
     "Il lato a breve si rigenera dai giorni di pagamento; la parte oltre no: cio' che scadenzi qui va a zero e ci resta.",
   debiti_previdenziali:
@@ -284,11 +302,11 @@ export function oltreRows(
 ): OltreRow[] {
   if (!baseBs) return [];
   return OLTRE_KEYS
-    .filter((key) => RIGA_SEMPRE.includes(key) || massaOltre(baseBs, key) > 0)
+    .filter((key) => RIGA_SEMPRE.includes(key) || massaOltre(baseBs, key, pregresso.acconti_tributari_storici ?? 0) > 0)
     .map((key) => {
       const plan = pregresso[key] as PregressoPlan | null | undefined;
       const breve = massaBreve(baseBs, key);
-      const mass = massaOltre(baseBs, key);
+      const mass = massaOltre(baseBs, key, pregresso.acconti_tributari_storici ?? 0);
       const nonIncassato = key === "crediti_commerciali" && plan?.non_incassato === true;
       const amounts = years.map((_, i) => {
         const written = plan?.amounts[i];
@@ -319,7 +337,7 @@ export function withOltreAmount(
   key: OltreKey, i: number, value: number | null,
 ): Pregresso {
   const p = pianoBase(baseBs, years, pregresso);
-  const plan = (p[key] as PregressoPlan | undefined) ?? pianoDiPartenza(baseBs ?? ({} as BalanceSheet), years, key);
+  const plan = (p[key] as PregressoPlan | undefined) ?? pianoDiPartenza(baseBs ?? ({} as BalanceSheet), years, key, p.acconti_tributari_storici ?? 0);
   const amounts = [...plan.amounts];
   while (amounts.length <= i) amounts.push(0);
   amounts[i] = cents((i === 0 ? massaBreve(baseBs, key) : 0) + (value ?? 0));

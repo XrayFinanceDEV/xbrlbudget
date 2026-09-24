@@ -72,6 +72,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Alert, AlertTitle, AlertDescription } from "@/components/ui/alert";
 import {
@@ -127,6 +128,36 @@ export default function BudgetPage() {
   const [activeTab, setActiveTab] = useState<string>("list");
   const [editingScenario, setEditingScenario] = useState<BudgetScenario | null>(null);
   const [recoveringBudget, setRecoveringBudget] = useState(false);
+  const [newPlanFrom, setNewPlanFrom] = useState<BudgetScenario | null>(null);
+  const [newPlanName, setNewPlanName] = useState("");
+  const [creatingPlan, setCreatingPlan] = useState(false);
+
+  const handleCreateAdditionalPlan = async () => {
+    if (
+      creatingPlan || !selectedCompanyId || !newPlanFrom ||
+      newPlanFrom.company_id !== selectedCompanyId || !newPlanName.trim()
+    ) return;
+    setCreatingPlan(true);
+    try {
+      const scenario = await createBudgetScenario(selectedCompanyId, {
+        company_id: selectedCompanyId,
+        name: newPlanName.trim(),
+        base_year: newPlanFrom.base_year,
+        scenario_type: "budget",
+      });
+      invalidateScenarios(selectedCompanyId);
+      const patch = patchPraticaPerScenarioAperto(pratica, scenario);
+      if (patch) updatePratica(patch);
+      setNewPlanFrom(null);
+      setEditingScenario(scenario);
+      setActiveTab("info");
+      toast.success("Business plan creato. Scegli l'orizzonte di 3 o 5 anni nel primo passo.");
+    } catch (err: unknown) {
+      toast.error(getErrorMessage(err, "Impossibile creare il business plan"));
+    } finally {
+      setCreatingPlan(false);
+    }
+  };
 
   const handleDeleteScenario = async (scenarioId: number) => {
     if (!selectedCompanyId) return;
@@ -354,13 +385,6 @@ export default function BudgetPage() {
               </Button>
             </div>
           )}
-          {/* Manual "Nuovo Scenario" creation is intentionally removed outside
-              startupMode (spec 2026-08-08-percorso-unico-pratica-design.md:239-240):
-              base_year here would default to Math.max(...years), which is not tied
-              to the pratica's corrected FinancialYear and can create a budget
-              scenario on data that never passed Rettifiche. The only creation
-              offered here is the recovery of that exact pratica bridge after its
-              budget was deleted. */}
           <ScenariosList
             scenarios={scenarios}
             loading={loading}
@@ -368,6 +392,10 @@ export default function BudgetPage() {
             onEdit={handleEditScenario}
             onDelete={handleDeleteScenario}
             onRegenerate={setRegenScenarioId}
+            onCreateFrom={startupMode ? undefined : (scenario) => {
+              setNewPlanFrom(scenario);
+              setNewPlanName("");
+            }}
             recoveries={recoveries}
             onRecover={handleRecoverBudget}
             recovering={recoveringBudget}
@@ -389,10 +417,8 @@ export default function BudgetPage() {
         />
       ) : editingScenario ? (
         // Fuori dallo startup la vecchia tab «Ipotesi» e' sostituita dal
-        // percorso a sette passi (spec 2026-09-08). `editingScenario` e'
-        // sempre valorizzato qui: la creazione manuale di uno scenario e'
-        // disattivata (vedi il commento su ScenariosList sopra), quindi si
-        // arriva a questo ramo solo da «Modifica» su uno scenario esistente.
+        // percorso a sette passi (spec 2026-09-08). Lo scenario puo' essere
+        // gia' salvato oppure appena creato da un bilancio base esistente.
         <BudgetWizard
           companyId={selectedCompanyId}
           years={years}
@@ -403,6 +429,47 @@ export default function BudgetPage() {
           }}
         />
       ) : null}
+
+      <Dialog open={newPlanFrom !== null} onOpenChange={(open) => {
+        if (!open && !creatingPlan) setNewPlanFrom(null);
+      }}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Nuovo business plan</DialogTitle>
+            <DialogDescription>
+              Usa il bilancio {newPlanFrom?.base_year} come base. Il nuovo piano avrà
+              ipotesi indipendenti; nel primo passo potrai scegliere 3 o 5 anni.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-2">
+            <Label htmlFor="new-budget-plan-name">Nome del piano</Label>
+            <Input
+              id="new-budget-plan-name"
+              value={newPlanName}
+              onChange={(event) => setNewPlanName(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === "Enter") {
+                  event.preventDefault();
+                  void handleCreateAdditionalPlan();
+                }
+              }}
+              placeholder="es. Piano a 5 anni"
+              maxLength={255}
+              autoFocus
+              disabled={creatingPlan}
+            />
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setNewPlanFrom(null)} disabled={creatingPlan}>
+              Annulla
+            </Button>
+            <Button onClick={handleCreateAdditionalPlan} disabled={creatingPlan || !newPlanName.trim()}>
+              {creatingPlan ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />}
+              Crea piano
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       <AlertDialog open={regenScenarioId !== null} onOpenChange={(open) => !open && setRegenScenarioId(null)}>
         <AlertDialogContent>
@@ -841,6 +908,7 @@ function ScenariosList({
   onEdit,
   onDelete,
   onRegenerate,
+  onCreateFrom,
   recoveries,
   onRecover,
   recovering,
@@ -851,6 +919,7 @@ function ScenariosList({
   onEdit: (scenario: BudgetScenario) => void;
   onDelete: (id: number) => void;
   onRegenerate: (id: number) => void;
+  onCreateFrom?: (scenario: BudgetScenario) => void;
   recoveries: BudgetRecovery[];
   onRecover: (recovery: BudgetRecovery) => void;
   recovering: boolean;
@@ -949,6 +1018,12 @@ function ScenariosList({
                   <RefreshCw className="h-4 w-4" />
                   Ricalcola
                 </Button>
+                {onCreateFrom && (
+                  <Button variant="outline" size="sm" onClick={() => onCreateFrom(scenario)}>
+                    <Plus className="h-4 w-4" />
+                    Nuovo piano da questa base
+                  </Button>
+                )}
                 <AlertDialog>
                   <AlertDialogTrigger asChild>
                     <Button variant="destructive" size="sm">

@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import io
+from dataclasses import dataclass
 
 from reportlab.lib.colors import HexColor
 from reportlab.lib.enums import TA_RIGHT
@@ -168,7 +169,17 @@ def panel(title: str, bullets: list) -> Table:
 def chart(png: bytes, height_in: float, width_pt: float = CW) -> Image:
     img = Image(io.BytesIO(png), width=width_pt, height=width_pt * height_in / 7.2)
     img.hAlign = "CENTER"
+    img.png = png  # il Word riusa il PNG del grafico, non l'immagine già decodificata
     return img
+
+
+@dataclass(frozen=True)
+class CoverLines:
+    """I testi della fascia di copertina, gli stessi che `draw_cover_band` disegna nel PDF e il Word scrive."""
+    eyebrow: str
+    name: str
+    title: str
+    lines: tuple
 
 
 class SectionStart(Flowable):

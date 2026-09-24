@@ -27,3 +27,17 @@ cambia una regola o una soglia, e il test `tests/test_bp_narrative.py` ne fissa 
 - L'indice della copertina nasce da due passate di `doc.build`: la copertina deve avere altezza fissa, o la seconda
   passata sposta le pagine (lo verifica un `assert` in `render_business_plan`).
 - Un valore assente è `None` fino alla stampa (`n.d.`), mai zero.
+
+
+**Il Word (.docx):** «Scarica Word» chiama `POST …/business-plan/docx`, stesso corpo e stessi errori della rotta PDF.
+Non è un secondo renderer: `backend/app/renderers/docx_export.py` traduce in `python-docx` gli stessi flowable che le
+sezioni danno al PDF, quindi un testo corretto nel codice cambia PDF e Word insieme. Testi e tabelle sono
+modificabili, i grafici sono i PNG del PDF (`layout.chart` li conserva in `Image.png`), copertina e intestazioni
+vengono da `cover_lines` e `page_texts`, le stesse funzioni che usa il PDF. L'indice non ha numeri di pagina (in
+Word si spostano alla prima correzione). I commenti corretti nel Word restano nel file: l'app non li rilegge.
+Trappole:
+- un flowable che il traduttore non conosce solleva `TypeError`: una primitiva nuova in `layout.py` va insegnata
+  anche a `docx_export.translate`, o il Word di quella sezione si rompe. `tests/test_docx_report.py` confronta ogni
+  riga di testo del PDF col Word, su AMBIENTA e sugli scenari fuori dal banco;
+- `python-docx` sta in `backend/requirements.txt` di proposito: nel venv arrivava solo con docling, codice morto;
+- Word non incorpora Lato: sul PC senza il font usa il suo ripiego, e il documento resta corretto.

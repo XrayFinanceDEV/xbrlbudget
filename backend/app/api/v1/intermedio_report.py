@@ -119,3 +119,37 @@ def download_infrannuale_pdf(
         "Cache-Control": "no-store",
     }
     return Response(content=result.data, media_type="application/pdf", headers=headers)
+
+
+@router.post(
+    "/companies/{company_id}/scenarios/{scenario_id}/infrannuale/docx",
+    response_class=Response,
+    summary="Scarica il report infrannuale in Word",
+    responses={
+        400: {"description": "Scenario non infrannuale, o bilanci del periodo mancanti"},
+        404: {"description": "Azienda o scenario non di questo utente"},
+    },
+)
+def download_infrannuale_docx(
+    company_id: int,
+    scenario_id: int,
+    request: InfrannualePdfRequest,
+    user_id: str = Depends(get_current_user_id),
+    db: Session = Depends(get_db),
+) -> Response:
+    """Lo stesso report in Word, per correggere i testi prima di consegnarlo: stessi controlli della PDF."""
+    scenario = validate_scenario_belongs_to_company(scenario_id, company_id, user_id, db)
+    if scenario.scenario_type != "infrannuale":
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST,
+                            detail="Il report infrannuale è disponibile solo per gli scenari infrannuali.")
+    try:
+        result = infrannuale_pdf_service.render_docx(db, scenario)
+    except ValueError as error:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(error)) from None
+    headers = {
+        "Content-Disposition": (f'attachment; filename="{result.ascii_filename}"; '
+                                f"filename*=UTF-8''{quote(result.filename, safe='', encoding='utf-8')}"),
+        "ETag": f'"{result.etag}"',
+        "Cache-Control": "no-store",
+    }
+    return Response(content=result.data, media_type=infrannuale_pdf_service.DOCX_MEDIA_TYPE, headers=headers)

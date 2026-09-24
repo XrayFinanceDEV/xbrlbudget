@@ -233,3 +233,8 @@ export const REPORT_MODELS: { value: ReportModel; label: string }[] = [
 export function reportPdfPath(model: ReportModel): string {
   return model === "business_plan" ? "business-plan/pdf" : "final-report/pdf";
 }
+
+/** Il Word esiste solo per il Business plan: il dossier Typst resta PDF (spec 2026-09-24). */
+export function wordAvailable(model: ReportModel): boolean {
+  return model === "business_plan";
+}

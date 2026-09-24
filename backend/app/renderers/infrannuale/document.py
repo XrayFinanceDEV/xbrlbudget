@@ -33,9 +33,13 @@ class SectionSpec:
 SECTIONS: list = []  # riempito da _register() in fondo al modulo
 
 
+def page_texts(data: InfrannualeData) -> tuple:
+    """Intestazione sinistra, destra e piè di pagina: gli stessi nel PDF e nel Word."""
+    return data.company_name, data.header_title, f"Riservato e confidenziale · {data.legend}"
+
+
 def _body_page(data: InfrannualeData):
-    right = data.header_title
-    foot = f"Riservato e confidenziale · {data.legend}"
+    _, right, foot = page_texts(data)
 
     def on_page(canvas, doc):
         canvas.saveState()
@@ -100,6 +104,16 @@ def render_infrannuale(data: InfrannualeData, *, only: Optional[tuple] = None) -
     if second != pages:
         raise IndexShifted("l'indice ha spostato le pagine: la copertina deve avere altezza fissa")
     return pdf
+
+
+def render_infrannuale_docx(data: InfrannualeData) -> bytes:
+    """Lo stesso report in Word (spec 2026-09-24): stesse sezioni, indice senza numeri di pagina."""
+    from app.renderers import docx_export
+    from .sections_sintesi import cover_lines
+    theme.register_fonts()
+    left, right, foot = page_texts(data)
+    return docx_export.build([s.build(data, {}) for s in SECTIONS], cover=cover_lines(data), header_left=left,
+                             header_right=right, footer=foot, title=f"{data.company_name} – {data.header_title}")
 
 
 def _register() -> None:

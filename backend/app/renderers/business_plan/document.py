@@ -34,9 +34,14 @@ def header_title(data: BusinessPlanData) -> str:
     return f"Piano economico-finanziario {span}"
 
 
+def page_texts(data: BusinessPlanData) -> tuple:
+    """Intestazione sinistra, destra e piè di pagina: gli stessi nel PDF e nel Word."""
+    return (data.company_name, header_title(data) + (" · BOZZA" if data.draft else ""),
+            f"Riservato e confidenziale · {legend(data)}")
+
+
 def _body_page(data: BusinessPlanData):
-    right = header_title(data) + (" · BOZZA" if data.draft else "")
-    foot = f"Riservato e confidenziale · {legend(data)}"
+    _, right, foot = page_texts(data)
 
     def on_page(canvas, doc):
         canvas.saveState()
@@ -100,6 +105,16 @@ def render_business_plan(data: BusinessPlanData, *, only: Optional[tuple] = None
     pdf, second = _build(data, specs, pages)
     assert second == pages, "l'indice ha spostato le pagine: la copertina deve avere altezza fissa"
     return pdf
+
+
+def render_business_plan_docx(data: BusinessPlanData) -> bytes:
+    """Lo stesso Business plan in Word (spec 2026-09-24): stesse sezioni, indice senza numeri di pagina."""
+    from app.renderers import docx_export
+    from .sections_sintesi import cover_lines
+    theme.register_fonts()
+    left, right, foot = page_texts(data)
+    return docx_export.build([s.build(data, {}) for s in SECTIONS], cover=cover_lines(data), header_left=left,
+                             header_right=right, footer=foot, title=f"{data.company_name} – {header_title(data)}")
 
 
 def _register() -> None:

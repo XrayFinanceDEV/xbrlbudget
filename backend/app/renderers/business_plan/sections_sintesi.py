@@ -48,6 +48,13 @@ def _cover_name(name: str) -> tuple:
     return (16.0, [lines[0], layout.fit(" ".join(lines[1:]), BOLD, 16, CW)])
 
 
+def cover_lines(data: BusinessPlanData) -> layout.CoverLines:
+    """I testi della fascia di copertina: gli stessi nel PDF e nel Word."""
+    return layout.CoverLines(f"REPORT DI BUDGET {_years(data)}" + (" · BOZZA" if data.draft else ""), data.company_name,
+                      f"Piano economico-finanziario {_years(data)}",
+                      (data.base_description, "Andamento economico, flussi di cassa, sostenibilità del debito e circolante"))
+
+
 def draw_cover_band(canvas, data: BusinessPlanData) -> None:
     """Fascia navy della copertina (0–283,5 pt dall'alto) con filetto teal, come nel riferimento."""
     theme.register_fonts()
@@ -58,8 +65,9 @@ def draw_cover_band(canvas, data: BusinessPlanData) -> None:
     canvas.rect(0, PAGE_H - 289.1, PAGE_W, 5.6, stroke=0, fill=1)
     canvas.setFillColor(white)
     canvas.setFont(BOLD, 10)
-    canvas.drawString(LM, PAGE_H - 64, f"REPORT DI BUDGET {_years(data)}" + (" · BOZZA" if data.draft else ""))
-    size, lines = _cover_name(data.company_name)
+    cl = cover_lines(data)
+    canvas.drawString(LM, PAGE_H - 64, cl.eyebrow)
+    size, lines = _cover_name(cl.name)
     canvas.setFont(BOLD, size)
     if len(lines) == 1:
         canvas.drawString(LM, PAGE_H - 122, lines[0])
@@ -67,11 +75,11 @@ def draw_cover_band(canvas, data: BusinessPlanData) -> None:
         for n, line in enumerate(lines):
             canvas.drawString(LM, PAGE_H - 106 - n * size * 1.12, line)
     canvas.setFont(REGULAR, 21)
-    canvas.drawString(LM, PAGE_H - 160, f"Piano economico-finanziario {_years(data)}")
+    canvas.drawString(LM, PAGE_H - 160, cl.title)
     canvas.setFillColor(C(theme.COVER_SUB))
     canvas.setFont(REGULAR, 11)
-    canvas.drawString(LM, PAGE_H - 200, data.base_description)
-    canvas.drawString(LM, PAGE_H - 220, "Andamento economico, flussi di cassa, sostenibilità del debito e circolante")
+    canvas.drawString(LM, PAGE_H - 200, cl.lines[0])
+    canvas.drawString(LM, PAGE_H - 220, cl.lines[1])
     canvas.setFillColor(C(theme.MUTED))
     canvas.setFont(REGULAR, 7.8)
     canvas.drawString(LM, PAGE_H - 820, "Riservato e confidenziale")

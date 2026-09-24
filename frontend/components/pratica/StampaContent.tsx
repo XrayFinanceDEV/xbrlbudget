@@ -8,6 +8,8 @@ import { usePratica } from "@/contexts/PraticaContext";
 import { usePrimaryAction } from "@/contexts/PraticaActionContext";
 import { useInvalidateAnalysis } from "@/hooks/use-queries";
 import { useInfrannualeDownload } from "@/hooks/use-infrannuale-download";
+import { useFileDownload } from "@/hooks/use-file-download";
+import { downloadReportDocx } from "@/lib/api";
 import { rigeneraBudgetRiusato } from "@/lib/budget-rigenera-riuso";
 import {
   bulkUpsertAssumptions,
@@ -22,7 +24,7 @@ import {
 } from "@/lib/api";
 import type { CrisiInfrannuale, IntraYearComparison, IntraYearComparisonItem, RatingCrisi } from "@/types/api";
 import { toast } from "sonner";
-import { AlertTriangle, Loader2, Printer, Sparkles, X } from "lucide-react";
+import { AlertTriangle, FileText, Loader2, Printer, Sparkles, X } from "lucide-react";
 import { cn, getErrorMessage } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
@@ -134,6 +136,13 @@ export function StampaContent({
   const handleDownloadPdf = async () => {
     if (!companyId || !scenarioId) return;
     await downloadPdf(companyId, scenarioId);
+  };
+  // Lo stesso report in Word, per correggere i testi prima di consegnarlo.
+  const { download: downloadFile, downloading: downloadingWord } = useFileDownload();
+  const handleDownloadWord = async () => {
+    if (!companyId || !scenarioId) return;
+    await downloadFile(() => downloadReportDocx(companyId, scenarioId, "infrannuale"),
+      "Impossibile scaricare il Word del report");
   };
 
   const handleCommentBlur = async () => {
@@ -421,13 +430,23 @@ export function StampaContent({
           </Button>
         )}
         {companyId && scenarioId && (
-          <Button onClick={() => void handleDownloadPdf()} variant="outline" disabled={downloadingPdf}>
+          <Button onClick={() => void handleDownloadPdf()} variant="outline" disabled={downloadingPdf || downloadingWord}>
             {downloadingPdf ? (
               <Loader2 className="h-4 w-4 mr-2 animate-spin" />
             ) : (
               <Printer className="h-4 w-4 mr-2" />
             )}
             Scarica PDF
+          </Button>
+        )}
+        {companyId && scenarioId && (
+          <Button onClick={() => void handleDownloadWord()} variant="outline" disabled={downloadingPdf || downloadingWord}>
+            {downloadingWord ? (
+              <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+            ) : (
+              <FileText className="h-4 w-4 mr-2" />
+            )}
+            Scarica Word
           </Button>
         )}
       </div>

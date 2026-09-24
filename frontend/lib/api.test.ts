@@ -25,7 +25,7 @@ vi.mock("axios", () => {
   };
 });
 
-import { downloadFinalReportPdf, downloadInfrannualePdf, generateEditorialNotes, getEditorialSession, getFinalReport, getFinalReportV2, prepareEditorialSession, previewForecast, saveEditorialNotes, setAuthToken } from "./api";
+import { downloadFinalReportPdf, downloadInfrannualePdf, downloadReportDocx, generateEditorialNotes, getEditorialSession, getFinalReport, getFinalReportV2, prepareEditorialSession, previewForecast, saveEditorialNotes, setAuthToken } from "./api";
 import { FinalReportDownloadError } from "./final-report-download";
 import v1 from "../../tests/fixtures/final_report/bilancio.json";
 import v2 from "../../tests/fixtures/final_report/v2/bilancio.json";
@@ -253,5 +253,38 @@ describe("downloadInfrannualePdf", () => {
     expect(url).toContain("/companies/1/scenarios/2/infrannuale/pdf");
     expect(JSON.parse(init.body)).toEqual({});
     expect(result.filename).toBe("Report infrannuale X 6M 2026.pdf");
+  });
+});
+
+describe("downloadReportDocx", () => {
+  const fetchMock = vi.fn();
+  beforeEach(() => {
+    fetchMock.mockReset();
+    vi.stubGlobal("fetch", fetchMock);
+    setAuthToken(null);
+  });
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("chiama la rotta Word giusta col corpo della rotta PDF", async () => {
+    const blob = new Blob(["PK"]);
+    fetchMock.mockResolvedValue({
+      ok: true, status: 200, blob: async () => blob, json: async () => ({}),
+      headers: { get: (n: string) => (n === "Content-Disposition" ? 'attachment; filename="Report.docx"' : null) },
+    });
+    const result = await downloadReportDocx(1, 2, "infrannuale");
+    expect(fetchMock.mock.calls[0][0]).toContain("/companies/1/scenarios/2/infrannuale/docx");
+    expect(JSON.parse(fetchMock.mock.calls[0][1].body)).toEqual({});
+    expect(result.filename).toBe("Report.docx");
+    await downloadReportDocx(1, 3, "business-plan", "final");
+    expect(fetchMock.mock.calls[1][0]).toContain("/companies/1/scenarios/3/business-plan/docx");
+    expect(JSON.parse(fetchMock.mock.calls[1][1].body)).toEqual({ document_state: "final" });
+  });
+
+  it("un errore del server diventa FinalReportDownloadError", async () => {
+    fetchMock.mockResolvedValue({ ok: false, status: 404, json: async () => ({ detail: "non trovato" }), headers: { get: () => null } });
+    const error = await downloadReportDocx(1, 2, "infrannuale").catch((e) => e);
+    expect(error.status).toBe(404);
   });
 });

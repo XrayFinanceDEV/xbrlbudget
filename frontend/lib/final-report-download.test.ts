@@ -3,6 +3,7 @@ import {
   FinalReportDownloadError,
   REPORT_MODELS,
   reportPdfPath,
+  wordAvailable,
   PREVIEW_BLOCKED_MESSAGE,
   PREVIEW_REVOKE_DELAY_MS,
   closePreviewTabOnError,
@@ -381,5 +382,12 @@ describe("modelli di report", () => {
   it("ogni modello ha la sua rotta", () => {
     expect(reportPdfPath("dossier")).toBe("final-report/pdf");
     expect(reportPdfPath("business_plan")).toBe("business-plan/pdf");
+  });
+});
+
+describe("wordAvailable", () => {
+  it("il Word esiste solo per il Business plan, non per il dossier Typst", () => {
+    expect(wordAvailable("business_plan")).toBe(true);
+    expect(wordAvailable("dossier")).toBe(false);
   });
 });

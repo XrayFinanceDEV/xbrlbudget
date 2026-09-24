@@ -1114,4 +1114,41 @@ export const downloadInfrannualePdf = async (
   return { blob, filename: resolveDownloadFilename(response.headers.get('Content-Disposition')) };
 };
 
+/**
+ * Scarica lo stesso report in Word (.docx), per correggere i testi prima di
+ * consegnarlo: Business plan (/report) o infrannuale (Stampa). Stesso corpo
+ * della rotta PDF gemella; i commenti corretti nel Word restano nel file.
+ */
+export const downloadReportDocx = async (
+  companyId: number,
+  scenarioId: number,
+  kind: 'business-plan' | 'infrannuale',
+  documentState: FinalReportDocumentState = 'draft',
+): Promise<DownloadFinalReportPdfResult> => {
+  const body = kind === 'business-plan' ? { document_state: documentState } : {};
+  const response = await fetch(
+    `${API_BASE_URL}/companies/${companyId}/scenarios/${scenarioId}/${kind}/docx`,
+    {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...(_authToken ? { Authorization: `Bearer ${_authToken}` } : {}),
+      },
+      body: JSON.stringify(body),
+    },
+  );
+  if (!response.ok) {
+    let detail: string | null = null;
+    try {
+      const data = await response.json();
+      if (data && typeof data.detail === 'string') detail = data.detail;
+    } catch {
+      // Corpo non JSON: si ricade sulla mappa per stato.
+    }
+    throw new FinalReportDownloadError(response.status, resolveDownloadErrorMessage(response.status, detail));
+  }
+  const blob = await response.blob();
+  return { blob, filename: resolveDownloadFilename(response.headers.get('Content-Disposition')) };
+};
+
 export default api;

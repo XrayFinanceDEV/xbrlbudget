@@ -75,10 +75,20 @@ def _cells(cmd, nrows, ncols):
     return [(r, c) for r in range(r0, min(r1, nrows - 1) + 1) for c in range(c0, min(c1, ncols - 1) + 1)]
 
 
+# Word è severo sull'ordine dei figli di w:tcPr e w:tcBorders (schema WordprocessingML): fuori ordine il file può
+# aprirsi come «contenuto illeggibile». python-docx e LibreOffice lo tollerano, quindi nessun test di apertura lo vede.
+_DOPO_SHD = ("w:noWrap", "w:tcMar", "w:textDirection", "w:tcFitText", "w:vAlign", "w:hideMark")
+_ORDINE_LATI = ("top", "left", "bottom", "right")
+
+
 def _shade(cell, hx: str) -> None:
+    tcPr = cell._tc.get_or_add_tcPr()
+    old = tcPr.find(qn("w:shd"))
+    if old is not None:
+        tcPr.remove(old)
     shd = OxmlElement("w:shd")
     shd.set(qn("w:val"), "clear"), shd.set(qn("w:color"), "auto"), shd.set(qn("w:fill"), hx)
-    cell._tc.get_or_add_tcPr().append(shd)
+    tcPr.insert_element_before(shd, *_DOPO_SHD)
 
 
 def _border(cell, side: str, width: float, hx: str) -> None:
@@ -86,10 +96,32 @@ def _border(cell, side: str, width: float, hx: str) -> None:
     borders = tcPr.find(qn("w:tcBorders"))
     if borders is None:
         borders = OxmlElement("w:tcBorders")
-        tcPr.append(borders)
+        tcPr.insert_element_before(borders, "w:shd", *_DOPO_SHD)
+    old = borders.find(qn(f"w:{side}"))  # due comandi sullo stesso lato: vince l'ultimo, come nel PDF
+    if old is not None:
+        borders.remove(old)
     b = OxmlElement(f"w:{side}")
     b.set(qn("w:val"), "single"), b.set(qn("w:sz"), str(max(2, round(width * 8)))), b.set(qn("w:color"), hx)
-    borders.append(b)
+    dopo = [x for x in _ORDINE_LATI[_ORDINE_LATI.index(side) + 1:]]
+    succ = next((borders.find(qn(f"w:{x}")) for x in dopo if borders.find(qn(f"w:{x}")) is not None), None)
+    if succ is None:
+        borders.append(b)
+    else:
+        succ.addprevious(b)
+
+
+def _widths(wt, widths: list) -> None:
+    """Larghezze su griglia, celle e tabella: Word legge tcW, LibreOffice e Google Docs la griglia."""
+    for g, w in zip(wt._tbl.tblGrid.gridCol_lst, widths):
+        g.w = Pt(w)
+    for row in wt.rows:
+        for cell, w in zip(row.cells, widths):
+            cell.width = Pt(w)
+    tblW = wt._tbl.tblPr.find(qn("w:tblW"))
+    if tblW is None:
+        tblW = OxmlElement("w:tblW")
+        wt._tbl.tblPr.append(tblW)
+    tblW.set(qn("w:type"), "dxa"), tblW.set(qn("w:w"), str(round(sum(widths) * 20)))
 
 
 _LATI = {"LINEABOVE": "top", "LINEBELOW": "bottom", "LINEBEFORE": "left", "LINEAFTER": "right"}
@@ -106,9 +138,7 @@ def _table(container, t: Table, state) -> None:
         rest = max(theme.CW - sum(w for w in widths if w), 20)
         for i in free:
             widths[i] = rest / len(free)
-    for r in range(nrows):
-        for c in range(ncols):
-            wt.cell(r, c).width = Pt(widths[c])
+    _widths(wt, widths)
     for cmd in t._bkgrndcmds:
         if cmd[0] == "BACKGROUND" and _hex(cmd[3]):
             for r, c in _cells(cmd, nrows, ncols):
@@ -213,6 +243,8 @@ def _page_field(p) -> None:
 
 
 def _two_sided(p, left: str, right: str, size: float, color: str, bold_left: bool, page: bool = False) -> None:
+    # gli stili Header/Footer del modello hanno stop a 4680 e 9360 twip: la tabulazione finirebbe lì, non al margine
+    p.style.paragraph_format.tab_stops.clear_all()
     p.paragraph_format.tab_stops.add_tab_stop(Pt(theme.CW), WD_TAB_ALIGNMENT.RIGHT)
     c = RGBColor.from_string(color[1:])
     r = p.add_run(left); _font(r, "", size, None, bold_left); r.font.color.rgb = c
@@ -224,7 +256,7 @@ def _two_sided(p, left: str, right: str, size: float, color: str, bold_left: boo
 def _cover(doc, cover: CoverLines) -> None:
     band = doc.add_table(rows=1, cols=1)
     cell = band.cell(0, 0)
-    cell.width = Pt(theme.CW)
+    _widths(band, [theme.CW])
     _shade(cell, theme.NAVY[1:])
     _border(cell, "bottom", 5.6, theme.TEAL[1:])
     white = RGBColor(0xFF, 0xFF, 0xFF)

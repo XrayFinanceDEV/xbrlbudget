@@ -227,7 +227,8 @@ export type ReportModel = "dossier" | "business_plan";
 
 export const REPORT_MODELS: { value: ReportModel; label: string }[] = [
   { value: "business_plan", label: "Business plan" },
-  { value: "dossier", label: "Dossier" },
+  // Il dossier Typst è staccato da /report (2026-09-24): rotte e codice restano, e tornerà come prodotto più
+  // avanzato. Rimetterlo qui riaccende il selettore «Modello», che compare solo con più di un modello.
 ];
 
 export function reportPdfPath(model: ReportModel): string {

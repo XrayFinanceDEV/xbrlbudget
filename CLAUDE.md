@@ -964,8 +964,11 @@ rifiutato** (vedi «Invarianti e trappole › Previsionale»).
 and `/aziende` redirect here) · `/budget` (scenario assumptions, and the Startup workflow) ·
 `/forecast/income` (**editable** P&L: cells → batch save → BS adapts) · `/forecast/balance`
 (**editable**: cells write `sp_overrides`, not `*_override` columns) · `/forecast/reclassified`
-(read-only) · `/analysis` (Indici) · `/cashflow` (rendiconto) · `/report` (selettore «Modello»:
-**Business plan** — ReportLab, default, anche in Word con «Scarica Word» — oppure il dossier Typst; →
+(read-only) · `/analysis` (Indici) · `/cashflow` (rendiconto) · `/report` (il
+**Business plan** — ReportLab, anche in Word con «Scarica Word». Il dossier Typst è **staccato** dall'interfaccia
+dal 2026-09-24, in attesa di tornare come prodotto più avanzato: rotte e codice restano, `REPORT_MODELS` ha il solo
+Business plan e il selettore «Modello» ricompare da sé con un secondo modello. I suoi testi AI mancanti
+(`narrative_missing`) sono solo informazione e non tengono più il report in bozza; →
 [docs/budget/BUSINESS-PLAN-PDF.md](docs/budget/BUSINESS-PLAN-PDF.md)) · `/import`
 (works, but unlinked from the nav — the pratica Import step is the normal way in).
 

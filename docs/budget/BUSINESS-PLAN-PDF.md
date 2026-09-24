@@ -1,11 +1,13 @@
 # Report Business plan (PDF)
 
-Secondo report PDF della pratica, accanto al dossier Typst. Riproduce il layout del business plan preparato dal
+Il report di `/report`: dal 2026-09-24 l'unico, perché il dossier Typst è staccato dall'interfaccia (rotte e codice
+restano, per un prodotto successivo più avanzato). Riproduce il layout del business plan preparato dal
 committente (`BUSINESS PLAN RIVISITATO.pdf`, fuori da git) con i numeri del motore.
 
 **Dove sta:** `backend/app/renderers/business_plan/` (ReportLab + matplotlib), servizio
 `services/business_plan_pdf_service.py`, rotta `POST /companies/{id}/scenarios/{sid}/business-plan/pdf`
-(`{"document_state": "draft"|"final"}`), selettore «Modello» su `/report`.
+(`{"document_state": "draft"|"final"}`), pulsanti su `/report`. Il «finale» chiede `readiness.status == "ready"`: i
+testi AI mancanti del dossier (`narrative_missing`) sono solo `info` e non lo bloccano più.
 
 **Da dove vengono i numeri:** solo da `FinalReportModelV2`, via `data.from_report`. Il report somma e sottrae righe
 già presenti (costi operativi = costi della produzione − ammortamenti; debiti finanziari = PFN + liquidità) e non

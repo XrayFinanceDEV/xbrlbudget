@@ -1,4 +1,4 @@
-from tools.triage_rilievi import esiti_junit, verdetto
+from tools.triage_rilievi import cartella_uscita, esiti_junit, verdetto
 
 
 def test_tabella_del_verdetto():
@@ -23,3 +23,10 @@ def test_esiti_junit_prende_il_peggiore_per_rilievo(tmp_path):
         '<testcase name="test_kit_la_base"/>'
         '</testsuite></testsuites>')
     assert esiti_junit(x) == {"A01": "fail", "C02": "skip", "A06": "pass", "A03": "pass"}
+
+
+def test_cartella_uscita_crea_gitignore(tmp_path):
+    out = cartella_uscita(tmp_path)
+    assert (out / ".gitignore").exists()
+    assert (out / ".gitignore").read_text() == "*\n"
+    assert out == tmp_path / ".superpowers" / "triage"

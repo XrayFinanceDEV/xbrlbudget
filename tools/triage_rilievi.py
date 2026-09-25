@@ -42,6 +42,16 @@ def esiti_junit(path) -> dict:
     return out
 
 
+def cartella_uscita(root: Path) -> Path:
+    """Crea .superpowers/triage e il suo .gitignore, ritorna il path."""
+    out = root / ".superpowers" / "triage"
+    out.mkdir(parents=True, exist_ok=True)
+    gitignore = out / ".gitignore"
+    if not gitignore.exists():
+        gitignore.write_text("*\n")
+    return out
+
+
 def _suite(root: Path, tag: str, out: Path) -> dict:
     py_xml, js_xml = out / f"{tag}-pytest.xml", out / f"{tag}-vitest.xml"
     subprocess.run([PY, "-m", "pytest", "tests/test_rilievi_ambienta.py", "-q", "-p", "no:warnings",
@@ -62,8 +72,7 @@ def _suite(root: Path, tag: str, out: Path) -> dict:
 
 def main() -> int:
     qui = Path(subprocess.check_output(["git", "rev-parse", "--show-toplevel"], text=True).strip())
-    out = qui / ".superpowers" / "triage"
-    out.mkdir(parents=True, exist_ok=True)
+    out = cartella_uscita(qui)
     vecchio = out / f"wt-{VECCHIO}"
     if not vecchio.exists():
         subprocess.run(["git", "worktree", "add", "--detach", str(vecchio), VECCHIO], cwd=qui, check=True)

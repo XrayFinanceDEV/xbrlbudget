@@ -28,14 +28,13 @@ describe("rilievi AMBIENTA · wizard", () => {
     expect(row({ forecast_years: [] }, 100).field).toBe("tax_advances_paid");
   });
 
-  it("A05 passare a Manuale non congela i valori della regola precedente", async (ctx) => {
-    const withSpRule = await fn<any>("@/lib/budget-sp-manuale", "withSpRule");
-    if (!withSpRule) return ctx.skip();
-    const prima = { 2027: { sp_indexing: { sp04: "ricavi" } } };
-    const dopo = withSpRule(prima, [2027], "sp04", "sp04_immob_finanziarie", "sp04_growth_pct", null, { 2027: 55178 });
-    // Oracolo del consulente: con i campi manuali vuoti la voce non segue i ricavi → nessun override scritto.
-    expect(dopo[2027]?.sp_overrides?.sp04_immob_finanziarie ?? null).toBeNull();
-  });
+  // A05 rimosso da questo file (fix round 1, controller): congelare i valori dell'anteprima quando
+  // si passa a Manuale è comportamento voluto, fissato da
+  // frontend/lib/budget-sp-manuale.test.ts:52-58 ("scegliere Manuale congela i valori dell'anteprima
+  // per anno") — non un verdetto del wizard. Il rilievo del consulente riguarda Manuale con i CAMPI
+  // VUOTI, cioè che cosa fa il MOTORE quando sp04 non ha né override né indicizzazione: spostato in
+  // tests/test_rilievi_ambienta.py
+  // (test_A05_immobilizzazioni_finanziarie_senza_regola_non_seguono_i_ricavi).
 
   // Ruling (controller): l'oracolo del brief (`riga.driver` null con casella spenta e indicizzazione
   // {sp16f:"ricavi"}) sarebbe rosso per uno stato legittimo — a casella spenta la tendina e' l'unico
@@ -51,13 +50,13 @@ describe("rilievi AMBIENTA · wizard", () => {
     const baseBs = { sp16f_debiti_previdenza_breve: 163536.55 };
 
     // Casella spenta, tendina su "ricavi": il motore segue i ricavi (indicizzazione esplicita).
-    const spenta: any[] = rows(baseBs, { sp16f: "ricavi" }, false, [2027]);
+    const spenta: any[] = rows(baseBs, { sp16f: "ricavi" }, false, []);
     const rigaSpenta = spenta.find((r) => r.code === "sp16f" || r.balanceField === "sp16f_debiti_previdenza_breve");
     expect(rigaSpenta).toBeDefined();
     expect(String(rigaSpenta.andamento ?? "")).not.toMatch(/personale/);
 
     // Casella accesa: il motore ignora la tendina e segue il personale.
-    const accesa: any[] = rows(baseBs, {}, true, [2027]);
+    const accesa: any[] = rows(baseBs, {}, true, []);
     const rigaAccesa = accesa.find((r) => r.code === "sp16f" || r.balanceField === "sp16f_debiti_previdenza_breve");
     expect(rigaAccesa).toBeDefined();
     expect(String(rigaAccesa.andamento ?? "")).toMatch(/personale/);

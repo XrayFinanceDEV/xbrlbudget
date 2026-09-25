@@ -73,6 +73,16 @@ def test_A04_incasso_scadenziato_sui_crediti_oltre_12_mesi_arriva_allo_sp():
     assert e.anni[2027][0]["sp07a_crediti_clienti_lungo"] == D("44000.00")
 
 
+def test_A05_immobilizzazioni_finanziarie_senza_regola_non_seguono_i_ricavi():
+    """A05 · Passo 6: regola «Manuale» sulle immobilizzazioni finanziarie con i campi 2027-2029 vuoti; l'output
+    le fa crescere coi ricavi (52.550 → 55.178 / 58.488 / 62.582) con uscite di cassa per investimenti.
+    Campi vuoti = nessun override e nessuna indicizzazione di sp04. Oracolo: sp04 resta 52.550 ogni anno."""
+    rows = per_anno(righe(), "revenue_growth_pct", (5, 6, 7))
+    e = genera(rows)
+    assert e.res["forecast_generated"] is True, e.res["message"]
+    assert [e.anni[y][0]["sp04_immob_finanziarie"] for y in (2027, 2028, 2029)] == [BASE_BS["sp04_immob_finanziarie"]] * 3
+
+
 def test_A06_previdenziali_seguono_il_personale_se_la_tendina_lo_dice():
     """A06 · Passo 6: tendina «cresce con il costo del personale», casella non spuntata; l'output cresce coi
     ricavi. Oracolo: sp16f cresce come ce08 (personale +3/4/4, ricavi +5/6/7)."""

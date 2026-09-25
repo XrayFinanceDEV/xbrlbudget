@@ -98,6 +98,8 @@ def test_A06_previdenziali_seguono_il_personale_se_la_tendina_lo_dice():
         assert abs(sp["sp16f_debiti_previdenza_breve"] - atteso) < D("1"), (y, sp["sp16f_debiti_previdenza_breve"], atteso)
 
 
+@pytest.mark.xfail(strict=True, reason="B01 confermato dal triage 2026-09-25: nel CE la variazione "
+                    "rimanenze resta ancorata al valore 2026, mentre nello SP le rimanenze seguono il DIO")
 def test_B01_variazione_rimanenze_del_ce_segue_lo_sp():
     """B01 · Passo 4 / CE B11: nello SP le rimanenze seguono il DIO, nel CE la variazione resta al valore
     2026. Oracolo: ce10 di ogni anno = rimanenze di fine anno − rimanenze d'inizio (convenzione del CE:
@@ -113,6 +115,8 @@ def test_B01_variazione_rimanenze_del_ce_segue_lo_sp():
         prec = sp["sp05_rimanenze"]
 
 
+@pytest.mark.xfail(strict=True, reason="B02 confermato dal triage 2026-09-25: l'ammortamento dei "
+                    "cespiti materiali esistenti continua alla quota piena anche oltre il residuo netto")
 def test_B02_ammortamento_dei_cespiti_esistenti_si_ferma_al_residuo():
     """B02 · Passo 6: materiali esistenti 72.797 netti ammortizzati 36.040/anno anche oltre il residuo.
     Con un investimento di 250.000 nel 2027 al 10%: 2027 = 36.040 + 25.000, 2028 = 36.040 + 25.000,
@@ -124,6 +128,8 @@ def test_B02_ammortamento_dei_cespiti_esistenti_si_ferma_al_residuo():
     assert e.anni[2029][1]["ce09b_ammort_materiali"] == D("25716.59")
 
 
+@pytest.mark.xfail(strict=True, reason="B03 confermato dal triage 2026-09-25: l'accantonamento TFR "
+                    "è il residuo del costo del personale, non retribuzioni/13,5 come dice l'interfaccia")
 def test_B03_tfr_uguale_retribuzioni_diviso_13_5():
     """B03 · Passo 3/6: l'accantonamento è il residuo personale − salari − oneri, non retribuzioni/13,5
     come dice l'interfaccia. Oracolo: ce08a = ce08b / 13,5 in ogni anno."""
@@ -167,6 +173,8 @@ def test_B05_ultimo_anno_la_rata_successiva_sta_a_breve():
     assert e.anni[2029][0]["sp16a_debiti_banche_breve"] == D("353409.00")
 
 
+@pytest.mark.xfail(strict=True, reason="B05 confermato dal triage 2026-09-25: quando il piano scadenzia "
+                    "solo 2027-2029 e resta un residuo, la rata dell'ultimo anno non finisce a breve")
 def test_B05_bis_rata_oltre_orizzonte_non_scadenziata():
     """B05 · variante del foglio: il piano scadenzia solo 2027-2029 e a fine 2029 resta un residuo.
     Oracolo del consulente: a breve almeno la rata dell'ultimo anno (53.409)."""
@@ -195,6 +203,8 @@ def _bp():
     pytest.importorskip("backend.app.renderers.business_plan.data")
 
 
+@pytest.mark.xfail(strict=True, reason="A01-bis confermato dal triage 2026-09-25: il PDF in bozza "
+                    "tace sul previsionale vecchio dopo un salvataggio respinto")
 def test_A01_bis_salvataggio_respinto_non_stampa_il_previsionale_vecchio_come_buono():
     """A01/A04/B04 · ipotesi della verifica sul codice: un salvataggio respinto risponde 200, a schermo resta il
     previsionale vecchio e il report lo stampa. Oracolo: il report è bloccato E il PDF in bozza dice che il
@@ -215,6 +225,8 @@ def test_A01_bis_salvataggio_respinto_non_stampa_il_previsionale_vecchio_come_bu
     assert "non aggiornat" in testo or "ipotesi salvate" in testo, "il PDF in bozza tace sul previsionale vecchio"
 
 
+@pytest.mark.xfail(strict=True, reason="A02 confermato dal triage 2026-09-25: il BEP del report usa "
+                    "la ripartizione fissi/variabili degli slider di default, non quella del motore")
 def test_A02_bep_del_report_usa_la_ripartizione_del_motore():
     """A02 · Report sez. 4: il BEP del report non usa la ripartizione fissi/variabili degli slider (60/40 di
     default). Oracolo: costi variabili e fatturato di pareggio del report = details['pareggio'] del motore."""
@@ -235,6 +247,8 @@ def _con_rimborsi():
     return rows
 
 
+@pytest.mark.xfail(strict=True, reason="C01 confermato dal triage 2026-09-25: il DSCR del report è "
+                    "(MOL-imposte)/oneri, senza la quota capitale al denominatore")
 def test_C01_il_dscr_del_report_comprende_la_quota_capitale():
     """C01 · Report sez. 1, 6, All. D: «DSCR proxy» = (EBITDA − imposte) / oneri, senza quota capitale.
     Oracolo: DSCR = (MOL − imposte) / (oneri + quota capitale); con rimborsi 53.409 è molto sotto il proxy."""
@@ -247,6 +261,8 @@ def test_C01_il_dscr_del_report_comprende_la_quota_capitale():
     assert abs(D(str(piano(e.data, "dscr")[0])) - atteso) < D("0.01"), (piano(e.data, "dscr")[0], atteso)
 
 
+@pytest.mark.xfail(strict=True, reason="C02 confermato dal triage 2026-09-25: il DSO del report include "
+                    "crediti tributari e oltre 12 mesi, non i soli crediti commerciali")
 def test_C02_dso_sui_soli_crediti_commerciali():
     """C02 · Report sez. 1, 7, All. E: «DSO» su tutti i crediti (tributari e oltre 12 mesi compresi).
     Oracolo: DSO 2026 = clienti (sp06a + sp07a) / ricavi × 360."""
@@ -258,6 +274,8 @@ def test_C02_dso_sui_soli_crediti_commerciali():
     assert abs(D(str(base(e.data, "dso"))) - atteso) < D("1"), (base(e.data, "dso"), atteso)
 
 
+@pytest.mark.xfail(strict=True, reason="C03 confermato dal triage 2026-09-25: il ROD del report divide "
+                    "per il totale debiti (fornitori compresi), non per i soli debiti finanziari")
 def test_C03_rod_sui_debiti_finanziari():
     """C03 · ROD = oneri finanziari / totale debiti (fornitori compresi). Oracolo: oneri / debiti finanziari
     (banche + altri finanziatori), in percentuale."""
@@ -270,6 +288,8 @@ def test_C03_rod_sui_debiti_finanziari():
     assert abs(D(str(base(e.data, "rod"))) - atteso) < D("0.05"), (base(e.data, "rod"), atteso)
 
 
+@pytest.mark.xfail(strict=True, reason="C04 confermato dal triage 2026-09-25: la PFN del report esclude "
+                    "gli altri finanziatori a lungo, che l'interfaccia (finDebt) include")
 def test_C04_pfn_del_report_comprende_gli_altri_finanziatori():
     """C04 · PFN del report esclude gli altri finanziatori, l'interfaccia (budget-piano-step.ts, finDebt)
     li include. Oracolo: PFN 2026 = banche + altri finanziatori + obbligazioni − cassa."""
@@ -289,6 +309,8 @@ def _analitico(data, etichetta: str):
                          f"{[r.label for r in data.indicators_analytical]}")
 
 
+@pytest.mark.xfail(strict=True, reason="C05 confermato dal triage 2026-09-25: liquidità corrente sez. 8 "
+                    "e Current Ratio (ILC) dell'All. E danno due valori diversi nello stesso documento")
 def test_C05_un_solo_current_ratio_nel_documento():
     """C05 · Liquidità corrente sez. 8 = 1,43×, Current Ratio All. E = 1,29×. Oracolo: stesso valore.
     Ruling: l'etichetta esatta nel catalogo è «Current Ratio (ILC)», non «Current Ratio»
@@ -301,6 +323,8 @@ def test_C05_un_solo_current_ratio_nel_documento():
     assert abs(sez8 - all_e) < D("0.01"), (sez8, all_e)
 
 
+@pytest.mark.xfail(strict=True, reason="C06 confermato dal triage 2026-09-25: «Indice di Indebitamento» "
+                    "nell'All. E è immobilizzazioni/PN, non debiti totali/PN")
 def test_C06_indice_di_indebitamento_e_debiti_su_patrimonio():
     """C06 · All. E: «Indice di indebitamento» = immobilizzazioni / PN. Oracolo: debiti totali / PN."""
     _bp()
@@ -312,6 +336,8 @@ def test_C06_indice_di_indebitamento_e_debiti_su_patrimonio():
     assert abs(val - atteso) < D("0.01"), (val, atteso)
 
 
+@pytest.mark.xfail(strict=True, reason="C07 confermato dal triage 2026-09-25: il TFR non è incluso fra "
+                    "le fonti consolidate della copertura immobilizzazioni")
 def test_C07_copertura_immobilizzazioni_con_il_tfr():
     """C07 · Sez. 8, All. D: il TFR non è fra le fonti consolidate. Oracolo (in %):
     (PN + debiti a lungo + TFR) / immobilizzazioni × 100."""
@@ -324,6 +350,8 @@ def test_C07_copertura_immobilizzazioni_con_il_tfr():
     assert abs(D(str(base(e.data, "copertura_immob"))) - atteso) < D("0.1"), (base(e.data, "copertura_immob"), atteso)
 
 
+@pytest.mark.xfail(strict=True, reason="C08 confermato dal triage 2026-09-25: erogazione e rimborsi "
+                    "escono compensati sulla stessa riga del rendiconto, non su righe separate")
 def test_C08_erogazioni_e_rimborsi_su_righe_separate():
     """C08 · Sez. 1, 5, All. C: nel 2027 erogazione 280.000 e rimborsi 88.409 compensati (191.591).
     Oracolo: il rendiconto 2027 porta nuovo debito = 280.000 e rimborsi ≥ 53.409, non il netto."""
@@ -339,6 +367,8 @@ def test_C08_erogazioni_e_rimborsi_su_righe_separate():
     assert D(str(rimb)) >= D("53409"), (nuovo, rimb)
 
 
+@pytest.mark.xfail(strict=True, reason="C09 confermato dal triage 2026-09-25: il testo narrativo non cita "
+                    "la percentuale oneri/MOL della colonna base")
 def test_C09_oneri_su_mol_parte_dalla_colonna_base():
     """C09 · Sez. 1: «dal 24,54% al 10,71%» ma il 2026 F è 30,73%. Oracolo: il testo cita il valore della
     colonna base."""

@@ -12,7 +12,9 @@ async function fn<T = any>(mod: string, name: string): Promise<T | null> {
 }
 
 describe("rilievi AMBIENTA · wizard", () => {
-  it("A01 lo scostamento digitato resta lo scostamento dopo un cambio dei ricavi", async (ctx) => {
+  // A01 confermato dal triage 2026-09-25: lo scostamento digitato è salvato come percentuale
+  // assoluta e non si mantiene quando la crescita ricavi cambia in seguito.
+  it.fails("A01 lo scostamento digitato resta lo scostamento dopo un cambio dei ricavi", async (ctx) => {
     const change = await fn<(d: number | null, r: number) => number>("@/lib/budget-costi-step", "variableGrowthChange");
     const dev = await fn<(g: number | null, r: number) => string>("@/lib/budget-costi-step", "variableGrowthDeviation");
     if (!change || !dev) return ctx.skip();

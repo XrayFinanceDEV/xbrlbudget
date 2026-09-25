@@ -1,76 +1,75 @@
-# Triage AMBIENTA — verdetto 2026-09-25
+# Triage AMBIENTA — verdetto 2026-09-25 (rifatto dopo la revisione finale)
 
-Commit confrontati: `62bfed1` (prima del lotto di fix) vs `HEAD` = `4b20725` (branch
-`test/rilievi-ambienta`), tramite `tools/triage_rilievi.py` (worktree temporaneo su `62bfed1`
-sotto `.superpowers/triage/`, rimosso a fine corsa). Foglio scritto:
-`inbox/Verifica_piano_Ambienta_triage.xlsx` (l'originale `Verifica_piano_Ambienta_problemi.xlsx`
-non è stato toccato).
+Commit confrontati: `62bfed1` (prima del lotto di fix) vs `HEAD` = `6d7ed1c` (branch `test/rilievi-ambienta`,
+ultimo commit del banco prima di questo rapporto), tramite `tools/triage_rilievi.py` (worktree temporaneo su
+`62bfed1` sotto `.superpowers/triage/`, rimosso a fine corsa). Foglio scritto:
+`inbox/Verifica_piano_Ambienta_triage.xlsx` (l'originale `Verifica_piano_Ambienta_problemi.xlsx` non è stato
+toccato).
 
-**Base dati**: AMBIENTA 2026 locale, `FinancialYear` id 493 (ricavi 4.109.510), **non** il 2026 del
-consulente (ricavi 4.209.510). Gli oracoli sono le formule del consulente applicate a questa base:
-un numero atteso che nel foglio del consulente compare come "129.308" in questo banco può uscire
-diverso in valore assoluto — ciò che si verifica è il *meccanismo* (la formula/il ramo di codice),
-non la cifra del foglio originale.
+**Come si misura.** pytest gira con `--runxfail` e Vitest su una copia temporanea del file con `it.fails(` riscritto
+in `it(`, su entrambi i commit: i marcatori xfail non cambiano l'esito misurato (prima della revisione finale un
+xfail usciva come `skipped` e il verdetto si invertiva). Sopra il verdetto meccanico c'è uno strato di **letture a
+mano** (`LETTURE` nello script) che sovrascrive Stato e Note dove l'esito del banco da solo inganna; la nota tiene
+sempre l'esito meccanico («— banco: 62bfed1=…, HEAD=…»).
 
-## Controllo di raccolta (prerequisito del verdetto)
+**Base dati**: AMBIENTA 2026 locale, `FinancialYear` id 493 (ricavi 4.109.510), **non** il 2026 del consulente
+(ricavi 4.209.510). Gli oracoli sono le formule del consulente applicate a questa base: si verifica il
+*meccanismo*, non la cifra del foglio originale.
 
-- `vecchio-pytest.xml` (su `62bfed1`): **24 testcase**, **0 `<error>`**. Nessun problema di
-  collezione: la suite gira e produce pass/fail/skip veri.
-- `nuovo-pytest.xml` (su `HEAD`): **24 testcase**, **0 `<error>`**.
-- `vecchio-vitest.xml` / `nuovo-vitest.xml`: **3 testcase** ciascuno, nessun errore di collezione.
+## Controllo di raccolta
 
-I verdetti sotto sono quindi validi su entrambi i lati: nessun caso di "vecchio non collezionato"
-da segnalare.
+- `vecchio-pytest.xml` (62bfed1): 27 testcase, 0 `<error>` — 7 failed, 9 passed, 11 skipped (i test di report:
+  il Business plan ReportLab non esisteva, `_bp()` fa `importorskip("backend.app.renderers.business_plan.data")`).
+- `nuovo-pytest.xml` (HEAD): 27 testcase, 0 `<error>` — 16 failed, 11 passed.
+- `vecchio-vitest.xml` / `nuovo-vitest.xml`: 4 testcase ciascuno, 0 errori. Import statici: tutte le funzioni del
+  wizard esistono già su 62bfed1 (ruling nel file Vitest).
 
-**Test SKIPPED sul lato vecchio** (9 su pytest — tutti test di report, non wizard/motore):
-`test_A01_bis_salvataggio_respinto_...`, `test_A02_bep_del_report_...`, `test_C01`...`test_C09`.
-Motivo dello skip: `pytest.importorskip("app.renderers.business_plan.data")` /
-`importorskip("backend.app.renderers.business_plan.data")` nell'helper `_bp()` — il **Business
-plan ReportLab non esisteva ancora a `62bfed1`**, quindi quei moduli non sono importabili su quel
-commit. Non è un errore di raccolta: è "n/a", e il verdetto lo dichiara esplicitamente
-(`Confermato (n/a su 62bfed1)` / `Non riprodotto (n/a su 62bfed1)`), mai un "Risolto" derivato da
-un lato che non ha mai girato.
+## Tabella per test (esito misurato, senza marcatori)
 
-## Tabella per test
+| ID | test | 62bfed1 | HEAD | meccanismo |
+|---|---|---|---|---|
+| A01 | `test_A01_scostamento_materie_applicato_dal_motore` | pass | pass | il motore applica lo scostamento −5 punti sulle materie |
+| A01 | vitest `A01 lo scostamento digitato resta lo scostamento dopo un cambio dei ricavi` | pass | pass | riscritto sul percorso vero (`withRevenueGrowth`): lo scostamento resta. Il vecchio test (rosso) era un falso positivo |
+| A01-bis | `test_A01_bis_salvataggio_respinto_non_stampa_il_previsionale_vecchio_come_buono` | skip (n/a) | **fail** | dopo un salvataggio respinto il PDF in bozza stampa il previsionale vecchio senza avviso |
+| A02 | `test_A02_bep_del_report_usa_la_ripartizione_del_motore` | skip (n/a) | **fail** | il BEP del report non usa `details['pareggio']` del motore |
+| A03 | `test_A03_acconto_manuale_maggiore_di_zero_vince_sulla_percentuale` | pass | pass | acconti digitati usati; ora anche sul persistito (posizione tributaria netta 2027 spostata di 50.000 − acconto di default) |
+| A03 | vitest `A03 il passo Imposte ha un campo per anno collegato a tax_advances_paid` | pass | pass | campo collegato |
+| A04 | `test_A04_incasso_scadenziato_sui_crediti_oltre_12_mesi_arriva_allo_sp` (base: oltre tutto su sp07a) | fail | pass | sp07a 45.000 → 44.000 |
+| A04 | `test_A04_…_altri_crediti_oltre_12_mesi[tutto_su_sp07g]` (nuovo) | fail | pass | tutto su sp07g: 45.000 → 44.000 |
+| A04 | `test_A04_…_altri_crediti_oltre_12_mesi[mix_del_consulente]` (nuovo) | fail | **fail** | sp07a 35.231 + sp07g 9.769: l'incasso si ripartisce per proporzione, sp07g 2027 = 9.551,91 invece di 8.769 |
+| A05 | `test_A05_immobilizzazioni_finanziarie_senza_regola_non_seguono_i_ricavi` | pass | pass | sp04 senza regola resta 52.550 |
+| A05 | vitest `A05 passare a Manuale da «ricavi» congela in sp_overrides la crescita coi ricavi` (nuovo, caratterizzazione) | pass | pass | `withSpRule(…, null, anteprima)` scrive 55.178 / 58.488 / 62.582 in `sp_overrides`: i numeri del consulente |
+| A06 | `test_A06_previdenziali_seguono_il_personale_se_la_tendina_lo_dice` | pass | pass | sp16f segue ce08 |
+| A06 | vitest `A06 l'etichetta dei previdenziali dice quello che fa il motore` | pass | pass | etichetta coerente col motore |
+| B01 | `test_B01_variazione_rimanenze_del_ce_segue_lo_sp` | fail | **fail** | ce10 fermo al 2026 mentre lo SP segue il DIO |
+| B02 | `test_B02_ammortamento_dei_cespiti_esistenti_si_ferma_al_residuo` | fail | **fail** | 61.040 contro 25.716,59 nel 2029 |
+| B03 | `test_B03_tfr_uguale_retribuzioni_diviso_13_5` | fail | **fail** | TFR = residuo del personale, non salari/13,5 |
+| B04 | `test_B04_fidi_e_residui_che_non_quadrano_col_bilancio_si_rifiutano` | pass | pass | respinto con lo scarto nel messaggio |
+| B05 | `test_B05_rata_oltre_orizzonte_non_scadenziata_sta_a_breve` (scenario del consulente, rinominato) | fail | **fail** | piano fino al 2029 con residuo: sp16a 2029 = 300.000, manca la rata |
+| B05 | `test_B05_bis_rata_2030_scadenziata_sta_a_breve` (variante, rinominata) | pass | pass | con la rata 2030 scadenziata sp16a 2029 = 353.409 |
+| C01 | `test_C01_il_dscr_del_report_comprende_la_quota_capitale` | skip (n/a) | **fail** | DSCR senza quota capitale |
+| C02 | `test_C02_dso_sui_soli_crediti_commerciali` | skip (n/a) | **fail** | DSO su tutti i crediti |
+| C03 | `test_C03_rod_sui_debiti_finanziari` | skip (n/a) | **fail** | ROD sul totale debiti |
+| C04 | `test_C04_pfn_del_report_comprende_gli_altri_finanziatori` | skip (n/a) | **fail** | PFN senza sp17b |
+| C05 | `test_C05_un_solo_current_ratio_nel_documento` | skip (n/a) | **fail** | 1,28 contro 1,17 |
+| C06 | `test_C06_indice_di_indebitamento_e_debiti_su_patrimonio` | skip (n/a) | **fail** | 2,24 = immob/PN; né debiti/PN (9,36) né attivo/PN (11,38) |
+| C07 | `test_C07_copertura_immobilizzazioni_con_il_tfr` | skip (n/a) | **fail** | TFR fuori dalle fonti consolidate |
+| C08 | `test_C08_erogazioni_e_rimborsi_su_righe_separate` | skip (n/a) | **fail** | erogazione e rimborsi compensati |
+| C09 | `test_C09_oneri_su_mol_parte_dalla_colonna_base` | skip (n/a) | **fail** | il testo non parte dalla colonna base |
+| E05 | `test_E05_caratterizzazione_ammortamento_primo_anno_e_straordinari` | pass | pass | aliquota piena nel primo anno (comportamento criticato) |
+| E05 | `test_E05_caratterizzazione_straordinari_ripetuti_ogni_anno` (nuovo) | pass | pass | ce18/ce19 della base ripetuti identici 2027-2029 (comportamento criticato) |
 
-| ID | test | 62bfed1 | HEAD | verdetto | meccanismo |
-|---|---|---|---|---|---|
-| A01 | `test_A01_scostamento_materie_applicato_dal_motore` (pytest) | pass | pass | Non riprodotto | il motore applica correttamente lo scostamento −5 punti sulle materie (CE Prev / dato interno) |
-| A01 | `A01 lo scostamento digitato resta lo scostamento dopo un cambio dei ricavi` (vitest, wizard) | fail | fail | Confermato | `expected '-7' to be '-5'` — lo scostamento digitato è salvato come percentuale assoluta (`variableGrowthChange`), non come delta dalla crescita ricavi: quando i ricavi cambiano dopo, `variableGrowthDeviation` non lo ricalcola e lo scostamento mostrato cambia |
-| A01-bis | `test_A01_bis_salvataggio_respinto_non_stampa_il_previsionale_vecchio_come_buono` (pytest, report) | skip (n/a) | fail | Confermato (n/a su 62bfed1) | `il PDF in bozza tace sul previsionale vecchio` — un salvataggio respinto (200, `forecast_generated: false`) lascia a schermo il previsionale vecchio, e il PDF in bozza non dice né "non aggiornat…" né "ipotesi salvate": stampa il previsionale vecchio come buono senza avviso |
-| A02 | `test_A02_bep_del_report_usa_la_ripartizione_del_motore` (pytest, report) | skip (n/a) | fail | Confermato (n/a su 62bfed1) | costi variabili/fatturato di pareggio del report divergono da `details['pareggio']` del motore di 1.570.083,60 — il BEP del report non usa la ripartizione fissi/variabili effettiva, ma quella degli slider 60/40 di default |
-| A03 | `test_A03_acconto_manuale_maggiore_di_zero_vince_sulla_percentuale` (pytest) | pass | pass | Non riprodotto | gli acconti digitati (50.000/10.000/20.000) vincono correttamente sulla percentuale |
-| A03 | `A03 il passo Imposte ha un campo per anno collegato a tax_advances_paid` (vitest, wizard) | pass | pass | Non riprodotto | il campo per anno è collegato a `tax_advances_paid` |
-| A04 | `test_A04_incasso_scadenziato_sui_crediti_oltre_12_mesi_arriva_allo_sp` (pytest) | fail | pass | Risolto (2026-09-24) | l'incasso scadenziato sui crediti oltre 12 mesi ora arriva correttamente allo SP (44.000 nel 2027) |
-| A05 | `test_A05_immobilizzazioni_finanziarie_senza_regola_non_seguono_i_ricavi` (pytest) | pass | pass | Non riprodotto | `sp04` resta costante (52.550) sui tre anni con la regola "Manuale" e i campi vuoti: nessun override, nessuna indicizzazione implicita ai ricavi |
-| A06 | `test_A06_previdenziali_seguono_il_personale_se_la_tendina_lo_dice` (pytest) | pass | pass | Non riprodotto | `sp16f` segue `ce08` (personale) quando la tendina lo dice, entro tolleranza di 1€ |
-| A06 | `A06 l'etichetta dei previdenziali dice quello che fa il motore` (vitest, wizard) | pass | pass | Non riprodotto | l'etichetta di `sp16f` concorda con ciò che il motore farà (nomina "personale" solo quando la casella governa davvero) |
-| B01 | `test_B01_variazione_rimanenze_del_ce_segue_lo_sp` (pytest) | fail | fail | Confermato | scarto di 22.401,33 fra `ce10_var_rimanenze_mat_prime` e la variazione reale delle rimanenze SP: nel CE la variazione resta ancorata al valore 2026, nello SP le rimanenze seguono il DIO — le due viste divergono |
-| B02 | `test_B02_ammortamento_dei_cespiti_esistenti_si_ferma_al_residuo` (pytest) | fail | fail | Confermato | `assert Decimal('61040.00') == Decimal('25716.59')` — l'ammortamento dei cespiti materiali esistenti continua alla quota piena (36.040/anno) anche oltre il residuo netto, invece di fermarsi al residuo (72.796,59 − 72.080 = 716,59 nel 2029) |
-| B03 | `test_B03_tfr_uguale_retribuzioni_diviso_13_5` (pytest) | fail | fail | Confermato | scarto di 12.274,75 fra `ce08a_tfr_accrual` e `ce08b_salari_stipendi / 13,5`: l'accantonamento TFR è calcolato come residuo del costo del personale (personale − salari − oneri), non come salari/13,5 |
-| B04 | `test_B04_fidi_e_residui_che_non_quadrano_col_bilancio_si_rifiutano` (pytest) | pass | pass | Non riprodotto | fidi + residuo che non quadrano col debito bancario di bilancio (scarto 11.000) vengono correttamente respinti, con lo scarto nel messaggio |
-| B05 | `test_B05_ultimo_anno_la_rata_successiva_sta_a_breve` (pytest) | pass | pass | Non riprodotto | la rata 2030 oltre l'orizzonte è correttamente scadenziata a breve nel 2029 quando il piano copre tutti gli anni fino alla rata |
-| B05 | `test_B05_bis_rata_oltre_orizzonte_non_scadenziata` (pytest, variante) | fail | fail | Confermato *(collassa su B05, vedi «Letture»)* | `assert Decimal('300000.00') >= Decimal('353409.00')` — quando il piano di rimborso scadenzia solo 2027-2029 e resta un residuo a fine 2029, la rata dell'ultimo anno (53.409) non finisce a breve: `sp16a` resta al solo importo dei fidi |
-| C01 | `test_C01_il_dscr_del_report_comprende_la_quota_capitale` (pytest, report) | skip (n/a) | fail | Confermato (n/a su 62bfed1) | DSCR proxy del report (3,3685) vs atteso (1,5298), scarto 1,84: il DSCR del report è (MOL−imposte)/oneri, senza la quota capitale al denominatore |
-| C02 | `test_C02_dso_sui_soli_crediti_commerciali` (pytest, report) | skip (n/a) | fail | Confermato (n/a su 62bfed1) | DSO del report = 119 (tutti i crediti, tributari e oltre 12 mesi compresi) vs atteso 97,55 (soli crediti commerciali sp06a+sp07a) |
-| C03 | `test_C03_rod_sui_debiti_finanziari` (pytest, report) | skip (n/a) | fail | Confermato (n/a su 62bfed1) | ROD del report 2,37% vs atteso 4,53%: il denominatore include i debiti fornitori, non i soli debiti finanziari (banche + altri finanziatori) |
-| C04 | `test_C04_pfn_del_report_comprende_gli_altri_finanziatori` (pytest, report) | skip (n/a) | fail | Confermato (n/a su 62bfed1) | PFN del report 960.882,60 vs atteso 997.386,34: esclude gli altri finanziatori a lungo (`sp17b`), che l'interfaccia (`finDebt`) invece include |
-| C05 | `test_C05_un_solo_current_ratio_nel_documento` (pytest, report) | skip (n/a) | fail | Confermato (n/a su 62bfed1) | Liquidità corrente sez. 8 (1,2835) ≠ Current Ratio (ILC) All. E (1,1736), scarto 0,11: due valori diversi per lo stesso indicatore nello stesso documento |
-| C06 | `test_C06_indice_di_indebitamento_e_debiti_su_patrimonio` (pytest, report) | skip (n/a) | fail | Confermato (n/a su 62bfed1) | "Indice di Indebitamento" in All. E vale immobilizzazioni/PN (2,2446) invece di debiti totali/PN (9,3553) |
-| C07 | `test_C07_copertura_immobilizzazioni_con_il_tfr` (pytest, report) | skip (n/a) | fail | Confermato (n/a su 62bfed1) | copertura immobilizzazioni 154,83% (report) vs 192,07% atteso: il TFR non è incluso fra le fonti consolidate (PN + debiti a lungo + TFR) |
-| C08 | `test_C08_erogazioni_e_rimborsi_su_righe_separate` (pytest, report) | skip (n/a) | fail | Confermato (n/a su 62bfed1) | `cf_nuovo_debito` 2027 = 191.591,00 invece di 280.000: erogazione e rimborsi risultano compensati sulla stessa riga anziché su righe separate |
-| C09 | `test_C09_oneri_su_mol_parte_dalla_colonna_base` (pytest, report) | skip (n/a) | fail | Confermato (n/a su 62bfed1) | il testo narrativo (`key_points`) non cita la percentuale oneri/MOL della colonna base (27,25%): parte da un'altra colonna |
-| E05 | `test_E05_caratterizzazione_ammortamento_primo_anno_e_straordinari` (pytest) | pass | pass | *caratterizzazione, non verdetto* | registra lo stato attuale (aliquota piena nel primo anno di un nuovo investimento): non è un rilievo da confermare o smentire, vedi «Letture» |
+I 16 test in **fail** su HEAD sono esattamente quelli marcati `xfail(strict=True, raises=AssertionError)`.
 
-## Verdetto per ID (come scritto dallo script, riga per riga)
+## Verdetto per ID (stampa dello script; `[meccanico: …]` quando una lettura prevale)
 
 ```
-A01  Confermato
+A01  Confermato solo come previsionale vecchio nel PDF (A01-bis)   [meccanico: Regressione]
 A02  Confermato (n/a su 62bfed1)
 A03  Non riprodotto
-A04  Risolto (2026-09-24)
-A05  Non riprodotto
-A06  Non riprodotto
+A04  Confermato sulla riga del consulente (sp07g)   [meccanico: Confermato]
+A05  Comportamento voluto (beb33c5)   [meccanico: Non riprodotto]
+A06  Non riprodotto (doppio comando confermato)   [meccanico: Non riprodotto]
 B01  Confermato
 B02  Confermato
 B03  Confermato
@@ -86,40 +85,34 @@ C07  Confermato (n/a su 62bfed1)
 C08  Confermato (n/a su 62bfed1)
 C09  Confermato (n/a su 62bfed1)
 E04  Senza test
-E05  Non riprodotto
+E05  Riprodotto (caratterizzazione, scelta ⚖)   [meccanico: Non riprodotto]
 ```
 
-(D01-D05, E01-E03 sono "Consulente", fuori dal perimetro di questo banco: lo script non scrive
-un verdetto software per loro, e il foglio li lascia "Aperto".)
+(D01-D05, E01-E03 sono «Consulente», fuori perimetro: il foglio li lascia «Aperto».)
 
 ## Letture
 
-- **A01**: il motore applica correttamente lo scostamento (verde, `test_A01_scostamento_...`);
-  sono rossi `A01-bis` (il report stampa un previsionale vecchio dopo un salvataggio respinto senza
-  dirlo — è la causa più probabile di ciò che ha visto il consulente) e il wizard (lo scostamento
-  digitato è salvato come percentuale assoluta, quindi non si mantiene quando la crescita ricavi
-  cambia in seguito). Nota tecnica: l'ID `A01-bis` collassa nel foglio sotto l'ID `A01` insieme al
-  test del motore e a quello del wizard, perché il regex del verdetto (`[A-E]\d{2}`) prende
-  "A01" anche da "A01_bis"; il verdetto per l'ID risulta quindi "Confermato" (il peggiore dei tre),
-  anche se il test del motore da solo è verde — da qui la tabella per test sopra, che li separa.
-- **A05**: il motore tiene `sp04` costante con i campi vuoti (verde). Indizio non verificato in
-  questo banco: lo scenario AMBIENTA 25 locale ha `sp_indexing` `{"sp04": "ricavi"}` salvato; una
-  schermata che mostrasse «Manuale» sopra una regola "ricavi" già salvata spiegherebbe il rilievo
-  visto dal consulente, ma non è coperta da un test qui — resta un'ipotesi, non un verdetto.
-- **B05 / B05-bis**: stesso ID nel foglio, due test pytest. `test_B05_ultimo_anno_la_rata_successiva_sta_a_breve`
-  è verde (il piano copre tutti gli anni fino alla rata, e la rata 2030 finisce correttamente a
-  breve nel 2029). `test_B05_bis_rata_oltre_orizzonte_non_scadenziata` è rosso: quando il piano di
-  rimborso scadenzia solo 2027-2029 e a fine 2029 resta un residuo oltre quelle rate, la rata
-  dell'ultimo anno (53.409) non viene comunque portata a breve. Il verdetto per ID collassa sul
-  peggiore ("Confermato"), coerente con l'ID unico nel foglio.
-- **E04**: fuori perimetro (spec §6) — nessun test in questo banco, il foglio riporta "Senza test".
-- **E05**: è un test di **caratterizzazione**, non un verdetto: registra lo stato attuale
-  dell'ammortamento del primo anno su un investimento nuovo (aliquota piena, non pro-rata) e degli
-  oneri diversi ripetuti ogni anno, senza dichiarare se sia corretto o no. Va letto come "stato
-  di oggi", non come "confermato" o "non riprodotto" nel senso degli altri ID, anche se il foglio
-  (che non distingue caratterizzazioni da verdetti) lo marca "Non riprodotto" perché il test è
-  verde su entrambi i lati.
-- **Base**: tutti gli oracoli sono applicati su AMBIENTA 2026 locale (`FinancialYear` id 493,
-  ricavi 4.109.510), non sul 2026 del consulente (ricavi 4.209.510): i valori assoluti citati sopra
-  (129.308, 353.409, …) sono quelli ricalcolati su questa base con le formule del consulente, non
-  le cifre del foglio originale del consulente.
+Le letture a mano (`LETTURE` in `tools/triage_rilievi.py`) prevalgono sullo Stato meccanico nel foglio:
+
+- **A01** — «Confermato solo come previsionale vecchio nel PDF (A01-bis); motore e wizard corretti». Il motore
+  applica lo scostamento e il wizard lo mantiene (`withRevenueGrowth`, fissato anche da `budget-horizon.test.ts`);
+  resta rosso solo A01-bis. Il meccanico «Regressione» è un artefatto: l'ID A01 raccoglie tre test, e su 62bfed1
+  A01-bis è `skip` (n/a) mentre gli altri due passano, quindi il lato vecchio aggrega a `pass`.
+- **A03**, **B04** — «Motore non riprodotto; sintomo spiegato da A01-bis»: il consulente ha visto un previsionale
+  vecchio stampato dopo un salvataggio respinto (bulk 200, `forecast_generated: false`).
+- **A04** — la riga del consulente è «Altri crediti oltre 12 mesi» = `sp07g` (9.769, «resta 8.769»), non `sp07a`.
+  Il wizard scrive lo stesso piano qualunque sia la sottovoce (`massaOltre` dei crediti commerciali comprende
+  `sp07g`); il motore mette il residuo sull'aggregato `sp07` e lo ripartisce in proporzione fra le sottovoci. Con
+  tutto su una sottovoce (sp07a o sp07g) l'incasso arriva (risolto il 2026-09-24); con il mix del consulente no.
+- **A05** — «Comportamento voluto (beb33c5) che produce il sintomo: passare a Manuale da «ricavi» congela la
+  crescita — decisione del proprietario». Il motore con sp04 senza regola tiene il saldo; ma il wizard, passando a
+  Manuale da una regola «ricavi», congela in `sp_overrides` i valori cresciuti (caratterizzazione Vitest).
+- **A06** — «Motore non riprodotto; doppio comando confermato per ispezione»: casella + tendina sugli stessi
+  previdenziali (`lib/budget-circolante-step.ts:229-232`), nessun test lo misura.
+- **B05** — il test col nome `test_B05_` è ora lo scenario del consulente (piano che finisce nel 2029 con un
+  residuo aperto): rosso. La variante con la rata 2030 scadenziata (`test_B05_bis_`) è verde.
+- **E05** — «Riprodotto (caratterizzazione, scelta ⚖)»: i due test asseriscono il comportamento che il consulente
+  critica (aliquota piena nel primo anno, straordinari ripetuti), quindi verde = riprodotto. Falliranno quando la
+  scelta del proprietario sarà implementata: è atteso.
+- **E04** — fuori perimetro (spec §6), «Senza test».
+- **Base** — valori assoluti ricalcolati sulla base 493, non le cifre del foglio del consulente.

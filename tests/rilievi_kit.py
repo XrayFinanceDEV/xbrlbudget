@@ -4,6 +4,8 @@ from dataclasses import dataclass
 from decimal import Decimal as D
 from pathlib import Path
 
+import pytest
+
 from database.models import BalanceSheet, BudgetScenario, Company, FinancialYear, IncomeStatement
 from backend.app.services import assumptions_service, forecast_preview_service
 from tests.e2e_kit import memory_sessions, read_forecast_maps
@@ -61,7 +63,8 @@ def genera(rows, *, bs=None, ce=None, report=False, prima=None) -> Esito:
             if prima is not None:
                 r0 = assumptions_service.bulk_upsert_assumptions(db, sc.id, [dict(r) for r in prima],
                                                                  auto_generate=True)
-                assert r0["forecast_generated"] is True, r0["message"]
+                if r0["forecast_generated"] is not True:
+                    pytest.fail(f"precondizione: il previsionale di partenza non si genera: {r0['message']}")
             res = assumptions_service.bulk_upsert_assumptions(db, sc.id, [dict(r) for r in rows],
                                                               auto_generate=True)
             anni = {y: (sp, c) for y, sp, c in read_forecast_maps(db, sc.id)}
@@ -76,6 +79,14 @@ def genera(rows, *, bs=None, ce=None, report=False, prima=None) -> Esito:
             return Esito(res, anni, det, data, rep)
     finally:
         engine.dispose()
+
+
+def generato(e: Esito) -> Esito:
+    """Precondizione: il previsionale si è generato. `pytest.fail`, non `assert`: un test marcato
+    xfail(raises=AssertionError) non deve inghiottire una precondizione caduta come se fosse il rilievo."""
+    if e.res["forecast_generated"] is not True:
+        pytest.fail(f"precondizione: previsionale non generato: {e.res['message']}")
+    return e
 
 
 def piano(data, key: str) -> list:

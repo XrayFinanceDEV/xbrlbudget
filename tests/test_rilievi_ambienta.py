@@ -8,7 +8,7 @@ from decimal import Decimal as D
 
 import pytest
 
-from tests.rilievi_kit import BASE_BS, BASE_CE, genera, per_anno, righe
+from tests.rilievi_kit import BASE_BS, BASE_CE, base, genera, per_anno, piano, righe
 
 SP = "sp"  # solo per leggibilità dei commenti
 
@@ -178,3 +178,164 @@ def test_E05_caratterizzazione_ammortamento_primo_anno_e_straordinari():
     assert e.res["forecast_generated"] is True, e.res["message"]
     quota_nuovo = e.anni[2027][1]["ce09b_ammort_materiali"] - BASE_CE["ce09b_ammort_materiali"]
     assert quota_nuovo == D("10000.00")  # aliquota piena nel primo anno: stato di oggi
+
+
+def _bp():
+    pytest.importorskip("app.renderers.business_plan.data")
+    pytest.importorskip("backend.app.renderers.business_plan.data")
+
+
+def test_A01_bis_salvataggio_respinto_non_stampa_il_previsionale_vecchio_come_buono():
+    """A01/A04/B04 · ipotesi della verifica sul codice: un salvataggio respinto risponde 200, a schermo resta il
+    previsionale vecchio e il report lo stampa. Oracolo: il report è bloccato E il PDF in bozza dice che il
+    previsionale non corrisponde alle ipotesi salvate."""
+    _bp()
+    from backend.app.renderers.business_plan.document import render_business_plan
+    buone = righe()
+    respinte = righe()
+    banche = BASE_BS["sp16a_debiti_banche_breve"] + BASE_BS["sp17a_debiti_banche_lungo"]
+    respinte[0].update(_banche(311000, float(banche - D("300000"))))
+    e = genera(respinte, prima=buone, report=True)
+    assert e.res["forecast_generated"] is False
+    assert e.rep is not None, "il report non si costruisce sul previsionale vecchio"
+    assert e.rep.readiness.status == "blocked", e.rep.readiness
+    import fitz
+    pdf = render_business_plan(e.data)
+    testo = "".join(p.get_text() for p in fitz.open(stream=pdf, filetype="pdf")).lower()
+    assert "non aggiornat" in testo or "ipotesi salvate" in testo, "il PDF in bozza tace sul previsionale vecchio"
+
+
+def test_A02_bep_del_report_usa_la_ripartizione_del_motore():
+    """A02 · Report sez. 4: il BEP del report non usa la ripartizione fissi/variabili degli slider (60/40 di
+    default). Oracolo: costi variabili e fatturato di pareggio del report = details['pareggio'] del motore."""
+    _bp()
+    rows = righe(fixed_materials_percentage=0, fixed_services_percentage=50)
+    e = genera(rows, report=True)
+    assert e.res["forecast_generated"] is True, e.res["message"]
+    for i, y in enumerate((2027, 2028, 2029)):
+        par = e.det[y]["pareggio"]
+        assert abs(D(str(piano(e.data, "costi_variabili")[i])) - par["costi_variabili"]) < D("1"), y
+        assert abs(D(str(piano(e.data, "bep")[i])) - par["fatturato_pareggio"]) < D("1"), y
+
+
+def _con_rimborsi():
+    banche = BASE_BS["sp16a_debiti_banche_breve"] + BASE_BS["sp17a_debiti_banche_lungo"]
+    rows = righe()
+    rows[0].update(_banche(300000, float(banche - D("300000"))))
+    return rows
+
+
+def test_C01_il_dscr_del_report_comprende_la_quota_capitale():
+    """C01 · Report sez. 1, 6, All. D: «DSCR proxy» = (EBITDA − imposte) / oneri, senza quota capitale.
+    Oracolo: DSCR = (MOL − imposte) / (oneri + quota capitale); con rimborsi 53.409 è molto sotto il proxy."""
+    _bp()
+    e = genera(_con_rimborsi(), report=True)
+    assert e.res["forecast_generated"] is True, e.res["message"]
+    ce = e.anni[2027][1]
+    mol = e.data.v("ebitda")[e.data.plan_idx[0]]
+    atteso = (D(str(mol)) - ce["ce20_imposte"]) / (ce["ce15_oneri_finanziari"] + D("53409"))
+    assert abs(D(str(piano(e.data, "dscr")[0])) - atteso) < D("0.01"), (piano(e.data, "dscr")[0], atteso)
+
+
+def test_C02_dso_sui_soli_crediti_commerciali():
+    """C02 · Report sez. 1, 7, All. E: «DSO» su tutti i crediti (tributari e oltre 12 mesi compresi).
+    Oracolo: DSO 2026 = clienti (sp06a + sp07a) / ricavi × 360."""
+    _bp()
+    e = genera(righe(), report=True)
+    assert e.res["forecast_generated"] is True, e.res["message"]
+    atteso = (BASE_BS["sp06a_crediti_clienti_breve"] + BASE_BS["sp07a_crediti_clienti_lungo"]) \
+        / BASE_CE["ce01_ricavi_vendite"] * 360
+    assert abs(D(str(base(e.data, "dso"))) - atteso) < D("1"), (base(e.data, "dso"), atteso)
+
+
+def test_C03_rod_sui_debiti_finanziari():
+    """C03 · ROD = oneri finanziari / totale debiti (fornitori compresi). Oracolo: oneri / debiti finanziari
+    (banche + altri finanziatori), in percentuale."""
+    _bp()
+    e = genera(righe(), report=True)
+    assert e.res["forecast_generated"] is True, e.res["message"]
+    fin = BASE_BS["sp16a_debiti_banche_breve"] + BASE_BS["sp17a_debiti_banche_lungo"] \
+        + BASE_BS["sp17b_debiti_altri_finanz_lungo"]
+    atteso = BASE_CE["ce15_oneri_finanziari"] / fin * 100
+    assert abs(D(str(base(e.data, "rod"))) - atteso) < D("0.05"), (base(e.data, "rod"), atteso)
+
+
+def test_C04_pfn_del_report_comprende_gli_altri_finanziatori():
+    """C04 · PFN del report esclude gli altri finanziatori, l'interfaccia (budget-piano-step.ts, finDebt)
+    li include. Oracolo: PFN 2026 = banche + altri finanziatori + obbligazioni − cassa."""
+    _bp()
+    e = genera(righe(), report=True)
+    assert e.res["forecast_generated"] is True, e.res["message"]
+    atteso = BASE_BS["sp16a_debiti_banche_breve"] + BASE_BS["sp17a_debiti_banche_lungo"] \
+        + BASE_BS["sp17b_debiti_altri_finanz_lungo"] - BASE_BS["sp09_disponibilita_liquide"]
+    assert abs(D(str(base(e.data, "pfn"))) - atteso) < D("1"), (base(e.data, "pfn"), atteso)
+
+
+def _analitico(data, etichetta: str):
+    for r in data.indicators_analytical:
+        if r.label.strip().lower() == etichetta.lower():
+            return r
+    raise AssertionError(f"indicatore «{etichetta}» assente dall'Allegato E: "
+                         f"{[r.label for r in data.indicators_analytical]}")
+
+
+def test_C05_un_solo_current_ratio_nel_documento():
+    """C05 · Liquidità corrente sez. 8 = 1,43×, Current Ratio All. E = 1,29×. Oracolo: stesso valore.
+    Ruling: l'etichetta esatta nel catalogo è «Current Ratio (ILC)», non «Current Ratio»
+    (contracts/final_report_dossier_catalog.json:2130)."""
+    _bp()
+    e = genera(righe(), report=True)
+    assert e.res["forecast_generated"] is True, e.res["message"]
+    sez8 = D(str(base(e.data, "liquidita_corrente")))
+    all_e = D(str(_analitico(e.data, "Current Ratio (ILC)").values[0]))
+    assert abs(sez8 - all_e) < D("0.01"), (sez8, all_e)
+
+
+def test_C06_indice_di_indebitamento_e_debiti_su_patrimonio():
+    """C06 · All. E: «Indice di indebitamento» = immobilizzazioni / PN. Oracolo: debiti totali / PN."""
+    _bp()
+    e = genera(righe(), report=True)
+    assert e.res["forecast_generated"] is True, e.res["message"]
+    pn = BASE_BS["sp11_capitale"] + BASE_BS["sp12_riserve"] + BASE_BS["sp13_utile_perdita"]
+    atteso = (BASE_BS["sp16_debiti_breve"] + BASE_BS["sp17_debiti_lungo"]) / pn
+    val = D(str(_analitico(e.data, "Indice di Indebitamento").values[0]))
+    assert abs(val - atteso) < D("0.01"), (val, atteso)
+
+
+def test_C07_copertura_immobilizzazioni_con_il_tfr():
+    """C07 · Sez. 8, All. D: il TFR non è fra le fonti consolidate. Oracolo (in %):
+    (PN + debiti a lungo + TFR) / immobilizzazioni × 100."""
+    _bp()
+    e = genera(righe(), report=True)
+    assert e.res["forecast_generated"] is True, e.res["message"]
+    pn = BASE_BS["sp11_capitale"] + BASE_BS["sp12_riserve"] + BASE_BS["sp13_utile_perdita"]
+    immob = BASE_BS["sp02_immob_immateriali"] + BASE_BS["sp03_immob_materiali"] + BASE_BS["sp04_immob_finanziarie"]
+    atteso = (pn + BASE_BS["sp17_debiti_lungo"] + BASE_BS["sp15_tfr"]) / immob * 100
+    assert abs(D(str(base(e.data, "copertura_immob"))) - atteso) < D("0.1"), (base(e.data, "copertura_immob"), atteso)
+
+
+def test_C08_erogazioni_e_rimborsi_su_righe_separate():
+    """C08 · Sez. 1, 5, All. C: nel 2027 erogazione 280.000 e rimborsi 88.409 compensati (191.591).
+    Oracolo: il rendiconto 2027 porta nuovo debito = 280.000 e rimborsi ≥ 53.409, non il netto."""
+    _bp()
+    rows = _con_rimborsi()
+    rows[0]["financing_loans"].append({"name": "Nuovo", "amount": 280000, "opening_residual": 0,
+                                       "duration_years": 8, "interest_rate": 4.5, "grace_years": 0,
+                                       "balloon_pct": 0})
+    e = genera(rows, report=True)
+    assert e.res["forecast_generated"] is True, e.res["message"]
+    nuovo, rimb = piano(e.data, "cf_nuovo_debito")[0], piano(e.data, "cf_rimborsi")[0]
+    assert abs(D(str(nuovo)) - D("280000")) < D("1"), (nuovo, rimb)
+    assert D(str(rimb)) >= D("53409"), (nuovo, rimb)
+
+
+def test_C09_oneri_su_mol_parte_dalla_colonna_base():
+    """C09 · Sez. 1: «dal 24,54% al 10,71%» ma il 2026 F è 30,73%. Oracolo: il testo cita il valore della
+    colonna base."""
+    _bp()
+    from backend.app.renderers.business_plan import fmt
+    from backend.app.renderers.business_plan.narrative import key_points
+    e = genera(_con_rimborsi(), report=True)
+    assert e.res["forecast_generated"] is True, e.res["message"]
+    testo = " ".join(t for _, t in key_points(e.data))
+    assert fmt.pct(base(e.data, "of_mol")) in testo, (fmt.pct(base(e.data, "of_mol")), testo)

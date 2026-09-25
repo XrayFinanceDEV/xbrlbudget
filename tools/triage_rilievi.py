@@ -16,6 +16,25 @@ BANCO = ["tests/rilievi_kit.py", "tests/test_rilievi_ambienta.py", "tests/fixtur
          "frontend/lib/rilievi-ambienta.test.ts"]
 _ID = re.compile(r"(?:^|test_|> )([A-E]\d{2})[_ ]")
 _PESO = {"fail": 3, "pass": 2, "skip": 1}
+_FAILS = re.compile(r"\bit\.fails\s*\(")
+VITEST_TEMP = "lib/rilievi-ambienta.triage.test.ts"
+
+# Lettura a mano del verdetto: prevale sullo Stato meccanico, che resta nella nota («— banco: …»).
+LETTURE = {
+    "A01": ("Confermato solo come previsionale vecchio nel PDF (A01-bis)",
+            "Confermato solo come previsionale vecchio nel PDF (A01-bis); motore e wizard corretti"),
+    "A03": ("Non riprodotto", "Motore non riprodotto; sintomo spiegato da A01-bis"),
+    "A04": ("Confermato sulla riga del consulente (sp07g)",
+            "Confermato sul mix del consulente (sp07a 35.231 + sp07g 9.769): l'incasso di 1.000 si ripartisce per "
+            "proporzione, sp07g 2027 = 9.551,91 invece di 8.769; tutto su sp07g risolto il 2026-09-24; sp07a verde"),
+    "A05": ("Comportamento voluto (beb33c5)",
+            "Comportamento voluto (beb33c5) che produce il sintomo: passare a Manuale da «ricavi» congela la "
+            "crescita — decisione del proprietario"),
+    "A06": ("Non riprodotto (doppio comando confermato)",
+            "Motore non riprodotto; doppio comando confermato per ispezione"),
+    "B04": ("Non riprodotto", "Motore non riprodotto; sintomo spiegato da A01-bis"),
+    "E05": ("Riprodotto (caratterizzazione, scelta ⚖)", "Riprodotto (caratterizzazione, scelta ⚖)"),
+}
 
 
 def verdetto(vecchio, nuovo) -> str:
@@ -34,12 +53,40 @@ def esiti_junit(path) -> dict:
         m = _ID.search(tc.get("name", ""))
         if not m:
             continue
-        esito = ("fail" if tc.find("failure") is not None or tc.find("error") is not None
-                 else "skip" if tc.find("skipped") is not None else "pass")
+        esito = _esito(tc)
         rid = m.group(1)
         if _PESO[esito] > _PESO.get(out.get(rid), 0):
             out[rid] = esito
     return out
+
+
+def _esito(tc) -> str:
+    """pass/fail/skip di un testcase JUnit. Un xfail rimasto (banco senza --runxfail) è un rilievo confermato;
+    un XPASS(strict) è un test che passa: il marcatore non deve invertire il verdetto."""
+    fallito = tc.find("failure")
+    if fallito is not None and "XPASS(strict)" in (fallito.get("message") or ""):
+        return "pass"
+    if fallito is not None or tc.find("error") is not None:
+        return "fail"
+    saltato = tc.find("skipped")
+    if saltato is not None:
+        return "fail" if saltato.get("type") == "pytest.xfail" else "skip"
+    return "pass"
+
+
+def senza_fails(testo: str) -> str:
+    """Il file Vitest con `it.fails(` riscritto in `it(`: il banco misura l'oracolo, non il marcatore."""
+    return _FAILS.sub("it(", testo)
+
+
+def riga_foglio(rid: str, e_old: dict, e_new: dict, letture=LETTURE) -> tuple:
+    """(Stato, Note) da scrivere nel foglio. Una lettura a mano prevale sullo Stato meccanico; la nota tiene
+    comunque l'esito del banco sui due commit."""
+    banco = f"banco: {VECCHIO}={e_old.get(rid, '-')}, HEAD={e_new.get(rid, '-')}"
+    if rid in letture:
+        stato, nota = letture[rid]
+        return stato, f"{nota} — {banco}"
+    return verdetto(e_old.get(rid), e_new.get(rid)), banco
 
 
 def cartella_uscita(root: Path) -> Path:
@@ -54,13 +101,20 @@ def cartella_uscita(root: Path) -> Path:
 
 def _suite(root: Path, tag: str, out: Path) -> dict:
     py_xml, js_xml = out / f"{tag}-pytest.xml", out / f"{tag}-vitest.xml"
+    # --runxfail: i marcatori xfail non devono cambiare l'esito misurato, su nessuno dei due lati.
     subprocess.run([PY, "-m", "pytest", "tests/test_rilievi_ambienta.py", "-q", "-p", "no:warnings",
-                    f"--junitxml={py_xml}"], cwd=root)
+                    "--runxfail", f"--junitxml={py_xml}"], cwd=root)
     nm = root / "frontend" / "node_modules"
     if not nm.exists():
         nm.symlink_to(NODE_MODULES)
-    subprocess.run(["npx", "vitest", "run", "lib/rilievi-ambienta.test.ts", "--reporter=junit",
-                    f"--outputFile={js_xml}"], cwd=root / "frontend")
+    # Copia temporanea senza `it.fails`: stesso motivo di --runxfail, poi si cancella.
+    src, tmp = root / "frontend" / "lib" / "rilievi-ambienta.test.ts", root / "frontend" / VITEST_TEMP
+    tmp.write_text(senza_fails(src.read_text()))
+    try:
+        subprocess.run(["npx", "vitest", "run", VITEST_TEMP, "--reporter=junit",
+                        f"--outputFile={js_xml}"], cwd=root / "frontend")
+    finally:
+        tmp.unlink(missing_ok=True)
     esiti = {}
     for x in (py_xml, js_xml):
         if x.exists():
@@ -89,10 +143,11 @@ def main() -> int:
         rid = ws.cell(r, 1).value
         if not rid or ws.cell(r, 10).value != "Softwarista":
             continue
-        v = verdetto(e_old.get(rid), e_new.get(rid))
-        ws.cell(r, 11).value = v
-        ws.cell(r, 12).value = f"banco: {VECCHIO}={e_old.get(rid, '-')}, HEAD={e_new.get(rid, '-')}"
-        print(f"{rid:4} {v}")
+        meccanico = verdetto(e_old.get(rid), e_new.get(rid))
+        stato, nota = riga_foglio(rid, e_old, e_new)
+        ws.cell(r, 11).value = stato
+        ws.cell(r, 12).value = nota
+        print(f"{rid:4} {stato}" + (f"   [meccanico: {meccanico}]" if stato != meccanico else ""))
     dst = qui / "inbox" / "Verifica_piano_Ambienta_triage.xlsx"
     wb.save(dst)
     print(f"scritto {dst}")

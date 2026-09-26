@@ -104,10 +104,16 @@ export function StepPatrimonialePiano(p: StepProps): JSX.Element {
           {row.code !== null && (
             <Select
               value={row.driver ?? "manuale"}
+              // Finche' l'anno base non e' caricato (`baseBs` assente: storico ancora in
+              // fetch, o fetch fallito) `row.baseAmount` e' `null` per costruzione
+              // (`minorFieldsRows`), e passarlo a «Manuale» scriverebbe zero su un saldo
+              // vero. La tendina resta disabilitata finche' l'anno base non c'e' davvero
+              // (rilievo del giro finale, lotto 3 fix rilievi 2026-09-26).
+              disabled={!baseBs}
               onValueChange={(v) => p.updateSpRule(
                 row.code as string, row.balanceField, row.field,
                 v === "manuale" ? null : (v as SpIndexingDriver),
-                numOrNull((baseBs as unknown as Record<string, unknown>)?.[row.balanceField]),
+                row.baseAmount,
               )}
             >
               <SelectTrigger className="w-full text-xs sm:col-span-2 lg:col-span-1" aria-label={`Regola ${row.label}`}>

@@ -71,6 +71,12 @@ describe("minorFieldsRows", () => {
   it("anno base assente ⇒ '—' su tutte le righe, mai '€ 0'", () => {
     const rows = minorFieldsRows(undefined);
     expect(rows.every((r) => r.baseLabel === "—")).toBe(true);
+    // Il chiamante (StepPatrimonialePiano) usa `baseAmount === null` su OGNI riga per
+    // sapere che l'anno base non e' ancora caricato e disabilitare la tendina Manuale/
+    // driver: se questo tornasse un numero (anche zero), «Manuale» scriverebbe quel
+    // numero in sp_overrides come se fosse il vero saldo di base (rilievo del giro
+    // finale, lotto 3 fix rilievi 2026-09-26).
+    expect(rows.every((r) => r.baseAmount === null)).toBe(true);
   });
 
   it("senza aggancio ogni voce dichiara di restare costante, e la % resta viva", () => {

@@ -21,6 +21,13 @@ Uso (dalla radice del repo, col venv del backend):
     python -m scripts.migra_previdenza_tendina [percorso.db]           # prova, non scrive
     python -m scripts.migra_previdenza_tendina [percorso.db] --apply   # scrive
 Fare un backup del database prima di `--apply`.
+
+Dopo `--apply` gli scenari toccati risultano `forecast_stale` in `/analysis` (la scrittura
+tocca `BudgetAssumptions.updated_at`, successiva all'ultima generazione riuscita) e vanno
+rigenerati — `POST /scenarios/{id}/generate` o un salvataggio delle ipotesi con
+`auto_generate=true` — anche se i NUMERI non cambiano (vedi sopra): e' la staleness a
+dichiarare che il previsionale mostrato precede una scrittura sulle ipotesi, non un
+avviso di un risultato diverso.
 """
 from __future__ import annotations
 

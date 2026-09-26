@@ -59,9 +59,12 @@ def _importo_it(value) -> str:
 # lasciata in pace resta ferma per tutto il piano.
 #
 # La forma dell'aggancio NON e' nuova: e' quella gia' cablata sui debiti
-# previdenziali (`previdenza_scales_with_personnel`), cioe' `stock dell'ANNO
+# previdenziali via `sp_indexing` (driver "personale"), cioe' `stock dell'ANNO
 # BASE × fattore del driver`. Indicizzare sulla base non accumula deriva, mentre
-# un `prev × (1+%)` composto per cinque anni si'.
+# un `prev × (1+%)` composto per cinque anni si'. (`previdenza_scales_with_personnel`
+# era l'interruttore dedicato che faceva la stessa cosa: dal lotto 3 fix rilievi,
+# 2026-09-26, A06, il motore non lo legge piu' — resta nel modello/schema solo
+# per compatibilita' con un client vecchio.)
 
 # ── GIORNI MEDI DERIVATI: la soglia oltre cui non descrivono piu' l'azienda ──
 #

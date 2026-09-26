@@ -226,6 +226,7 @@ def probe(
         rec["coge_provider"] = vr.get("coge_provider")
         rec["ivcee_provider"] = vr.get("ivcee_provider")
         rec["dettagli_provider"] = vr.get("dettagli_provider")
+        rec["import_snello"] = vr.get("import_snello")
         w = list(res.get("warnings") or []) + list(vr.get("warnings") or [])
         rec["warnings"] = [str(x)[:220] for x in w][:10]
 

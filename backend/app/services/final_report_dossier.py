@@ -169,6 +169,12 @@ def _deps_sum(data: dict[str, Decimal], keys: tuple[str, ...]) -> Decimal | None
     return None if any(key not in data for key in keys) else sum((data[key] for key in keys), ZERO)
 
 
+def _pareggio_field(motore: dict[str, str | None], field: str) -> Decimal | None:
+    """Una chiave di `engine_meta['pareggio']` (stringa al centesimo o `None`) come `Decimal`."""
+    raw = motore.get(field)
+    return None if raw is None else Decimal(raw)
+
+
 def _column(series: dict[str, tuple[list, list]], key: str, value: Decimal | None, reason: str | None) -> None:
     series[key][0].append(value)
     series[key][1].append(value is None and (reason or 'source_field_unavailable') or None)
@@ -256,11 +262,8 @@ def build_structure_series(sources: list[DossierSource], indicators: list[Indica
                     _column(pareggio, key, None, 'engine_meta_missing')
                 continue
 
-            def _dec(field: str) -> Decimal | None:
-                raw = motore.get(field)
-                return None if raw is None else Decimal(raw)
-
-            variabili, fissi_operativi = _dec('costi_variabili'), _dec('costi_fissi_operativi')
+            variabili = _pareggio_field(motore, 'costi_variabili')
+            fissi_operativi = _pareggio_field(motore, 'costi_fissi_operativi')
             if variabili is None or fissi_operativi is None:
                 for key in pareggio:
                     _column(pareggio, key, None, 'pareggio_non_definito')
@@ -272,7 +275,8 @@ def build_structure_series(sources: list[DossierSource], indicators: list[Indica
             # variabili (qui i variabili sono quelli dichiarati dal motore).
             margin = None if revenue is None else revenue - variabili
             _column(pareggio, 'contribution_margin', margin, None if margin is not None else 'source_field_unavailable')
-            bep, sicurezza_pct = _dec('fatturato_pareggio'), _dec('margine_sicurezza_pct')
+            bep = _pareggio_field(motore, 'fatturato_pareggio')
+            sicurezza_pct = _pareggio_field(motore, 'margine_sicurezza_pct')
             _column(pareggio, 'break_even_revenue', bep, None if bep is not None else 'pareggio_non_definito')
             _column(pareggio, 'safety_margin_pct', sicurezza_pct, None if sicurezza_pct is not None else 'pareggio_non_definito')
             continue

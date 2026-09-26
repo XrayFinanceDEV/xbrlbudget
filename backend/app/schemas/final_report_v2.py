@@ -437,6 +437,16 @@ class FinalReportModelV2(FinalReportModel):
                 raise ValueError(f"break-even costs must split the operating costs at period {canonical_periods[index]}")
             margin = series["break_even"]["contribution_margin"].values[index]
             revenue = ce_column("income_statement:ce01_ricavi_vendite")[index]
+            bep = series["break_even"]["break_even_revenue"].values[index]
+            # lotto 2 fix rilievi (2026-09-26), fix round 1: su un anno di piano la lega
+            # sui costi operativi (sopra) non vale più, ma `fixed_costs` resta agganciato
+            # all'identità di pareggio del motore stesso — `bep = costi_fissi / %MdC`,
+            # cioè `costi_fissi = bep × MdC / ricavi` — usando solo campi già nella serie.
+            # Saltata quando un valore manca o i ricavi non sono positivi (nessun pareggio
+            # dichiarato in quel caso).
+            if (canonical_basis[index] == "forecast" and None not in (fixed, bep, margin, revenue)
+                    and revenue > 0 and abs(bep * margin / revenue - fixed) > tolerance):
+                raise ValueError(f"break-even fixed costs must reconcile with the engine's own identity at period {canonical_periods[index]}")
             if None not in (margin, revenue, variable) and abs(margin - (revenue - variable)) > tolerance:
                 raise ValueError(f"contribution margin must equal revenue minus variable costs at period {canonical_periods[index]}")
         incidence = {"materials": "practice.materials_revenue", "services": "practice.services_revenue",

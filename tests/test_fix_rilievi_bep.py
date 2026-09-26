@@ -43,9 +43,13 @@ def test_bep_con_engine_meta_null_e_dichiarato_non_ricalcolato():
 
 
 def test_bep_del_piano_riporta_i_valori_dichiarati_dal_motore():
-    """Controparte positiva: senza ritocchi, `costi_variabili`/`bep` del report
-    coincidono (a meno di arrotondamento) con `ForecastYear.engine_meta['pareggio']`
-    persistito — non con una quota fissa di default."""
+    """Controparte positiva: senza ritocchi, `costi_variabili`/`fixed_costs`/`bep`
+    del report coincidono (a meno di arrotondamento) con
+    `ForecastYear.engine_meta['pareggio']` persistito — non con una quota fissa di
+    default. Su AMBIENTA `costi_fissi_operativi` ≠ `costi_fissi` (ce03 lavori
+    interni e ce04 altri ricavi non sono zero nella base): una mappatura sbagliata
+    di `fixed_costs` su `costi_fissi` invece che su `costi_fissi_operativi`
+    farebbe fallire l'assert sotto, non solo "un numero diverso per caso"."""
     _bp()
     e = generato(genera(righe(), report=True))
     group_be = next(g for g in e.rep.structure_series if g.id == "break_even")
@@ -54,5 +58,7 @@ def test_bep_del_piano_riporta_i_valori_dichiarati_dal_motore():
         idx = next(i for i, p in enumerate(group_be.periods) if p.year == year)
         par = e.meta[year]["pareggio"]
         assert par is not None, year
+        assert D(par["costi_fissi_operativi"]) != D(par["costi_fissi"]), year
         assert series_be["variable_costs"].values[idx] == D(par["costi_variabili"]), year
+        assert series_be["fixed_costs"].values[idx] == D(par["costi_fissi_operativi"]), year
         assert series_be["break_even_revenue"].values[idx] == D(par["fatturato_pareggio"]), year

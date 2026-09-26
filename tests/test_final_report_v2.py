@@ -446,12 +446,15 @@ def test_forecast_year_without_engine_meta_declares_break_even_as_null_not_zero(
 
 @pytest.mark.parametrize('locate, error', [
     (lambda raw: _swap(raw, 'composition_uses', 'cash'), 'must match the statement rows'),
-    # lotto 2 fix rilievi (2026-09-26): su un anno di piano `fixed_costs` viene da
-    # `engine_meta['pareggio']` del motore (costi_fissi_operativi, riconciliato sul
-    # MOL), non più da una ripartizione dei cinque costi operativi canonici — quella
-    # lega non si controlla più sugli anni di piano (v. schemas/final_report_v2.py).
-    # Il margine di contribuzione resta agganciato a ricavi meno variabili su ogni
-    # colonna, piano compreso: è lì che si sposta il controllo anti-manomissione.
+    # lotto 2 fix rilievi (2026-09-26), fix round 1: su un anno di piano `fixed_costs`
+    # viene da `engine_meta['pareggio']` del motore (costi_fissi_operativi,
+    # riconciliato sul MOL), non più da una ripartizione dei cinque costi operativi
+    # canonici — quella lega non si controlla più sugli anni di piano. Al suo posto,
+    # `fixed_costs` resta agganciato all'identità di pareggio del motore stesso
+    # (`bep × MdC / ricavi == costi_fissi`, v. schemas/final_report_v2.py): un valore
+    # manomesso continua a farla scattare. Il margine di contribuzione resta
+    # agganciato a ricavi meno variabili su ogni colonna, piano compreso.
+    (lambda raw: _bump(raw, 'break_even', 'fixed_costs'), "break-even fixed costs must reconcile with the engine's own identity"),
     (lambda raw: _bump(raw, 'break_even', 'contribution_margin'), 'contribution margin must equal revenue minus variable costs'),
     (lambda raw: _bump(raw, 'cost_incidence', 'services'), 'must match indicator'),
     (lambda raw: _reorder_periods(raw, 'composition_sources'), 'canonical statement periods'),

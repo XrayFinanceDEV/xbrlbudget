@@ -32,8 +32,28 @@ LETTURE = {
             "crescita — decisione del proprietario"),
     "A06": ("Non riprodotto (doppio comando confermato)",
             "Motore non riprodotto; doppio comando confermato per ispezione"),
+    "B01": ("Risolto nel lotto 1 fix rilievi (2026-09-26)",
+            "Risolto nel lotto 1 fix rilievi (2026-09-26): ce10_var_rimanenze_mat_prime segue lo stato "
+            "patrimoniale delle sole materie (sp05a), non più i ricavi; il DIO delle materie si deduce dal "
+            "consumo (ce05 + ce10), non dal fatturato — details['rimanenze_materie']"),
+    "B02": ("Risolto nel lotto 1 fix rilievi (2026-09-26)",
+            "Risolto nel lotto 1 fix rilievi (2026-09-26): l'ammortamento dei cespiti esistenti si ferma al "
+            "residuo netto invece di continuare alla quota piena; ogni nuovo investimento ammortizza per conto "
+            "proprio — details['ammortamenti']"),
+    "B03": ("Risolto nel lotto 1 fix rilievi (2026-09-26)",
+            "Risolto nel lotto 1 fix rilievi (2026-09-26): ce08a (TFR) è sempre ce08b / 13,5, non più capato al "
+            "residuo del personale; un'eccedenza ricompone il totale come somma e lo dichiara "
+            "(details['personale_ricomposto'])"),
     "B04": ("Non riprodotto", "Motore non riprodotto; sintomo spiegato da A01-bis"),
-    "E05": ("Riprodotto (caratterizzazione, scelta ⚖)", "Riprodotto (caratterizzazione, scelta ⚖)"),
+    "B05": ("Risolto nel lotto 1 fix rilievi (2026-09-26)",
+            "Risolto nel lotto 1 fix rilievi (2026-09-26): nell'ultimo anno di piano un contratto scadenziato a "
+            "mano la cui lista non copre l'anno dopo ripete a breve l'ultima rata positiva (rata_ripetuta) "
+            "invece di lasciare l'intero residuo a lungo termine oltre l'orizzonte — anche per gli altri "
+            "finanziatori"),
+    "E05": ("Risolto nel lotto 1 fix rilievi (2026-09-26), su decisione del proprietario",
+            "Risolto nel lotto 1 fix rilievi (2026-09-26), su decisione del proprietario: un nuovo investimento "
+            "ammortizza a metà aliquota nell'anno d'ingresso, piena dopo; proventi e oneri straordinari valgono "
+            "zero in ogni anno di piano, salvo override esplicito"),
 }
 
 

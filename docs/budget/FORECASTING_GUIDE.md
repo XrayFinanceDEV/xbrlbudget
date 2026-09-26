@@ -145,6 +145,13 @@ voce è stata forzata in CE Prev. con un importo assoluto: su un importo forzato
 non è definita, e l'anteprima marca la cella invece di mostrare un numero che il motore non ha
 usato.
 
+**Il TFR** (`ce08a`) è sempre retribuzioni / 13,5. Se questo più salari e oneri sociali supera il
+costo del personale che avresti (perché forzato in CE Prev. o troppo basso), il motore **ricompone
+il totale come somma** delle tre voci e azzera «altri costi del personale», dichiarando l'eccedenza;
+un totale forzato invece vince e limita l'accantonamento a quanto resta sotto. **Proventi e oneri
+straordinari** valgono zero in ogni anno di piano — non sono ricorrenti per definizione — salvo un
+importo forzato in CE Prev.
+
 **Il pareggio lo dichiara il motore**, `details['pareggio']` per ogni anno: `costi_variabili` =
 parte variabile di materie e servizi; `costi_fissi` = parte fissa di materie e servizi + personale
 + godimento + oneri diversi; `costi_fissi_operativi` = costi fissi − altri ricavi, lavori interni e variazioni di rimanenze di prodotti + variazioni di rimanenze di materie e accantonamenti (cosi' il pareggio si calcola sul MOL del CE);
@@ -191,9 +198,13 @@ e tutto il blocco è `null`, sull'anno interessato.
 
 - I giorni non impostati esplicitamente li **deriva dall'anno base su 360 giorni**, e li deriva
   dai saldi **commerciali**, non dagli aggregati: i crediti tributari e le imposte anticipate
-  restano fuori dal DSO perché dipendono dalla posizione fiscale, non dal giro d'affari; il DIO
-  ha come denominatore il **ricavo**, non gli acquisti; il DPO guarda i soli **debiti verso
-  fornitori**. Il circolante scala poi su ricavi e costi previsionali, override compresi.
+  restano fuori dal DSO perché dipendono dalla posizione fiscale, non dal giro d'affari; il DPO
+  guarda i soli **debiti verso fornitori**. Il circolante scala poi su ricavi e costi previsionali,
+  override compresi. **Il DIO delle materie prime ha come denominatore il loro consumo**
+  (acquisti + variazione di rimanenze), non il ricavo — le altre rimanenze restano sul ricavo. Un
+  `ce10_override` (la variazione di rimanenze in CE Prev.) oltre la giacenza di materie in apertura
+  si **rifiuta**: le rimanenze non possono scendere sotto zero, e lo SP segue sempre il CE su questa
+  voce.
 - Su un giorno **dedotto** il motore controlla anche che il rapporto non sia degenerato (oltre
   un anno di rotazione, o un denominatore non positivo): in quel caso **riporta il saldo
   dell'anno base invece di scalarlo** e lo dichiara, e questo passo te lo mostra con un avviso.
@@ -320,7 +331,10 @@ foglio.»
   pensionamenti, dimissioni, licenziamenti — escono di cassa nell'anno e riducono il fondo),
   **Fondo a fine anno** con «oltre il fondo» in rosso quando la liquidazione supera fondo +
   accantonamento (il motore rifiuta).
-- **Nuovi investimenti**: come oggi, materiali e immateriali, per anno.
+- **Nuovi investimenti**: come oggi, materiali e immateriali, per anno. Il motore tiene separato il
+  residuo dei cespiti esistenti da quello di ogni nuovo investimento, e un nuovo investimento
+  ammortizza a **metà aliquota nell'anno in cui entra**, piena dopo: l'anno dell'investimento mostra
+  quindi meno ammortamento — e più utile imponibile — di un anno senza.
 - **Nuovi finanziamenti**: una card per finanziamento — **Nome** (es. «Nuovo finanziamento BPM»),
   **Importo €**, **Erogato nel** (l'anno di piano), **Durata**, **Preammortamento**, **Tasso %** —
   con il riepilogo «500.000 € · 2027 · rata 100.000 €/anno dal 2029». «+ Aggiungi finanziamento»
@@ -352,7 +366,10 @@ foglio.»
   passo. L'uscita di cassa passa dal plug, il rendiconto la legge dal movimento del fondo.
 - **Nuovi finanziamenti**: ciascuno ha il proprio calendario — quote capitale costanti dopo
   l'eventuale preammortamento, interessi sul residuo di apertura. La quota che cade l'anno dopo sta
-  a breve, il resto oltre.
+  a breve, il resto oltre. Nell'**ultimo anno di piano**, un finanziamento con rate scritte a mano la
+  cui lista non arriva all'anno dopo ripete l'ultima rata a breve, invece di lasciare l'intero
+  residuo oltre l'orizzonte del piano dove nessun anno lo vedrà mai scadere — vale anche per gli
+  altri finanziatori scadenziati a mano al passo 5.
 - **La cassa è il pareggio e pareggia solo verso l'alto.** Se hai diviso fidi e mutui al passo 5,
   un fabbisogno tira sui fidi (descritto lì) e il piano non si ferma mai per questo. Senza quella
   divisione vale la regola di sempre: spento, il motore si ferma sul primo anno che non si
@@ -507,6 +524,10 @@ le mostra insieme:
   dell'analisi lo dichiara. Succede appunto quando il salvataggio ha registrato le ipotesi ma
   il motore si è fermato: le pagine successive continuano a mostrare i numeri della generazione
   precedente.
+- Ogni generazione registra anche **quale versione del motore** l'ha calcolata
+  (`ForecastYear.engine_meta`). Un previsionale generato prima di questo giro di correzioni non ha
+  questa firma: non significa «vecchio», significa che non c'è ancora un modo per saperlo — un
+  avviso sulla versione appare solo quando due firme vengono davvero confrontate.
 
 Gli altri due modi di rigenerare passano da un'altra porta e falliscono in modo diverso:
 «Ricalcola» rigenera senza scrivere nulla e risponde con un errore vero, e lo stesso vale per le

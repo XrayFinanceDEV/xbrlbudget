@@ -162,8 +162,9 @@ def test_B02_ammortamento_dei_cespiti_esistenti_si_ferma_al_residuo():
 
 
 def test_B03_tfr_uguale_retribuzioni_diviso_13_5():
-    """B03 · Passo 3/6: l'accantonamento è il residuo personale − salari − oneri, non retribuzioni/13,5
-    come dice l'interfaccia. Oracolo: ce08a = ce08b / 13,5 in ogni anno."""
+    """B03 · Passo 3/6, fix 2026-09-26: il TFR (`ce08a`) è ora sempre retribuzioni / 13,5
+    (`tfr_accrual_quota`), non più capato al residuo del personale (totale − salari − oneri) come
+    faceva il motore prima del lotto. Oracolo: ce08a = ce08b / 13,5 in ogni anno."""
     e = generato(genera(per_anno(righe(), "personnel_growth_pct", (3, 4, 4))))
     for y in (2027, 2028, 2029):
         ce = e.anni[y][1]
@@ -193,9 +194,11 @@ def test_B04_fidi_e_residui_che_non_quadrano_col_bilancio_si_rifiutano():
 
 
 def test_B05_rata_oltre_orizzonte_non_scadenziata_sta_a_breve():
-    """B05 · lo scenario del consulente: il piano del Finanziamento A scadenzia solo 2027-2029 e a fine 2029 resta
-    un residuo (360.710 nel foglio). Oracolo del consulente: a breve almeno la rata dell'ultimo anno (53.409),
-    cioè banche a breve 2029 ≥ fidi 300.000 + 53.409."""
+    """B05 · Passo 6, fix 2026-09-26: lo scenario del consulente — il piano del Finanziamento A
+    scadenzia solo 2027-2029, e a fine 2029 (ultimo anno di piano) resta un residuo (360.710 nel
+    foglio) che nessun anno vedrà mai scadere. Il motore ora ripete a breve l'ultima rata positiva
+    della lista (`rata_ripetuta`) invece di lasciare l'intero residuo a lungo termine. Oracolo:
+    banche a breve 2029 ≥ fidi 300.000 + rata 53.409."""
     banche = BASE_BS["sp16a_debiti_banche_breve"] + BASE_BS["sp17a_debiti_banche_lungo"]
     rows = righe()
     rows[0].update(_banche(300000, float(banche - D("300000"))))

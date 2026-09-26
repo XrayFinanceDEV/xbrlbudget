@@ -116,3 +116,34 @@ Le letture a mano (`LETTURE` in `tools/triage_rilievi.py`) prevalgono sullo Stat
   scelta del proprietario sarà implementata: è atteso.
 - **E04** — fuori perimetro (spec §6), «Senza test».
 - **Base** — valori assoluti ricalcolati sulla base 493, non le cifre del foglio del consulente.
+
+## Lotto 1, 2026-09-26
+
+Fix sul motore (`docs/superpowers/specs/2026-09-26-fix-rilievi-ambienta-design.md` §3, branch
+`fix/rilievi-ambienta`, task 1-8 del piano). `tools/triage_rilievi.py::LETTURE` aggiornato per B01, B02, B03, B05,
+E05 — «Risolto nel lotto 1 fix rilievi (2026-09-26)» (E05 con «su decisione del proprietario»); il banco
+(`tests/test_rilievi_ambienta.py`) conferma: i cinque test passano senza marcatore `xfail`.
+
+- **B01** — `ce10_var_rimanenze_mat_prime` segue ora lo stato patrimoniale delle sole materie (sp05a), non più i
+  ricavi; il DIO delle materie si deduce dal consumo (ce05 + ce10), non dal fatturato
+  (`details['rimanenze_materie']`). Un `ce10_override` oltre la giacenza in apertura si rifiuta.
+- **B02** — l'ammortamento dei cespiti esistenti si ferma al residuo netto invece di continuare alla quota piena;
+  ogni nuovo investimento ammortizza per conto proprio (`details['ammortamenti']`).
+- **B03** — `ce08a` (TFR) è sempre `ce08b / 13,5`, non più capato al residuo del personale; un'eccedenza ricompone
+  il totale come somma e lo dichiara (`details['personale_ricomposto']`).
+- **B05** — nell'ultimo anno di piano un contratto scadenziato a mano la cui lista non copre l'anno dopo ripete a
+  breve l'ultima rata positiva (`rata_ripetuta`), invece di lasciare l'intero residuo a lungo termine oltre
+  l'orizzonte del piano; la stessa regola vale anche per gli altri finanziatori (`details['altri_finanziatori']`),
+  ruling del controller del Task 6.
+- **E05** — decisione del proprietario (2026-09-26): un nuovo investimento ammortizza a metà aliquota nell'anno
+  d'ingresso, piena dopo; proventi e oneri straordinari valgono zero in ogni anno di piano, salvo override
+  esplicito. Il comportamento criticato dal consulente è quello che i due test caratterizzavano prima del lotto —
+  ora asseriscono la regola scelta.
+- **A04** — **in corso, Task 7** (worktree separato `../budget-fix-rilievi-t7`, branch `fix/rilievi-t7` da
+  `c1f621b`, poi cherry-pick su `fix/rilievi-ambienta`): non ancora nel banco di questo lotto. `LETTURE['A04']`
+  resta quella del 2026-09-25 finché il cherry-pick non atterra; il verdetto si aggiorna nel prossimo giro.
+- **Firma del motore** — `ForecastYear.engine_meta` (`{"engine_version", "pareggio"}`) e `ENGINE_VERSION = "2"`
+  (`calculations/forecast_engine.py`), scritti a ogni generazione dal Task 1 in poi; `NULL` sui previsionali
+  generati prima significa «non lo so», mai un motore vecchio da segnalare.
+- **Lotto 2** (report e indici: A01-bis, A02, C01-C09) resta `xfail` — fuori dal perimetro di questo lotto, dipende
+  dalla firma e dal `pareggio` persistiti qui.

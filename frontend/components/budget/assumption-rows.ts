@@ -89,7 +89,7 @@ export const ADVANCED_GROUPS: { title: string; rows: AssumptionRowDef[] }[] = [
     title: "Capitale circolante",
     rows: [
       rule(["dso_days"], { key: "dso", label: "Giorni incasso clienti (DSO)", autoPlaceholder: "dso" }),
-      rule(["dio_days"], { key: "dio", label: "Giorni rotazione magazzino (DIO)", autoPlaceholder: "dio" }),
+      rule(["dio_days"], { key: "dio", label: "Giorni di scorta materie prime (sul consumo)", autoPlaceholder: "dio" }),
       rule(["dpo_days"], { key: "dpo", label: "Giorni pagamento fornitori (DPO)", autoPlaceholder: "dpo" }),
       rule(["receivables_long_growth_pct"], { key: "crediti-oltre", label: "Crediti oltre 12 mesi %" }),
     ],

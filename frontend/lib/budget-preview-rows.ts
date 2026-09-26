@@ -110,7 +110,7 @@ export function rowsAnnoBase(baseYear: number, historicalYears: number[], histor
     incidenceRow("ce08", "Personale", "ce08_costi_personale"),
     row("mol", "MOL", "kpi", { value: molOf(baseEntry) }, restEntries.map((e) => ({ value: molOf(e) }))),
     daysRow("dso", "Giorni incasso clienti (DSO)", "dso"),
-    daysRow("dio", "Giorni rotazione magazzino (DIO)", "dio"),
+    daysRow("dio", "Giorni di scorta materie prime (sul consumo)", "dio"),
     daysRow("dpo", "Giorni pagamento fornitori (DPO)", "dpo"),
   ];
 }
@@ -281,7 +281,12 @@ export function rowsCircolante(baseBs: BalanceSheet, baseInc: IncomeStatement, y
     const cred = num(bs.sp06_crediti_breve) - num(bs.sp06e_crediti_tributari_breve) - num(bs.sp06f_imposte_anticipate_breve);
     const mag = num(bs.sp05_rimanenze), forn = num(bs.sp16d_debiti_fornitori_breve), rev = num(y.income_statement.ce01_ricavi_vendite);
     const ccn = cred + mag - forn;
-    const out = { cred: { value: cred, days: d.dso_applied }, mag: { value: mag, days: d.dio_applied },
+    // `mag` e' TUTTO sp05 (materie, semilavorati, prodotti finiti, acconti...), ma `d.dio_applied`
+    // (dal B01, lotto 1 fix rilievi) e' i giorni delle sole materie prime sul consumo: mostrarli
+    // accanto al totale suggerirebbe che il totale ruota a quei giorni, il che non e' vero non
+    // appena il magazzino ha altro oltre alle materie (rilievo I2 della revisione finale,
+    // 2026-09-26). Nessun giorno unico descrive il totale: si mostra il valore senza giorni.
+    const out = { cred: { value: cred, days: d.dso_applied }, mag: { value: mag },
       forn: { value: -forn, days: d.dpo_applied }, ccn: { value: ccn }, pct: { value: null, pct: pctOf(ccn, rev) },
       cash: { value: -(ccn - prevCcn) } };
     prevCcn = ccn;

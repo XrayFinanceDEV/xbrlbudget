@@ -62,10 +62,15 @@ const dayLabel = (n: number | null): string => (n === null ? "n/d" : `${n} gg`);
 const autoPlaceholder = (n: number | null) => () => (n === null ? "auto" : `auto ${n}`);
 
 /** L'etichetta di ciascuno dei tre giorni medi, in un posto solo: le righe
- *  della tabella e gli avvisi devono chiamarli allo stesso modo. */
+ *  della tabella e gli avvisi devono chiamarli allo stesso modo.
+ *
+ *  `dio` (lotto 1 fix rilievi, rilievo I2 della revisione finale, 2026-09-26): dal B01 questo
+ *  campo e' i giorni delle sole MATERIE PRIME sul loro consumo (`ce05+ce10`), non piu' un giorno
+ *  di rotazione di tutto il magazzino sui ricavi — l'etichetta "(DIO)" da sola lo presenta ancora
+ *  come prima. */
 const GIORNI_LABELS: Record<string, string> = {
   dso: "Giorni incasso clienti (DSO)",
-  dio: "Giorni rotazione magazzino (DIO)",
+  dio: "Giorni di scorta materie prime (sul consumo)",
   dpo: "Giorni pagamento fornitori (DPO)",
 };
 

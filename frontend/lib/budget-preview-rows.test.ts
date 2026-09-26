@@ -257,6 +257,13 @@ describe("rowsCircolante", () => {
     // assorbimento di cassa = -(ccn - ccn_precedente) = -(220 - 180) = -40
     expect(rows.find((r) => r.key === "cassa")!.years[0].value).toBe(-40);
   });
+
+  it("I2 (revisione finale, 2026-09-26): la riga Rimanenze non porta i giorni di dio_applied, che sono delle sole materie prime, non del totale sp05", () => {
+    const baseBs = { sp05_rimanenze: "120" } as unknown as BalanceSheet;
+    const y = year(2027); // details.dio_applied === 45 nel fixture condiviso `year()`
+    const rows = rowsCircolante(baseBs, baseInc, [y]);
+    expect(rows.find((r) => r.key === "rimanenze")!.years[0].days).toBeUndefined();
+  });
 });
 
 describe("unfundedFromError", () => {

@@ -141,19 +141,31 @@ def ammortamento_categoria(
     - Un investimento dell'anno (`investimento > 0`) apre un cespite nuovo
       `{'anno', 'importo', 'aliquota', 'residuo': importo}`; l'aliquota e' quella
       dell'anno d'ingresso e resta la sua per tutta la vita del cespite.
+    - Riallineamento al netto persistito (I1, revisione finale lotto 1, 2026-09-26): dal
+      secondo anno in poi, PRIMA di aprire il cespite dell'investimento dell'anno, il pool
+      (`esistente_apertura` + residui dei cespiti) si riporta a `netto_apertura` — un
+      `sp_overrides` scritto direttamente su sp02/sp03 lo puo' aver spostato senza che il
+      pool, che viene da `prev_details`, lo sappia. Se il pool eccede, la differenza si
+      toglie come una dismissione (prima l'esistente, poi i nuovi in ordine d'ingresso, mai
+      sotto zero); se manca, si aggiunge al pool esistente. Dichiarato sempre in
+      `riallineato_al_netto` (positivo = aggiunto, negativo = tolto, zero quando non serve
+      o al primo anno di piano).
     - La quota sull'esistente e' `min(quota_base, esistente_apertura)`: si ferma al
       residuo, non continua alla quota piena di sempre (B02). `quota_base` e'
       `ce09a`/`ce09b` dell'ANNO BASE, costante per tutto il piano.
     - Ogni cespite nuovo ammortizza alla propria aliquota piena, ECCETTO nell'anno
       in cui entra: li' la quota e' meta' aliquota (E05, decisione del proprietario
       2026-09-26), sempre limitata al proprio residuo.
-    - Guardia: `netto_apertura + investimento` e' il massimo ammortizzabile (un
-      `sp_overrides` sullo SP puo' averlo abbassato sotto la quota che le formule
-      produrrebbero). Se la somma calcolata lo supera, la quota si LIMITA a quel
-      massimo e si alloca come un override (`limitato_al_netto = True`).
+    - Guardia: `netto_apertura + investimento - dismissione` e' il massimo ammortizzabile
+      (un `sp_overrides` sullo SP puo' averlo abbassato sotto la quota che le formule
+      produrrebbero, e la dismissione dell'anno riduce cio' che resta da ammortizzare).
+      Se la somma calcolata lo supera, la quota si LIMITA a quel massimo e si alloca come
+      un override (`limitato_al_netto = True`).
     - Un override esplicito (o la guardia sopra) toglie l'importo prima dalla massa
       esistente fino al suo residuo, poi dai cespiti nuovi in ordine d'ingresso;
-      `override = True` solo per l'override vero, mai per la guardia.
+      `override = True` solo per l'override vero, mai per la guardia. Il CHIAMANTE deve
+      rifiutare un override oltre il massimo ammortizzabile (M3, stessa revisione): questa
+      funzione non lo fa, quindi da sola onorerebbe un override che il netto non regge.
     - Una dismissione (`dismissione`, solo materiali) si toglie DOPO le quote, nello
       stesso ordine (esistente poi nuovi), mai sotto zero: non e' una quota, e' una
       radiazione del residuo.
@@ -170,9 +182,33 @@ def ammortamento_categoria(
     if stato_apertura is None:
         esistente_apertura = netto_apertura
         cespiti_nuovi: List[Dict[str, Any]] = []
+        riallineato_al_netto = ZERO
     else:
         esistente_apertura = Decimal(str(stato_apertura.get('esistente_residuo') or 0))
         cespiti_nuovi = [dict(c) for c in (stato_apertura.get('cespiti_nuovi') or [])]
+        # Riallineamento al netto persistito (I1, revisione finale lotto 1, 2026-09-26): i pool
+        # (`esistente_residuo` + residui dei cespiti) vengono da `prev_details`, che non sa nulla di
+        # un `sp_overrides` scritto direttamente su sp02/sp03. Senza questo passo il pool "esistente"
+        # resta un fantasma che continua a caricare `quota_base` sul netto degli investimenti nuovi
+        # (o, verso l'alto, non si ammortizza mai oltre il pool originale). Si riporta il pool al
+        # netto persistito ad ogni inizio d'anno dopo il primo: se eccede, si riduce come una
+        # dismissione (prima l'esistente, poi i nuovi in ordine d'ingresso, mai sotto zero); se
+        # manca, la differenza si aggiunge al pool esistente. Sempre dichiarato, anche a zero.
+        pool_totale = esistente_apertura + sum((c['residuo'] for c in cespiti_nuovi), ZERO)
+        riallineato_al_netto = netto_apertura - pool_totale
+        if riallineato_al_netto > ZERO:
+            esistente_apertura += riallineato_al_netto
+        elif riallineato_al_netto < ZERO:
+            eccesso = -riallineato_al_netto
+            preso = min(eccesso, esistente_apertura)
+            esistente_apertura -= preso
+            eccesso -= preso
+            for cespite in cespiti_nuovi:
+                if eccesso <= ZERO:
+                    break
+                preso = min(eccesso, cespite['residuo'])
+                cespite['residuo'] = cespite['residuo'] - preso
+                eccesso -= preso
 
     if investimento > ZERO:
         cespiti_nuovi = cespiti_nuovi + [
@@ -190,7 +226,10 @@ def ammortamento_categoria(
     quota_nuovi_totale = sum(quote_nuovi, ZERO)
 
     quota_calcolata = quota_esistente + quota_nuovi_totale
-    max_disponibile = netto_apertura + investimento
+    # La dismissione dell'anno riduce cio' che si puo' davvero ammortizzare (I1): senza,
+    # il tetto ignorava una radiazione della stessa annata e la quota poteva restare
+    # sopra cio' che il netto, gia' ridotto dalla dismissione, puo' sostenere.
+    max_disponibile = netto_apertura + investimento - dismissione
 
     is_override = override is not None
     limitato_al_netto = (not is_override) and quota_calcolata > max_disponibile
@@ -234,6 +273,7 @@ def ammortamento_categoria(
         'cespiti_nuovi': cespiti_nuovi,
         'override': is_override,
         'limitato_al_netto': limitato_al_netto,
+        'riallineato_al_netto': riallineato_al_netto,
     }
 
 

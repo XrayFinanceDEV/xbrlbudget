@@ -3,7 +3,7 @@ from decimal import Decimal as D
 
 from calculations.forecast_engine import _consuma_in_ordine
 from calculations.projection_common import ammortamento_categoria, rata_anno_dopo, rimanenze_materie
-from tests.rilievi_kit import BASE_BS, genera, generato, righe
+from tests.rilievi_kit import BASE_BS, BASE_CE, genera, generato, righe
 from tests.test_forecast_altri_finanziatori import _genera as _genera_altri_finanziatori
 from tests.test_forecast_altri_finanziatori import _rows as _rows_altri_finanziatori
 from tests.test_rilievi_ambienta import _banche
@@ -73,14 +73,24 @@ def test_override_consuma_prima_l_esistente():
 
 
 def test_quota_limitata_al_netto_disponibile():
+    # lotto 1 fix rilievi (2026-09-26): un pool (100) sopra il netto persistito (30) e' ESATTAMENTE
+    # lo scenario che I1 riallinea PRIMA della quota, non piu' quello che il tetto limita dopo — un
+    # `sp_overrides` al ribasso su sp02/sp03 non lascia piu' un pool fantasma. Il riallineamento
+    # (-70) porta l'esistente a 30, la quota si ferma li' da sola: `limitato_al_netto` resta False
+    # perche' non c'e' piu' nulla da limitare. Il tetto sulla stessa annata lo prova invece
+    # `test_I1_max_disponibile_include_la_dismissione_dell_anno`, con una dismissione dell'anno.
     stato = {"esistente_residuo": D("100"), "cespiti_nuovi": []}
     q, s = ammortamento_categoria(stato, D("30"), D("60"), D("0"), D("0.1"), 2028, None)
-    assert q == D("30") and s["limitato_al_netto"] is True
+    assert q == D("30") and s["limitato_al_netto"] is False
+    assert s["riallineato_al_netto"] == D("-70")
 
 
 def test_dismissione_consuma_prima_l_esistente_poi_i_nuovi_in_ordine_mai_sotto_zero():
     # Due cespiti nuovi gia' aperti, aliquota zero cosi' la quota dell'anno resta a zero e la
     # dismissione e' l'unica cosa che tocca i residui: piu' facile isolarne l'ordine.
+    # lotto 1 fix rilievi (2026-09-26): il netto persistito (210) ora deve combaciare col totale dei
+    # pool (50+80+80=210), altrimenti I1 riallinea PRIMA della dismissione e sposta l'esistente —
+    # qui si isola il solo comportamento della dismissione, non il riallineamento.
     stato = {
         "esistente_residuo": D("50"),
         "cespiti_nuovi": [
@@ -90,15 +100,18 @@ def test_dismissione_consuma_prima_l_esistente_poi_i_nuovi_in_ordine_mai_sotto_z
     }
     # 100 di dismissione: i primi 50 svuotano l'esistente, i 50 restanti vanno sul PRIMO
     # cespite nuovo (ordine d'ingresso); il secondo cespite resta intatto.
-    q, s = ammortamento_categoria(stato, D("300"), D("0"), D("0"), D("0.1"), 2028, None,
+    q, s = ammortamento_categoria(stato, D("210"), D("0"), D("0"), D("0.1"), 2028, None,
                                    dismissione=D("100"))
     assert q == D("0")
+    assert s["riallineato_al_netto"] == D("0")
     assert s["esistente_residuo"] == D("0")
     assert s["cespiti_nuovi"][0]["residuo"] == D("30")
     assert s["cespiti_nuovi"][1]["residuo"] == D("80")
 
 
 def test_dismissione_oltre_il_disponibile_si_ferma_a_zero_mai_sotto():
+    # lotto 1 fix rilievi (2026-09-26): netto persistito allineato al totale dei pool (210), stesso
+    # motivo del test precedente.
     stato = {
         "esistente_residuo": D("50"),
         "cespiti_nuovi": [
@@ -108,7 +121,7 @@ def test_dismissione_oltre_il_disponibile_si_ferma_a_zero_mai_sotto():
     }
     # Una dismissione ben oltre il totale disponibile (50 + 80 + 80 = 210) azzera tutto, senza
     # mai andare sotto zero.
-    q, s = ammortamento_categoria(stato, D("300"), D("0"), D("0"), D("0.1"), 2028, None,
+    q, s = ammortamento_categoria(stato, D("210"), D("0"), D("0"), D("0.1"), 2028, None,
                                    dismissione=D("1000000"))
     assert s["esistente_residuo"] == D("0")
     assert s["cespiti_nuovi"][0]["residuo"] == D("0")
@@ -285,3 +298,123 @@ def test_B05_rata_ripetuta_dichiarata_anche_su_altri_finanziatori():
     assert det[2027]["altri_finanziatori"]["contratti"][0]["rata_ripetuta"] is False
     assert det[2028]["altri_finanziatori"]["contratti"][0]["rata_ripetuta"] is False
     assert det[2029]["altri_finanziatori"]["contratti"][0]["rata_ripetuta"] is True
+
+
+# ── I1 (revisione finale, 2026-09-26): i pool degli ammortamenti si riallineano al netto
+# persistito a inizio d'anno, cosi' un `sp_overrides` su sp02/sp03 non lascia un pool
+# fantasma che ignora la modifica. ──
+
+def test_I1_riallineamento_zero_dichiarato_al_primo_anno():
+    q, s = ammortamento_categoria(None, D("100"), D("60"), D("0"), D("0.1"), 2027, None)
+    assert s["riallineato_al_netto"] == D("0")
+
+
+def test_I1_pool_eccedente_si_riduce_come_dismissione_esistente_poi_nuovi():
+    # Pool totale 40+80=120 contro un netto persistito di 50 (es. un sp_overrides al
+    # ribasso su sp03): l'eccesso 70 si toglie prima dall'esistente (40 -> 0), poi dal
+    # cespite nuovo (80 -> 50). Aliquote a zero per isolare il riallineamento dalla quota
+    # dell'anno.
+    stato = {
+        "esistente_residuo": D("40"),
+        "cespiti_nuovi": [
+            {"anno": 2020, "importo": D("100"), "aliquota": D("0"), "residuo": D("80")},
+        ],
+    }
+    q, s = ammortamento_categoria(stato, D("50"), D("0"), D("0"), D("0.1"), 2028, None)
+    assert s["riallineato_al_netto"] == D("-70")
+    assert s["esistente_residuo"] == D("0")
+    assert s["cespiti_nuovi"][0]["residuo"] == D("50")
+    assert q == D("0")
+
+
+def test_I1_pool_insufficiente_si_aggiunge_all_esistente():
+    # Pool 10 contro un netto persistito di 100 (es. un sp_overrides al rialzo su sp03):
+    # la differenza 90 si aggiunge al pool esistente, che torna ad ammortizzarsi a quota
+    # base invece di restare fermo al proprio residuo originale.
+    stato = {"esistente_residuo": D("10"), "cespiti_nuovi": []}
+    q, s = ammortamento_categoria(stato, D("100"), D("60"), D("0"), D("0.1"), 2028, None)
+    assert s["riallineato_al_netto"] == D("90")
+    assert q == D("60")
+    assert s["esistente_residuo"] == D("40")
+
+
+def test_I1_max_disponibile_include_la_dismissione_dell_anno():
+    # Pool e netto persistito coincidono (nessun riallineamento): una dismissione di 30
+    # dell'anno abbassa il tetto ammortizzabile a 100+0-30=70, sotto la quota_base 90.
+    stato = {"esistente_residuo": D("100"), "cespiti_nuovi": []}
+    q, s = ammortamento_categoria(stato, D("100"), D("90"), D("0"), D("0.1"), 2028, None,
+                                   dismissione=D("30"))
+    assert s["riallineato_al_netto"] == D("0")
+    assert s["limitato_al_netto"] is True
+    assert q == D("70")
+    assert s["esistente_residuo"] == D("0")  # 100 - 70(preso) - 30(dismissione) = 0
+
+
+def test_I1_sonda_ambienta_override_sp03_poi_investimento_riallinea_il_pool():
+    # Sonda della revisione finale: override sp03=1.000 in chiusura 2027, poi un
+    # investimento di 100.000 al 10% nel 2028. Il pool esistente (fantasma, dal 2027)
+    # si riallinea a 1.000 prima di aprire il cespite nuovo: ce09b 2028 = 1.000 (quota
+    # sull'esistente, tutto il residuo) + 5.000 (meta' aliquota sul nuovo) = 6.000,00 —
+    # non piu' i 41.040 che il pool fantasma prima produceva.
+    from backend.app.services import assumptions_service
+    from database.models import BalanceSheet, BudgetScenario, Company, FinancialYear, IncomeStatement
+    from tests.e2e_kit import memory_sessions, read_forecast_maps
+
+    rows = righe(depreciation_rate=10)
+    rows[1]["tangible_investments"] = 100000  # 2028
+    engine, sessions = memory_sessions()
+    try:
+        with sessions() as db:
+            company = Company(name="AMBIENTA", tax_id="I1SONDA", sector=1, user_id="rilievi")
+            db.add(company); db.flush()
+            fy = FinancialYear(company_id=company.id, year=2026, period_months=None,
+                               validation_status="verified", forecastable=True)
+            db.add(fy); db.flush()
+            db.add(BalanceSheet(financial_year_id=fy.id, **BASE_BS))
+            db.add(IncomeStatement(financial_year_id=fy.id, **BASE_CE))
+            db.commit()
+            sc = BudgetScenario(company_id=company.id, name="i1-sonda", base_year=2026,
+                                scenario_type="budget")
+            db.add(sc); db.commit()
+            res = assumptions_service.bulk_upsert_assumptions(
+                db, sc.id, [dict(r) for r in rows], auto_generate=True)
+            assert res["forecast_generated"] is True, res["message"]
+            assumptions_service.apply_sp_overrides(
+                db, sc, [{"forecast_year": 2027, "field": "sp03_immob_materiali", "value": 1000}],
+            )
+            anni = {y: (sp, c) for y, sp, c in read_forecast_maps(db, sc.id)}
+            ce2028 = anni[2028][1]
+            assert ce2028["ce09b_ammort_materiali"] == D("6000.00")
+    finally:
+        engine.dispose()
+
+
+# ── M3 (revisione finale, 2026-09-26): un override di ce09a/ce09b oltre il netto
+# disponibile si RIFIUTA con un ValueError italiano — come ce10_override oltre le
+# materie d'apertura — invece di essere onorato nel CE mentre lo SP clampa a zero e la
+# cassa assorbe la differenza. ──
+
+def test_M3_override_ce09b_oltre_il_netto_disponibile_si_rifiuta():
+    rows = righe(ce09b_override=999999999)
+    res = genera(rows).res
+    assert res["forecast_generated"] is False
+    assert "ce09b" in res["message"] and "netto disponibile" in res["message"], res["message"]
+
+
+def test_M3_override_ce09a_oltre_il_netto_disponibile_si_rifiuta():
+    rows = righe(ce09a_override=999999999)
+    res = genera(rows).res
+    assert res["forecast_generated"] is False
+    assert "ce09a" in res["message"] and "netto disponibile" in res["message"], res["message"]
+
+
+def test_M3_override_ce09b_entro_il_netto_disponibile_e_accettato():
+    # Solo il primo anno: applicarlo a tutti e tre (come farebbe un `righe(...)` diretto)
+    # svuoterebbe il netto disponibile del 2028, che erediterebbe zero e rifiuterebbe lo
+    # stesso override per una ragione diversa — lo stesso accorgimento degli altri test a
+    # override singolo di questo file.
+    netto = BASE_BS["sp03_immob_materiali"]
+    rows = righe()
+    rows[0]["ce09b_override"] = float(netto)
+    e = generato(genera(rows))
+    assert e.anni[2027][1]["ce09b_ammort_materiali"] == netto.quantize(D("0.01"))

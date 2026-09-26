@@ -3126,9 +3126,33 @@ class ForecastEngine:
         # MATERIALI, mai gli immateriali — l'eventuale plus/minusvalenza sul
         # conto economico resta gestita piu' sotto (ce04/ce12), invariata.
         disposal_nbv_ammort = getattr(assumption, 'asset_disposal_nbv', None) or Decimal('0')
+        netto_apertura_immateriali = _prev_bs_val('sp02_immob_immateriali')
+        netto_apertura_materiali = _prev_bs_val('sp03_immob_materiali')
+        # M3 (revisione finale, 2026-09-26): un override oltre il netto disponibile si
+        # RIFIUTA, come ce10_override oltre le materie d'apertura — `ammortamento_categoria`
+        # da sola onorerebbe l'override nel CE mentre i pool clampano a zero, e la cassa
+        # assorbirebbe la differenza in silenzio (`CLAUDE.md`, «diagnose, never fabricate»).
+        max_ammortizzabile_immateriali = netto_apertura_immateriali + intangible_inv
+        if assumption.ce09a_override is not None and assumption.ce09a_override > max_ammortizzabile_immateriali:
+            raise ValueError(
+                f"L'override di ce09a_ammort_immateriali nell'anno {assumption.forecast_year} "
+                f"({eur_it(assumption.ce09a_override)}) supera il netto disponibile "
+                f"({eur_it(max_ammortizzabile_immateriali)}): gli immobilizzi immateriali non "
+                "possono scendere sotto zero. Abbassa l'override o svuota la cella (value: null) "
+                "e lascia che l'ammortamento lo derivi."
+            )
+        max_ammortizzabile_materiali = netto_apertura_materiali + tangible_inv - disposal_nbv_ammort
+        if assumption.ce09b_override is not None and assumption.ce09b_override > max_ammortizzabile_materiali:
+            raise ValueError(
+                f"L'override di ce09b_ammort_materiali nell'anno {assumption.forecast_year} "
+                f"({eur_it(assumption.ce09b_override)}) supera il netto disponibile "
+                f"({eur_it(max_ammortizzabile_materiali)}): gli immobilizzi materiali non "
+                "possono scendere sotto zero. Abbassa l'override o svuota la cella (value: null) "
+                "e lascia che l'ammortamento lo derivi."
+            )
         ce09a, stato_ammort_immateriali = ammortamento_categoria(
             stato_ammort.get('immateriali'),
-            _prev_bs_val('sp02_immob_immateriali'),
+            netto_apertura_immateriali,
             base_ce09a,
             intangible_inv,
             depreciation_rate_intangible,
@@ -3137,7 +3161,7 @@ class ForecastEngine:
         )
         ce09b, stato_ammort_materiali = ammortamento_categoria(
             stato_ammort.get('materiali'),
-            _prev_bs_val('sp03_immob_materiali'),
+            netto_apertura_materiali,
             base_ce09b,
             tangible_inv,
             depreciation_rate_tangible,

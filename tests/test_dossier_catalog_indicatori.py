@@ -178,16 +178,20 @@ def test_solidita_table_row_spec_leaves_the_dscr_label_to_the_catalog():
     `practice.dscr` in "DSCR — proxy della pratica" — l'etichetta del catalogo è ora "DSCR" e basta.
     La riga della tabella "solidita" continua a passare `display_label=None`, ma solo per non
     riscrivere a mano un'etichetta che il catalogo già dà giusta, non per preservare
-    un'avvertenza che non esiste più. Il DSCR è `None` su tutte e tre le fixture sintetiche
-    (nessun rendiconto agganciato a `fixture_report` ⇒ `cashflow_unavailable`, mai il vecchio
-    `zero_denominator` sugli oneri finanziari a zero), quindi qui si controlla l'ordine
-    `rows_spec`, non la riga effettivamente resa."""
+    un'avvertenza che non esiste più. Il DSCR è `None` su tutte e tre le fixture sintetiche,
+    quindi qui si controlla l'ordine `rows_spec`, non la riga effettivamente resa.
+
+    lotto 2 fix rilievi (2026-09-26): F2, un anno di piano (`fixture_report` costruisce
+    `basis='forecast'`) legge `engine_meta['rimborsi_piano']`, mai il rendiconto: senza quella
+    chiave (`fixture_report` non la passa) la ragione è `rimborsi_piano_non_disponibile`, non più
+    `cashflow_unavailable` (quella resta per la sola colonna base/storica senza rendiconto).
+    """
     report = fixture_report("bilancio", [2027, 2028, 2029])
     page = next(p for p in indicatori.build(report) if p["id"] == "solidita")
     dscr_indicator = next(i for i in report.indicator_catalog if i.id == "practice.dscr")
     assert dscr_indicator.label == "DSCR"
     assert dscr_indicator.values == [None, None, None]
-    assert dscr_indicator.unavailable_reasons == ["cashflow_unavailable"] * 3
+    assert dscr_indicator.unavailable_reasons == ["rimborsi_piano_non_disponibile"] * 3
     table = _tables([page])[0]
     assert all("DSCR" not in row["cells"][0] for row in table["rows"])
 

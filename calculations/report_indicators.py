@@ -89,21 +89,37 @@ def financial_debt_total(field_value: Callable[[str], Decimal]) -> Decimal:
     return sum((field_value(field) for field in FINANCIAL_DEBT_FIELDS), ZERO)
 
 
-def _dscr_capital_quota(cashflow) -> tuple[Decimal | None, str | None]:
-    """Quota capitale rimborsata nell'anno (C01, lotto 2 fix rilievi 2026-09-26): letta dal
-    rendiconto finanziario dettagliato dello stesso anno, `financing.third_party_funds.decreases`
-    (il rimborso che il Task 5/C08 porta su una riga propria, separata dalle erogazioni). Un anno
-    senza rendiconto (prima colonna storica del dossier, periodi infrannuali `observed`/
-    `adjusted`, che non ne calcolano uno proprio) rende il DSCR indefinito: mai un fallback
-    silenzioso alla vecchia formula (EBITDA - imposte)/oneri, senza la quota capitale. Quando le
-    erogazioni note dell'anno
+def _dscr_capital_quota(cashflow, *, is_forecast_year: bool = False,
+                         rimborsi_piano: Decimal | None = None) -> tuple[Decimal | None, str | None]:
+    """Quota capitale rimborsata nell'anno (C01, lotto 2 fix rilievi 2026-09-26; F2, decisione del
+    proprietario 2026-09-26).
+
+    Su un anno di PIANO (`is_forecast_year`) la quota viene esclusivamente da
+    `engine_meta['rimborsi_piano']` del motore (`calculations/forecast_engine.py`): le sole rate
+    di uno scadenziamento vero — contratti bancari, pregresso bancario su piano anni, altri
+    finanziatori — mai il rimborso di uno scoperto, di un fido o dello sweep di cassa. Prima di
+    questa correzione la quota veniva dal rendiconto (`financing.third_party_funds.decreases`,
+    Task 5/C08), che mischia nella stessa riga il vero servizio del debito con la liquidità libera
+    che rientra: su uno scenario con crescita −40/+80/0 e scoperto concesso il DSCR crollava da
+    3,29 a 0,90 nell'anno in cui l'unico movimento era il rimborso dello scoperto, non un impegno
+    contrattuale. Senza `rimborsi_piano` dichiarato (nessun `engine_meta` persistito, o un motore
+    più vecchio di questa correzione): `rimborsi_piano_non_disponibile`, mai un fallback silenzioso.
+
+    Sulla colonna BASE/storica (`is_forecast_year=False`, invariata dal Task 6) la quota resta
+    quella letta dal rendiconto finanziario dettagliato dello stesso anno,
+    `financing.third_party_funds.decreases` — il rimborso vero quando le erogazioni dell'anno sono
+    note, la diminuzione netta del debito finanziario altrimenti. Un anno senza rendiconto (prima
+    colonna storica del dossier, periodi infrannuali `observed`/`adjusted`, che non ne calcolano
+    uno proprio) rende il DSCR indefinito allo stesso modo: mai un fallback silenzioso alla vecchia
+    formula (EBITDA - imposte)/oneri, senza la quota capitale. Quando le erogazioni note dell'anno
     (motore di previsione) non bastano a spiegare l'aumento del debito rilevato
     (`erogazioni_incoerenti`), la quota capitale non è determinabile allo stesso modo — il
     rendiconto in quel caso è tornato al solo netto storico, che non è la quota capitale.
-    Senza erogazioni note (colonna storica/base, o un anno di piano il cui `engine_meta` non le
-    dichiara) `decreases` è comunque la diminuzione netta del debito finanziario dell'anno: si usa
-    come quota capitale, dichiarandolo nella formula dell'indicatore.
     """
+    if is_forecast_year:
+        if rimborsi_piano is None:
+            return None, 'rimborsi_piano_non_disponibile'
+        return rimborsi_piano, None
     if not cashflow:
         return None, 'cashflow_unavailable'
     financing = cashflow.get('financing') or {}
@@ -115,15 +131,20 @@ def _dscr_capital_quota(cashflow) -> tuple[Decimal | None, str | None]:
     return quota, None
 
 
-DSCR_FORMULA = ('(MOL - imposte) / (oneri finanziari + quota capitale rimborsata nell\'anno): la quota viene dal '
-                'rendiconto finanziario dettagliato dello stesso anno (financing.third_party_funds.decreases) — il '
-                'rimborso vero quando le erogazioni dell\'anno sono note, la diminuzione netta del debito '
-                'finanziario altrimenti. Indefinito senza un rendiconto per l\'anno, o con erogazioni note ma '
-                'incoerenti col debito rilevato: mai la vecchia formula senza quota capitale '
+DSCR_FORMULA = ('(MOL - imposte) / (oneri finanziari + quota capitale delle rate dei piani): sugli anni di piano '
+                'la quota viene da engine_meta[\'rimborsi_piano\'] del motore — le sole rate di uno '
+                'scadenziamento vero (contratti bancari, pregresso bancario su piano anni, altri finanziatori), '
+                'mai il rimborso di uno scoperto, di un fido o dello sweep di cassa. Sulla colonna base/storica la '
+                'quota resta la diminuzione netta del debito finanziario dell\'anno, dal rendiconto finanziario '
+                'dettagliato (financing.third_party_funds.decreases) — il rimborso vero quando le erogazioni '
+                'dell\'anno sono note. Indefinito senza un rendiconto per l\'anno (base/storica), con erogazioni '
+                'note ma incoerenti col debito rilevato (base/storica), o senza rimborsi_piano dichiarato dal '
+                'motore (piano): mai la vecchia formula senza quota capitale '
                 '((EBITDA - imposte) / oneri finanziari).')
 
 
-def indicator_results(bs, inc, analytical_ratios=None, cashflow=None) -> dict[str, IndicatorResult]:
+def indicator_results(bs, inc, analytical_ratios=None, cashflow=None, *, is_forecast_year: bool = False,
+                       rimborsi_piano: Decimal | None = None) -> dict[str, IndicatorResult]:
     """No annualization: flows retain the duration identified by their period."""
     if bs is None or inc is None:
         return {}
@@ -161,7 +182,8 @@ def indicator_results(bs, inc, analytical_ratios=None, cashflow=None) -> dict[st
         result['practice.' + key] = IndicatorResult(value, reason, formula, practice_convention)
     def amount(key, value, formula):
         result['practice.' + key] = IndicatorResult(value, None, formula, practice_convention)
-    quota_capitale, dscr_reason = _dscr_capital_quota(cashflow)
+    quota_capitale, dscr_reason = _dscr_capital_quota(
+        cashflow, is_forecast_year=is_forecast_year, rimborsi_piano=rimborsi_piano)
     if dscr_reason:
         result['practice.dscr'] = IndicatorResult(None, dscr_reason, DSCR_FORMULA, practice_convention)
     else:

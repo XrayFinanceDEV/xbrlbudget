@@ -59,13 +59,49 @@ def _erogazioni_anno(details: Dict[str, Any]) -> str:
     return str(totale.quantize(Decimal('0.01'), rounding=ROUND_HALF_UP))
 
 
+def _rimborsi_piano_anno(details: Dict[str, Any]) -> str:
+    """La quota capitale rimborsata nell'anno secondo IL PIANO (F2, decisione del proprietario
+    2026-09-26): il DSCR conta solo le rate che uno scadenziamento vero prevede, mai il rimborso
+    di uno scoperto, di un fido o dello sweep di cassa — quella e' liquidita' libera che rientra,
+    non un servizio del debito contrattuale (il rilievo del revisore: uno scenario con crescita
+    -40/+80/0 e scoperto concesso faceva scendere il DSCR da 3,29 a 0,90 solo per il rimborso
+    dello scoperto). Somma, al centesimo:
+    - `rimborso` di ogni contratto in `details['debito_bancario']['contratti']` (nuovi e
+      pregressi CON un calendario: `_contratti_dell_anno` lo scrive dal kernel sul singolo
+      contratto, mai dallo sweep — vedi `_dichiara_debito_bancario`);
+    - `rimborso` di `details['debito_bancario']['pregresso_piano_anni']`, quando il pregresso
+      bancario segue un piano ad anni (`existing_debt_repayment_years`) invece dello sweep;
+    - `rimborso` di `details['altri_finanziatori']` (qualunque `mode` — `legacy`/`anni`/
+      `contratti` seguono sempre un proprio scadenziamento, mai lo sweep).
+    ESCLUSI per costruzione, perche' non hanno una chiave `rimborso` qui: il pregresso bancario
+    SENZA piano (`pregresso_senza_piano` porta solo `rimborso_sweep`), i fidi (`fidi` porta
+    `tiraggio` e `rimborso_sweep`, mai una rata schedulata) e lo scoperto di c/c generato dal
+    piano (non vive in `debito_bancario` affatto).
+    Una chiave diagnostica assente vale zero: senza alcun piano di rimborso la somma e' "0.00",
+    non `None` — un anno interamente a sweep non ha rate, per davvero.
+    """
+    zero = Decimal('0')
+    debito = details.get('debito_bancario') or {}
+    totale = sum(
+        (Decimal(str(c.get('rimborso') or 0)) for c in (debito.get('contratti') or [])),
+        zero,
+    )
+    piano_anni = debito.get('pregresso_piano_anni')
+    if piano_anni:
+        totale += Decimal(str(piano_anni.get('rimborso') or 0))
+    altri = details.get('altri_finanziatori') or {}
+    totale += Decimal(str(altri.get('rimborso') or 0))
+    return str(totale.quantize(Decimal('0.01'), rounding=ROUND_HALF_UP))
+
+
 def engine_meta(details: Dict[str, Any]) -> Dict[str, Any]:
     """La firma persistita su `ForecastYear.engine_meta`: JSON puro, importi come stringhe al centesimo."""
     pareggio = details.get('pareggio')
     if pareggio is not None:
         pareggio = {k: (None if v is None else str(Decimal(str(v)).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)))
                     for k, v in pareggio.items()}
-    return {'engine_version': ENGINE_VERSION, 'pareggio': pareggio, 'erogazioni': _erogazioni_anno(details)}
+    return {'engine_version': ENGINE_VERSION, 'pareggio': pareggio, 'erogazioni': _erogazioni_anno(details),
+            'rimborsi_piano': _rimborsi_piano_anno(details)}
 
 
 def _importo_it(value) -> str:

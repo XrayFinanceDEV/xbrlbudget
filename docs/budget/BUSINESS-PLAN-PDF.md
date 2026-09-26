@@ -11,15 +11,23 @@ testi AI mancanti del dossier (`narrative_missing`) sono solo `info` e non lo bl
 
 **Da dove vengono i numeri:** solo da `FinalReportModelV2`, via `data.from_report`. Il report somma e sottrae righe
 già presenti (costi operativi = costi della produzione − ammortamenti; debiti finanziari = PFN + liquidità) e non
-ricalcola indicatori. DSCR = (MOL − imposte) / (oneri finanziari + quota capitale rimborsata nell'anno) — non è più
-un proxy (lotto 2 fix rilievi, 2026-09-26): la quota capitale viene da `financing.third_party_funds.decreases` del
-rendiconto dettagliato (`calculations/report_indicators._dscr_capital_quota`); `None` quando il periodo non ha un
-rendiconto (prima colonna storica, periodi infrannuale `observed`/`adjusted`) o quando `erogazioni_incoerenti` è
-vero — mai una cifra ricostruita al suo posto. Il punto di pareggio (SEZIONE 4, "Costi fissi e variabili · break
-even point") sugli anni di piano viene allo stesso modo da `ForecastYear.engine_meta['pareggio']`, non da una
-ripartizione fissa 60/40 costi fissi/variabili (quella resta solo per la colonna base/storica); `None` con
-`engine_meta_missing` o `pareggio_non_definito` quando il motore stesso non li ha definiti (ce05/ce06 sotto
-override).
+ricalcola indicatori. DSCR = (MOL − imposte) / (oneri finanziari + quota capitale delle rate dei piani) — non è più
+un proxy (lotto 2 fix rilievi, 2026-09-26). Decisione del proprietario 2026-09-26 (F2): sugli anni di piano la quota
+capitale viene da `ForecastYear.engine_meta['rimborsi_piano']` del motore — le sole rate di uno scadenziamento vero
+(contratti bancari, pregresso bancario su piano anni, altri finanziatori), mai il rimborso di uno scoperto, di un
+fido o dello sweep di cassa (che un rendiconto-derivato mischiava nella stessa riga: uno scenario con crescita
+−40/+80/0 e scoperto concesso faceva crollare il DSCR da 3,29× a 0,90× solo per il rimborso dello scoperto, senza
+alcuna rata contrattuale in più). `None` con `rimborsi_piano_non_disponibile` quando l'anno non ha `rimborsi_piano`
+dichiarato (nessun `engine_meta` persistito, o un motore più vecchio di questa correzione). Sulla colonna
+base/storica la quota resta quella di prima (`calculations/report_indicators._dscr_capital_quota`): la diminuzione
+netta del debito finanziario dell'anno, da `financing.third_party_funds.decreases` del rendiconto dettagliato;
+`None` quando il periodo non ha un rendiconto (prima colonna storica, periodi infrannuale `observed`/`adjusted`) o
+quando `erogazioni_incoerenti` è vero — mai una cifra ricostruita al suo posto.
+
+Il punto di pareggio (SEZIONE 4, "Costi fissi e variabili · break even point") sugli anni di piano viene allo
+stesso modo da `ForecastYear.engine_meta['pareggio']`, non da una ripartizione fissa 60/40 costi fissi/variabili
+(quella resta solo per la colonna base/storica); `None` con `engine_meta_missing` o `pareggio_non_definito` quando
+il motore stesso non li ha definiti (ce05/ce06 sotto override).
 
 **Rendiconto (SEZIONE 5 "Flussi di cassa", ALLEGATO C "Rendiconto finanziario completo"):** quando l'anno dichiara
 le proprie erogazioni

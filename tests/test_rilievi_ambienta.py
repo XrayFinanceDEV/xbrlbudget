@@ -285,13 +285,43 @@ def test_C01_il_dscr_del_report_comprende_la_quota_capitale():
     senza la quota capitale. Oracolo: DSCR = (MOL − imposte) / (oneri + quota capitale); con rimborsi 53.409 è
     molto sotto la vecchia formula. Il numeratore (MOL − imposte) è la formula del consulente, non una scelta
     del banco: un fix che adottasse un altro numeratore (es. flusso di cassa operativo) va confrontato con lui,
-    non con questo test."""
+    non con questo test.
+
+    F2 (decisione del proprietario, 2026-09-26): la quota capitale non viene più dal rendiconto
+    (`financing.third_party_funds.decreases`) ma da `engine_meta['rimborsi_piano']` del motore — su
+    questo scenario coincide comunque con 53.409 (MUTUO_A è un contratto pregresso CON calendario,
+    quindi entra in `debito_bancario['contratti']`, incluso in `rimborsi_piano`): l'oracolo resta lo
+    stesso, cambia solo la fonte."""
     _bp()
     e = generato(genera(_con_rimborsi(), report=True))
     ce = e.anni[2027][1]
     mol = e.data.v("ebitda")[e.data.plan_idx[0]]
     atteso = (D(str(mol)) - ce["ce20_imposte"]) / (ce["ce15_oneri_finanziari"] + D("53409"))
     assert abs(D(str(piano(e.data, "dscr")[0])) - atteso) < D("0.01"), (piano(e.data, "dscr")[0], atteso)
+
+
+def test_F2_dscr_non_conta_il_rimborso_dello_scoperto():
+    """F2 (decisione del proprietario, 2026-09-26): scenario del revisore — crescita −40/+80/0 con
+    scoperto concesso (`overdraft_allowed=True` di default in `righe()`), nessun contratto bancario
+    né altri finanziatori con un piano: `rimborsi_piano` è "0.00" in ogni anno. Prima del fix il
+    DSCR leggeva `financing.third_party_funds.decreases` (il rimborso NETTO di tutto il debito,
+    scoperto compreso) e crollava da 3,29× (2028) a 0,90× (2029) solo perché quell'anno la cassa
+    ripagava lo scoperto — nessuna rata contrattuale in più, nessun impegno diverso. Oracolo: con
+    `rimborsi_piano` = 0 su ogni anno di piano, il DSCR 2029 non crolla per il rimborso dello
+    scoperto — resta dello stesso ordine di grandezza del 2028 (entrambi coperti dagli oneri
+    finanziari soli al denominatore, mai un rimborso di scoperto inventato)."""
+    _bp()
+    rows = per_anno(righe(), "revenue_growth_pct", [-40, 80, 0])
+    e = generato(genera(rows, report=True))
+    assert e.meta[2027]["rimborsi_piano"] == "0.00"
+    assert e.meta[2028]["rimborsi_piano"] == "0.00"
+    assert e.meta[2029]["rimborsi_piano"] == "0.00"
+    # 2027 ha un DSCR fortemente negativo per conto suo (crescita −40%, MOL negativo): non è
+    # questo il caso che F2 corregge, lo si esclude dal confronto.
+    dscr_2028, dscr_2029 = D(str(piano(e.data, "dscr")[1])), D(str(piano(e.data, "dscr")[2]))
+    assert dscr_2028 > D("3"), dscr_2028
+    assert dscr_2029 > D("3"), dscr_2029
+    assert abs(dscr_2029 - dscr_2028) < D("1"), (dscr_2028, dscr_2029)
 
 
 def test_C02_dso_sui_soli_crediti_commerciali():

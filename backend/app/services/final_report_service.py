@@ -533,7 +533,7 @@ def assemble_final_report(db: Session, company_id: int, scenario_id: int, *, sch
         calculations = analysis.get('calculations', {}).get('by_year', {})
         cashflows = {entry['year']: entry for entry in cashflow_years if isinstance(entry, dict) and 'year' in entry}
 
-        def add_source(identifier, year, basis, record, label, months=12, snapshot=None, calculation_available=True, fixed_split=None, pareggio_motore=None):
+        def add_source(identifier, year, basis, record, label, months=12, snapshot=None, calculation_available=True, fixed_split=None, pareggio_motore=None, rimborsi_piano=None):
             bs = _statement_map(getattr(record, 'balance_sheet', None)) if record and record.balance_sheet else None
             inc = _statement_map(getattr(record, 'income_statement', None)) if record and record.income_statement else None
             if snapshot is not None:
@@ -549,6 +549,7 @@ def assemble_final_report(db: Session, company_id: int, scenario_id: int, *, sch
                 cashflow=cashflows.get(year) if annual_calculation else None,
                 fixed_split=fixed_split,
                 pareggio_motore=pareggio_motore,
+                rimborsi_piano=rimborsi_piano,
             ))
 
         historical_years = sorted({row['year'] for row in analysis.get('historical_years', []) if isinstance(row, dict) and 'year' in row})
@@ -588,7 +589,12 @@ def assemble_final_report(db: Session, company_id: int, scenario_id: int, *, sch
             # "nessun engine_meta persistito" (`engine_meta_missing`) da "engine_meta c'è ma non
             # ha mai calcolato il pareggio" (`pareggio_non_definito`) — un `.get('pareggio')`
             # diretto le confondeva entrambe in `None`.
+            # F2 (decisione del proprietario, 2026-09-26): `rimborsi_piano` per il DSCR, stessa
+            # sorgente (`ForecastYear.engine_meta`) — assente quando l'engine_meta non c'è affatto
+            # o quando il motore che ha girato è più vecchio di questa correzione.
+            forecast_engine_meta = getattr(forecast_row, 'engine_meta', None) or {}
             add_source(f'forecast:{year}', year, 'forecast', forecast_row, f'{year} previsionale',
-                pareggio_motore=pareggio_motore_from(getattr(forecast_row, 'engine_meta', None)))
+                pareggio_motore=pareggio_motore_from(getattr(forecast_row, 'engine_meta', None)),
+                rimborsi_piano=forecast_engine_meta.get('rimborsi_piano'))
         from app.services.editorial_notes_service import project_editorial_report
         return project_editorial_report(db, extend_dossier(report, sources), scenario.id)

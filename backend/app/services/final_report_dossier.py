@@ -48,6 +48,13 @@ class DossierSource:
     # con le 7 chiavi di `calculations.forecast_engine.engine_meta`, o `None` quando
     # l'anno non ha affatto un `engine_meta` persistito). Letto solo per basis=='forecast'.
     pareggio_motore: dict[str, str | None] | None = None
+    # F2 (decisione del proprietario, 2026-09-26): `ForecastYear.engine_meta["rimborsi_piano"]`
+    # dell'anno di piano — stringa al centesimo, le sole rate di uno scadenziamento vero (mai
+    # scoperto/fidi/sweep) — per il DSCR. Letto solo per basis=='forecast'; `None` sia quando
+    # l'anno non ha affatto un `engine_meta` persistito, sia quando il motore che ha girato è più
+    # vecchio di questa correzione (nessuna chiave `rimborsi_piano`): in entrambi i casi il DSCR
+    # di quell'anno esce indefinito con la stessa ragione dichiarata (`_dscr_capital_quota`).
+    rimborsi_piano: str | None = None
 
 
 def pareggio_motore_from(engine_meta: dict | None) -> dict | None:
@@ -128,7 +135,17 @@ def build_detailed_statements(sources: list[DossierSource]) -> list[DetailedStat
 
 
 def build_indicator_catalog(sources: list[DossierSource]) -> list[IndicatorDefinition]:
-    results = [indicator_results(s.balance_sheet, s.income_statement, (s.calculations or {}).get('ratios'), s.cashflow) for s in sources]
+    # F2 (decisione del proprietario, 2026-09-26): il DSCR di un anno di piano legge
+    # `rimborsi_piano` invece del rendiconto — `is_forecast_year` lo dice a `indicator_results`,
+    # `s.rimborsi_piano` resta `None` (dichiarato con la sua ragione) su ogni altra base.
+    results = [
+        indicator_results(
+            s.balance_sheet, s.income_statement, (s.calculations or {}).get('ratios'), s.cashflow,
+            is_forecast_year=s.period.basis == 'forecast',
+            rimborsi_piano=None if s.rimborsi_piano is None else Decimal(s.rimborsi_piano),
+        )
+        for s in sources
+    ]
     definitions = [('practice.' + row['key'], row, 'pratica') for row in CATALOG['practice_indicators']]
     definitions += [('practice.' + key, {'label': label, 'format': 'pct'}, 'incidenze') for key, label in (('materials_revenue', 'Materie prime / Ricavi'), ('services_revenue', 'Servizi / Ricavi'), ('personnel_revenue', 'Personale / Ricavi'))]
     # M2-02E: quattro indicatori canonici mancanti (pagine 7, 8, 12 del dossier v4). Come

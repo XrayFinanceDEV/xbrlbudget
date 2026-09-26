@@ -113,7 +113,13 @@ def test_pdf_e_word_del_business_plan_non_citano_piu_il_proxy():
 def test_dscr_del_report_usa_la_stessa_riga_di_rimborsi_del_rendiconto():
     """Il DSCR di piano legge esattamente `financing.third_party_funds.decreases` dell'anno — la
     stessa riga che l'Allegato del rendiconto (`cf_rimborsi`) mostra — non un secondo calcolo
-    indipendente che potrebbe divergere."""
+    indipendente che potrebbe divergere.
+
+    F2 (decisione del proprietario, 2026-09-26): su questo scenario `rimborsi_piano` (la nuova
+    fonte del DSCR sugli anni di piano) coincide con `cf_rimborsi` perché l'unico rimborso è quello
+    schedulato di MUTUO_A (nessuno scoperto, nessun fido, nessun sweep in questo test) — l'oracolo
+    resta valido, ma non dimostra più da solo che le due fonti sono la stessa cosa in generale: F2
+    le separa apposta (vedi `test_f2_*` sotto)."""
     _bp()
     e = generato(genera(_con_rimborsi(), report=True))
     ce = e.anni[2027][1]
@@ -121,3 +127,65 @@ def test_dscr_del_report_usa_la_stessa_riga_di_rimborsi_del_rendiconto():
     rimborsi = piano(e.data, "cf_rimborsi")[0]
     atteso = (D(str(mol)) - ce["ce20_imposte"]) / (ce["ce15_oneri_finanziari"] + D(str(rimborsi)))
     assert abs(D(str(piano(e.data, "dscr")[0])) - atteso) < D("0.01")
+
+
+# ===========================================================================
+# F2 (decisione del proprietario, 2026-09-26): il DSCR di un anno di piano legge
+# `rimborsi_piano`, mai più il rendiconto — unit test isolati su `_dscr_capital_quota` /
+# `indicator_results`. L'oracolo end-to-end (scenario del revisore, overdraft) vive in
+# `tests/test_rilievi_ambienta.py::test_F2_dscr_non_conta_il_rimborso_dello_scoperto`.
+# ===========================================================================
+
+def test_f2_anno_di_piano_legge_rimborsi_piano_non_il_rendiconto():
+    """Su un anno di piano (`is_forecast_year=True`) il DSCR ignora completamente il rendiconto,
+    anche quando questo porterebbe a un numero diverso — la quota capitale vera è solo quella
+    delle rate del piano, mai il rimborso netto di tutto il debito (scoperto compreso)."""
+    ce = dict(CE)
+    ce["ce15_oneri_finanziari"] = D("10000")
+    cashflow = {"financing": {"third_party_funds": {"decreases": D("999999")}}}
+    res = indicator_results(dict(BS), ce, cashflow=cashflow, is_forecast_year=True,
+                            rimborsi_piano=D("5000"))
+    ce_result = calculate_ce_result(ce)
+    atteso = (ce_result.ebitda - ce_result.taxes) / D("15000")
+    assert res["practice.dscr"].value == atteso
+    assert res["practice.dscr"].reason is None
+
+
+def test_f2_anno_di_piano_senza_rimborsi_piano_e_indefinito_non_cashflow_unavailable():
+    """Un anno di piano il cui `engine_meta` non porta `rimborsi_piano` (nessun `engine_meta`
+    persistito, o un motore più vecchio di questa correzione) è indefinito con una ragione
+    dedicata — mai `cashflow_unavailable` (quella resta per la sola colonna base/storica) e mai un
+    fallback silenzioso al rendiconto."""
+    cashflow = {"financing": {"third_party_funds": {"decreases": D("5000")}}}
+    res = indicator_results(dict(BS), dict(CE), cashflow=cashflow, is_forecast_year=True,
+                            rimborsi_piano=None)
+    assert res["practice.dscr"].value is None
+    assert res["practice.dscr"].reason == "rimborsi_piano_non_disponibile"
+
+
+def test_f2_anno_di_piano_zero_rimborsi_piano_e_zero_vero_non_indisponibile():
+    """`rimborsi_piano` a zero (un anno interamente a sweep, senza alcun piano di rimborso) è un
+    valore vero, non un'assenza: il DSCR si calcola normalmente (o resta `zero_denominator` se
+    anche gli oneri sono zero), mai `rimborsi_piano_non_disponibile`."""
+    ce = dict(CE)
+    ce["ce15_oneri_finanziari"] = D("1000")
+    res = indicator_results(dict(BS), ce, is_forecast_year=True, rimborsi_piano=D("0"))
+    assert res["practice.dscr"].reason != "rimborsi_piano_non_disponibile"
+    ce_result = calculate_ce_result(ce)
+    atteso = (ce_result.ebitda - ce_result.taxes) / D("1000")
+    assert res["practice.dscr"].value == atteso
+
+
+def test_f2_colonna_base_storica_resta_sul_rendiconto_invariata():
+    """`is_forecast_year=False` (default): il comportamento della colonna base/storica non cambia
+    di una virgola — stesso rendiconto, stessa `rimorsi_non_determinabili`/`cashflow_unavailable`
+    di prima di F2. `rimborsi_piano` passato per errore su questo ramo viene ignorato."""
+    cashflow = {"financing": {"third_party_funds": {"decreases": D("5000")}}}
+    ce = dict(CE)
+    ce["ce15_oneri_finanziari"] = D("10000")
+    con_rimborsi_piano = indicator_results(dict(BS), ce, cashflow=cashflow, rimborsi_piano=D("999"))
+    senza = indicator_results(dict(BS), ce, cashflow=cashflow)
+    assert con_rimborsi_piano["practice.dscr"].value == senza["practice.dscr"].value
+    ce_result = calculate_ce_result(ce)
+    atteso = (ce_result.ebitda - ce_result.taxes) / D("15000")
+    assert con_rimborsi_piano["practice.dscr"].value == atteso

@@ -24,6 +24,11 @@ Ogni pagina è autonoma. L'ordine sotto è quello in cui i fatti accadono a un f
 | 05 | [Bilancio infrannuale](REGOLE-IMPORT-05-INFRANNUALE.md) | Periodi parziali, annualizzazione, roll-forward, le tre modalità del circolante, i gate del previsionale |
 | 06 | [Persistenza e round-trip](REGOLE-IMPORT-06-PERSISTENZA.md) | Cosa finisce sul DB, stati di validazione, hash, versioni, provenienza, baseline di regressione |
 
+Il percorso alternativo `IMPORT_MOTORE=snello` (Sonnet per la struttura, Qwen locale per la
+lettura) è descritto in [REGOLE-IMPORT-02-ESTRAZIONE.md](REGOLE-IMPORT-02-ESTRAZIONE.md) §10
+(struttura, macroconti, verifica) e in [REGOLE-IMPORT-04-QUADRATURE.md](REGOLE-IMPORT-04-QUADRATURE.md)
+§12 (soglia relativa e tappo dichiarato).
+
 Documenti preesistenti nella stessa cartella ([IMPORT-OVERVIEW](IMPORT-OVERVIEW.md),
 [IMPORT-ROUTING-TAXONOMY](IMPORT-ROUTING-TAXONOMY.md),
 [IMPORT-QUADRATURA-ENGINE](IMPORT-QUADRATURA-ENGINE.md),

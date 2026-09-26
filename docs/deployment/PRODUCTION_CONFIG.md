@@ -49,3 +49,32 @@ Nota operativa: la chiamata a gx10 ha un timeout di 900 s e il pass CoGe ritenta
 lettura dello stato patrimoniale fino a 3 volte, quindi un gx10 bloccato può tenere
 impegnato un import di route C a lungo prima di ripiegare sul candidato deterministico
 (misurato dal vivo: una chiamata normale impiega 15-26 s).
+
+## Percorso snello per l'import PDF (`IMPORT_MOTORE=snello`)
+
+`IMPORT_MOTORE` — `snello` accende il motore alternativo di import PDF (struttura Sonnet vision +
+lettura macroconti su gx10 + verifica con tappo dichiarato); qualunque altro valore, o l'assenza
+della variabile (default), lascia l'importatore attuale invariato. Vedi
+[REGOLE-IMPORT-02-ESTRAZIONE.md §10](../import/REGOLE-IMPORT-02-ESTRAZIONE.md) e
+[REGOLE-IMPORT-04-QUADRATURE.md §12](../import/REGOLE-IMPORT-04-QUADRATURE.md).
+
+`STRUTTURA_MODEL` — modello Anthropic per la fase di struttura (F1): quali pagine sono SP/CE/di
+dettaglio, schema (di legge / riclassificato / piano dei conti) e disposizione. Default
+`claude-sonnet-5`. **Le pagine intere del documento vanno ad Anthropic per questa fase**,
+indipendentemente da `PDF_LLM_PROVIDER_*`: la struttura non gira mai su gx10.
+
+`GX10_CONCORRENZA` — richieste gx10 in parallelo per processo (un solo semaforo, condiviso da
+tutte le chiamate a gx10, non solo dal percorso snello). Default **6** (decisione del
+proprietario, 2026-09-26; prima 4). gx10 ha 500k token di contesto condivisi: sotto questo numero
+di richieste il prefill non rallenta, purché ciascuna resti sotto `GX10_CONTESTO_MAX`.
+
+`GX10_CONTESTO_MAX` — tetto di token stimati (prompt + `max_tokens`) per una singola chiamata
+gx10. Default **100000**. Una chiamata che lo supererebbe solleva `ContestoEccessivo` prima
+dell'invio, invece di partire e farsi troncare.
+
+`IMPORT_SNELLO_SOGLIA_MIN` — soglia minima assoluta, in euro, della verifica F3 del percorso
+snello. Default **100**.
+
+`IMPORT_SNELLO_SOGLIA_PCT` — soglia relativa, in percento del totale attivo, della stessa
+verifica. Default **0.1** (0,1%). La soglia effettiva per esercizio è
+`max(IMPORT_SNELLO_SOGLIA_MIN, IMPORT_SNELLO_SOGLIA_PCT% × totale attivo)`.

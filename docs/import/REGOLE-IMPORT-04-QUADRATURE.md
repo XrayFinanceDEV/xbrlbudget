@@ -271,3 +271,37 @@ validazione è **ricalcolato**.
 ## 11. La promozione di una proiezione
 
 Richiede `semantic_valid` **sulla proiezione**. Non è una soglia in euro (vedi indice §5 D5).
+
+## 12. Il percorso snello: soglia relativa e tappo dichiarato
+
+> Motore: `importers/import_snello/verifica.py`. Solo sotto `IMPORT_MOTORE=snello` — vedi
+> [REGOLE-IMPORT-02-ESTRAZIONE.md §10](REGOLE-IMPORT-02-ESTRAZIONE.md).
+
+Il percorso snello non usa le tolleranze fisse di questa pagina: la sua soglia è **relativa**,
+`max(IMPORT_SNELLO_SOGLIA_MIN, IMPORT_SNELLO_SOGLIA_PCT% del totale attivo)` — di default
+`max(100 €, 0,1% dell'attivo)`, per esercizio.
+
+**Entro soglia, un tappo dichiarato — l'unica eccezione al divieto di plug di questa pagina**,
+decisione del proprietario (2026-09-26): lo scarto si chiude, non solo si dichiara, su un campo
+esplicito — `sp06g_crediti_altri_breve` o `sp16g_altri_debiti_breve` sullo SP, `ce06_servizi` fra
+CE e SP — mai su un campo `TIER0`. Un tappo che porterebbe `ce06_servizi` sotto zero **non si
+applica**: l'esito diventa "oltre soglia" invece di un tappo negativo.
+
+**Dove si legge.** Nel `validation_report["import_snello"]` del foglio: l'esito (`ok` / `tappo` /
+`squadrato` / `ripiego`), il tappo (campo, importo, soglia), gli scarti SP/CE per esercizio prima
+e dopo il tappo. Le chiavi diagnostiche generali restano quelle di sempre: `_plug_residual` =
+l'importo del tappo sullo SP (0 se nessun tappo), `_unclassified_mass` = la massa messa sui
+secchi espliciti per un conto sul lato sbagliato senza contropartita — mai zero per omissione,
+sempre dichiarate.
+
+**Oltre soglia, una rilettura mirata; ancora oltre, ripiego.** Il ripiego è l'importatore attuale,
+intero e invariato: da lì in avanti valgono **tutte** le regole di questa pagina, comprese quelle
+che qui sopra il percorso snello supera (nessun plug, chiusura solo diagnostica). Il ripiego si
+dichiara con `validation_report["import_snello"]["esito"] = "ripiego"`.
+
+**La chiusura al centesimo resta la regola dell'importatore attuale.** La soglia relativa e il
+tappo governano solo il **percorso snello** (F3, prima del punto di convergenza): non toccano
+`arithmetic_balanced` (§8, **€0,01 fisso**, indipendente da qualunque tolleranza di runtime) né
+il gate contabile duro di questa pagina (§2, `quadra`), che restano quelli di sempre e continuano
+a girare sul foglio consegnato — un tappo entro soglia non è una licenza a saltare la quadratura
+al centesimo che l'importatore attuale misura dopo.

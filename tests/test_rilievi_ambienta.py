@@ -261,9 +261,6 @@ def test_A01_bis_salvataggio_respinto_non_stampa_il_previsionale_vecchio_come_bu
     assert any(f in testo for f in frasi), "il PDF in bozza tace sul previsionale vecchio"
 
 
-@pytest.mark.xfail(strict=True, raises=AssertionError, reason="A02 confermato dal triage 2026-09-25: il BEP del report usa "
-                    "la ripartizione fissi/variabili degli slider di default, non quella del motore"
-                    " — togli il marcatore quando il fix lo fa passare")
 def test_A02_bep_del_report_usa_la_ripartizione_del_motore():
     """A02 · Report sez. 4: il BEP del report non usa la ripartizione fissi/variabili degli slider (60/40 di
     default). Oracolo: costi variabili e fatturato di pareggio del report = details['pareggio'] del motore."""

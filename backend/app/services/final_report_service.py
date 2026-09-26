@@ -533,7 +533,7 @@ def assemble_final_report(db: Session, company_id: int, scenario_id: int, *, sch
         calculations = analysis.get('calculations', {}).get('by_year', {})
         cashflows = {entry['year']: entry for entry in cashflow_years if isinstance(entry, dict) and 'year' in entry}
 
-        def add_source(identifier, year, basis, record, label, months=12, snapshot=None, calculation_available=True, fixed_split=None):
+        def add_source(identifier, year, basis, record, label, months=12, snapshot=None, calculation_available=True, fixed_split=None, pareggio_motore=None):
             bs = _statement_map(getattr(record, 'balance_sheet', None)) if record and record.balance_sheet else None
             inc = _statement_map(getattr(record, 'income_statement', None)) if record and record.income_statement else None
             if snapshot is not None:
@@ -548,6 +548,7 @@ def assemble_final_report(db: Session, company_id: int, scenario_id: int, *, sch
                 calculations=calculations.get(str(year), calculations.get(year)) if annual_calculation else None,
                 cashflow=cashflows.get(year) if annual_calculation else None,
                 fixed_split=fixed_split,
+                pareggio_motore=pareggio_motore,
             ))
 
         historical_years = sorted({row['year'] for row in analysis.get('historical_years', []) if isinstance(row, dict) and 'year' in row})
@@ -577,7 +578,13 @@ def assemble_final_report(db: Session, company_id: int, scenario_id: int, *, sch
             add_source(f'historical:{scenario.base_year}', scenario.base_year, 'historical', financial_year,
                 f'{scenario.base_year} base')
         for year in wanted:
-            add_source(f'forecast:{year}', year, 'forecast', by_forecast_year.get(year), f'{year} previsionale',
-                fixed_split=_fixed_split(next((a for a in scenario.assumptions if a.forecast_year == year), None)))
+            # A02 (lotto 2 fix rilievi, 2026-09-26): il BEP di un anno di piano vero
+            # viene dal motore (`ForecastYear.engine_meta['pareggio']`), mai più dalla
+            # quota fissa per categoria delle ipotesi — `fixed_split` resta solo per
+            # la chiusura infrannuale promossa (`basis='closing'`, sopra), che non è
+            # un anno di piano rigenerato da questo motore.
+            forecast_row = by_forecast_year.get(year)
+            add_source(f'forecast:{year}', year, 'forecast', forecast_row, f'{year} previsionale',
+                pareggio_motore=(getattr(forecast_row, 'engine_meta', None) or {}).get('pareggio'))
         from app.services.editorial_notes_service import project_editorial_report
         return project_editorial_report(db, extend_dossier(report, sources), scenario.id)

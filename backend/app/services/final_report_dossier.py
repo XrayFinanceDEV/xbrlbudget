@@ -39,8 +39,15 @@ class DossierSource:
     calculations: dict | None = None
     cashflow: dict | None = None
     # Quota fissa per categoria delle ipotesi dello scenario (materie, servizi),
-    # in punti percentuali. `None` su un anno di piano = nessuna ipotesi.
+    # in punti percentuali. `None` su un anno di piano = nessuna ipotesi. Resta
+    # letta solo dalle basi diverse da 'forecast' (es. 'closing' dell'infrannuale
+    # promossa): un anno di piano vero usa `pareggio_motore`, mai più questa quota.
     fixed_split: tuple[Decimal, Decimal] | None = None
+    # A02 (lotto 2 fix rilievi, 2026-09-26): `ForecastYear.engine_meta["pareggio"]`
+    # dell'anno di piano, stringhe al centesimo o `None` per singola chiave (dizionario
+    # con le 7 chiavi di `calculations.forecast_engine.engine_meta`, o `None` quando
+    # l'anno non ha affatto un `engine_meta` persistito). Letto solo per basis=='forecast'.
+    pareggio_motore: dict[str, str | None] | None = None
 
 
 def _path(data, key):
@@ -235,9 +242,39 @@ def build_structure_series(sources: list[DossierSource], indicators: list[Indica
             for key in pareggio:
                 _column(pareggio, key, None, 'source_period_unavailable')
             continue
-        if source.period.basis == 'forecast' and source.fixed_split is None:
-            for key in pareggio:
-                _column(pareggio, key, None, 'assumptions_missing')
+        if source.period.basis == 'forecast':
+            # A02 (lotto 2 fix rilievi, 2026-09-26): un anno di piano non ricalcola
+            # più fissi/variabili con una quota 60/40 (o quella delle ipotesi): usa
+            # integralmente `engine_meta['pareggio']` del motore, dichiarato per
+            # ogni anno in `calculations/forecast_engine.py`. `None` per l'intero
+            # anno (`engine_meta_missing`) quando non c'è affatto un `pareggio`
+            # persistito; `None` (`pareggio_non_definito`) quando il motore l'ha
+            # dichiarato lui stesso non definito (ce05/ce06 sotto override).
+            motore = source.pareggio_motore
+            if motore is None:
+                for key in pareggio:
+                    _column(pareggio, key, None, 'engine_meta_missing')
+                continue
+
+            def _dec(field: str) -> Decimal | None:
+                raw = motore.get(field)
+                return None if raw is None else Decimal(raw)
+
+            variabili, fissi_operativi = _dec('costi_variabili'), _dec('costi_fissi_operativi')
+            if variabili is None or fissi_operativi is None:
+                for key in pareggio:
+                    _column(pareggio, key, None, 'pareggio_non_definito')
+                continue
+            _column(pareggio, 'variable_costs', variabili, None)
+            _column(pareggio, 'fixed_costs', fissi_operativi, None)
+            revenue = inc.get('ce01_ricavi_vendite')
+            # Stessa definizione della colonna base/storica: MdC = Ricavi − Costi
+            # variabili (qui i variabili sono quelli dichiarati dal motore).
+            margin = None if revenue is None else revenue - variabili
+            _column(pareggio, 'contribution_margin', margin, None if margin is not None else 'source_field_unavailable')
+            bep, sicurezza_pct = _dec('fatturato_pareggio'), _dec('margine_sicurezza_pct')
+            _column(pareggio, 'break_even_revenue', bep, None if bep is not None else 'pareggio_non_definito')
+            _column(pareggio, 'safety_margin_pct', sicurezza_pct, None if sicurezza_pct is not None else 'pareggio_non_definito')
             continue
         costs = [inc.get(key) for key in BREAK_EVEN_COST_FIELDS]
         if any(cost is None for cost in costs):
@@ -304,11 +341,14 @@ def build_structure_series(sources: list[DossierSource], indicators: list[Indica
                           series=incidence, source='calculations.report_indicators',
                           methodology="Valori del catalogo indicatori (practice.*): rapporto sull'articolo CE 1 × 100, con i flussi del periodo senza annualizzazione."),
         ReportSeriesGroup(id='break_even', title='Pareggio e margine di sicurezza', periods=periods,
-                          series=_finish(pareggio, labels, units), source='FinancialRatiosCalculator.calculate_break_even_analysis; BudgetAssumptions',
-                          methodology='calculate_break_even_analysis chiamato con la quota fissa desunta dalle ipotesi per'
-                                      ' categoria (materie e servizi) e con il 40% di default sugli altri costi operativi; i'
-                                      ' periodi non di piano usano il default. Ricavi di pareggio e margine di sicurezza solo'
-                                      ' con ricavi e margine di contribuzione positivi.'),
+                          series=_finish(pareggio, labels, units),
+                          source='calculations.forecast_engine (anni di piano); FinancialRatiosCalculator.calculate_break_even_analysis (colonna base/storica)',
+                          methodology='Gli anni di piano riportano `engine_meta[\'pareggio\']` del motore (A02, lotto 2 fix'
+                                      ' rilievi 2026-09-26): costi variabili e fissi operativi dichiarati dal motore, mai'
+                                      ' più una quota 60/40 o quella delle ipotesi. La colonna base/storica resta'
+                                      ' calculate_break_even_analysis con il 40% di default sugli altri costi operativi.'
+                                      ' Ricavi di pareggio e margine di sicurezza assenti quando il motore non li dichiara'
+                                      ' (piano) o quando ricavi e margine di contribuzione non sono positivi (base).'),
     ]
 
 

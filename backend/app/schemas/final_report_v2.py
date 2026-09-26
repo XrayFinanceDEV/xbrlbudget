@@ -367,6 +367,7 @@ class FinalReportModelV2(FinalReportModel):
         if [g.id for g in self.structure_series] != list(STRUCTURE_GROUP_SERIES):
             raise ValueError("structure series must contain the four canonical groups in order")
         canonical_periods = [p.id for p in self.detailed_statements[0].periods]
+        canonical_basis = [p.basis for p in self.detailed_statements[0].periods]
         if [p.id for p in self.detailed_statements[1].periods] != canonical_periods:
             raise ValueError("detailed statements must share one period sequence")
         tolerance = Decimal("0.01")
@@ -427,7 +428,12 @@ class FinalReportModelV2(FinalReportModel):
             costs = [ce_column(r)[index] for r in ("income_statement:ce05_materie_prime", "income_statement:ce06_servizi",
                                                    "income_statement:ce07_godimento_beni", "income_statement:ce08_costi_personale",
                                                    "income_statement:ce12_oneri_diversi")]
-            if None not in (fixed, variable, *costs) and abs(fixed + variable - sum(costs, zero)) > tolerance:
+            # lotto 2 fix rilievi (2026-09-26): su un anno di piano `fixed_costs` è
+            # `costi_fissi_operativi` del motore — riconciliato sul MOL (comprende
+            # ce02/ce03/ce03a/ce04/ce10/ce11/ce11b), non una ripartizione delle
+            # cinque voci operative canoniche — quindi la somma non chiude più su
+            # `costs`. La lega resta valida solo sulle colonne non di piano.
+            if canonical_basis[index] != "forecast" and None not in (fixed, variable, *costs) and abs(fixed + variable - sum(costs, zero)) > tolerance:
                 raise ValueError(f"break-even costs must split the operating costs at period {canonical_periods[index]}")
             margin = series["break_even"]["contribution_margin"].values[index]
             revenue = ce_column("income_statement:ce01_ricavi_vendite")[index]

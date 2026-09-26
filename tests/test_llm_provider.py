@@ -3,6 +3,8 @@
 Nessuna rete: gx10 si simula con httpx.MockTransport.
 """
 import json
+import threading
+import time
 from decimal import Decimal
 
 import httpx
@@ -197,3 +199,56 @@ def test_chiama_gx10_json_troncata_e_risposta_non_json(monkeypatch):
         llm_provider.chiama_gx10_json("s", [{"role": "user", "content": "u"}], {},
                                       max_tokens=5, transport=httpx.MockTransport(rotta))
     assert "k-segreta" not in str(exc.value)
+
+
+def _ok(testo='{"a": 1}'):
+    return httpx.Response(200, json={"choices": [{"finish_reason": "stop", "message": {"content": testo}}],
+                                     "usage": {"prompt_tokens": 1, "completion_tokens": 1}})
+
+
+def test_chiama_gx10_testo_restituisce_il_testo_senza_schema(monkeypatch):
+    monkeypatch.setenv("GX10_API_KEY", "k-segreta")
+    visto = {}
+    def handler(request):
+        visto["body"] = json.loads(request.content)
+        return _ok("1 SPA.B.II.2\n2 X")
+    out = llm_provider.chiama_gx10_testo("sys", [{"role": "user", "content": "u"}], max_tokens=50,
+                                         transport=httpx.MockTransport(handler))
+    assert out == "1 SPA.B.II.2\n2 X"
+    assert "structured_outputs" not in visto["body"]
+    assert visto["body"]["max_tokens"] == 50
+
+
+def test_contesto_eccessivo_rifiutato_prima_di_inviare(monkeypatch):
+    monkeypatch.setenv("GX10_API_KEY", "k-segreta")
+    monkeypatch.setattr(llm_provider, "GX10_CONTESTO_MAX", 1000)
+    def handler(request):
+        raise AssertionError("non doveva inviare")
+    with pytest.raises(llm_provider.ContestoEccessivo):
+        llm_provider.chiama_gx10_testo("s", [{"role": "user", "content": "x" * 3000}], max_tokens=10,
+                                       transport=httpx.MockTransport(handler))
+
+
+def test_stima_token_conta_le_immagini():
+    msg = [{"role": "user", "content": [{"type": "text", "text": "abc" * 100},
+                                         {"type": "image_url", "image_url": {"url": "data:image/png;base64,AA"}}]}]
+    assert llm_provider.stima_token(msg) == 100 + 1500
+
+
+def test_semaforo_limita_le_richieste_in_volo(monkeypatch):
+    monkeypatch.setenv("GX10_API_KEY", "k-segreta")
+    monkeypatch.setattr(llm_provider, "_SEMAFORO", threading.BoundedSemaphore(2))
+    in_volo, massimo, lock = [0], [0], threading.Lock()
+    def handler(request):
+        with lock:
+            in_volo[0] += 1; massimo[0] = max(massimo[0], in_volo[0])
+        time.sleep(0.05)
+        with lock:
+            in_volo[0] -= 1
+        return _ok("ok")
+    t = httpx.MockTransport(handler)
+    th = [threading.Thread(target=llm_provider.chiama_gx10_testo,
+                           args=("s", [{"role": "user", "content": "u"}]), kwargs={"max_tokens": 5, "transport": t})
+          for _ in range(6)]
+    [x.start() for x in th]; [x.join() for x in th]
+    assert massimo[0] == 2

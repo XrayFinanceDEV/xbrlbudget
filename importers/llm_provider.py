@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import json
 import os
+import threading
 
 import httpx
 import pydantic
@@ -27,6 +28,33 @@ class LLMProviderError(RuntimeError):
 
 class RispostaTroncata(LLMProviderError):
     pass
+
+
+GX10_CONCORRENZA = int(os.environ.get("GX10_CONCORRENZA", "4"))
+GX10_CONTESTO_MAX = int(os.environ.get("GX10_CONTESTO_MAX", "100000"))
+# gx10 ha 500k token di contesto condivisi: 4 richieste sotto 100k non rallentano il prefill.
+_SEMAFORO = threading.BoundedSemaphore(GX10_CONCORRENZA)
+
+
+class ContestoEccessivo(LLMProviderError):
+    pass
+
+
+def stima_token(messaggi: list[dict], system_prompt: str = "") -> int:
+    """Stima grezza dei token di una richiesta: caratteri/3 del testo, piu' 1.500 per ogni
+    immagine (le immagini gx10 costano molto piu' di poche righe di testo)."""
+    caratteri, immagini = len(system_prompt), 0
+    for m in messaggi:
+        c = m.get("content")
+        if isinstance(c, str):
+            caratteri += len(c)
+        else:
+            for parte in c or []:
+                if parte.get("type") == "text":
+                    caratteri += len(parte.get("text", ""))
+                elif parte.get("type") == "image_url":
+                    immagini += 1
+    return caratteri // 3 + 1500 * immagini
 
 
 def _provider_da_env(nome: str) -> str:
@@ -60,24 +88,30 @@ def lettore_dettagli_disponibile() -> bool:
     return bool(os.environ.get("ANTHROPIC_API_KEY"))
 
 
-def chiama_gx10_json(system_prompt: str, messaggi: list[dict], schema: dict, *,
-                     max_tokens: int, timeout: float = 900.0,
-                     transport: httpx.BaseTransport | None = None) -> dict:
+def _invia(system_prompt: str, messaggi: list[dict], *, max_tokens: int, timeout: float,
+          transport: httpx.BaseTransport | None, schema: dict | None = None) -> str:
+    """Chiamata comune a gx10: chiave, tetto di contesto, semaforo di concorrenza, corpo
+    della richiesta (con o senza vincolo di schema) e gestione degli errori. Restituisce il
+    testo grezzo del messaggio di risposta; chi chiama decide se e come interpretarlo."""
     chiave = os.environ.get("GX10_API_KEY", "")
     if not chiave:
         raise LLMProviderError("GX10_API_KEY non impostata: il fornitore gx10 non e' disponibile")
+    if stima_token(messaggi, system_prompt) + max_tokens > GX10_CONTESTO_MAX:
+        raise ContestoEccessivo("richiesta gx10 oltre il tetto di contesto")
     body = {
         "model": GX10_MODEL,
         "temperature": 0,
         "max_tokens": max_tokens,
         "chat_template_kwargs": {"enable_thinking": False},
-        "structured_outputs": {"json": schema},
         "messages": [{"role": "system", "content": system_prompt}, *messaggi],
     }
+    if schema is not None:
+        body["structured_outputs"] = {"json": schema}
     try:
-        with httpx.Client(timeout=timeout, transport=transport) as client:
-            r = client.post(f"{GX10_BASE_URL.rstrip('/')}/v1/chat/completions",
-                            headers={"Authorization": "Bearer " + chiave}, json=body)
+        with _SEMAFORO:
+            with httpx.Client(timeout=timeout, transport=transport) as client:
+                r = client.post(f"{GX10_BASE_URL.rstrip('/')}/v1/chat/completions",
+                                headers={"Authorization": "Bearer " + chiave}, json=body)
     except httpx.HTTPError as exc:
         raise LLMProviderError(f"gx10 non raggiungibile: {type(exc).__name__}") from None
     if r.status_code != 200:
@@ -86,15 +120,31 @@ def chiama_gx10_json(system_prompt: str, messaggi: list[dict], schema: dict, *,
         scelta = r.json()["choices"][0]
         if scelta.get("finish_reason") == "length":
             raise RispostaTroncata("risposta gx10 troncata: max_tokens insufficiente")
-        testo = scelta["message"].get("content") or ""
+        return scelta["message"].get("content") or ""
     except RispostaTroncata:
         raise
     except (ValueError, KeyError, IndexError, TypeError):
         raise LLMProviderError("risposta gx10 non valida: formato inatteso") from None
+
+
+def chiama_gx10_json(system_prompt: str, messaggi: list[dict], schema: dict, *,
+                     max_tokens: int, timeout: float = 900.0,
+                     transport: httpx.BaseTransport | None = None) -> dict:
+    testo = _invia(system_prompt, messaggi, max_tokens=max_tokens, timeout=timeout,
+                   transport=transport, schema=schema)
     try:
         return json.loads(testo)
     except json.JSONDecodeError:
         raise LLMProviderError("risposta gx10 non valida: JSON non decodificabile") from None
+
+
+def chiama_gx10_testo(system_prompt: str, messaggi: list[dict], *, max_tokens: int,
+                      timeout: float = 600.0,
+                      transport: httpx.BaseTransport | None = None) -> str:
+    """Come chiama_gx10_json ma senza vincolo di schema: restituisce il testo libero della
+    risposta (es. le due righe "riga -> codice" del ripiego di route C)."""
+    return _invia(system_prompt, messaggi, max_tokens=max_tokens, timeout=timeout,
+                  transport=transport, schema=None)
 
 
 def chiama_gx10_strutturato(system_prompt: str, testo_utente: str,

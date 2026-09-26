@@ -55,28 +55,29 @@ describe("rilievi AMBIENTA · wizard", () => {
     }
   });
 
-  // Ruling (controller): l'oracolo del brief (`riga.driver` null con casella spenta e indicizzazione
-  // {sp16f:"ricavi"}) sarebbe rosso per uno stato legittimo — a casella spenta la tendina e' l'unico
-  // comando attivo, quindi un driver non nullo e' corretto, non un difetto. Il rilievo vero del
-  // consulente e' un altro: lo schermo diceva «Cresce con il costo del personale» mentre l'output
-  // cresceva coi ricavi, casella NON spuntata. Il test verifica quindi che l'etichetta di sp16f
-  // concordi con ciò che il motore farà davvero: a casella spenta la tendina governa e l'etichetta
-  // non deve nominare «personale»; a casella accesa e' la casella a governare e l'etichetta deve
-  // nominare «personale». Il doppio comando (casella + tendina, lib/budget-circolante-step.ts:229-232)
-  // resta: confermato per ispezione, non da questo test.
-  it("A06 l'etichetta dei previdenziali dice quello che fa il motore", () => {
+  // A06 · ORACOLO riscritto (decisione del proprietario, lotto 3 fix rilievi 2026-09-26): il doppio
+  // comando che generava il rilievo (casella previdenza/personale + tendina) e' sparito — la casella
+  // non esiste piu' nel wizard e il motore non la legge. sp16f/sp17f sono agganciabili come le altre
+  // undici voci minori: senza tendina restano costanti, con tendina su "personale" l'etichetta lo dice.
+  it("A06 l'etichetta dei previdenziali dice quello che fa il motore, dalla sola tendina", () => {
     const baseBs = { sp16f_debiti_previdenza_breve: 163536.55 } as never;
 
-    // Casella spenta, tendina su "ricavi": il motore segue i ricavi (indicizzazione esplicita).
-    const spenta = minorFieldsRows(baseBs, { sp16f: "ricavi" }, false, []) as any[];
-    const rigaSpenta = spenta.find((r) => r.code === "sp16f" || r.balanceField === "sp16f_debiti_previdenza_breve");
-    expect(rigaSpenta).toBeDefined();
-    expect(String(rigaSpenta.andamento ?? "")).not.toMatch(/personale/);
+    // Nessuna tendina: la voce resta costante, l'etichetta non nomina alcun driver.
+    const ferma = minorFieldsRows(baseBs, {}, []) as any[];
+    const rigaFerma = ferma.find((r) => r.code === "sp16f" || r.balanceField === "sp16f_debiti_previdenza_breve");
+    expect(rigaFerma).toBeDefined();
+    expect(String(rigaFerma.andamento ?? "")).not.toMatch(/personale/);
 
-    // Casella accesa: il motore ignora la tendina e segue il personale.
-    const accesa = minorFieldsRows(baseBs, {}, true, []) as any[];
-    const rigaAccesa = accesa.find((r) => r.code === "sp16f" || r.balanceField === "sp16f_debiti_previdenza_breve");
-    expect(rigaAccesa).toBeDefined();
-    expect(String(rigaAccesa.andamento ?? "")).toMatch(/personale/);
+    // Tendina su "ricavi": il motore segue i ricavi, non il personale.
+    const suRicavi = minorFieldsRows(baseBs, { sp16f: "ricavi" }, []) as any[];
+    const rigaRicavi = suRicavi.find((r) => r.code === "sp16f" || r.balanceField === "sp16f_debiti_previdenza_breve");
+    expect(rigaRicavi).toBeDefined();
+    expect(String(rigaRicavi.andamento ?? "")).not.toMatch(/personale/);
+
+    // Tendina su "personale": e' l'unico comando, e l'etichetta lo nomina.
+    const suPersonale = minorFieldsRows(baseBs, { sp16f: "personale" }, []) as any[];
+    const rigaPersonale = suPersonale.find((r) => r.code === "sp16f" || r.balanceField === "sp16f_debiti_previdenza_breve");
+    expect(rigaPersonale).toBeDefined();
+    expect(String(rigaPersonale.andamento ?? "")).toMatch(/personale/);
   });
 });

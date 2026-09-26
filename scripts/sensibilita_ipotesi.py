@@ -389,7 +389,6 @@ VOCE_PILOTATA = {
     # un'azienda con ce08 == ce08b non ha alcuna quota da sospendere.
     "tfr_accrual_suspended": "ce08a_tfr_accrual",
     "rent_growth_pct": "ce07_godimento_beni",
-    "previdenza_scales_with_personnel": "sp16f_debiti_previdenza_breve",
     # Il debito bancario di apertura non e' una colonna sola: e' la somma delle
     # banche piu' gli scarti aggregato/dettaglio, come lo calcola il motore.
     "existing_debt_repayment_years": "@banche",
@@ -409,7 +408,6 @@ ACCOPPIAMENTI = {
     "financing_interest_rate": {"financing_amount": D("100000"),
                                 "financing_duration_years": D("5")},
     "cash_sweep_min_cash": {"cash_sweep_enabled": True},
-    "previdenza_scales_with_personnel": {"personnel_growth_pct": D("10")},
     "tfr_accrual_suspended": {"personnel_growth_pct": D("10")},
 }
 
@@ -422,6 +420,9 @@ NON_LETTI = {
     "interest_rate_payables": "colonna morta: nessun punto di lettura nel motore",
     "tax_rate": "ripiego: il motore preferisce l'aliquota effettiva dell'anno base "
                 "quando e' derivabile (CLAUDE.md)",
+    "previdenza_scales_with_personnel": "lotto 3 fix rilievi (2026-09-26, A06): la casella e' "
+                "sparita e il motore non la legge piu' — l'aggancio al personale si scrive con "
+                "sp_indexing (\"personale\") su sp16f/sp17f",
 }
 
 

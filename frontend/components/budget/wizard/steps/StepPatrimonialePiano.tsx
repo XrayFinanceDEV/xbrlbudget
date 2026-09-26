@@ -77,12 +77,13 @@ export function StepPatrimonialePiano(p: StepProps): JSX.Element {
   const previewYears = p.preview.data?.forecast_years ?? [];
 
   // ── Voci minori: la stessa card di prima (Task 12), spostata qui com'era ──
-  const previdenzaChecked = boolAssumption(p.assumptions, p.forecastYears, "previdenza_scales_with_personnel");
+  // A06 (lotto 3 fix rilievi, 2026-09-26): sp16f/sp17f non hanno piu' una casella a
+  // parte — la tendina delle voci minori e' l'unico comando, "personale" compreso.
   const indexing = useMemo(() => spIndexingOf(p.assumptions, p.forecastYears), [p.assumptions, p.forecastYears]);
   const piani = useMemo(() => pianiPregressoOf(p.assumptions, p.forecastYears), [p.assumptions, p.forecastYears]);
   const minorRows = useMemo(
-    () => minorFieldsRows(baseBs, indexing, previdenzaChecked, piani),
-    [baseBs, indexing, previdenzaChecked, piani],
+    () => minorFieldsRows(baseBs, indexing, piani),
+    [baseBs, indexing, piani],
   );
   const regoleAttive = minorRows.filter((row) => row.code !== null && row.baseAmount !== 0);
   const saldiZero = minorRows.filter((row) => row.code !== null && row.baseAmount === 0);
@@ -258,10 +259,6 @@ export function StepPatrimonialePiano(p: StepProps): JSX.Element {
               </AccordionItem>
             </Accordion>
           )}
-          <div className="flex items-center space-x-2 border-t border-border pt-3">
-            <Checkbox id="previdenza-scales" checked={previdenzaChecked} onCheckedChange={(checked) => p.updateAll("previdenza_scales_with_personnel", checked === true)} />
-            <Label htmlFor="previdenza-scales" className="text-sm font-normal">Debiti previdenziali scalano col costo del personale</Label>
-          </div>
         </CardContent>
       </Card>
       <div className="grid gap-5 lg:grid-cols-2 items-start">

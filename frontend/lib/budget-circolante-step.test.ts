@@ -129,7 +129,7 @@ describe("minorFieldsRows", () => {
     // estinguendo la voce e' peggio del divieto: e' una bugia a schermo.
     const rows = minorFieldsRows(
       balance(), { sp16g: "ricavi", sp17g: "ricavi", sp16f: "ricavi" },
-      false, ["altri_debiti"],
+      ["altri_debiti"],
     );
     for (const field of ["sp16g_growth_pct", "sp17g_growth_pct"]) {
       const r = rows.find((x) => x.field === field);
@@ -145,10 +145,14 @@ describe("minorFieldsRows", () => {
     expect(previdenza?.code).toBe("sp16f");
   });
 
-  it("l'interruttore previdenza/personale toglie sp16f e sp17f dagli agganciabili", () => {
-    const rows = minorFieldsRows(balance(), { sp16f: "ricavi" }, true);
+  // A06 (lotto 3 fix rilievi, 2026-09-26): la casella previdenza/personale e' sparita —
+  // `minorFieldsRows` non la legge piu' e sp16f/sp17f sono agganciabili come le altre
+  // undici voci, "personale" compreso fra i driver offerti.
+  it("sp16f si aggancia al costo del personale dalla sola tendina", () => {
+    const rows = minorFieldsRows(balance(), { sp16f: "personale" });
     const sp16f = rows.find((r) => r.field === "sp16f_growth_pct");
-    expect(sp16f?.code).toBeNull();
+    expect(sp16f?.code).toBe("sp16f");
+    expect(sp16f?.driver).toBe("personale");
     expect(sp16f?.andamento).toBe("Cresce con il costo del personale");
     expect(sp16f?.agganciata).toBe(true);
     expect(sp16f?.off).toBe(true);

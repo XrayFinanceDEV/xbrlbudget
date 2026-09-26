@@ -6,6 +6,7 @@ from decimal import Decimal
 from typing import Dict, Optional, NamedTuple
 from database.models import BalanceSheet, IncomeStatement
 from calculations.base import BaseCalculator
+from calculations.report_indicators import attivo_corrente, passivo_corrente
 
 
 class WorkingCapitalMetrics(NamedTuple):
@@ -123,8 +124,12 @@ class FinancialRatiosCalculator(BaseCalculator):
         # CCLN = Capital Circolante Lordo Netto = Attivo Corrente
         ccln = self.bs.current_assets
 
-        # CCN = Capitale Circolante Netto = Attivo Corrente - Passivo Corrente
-        ccn = self.bs.working_capital_net
+        # CCN = Capitale Circolante Netto = Attivo corrente - Passivo corrente, simmetrico sui
+        # ratei (C05, lotto 2 fix rilievi 2026-09-26): stessa formula di `report_indicators.py`,
+        # non `BalanceSheet.working_capital_net` (quello resta per Altman/FGPMI, che non si toccano
+        # in questo lotto).
+        field_value = lambda field: getattr(self.bs, field)
+        ccn = attivo_corrente(field_value) - passivo_corrente(field_value)
 
         # MS = Margine di Struttura = Patrimonio Netto - Immobilizzazioni
         ms = self.bs.total_equity - self.bs.fixed_assets
@@ -154,21 +159,23 @@ class FinancialRatiosCalculator(BaseCalculator):
         Returns:
             LiquidityRatios with Current Ratio, Quick Ratio, Acid Test
         """
-        # ILC = Current Ratio = Attivo Corrente / Passivo Corrente
+        # ILC = Current Ratio = Attivo corrente / Passivo corrente, simmetrico sui ratei (C05,
+        # lotto 2 fix rilievi 2026-09-26): stessa formula della sezione 8 del report
+        # (`report_indicators.attivo_corrente`/`passivo_corrente`) — un solo current ratio nel
+        # documento, non `BalanceSheet.current_assets`/`current_liabilities` (quelle restano per
+        # Altman/FGPMI).
+        field_value = lambda field: getattr(self.bs, field)
+        passivo = passivo_corrente(field_value)
         current_ratio = self.safe_divide(
-            self.bs.current_assets,
-            self.bs.current_liabilities
+            attivo_corrente(field_value),
+            passivo
         )
 
-        # Quick Ratio = (Liquidità + Crediti) / Passivo Corrente
-        liquid_assets = (
-            self.bs.sp06_crediti_breve +
-            self.bs.sp07_crediti_lungo +
-            self.bs.sp09_disponibilita_liquide
-        )
+        # Quick Ratio = (Attivo corrente - rimanenze) / Passivo corrente
+        liquid_assets = attivo_corrente(field_value) - self.bs.sp05_rimanenze
         quick_ratio = self.safe_divide(
             liquid_assets,
-            self.bs.current_liabilities
+            passivo
         )
 
         # Acid Test = (Liquidità + Crediti + Attività Finanziarie) / Passivo Corrente

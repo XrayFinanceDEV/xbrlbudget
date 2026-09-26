@@ -335,9 +335,6 @@ def _analitico(data, etichetta: str):
                          f"{[r.label for r in data.indicators_analytical]}")
 
 
-@pytest.mark.xfail(strict=True, raises=AssertionError, reason="C05 confermato dal triage 2026-09-25: liquidità corrente sez. 8 "
-                    "e Current Ratio (ILC) dell'All. E danno due valori diversi nello stesso documento"
-                    " — togli il marcatore quando il fix lo fa passare")
 def test_C05_un_solo_current_ratio_nel_documento():
     """C05 · Liquidità corrente sez. 8 = 1,43×, Current Ratio All. E = 1,29×. Oracolo: stesso valore.
     Ruling: l'etichetta esatta nel catalogo è «Current Ratio (ILC)», non «Current Ratio»

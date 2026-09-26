@@ -52,6 +52,27 @@ def balance_aggregates(bs: Mapping[str, Decimal]) -> dict[str, Decimal]:
             'total_equity': equity, 'total_debt': debt, 'total_liabilities': liabilities}
 
 
+def attivo_corrente(field_value: Callable[[str], Decimal]) -> Decimal:
+    """Attivo corrente (C05, lotto 2 fix rilievi 2026-09-26): rimanenze + crediti a breve +
+    attività finanziarie a breve + liquidità + ratei attivi. I crediti oltre 12 mesi (sp07) restano
+    fuori: non sono correnti. Un solo calcolo condiviso da sezione 8 e Allegato E — prima ognuno
+    portava una perimetrazione diversa e lo stesso bilancio dava due current ratio nello stesso
+    documento.
+    """
+    fields = ('sp05_rimanenze', 'sp06_crediti_breve', 'sp08_attivita_finanziarie',
+              'sp09_disponibilita_liquide', 'sp10_ratei_risconti_attivi')
+    return sum((field_value(f) for f in fields), ZERO)
+
+
+def passivo_corrente(field_value: Callable[[str], Decimal]) -> Decimal:
+    """Passivo corrente (C05): debiti a breve + ratei passivi — simmetrico sull'attivo corrente,
+    che include i ratei attivi (sp10). Senza sp18 il passivo corrente sarebbe sbilanciato sui ratei
+    rispetto all'attivo che li conta già.
+    """
+    fields = ('sp16_debiti_breve', 'sp18_ratei_risconti_passivi')
+    return sum((field_value(f) for f in fields), ZERO)
+
+
 FINANCIAL_DEBT_FIELDS = ('sp16a_debiti_banche_breve', 'sp17a_debiti_banche_lungo',
                          'sp16b_debiti_altri_finanz_breve', 'sp17b_debiti_altri_finanz_lungo',
                          'sp16c_debiti_obbligazioni_breve', 'sp17c_debiti_obbligazioni_lungo')
@@ -77,7 +98,8 @@ def indicator_results(bs, inc, analytical_ratios=None) -> dict[str, IndicatorRes
     b = balance_aggregates(bs)
     fixed, equity, assets = b['fixed_assets'], b['total_equity'], b['total_assets']
     short, long, debt = v('sp16_debiti_breve'), v('sp17_debiti_lungo'), b['total_debt']
-    current = b['current_assets'] - v('sp07_crediti_lungo') + v('sp10_ratei_risconti_attivi')
+    current = attivo_corrente(v)
+    passivo = passivo_corrente(v)
     financial_debt = financial_debt_total(v)
     pfn = financial_debt - v('sp09_disponibilita_liquide') - v('sp08_attivita_finanziarie')
     revenue, interest = v('ce01_ricavi_vendite'), v('ce15_oneri_finanziari')
@@ -97,9 +119,13 @@ def indicator_results(bs, inc, analytical_ratios=None) -> dict[str, IndicatorRes
     ratio('dscr', ce.ebitda - ce.taxes, interest, '(EBITDA - imposte) / oneri finanziari: proxy della pratica, non servizio completo del debito.', positive=True)
     ratio('ebitda_margin', ce.ebitda, revenue, 'EBITDA / ricavi × 100', percentage=True)
     amount('mt', current - v('sp05_rimanenze') - short, 'Attivo corrente pratica - rimanenze - debiti entro 12 mesi')
-    amount('ccn', current - short, 'Attivo corrente pratica - debiti entro 12 mesi')
-    ratio('current_ratio', current, short, 'Attivo corrente pratica / debiti entro 12 mesi')
-    ratio('quick_ratio', current - v('sp05_rimanenze'), short, 'Attivo corrente pratica - rimanenze / debiti entro 12 mesi')
+    # C05 (lotto 2 fix rilievi, 2026-09-26): CCN, current ratio e quick ratio sul passivo corrente
+    # simmetrico sui ratei (debiti a breve + ratei passivi) — stessa formula usata dall'Allegato E,
+    # cosicché sezione 8 e Allegato E non pubblichino più due current ratio diversi sullo stesso
+    # bilancio.
+    amount('ccn', current - passivo, 'Attivo corrente pratica - passivo corrente (debiti entro 12 mesi + ratei passivi)')
+    ratio('current_ratio', current, passivo, 'Attivo corrente pratica / passivo corrente (debiti entro 12 mesi + ratei passivi)')
+    ratio('quick_ratio', current - v('sp05_rimanenze'), passivo, 'Attivo corrente pratica - rimanenze / passivo corrente (debiti entro 12 mesi + ratei passivi)')
     amount('ms', equity - fixed, 'Patrimonio netto - immobilizzazioni')
     # C07: il TFR è una fonte consolidata al pari del debito oltre 12 mesi, non fuori dal computo.
     ratio('copertura_immob', equity + long + v('sp15_tfr'), fixed, '(Patrimonio netto + debiti oltre 12 mesi + TFR) / immobilizzazioni × 100', percentage=True)
@@ -141,7 +167,7 @@ def indicator_results(bs, inc, analytical_ratios=None) -> dict[str, IndicatorRes
     purchases = v('ce05_materie_prime') + v('ce06_servizi')
     dpo_base = purchases if purchases > 0 else revenue
     denominators = {
-        'liquidity.current_ratio': short, 'liquidity.quick_ratio': short, 'liquidity.acid_test': short,
+        'liquidity.current_ratio': passivo, 'liquidity.quick_ratio': passivo, 'liquidity.acid_test': short,
         'solvency.autonomy_index': assets, 'solvency.leverage_ratio': equity, 'solvency.debt_to_equity': equity,
         'solvency.debt_to_production': ce.production_value,
         'profitability.roe': equity, 'profitability.roi': assets, 'profitability.ros': revenue,
@@ -155,8 +181,10 @@ def indicator_results(bs, inc, analytical_ratios=None) -> dict[str, IndicatorRes
         'efficiency.revenue_per_employee_cost': v('ce08_costi_personale'), 'efficiency.revenue_per_materials_cost': v('ce05_materie_prime'),
     }
     formulas = {
-        'liquidity.current_ratio': 'Attivo corrente del modello / debiti entro 12 mesi',
-        'liquidity.quick_ratio': '(Crediti entro e oltre 12 mesi + cassa) / debiti entro 12 mesi',
+        'liquidity.current_ratio': '(Rimanenze + crediti a breve + attività finanziarie a breve + liquidità + ratei attivi) '
+                                    '/ (debiti entro 12 mesi + ratei passivi) — stessa formula della sezione 8',
+        'liquidity.quick_ratio': '(Crediti a breve + attività finanziarie a breve + liquidità + ratei attivi) '
+                                  '/ (debiti entro 12 mesi + ratei passivi)',
         'liquidity.acid_test': '(Crediti entro e oltre 12 mesi + attività finanziarie + cassa) / debiti entro 12 mesi',
         'solvency.autonomy_index': 'Patrimonio netto / totale attivo',
         'solvency.leverage_ratio': 'Debiti totali / patrimonio netto',

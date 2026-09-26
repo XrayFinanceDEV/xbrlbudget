@@ -105,7 +105,8 @@ export function StepPatrimonialePiano(p: StepProps): JSX.Element {
               value={row.driver ?? "manuale"}
               onValueChange={(v) => p.updateSpRule(
                 row.code as string, row.balanceField, row.field,
-                v === "manuale" ? null : (v as SpIndexingDriver), projected,
+                v === "manuale" ? null : (v as SpIndexingDriver),
+                numOrNull((baseBs as unknown as Record<string, unknown>)?.[row.balanceField]),
               )}
             >
               <SelectTrigger className="w-full text-xs sm:col-span-2 lg:col-span-1" aria-label={`Regola ${row.label}`}>

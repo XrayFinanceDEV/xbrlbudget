@@ -36,13 +36,10 @@ describe("rilievi AMBIENTA · wizard", () => {
     expect(accontiRow({ forecast_years: [] } as never, 100).field).toBe("tax_advances_paid");
   });
 
-  // A05 · CARATTERIZZAZIONE (verde = comportamento di oggi). Il motore con sp04 senza regola tiene il saldo
-  // costante (tests/test_rilievi_ambienta.py, test_A05_…); ma il wizard non produce mai quello stato quando la
-  // voce aveva già la regola «ricavi»: passare a «Manuale» congela in sp_overrides i valori dell'anteprima, che
-  // sono proprio quelli cresciuti coi ricavi (52.550 → 55.178 / 58.488 / 62.582, i numeri del consulente).
-  // È voluto (beb33c5, budget-sp-manuale.test.ts «scegliere Manuale congela i valori dell'anteprima per anno»):
-  // il sintomo del consulente nasce da una decisione del proprietario, non da un difetto del motore.
-  it("A05 passare a Manuale da «ricavi» congela in sp_overrides la crescita coi ricavi", () => {
+  // A05 · ORACOLO (decisione del proprietario, lotto 3 fix rilievi 2026-09-26). Passare a «Manuale» da «ricavi»
+  // scrive il saldo dell'anno base (2026, 52.550) in ogni anno di piano, costante — non più i valori
+  // dell'anteprima cresciuti coi ricavi (52.550 → 55.178 / 58.488 / 62.582, il sintomo del consulente).
+  it("A05 passare a Manuale da «ricavi» scrive il saldo 2026 dell'anno base, costante", () => {
     const years = [2027, 2028, 2029];
     const field = "sp04_immob_finanziarie";
     const conRicavi = asMap({
@@ -50,16 +47,12 @@ describe("rilievi AMBIENTA · wizard", () => {
       2028: { sp_indexing: { sp04: "ricavi" } },
       2029: { sp_indexing: { sp04: "ricavi" } },
     });
-    const c = (x: number) => Math.round(x * 100) / 100;
-    const anteprima: Record<number, number> = {
-      2027: c(52550 * 1.05), 2028: c(52550 * 1.05 * 1.06), 2029: c(52550 * 1.05 * 1.06 * 1.07),
-    };
-    const manuale = withSpRule(conRicavi, years, "sp04", field, "sp04_growth_pct", null, anteprima);
+    const saldoBase2026 = 52550;
+    const manuale = withSpRule(conRicavi, years, "sp04", field, "sp04_growth_pct", null, saldoBase2026);
     for (const y of years) {
       expect(manuale[y].sp_indexing).toBeNull();
-      expect(manuale[y].sp_overrides?.[field]).toBe(anteprima[y]);
+      expect(manuale[y].sp_overrides?.[field]).toBe(saldoBase2026);
     }
-    expect(years.map((y) => Math.round(Number(manuale[y].sp_overrides?.[field])))).toEqual([55178, 58488, 62582]);
   });
 
   // Ruling (controller): l'oracolo del brief (`riga.driver` null con casella spenta e indicizzazione

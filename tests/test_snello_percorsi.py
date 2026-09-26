@@ -14,7 +14,7 @@ from importers.import_snello import percorsi as P
     ("SPP.B.4", "sp14d"), ("SPP.C", "sp15"), ("SPP.D.4", "sp16a"), ("SPP.D.4.O", "sp17a"), ("SPP.D.3", "sp16b"),
     ("SPP.D.7.E", "sp16d"), ("SPP.D.12", "sp16e"), ("SPP.D.13", "sp16f"), ("SPP.D.14.O", "sp17g"),
     ("SPP.D.E", "sp16"), ("SPP.D.O", "sp17"), ("SPP.E", "sp18"),
-    ("CE.A.1", "ce01"), ("CE.A.2", "ce02"), ("CE.A.4", "ce03"), ("CE.A.5", "ce04"), ("CE.B.6", "ce05"),
+    ("CE.A.1", "ce01"), ("CE.A.2", "ce02"), ("CE.A.3", "ce03"), ("CE.A.4", "ce03a"), ("CE.A.5", "ce04"), ("CE.B.6", "ce05"),
     ("CE.B.7", "ce06"), ("CE.B.8", "ce07"), ("CE.B.9.a", "ce08b"), ("CE.B.9.b", "ce08c"), ("CE.B.9.c", "ce08a"),
     ("CE.B.9.e", "ce08d"), ("CE.B.9", "ce08"), ("CE.B.10.a", "ce09a"), ("CE.B.10.d", "ce09d"), ("CE.B.10", "ce09"),
     ("CE.B.11", "ce10"), ("CE.B.12", "ce11"), ("CE.B.13", "ce11b"), ("CE.B.14", "ce12"), ("CE.C.16.d", "ce14"),
@@ -29,6 +29,7 @@ def test_nomi_completi_dal_modello_orm():
     assert P.NOMI["sp06a"] == "sp06a_crediti_clienti_breve"
     assert P.NOMI["ce08b"] == "ce08b_salari_stipendi"
     assert P.NOMI["sp16"] == "sp16_debiti_breve"
+    assert P.NOMI["ce03a"] == "ce03a_incrementi_immobilizzazioni"
 
 
 def test_fondo_risultato_lato():

@@ -47,7 +47,7 @@ class ActivityRatios(NamedTuple):
     """Activity/Efficiency ratios"""
     asset_turnover: Decimal         # Fatturato / Totale Attivo
     inventory_turnover_days: Optional[Decimal]  # DMAG - Giorni di Magazzino; None con consumo non positivo
-    receivables_turnover_days: Decimal  # DCRED - Giorni di Credito
+    receivables_turnover_days: Optional[Decimal]  # DCRED - Giorni di Credito; None con crediti commerciali non dettagliati
     payables_turnover_days: Decimal  # DDEB - Giorni di Debito
     working_capital_days: Decimal    # DCCN - Giorni CCN
     cash_conversion_cycle: Optional[Decimal]   # Ciclo di conversione del denaro; None se il DMAG lo è
@@ -134,14 +134,12 @@ class FinancialRatiosCalculator(BaseCalculator):
         # MS = Margine di Struttura = Patrimonio Netto - Immobilizzazioni
         ms = self.bs.total_equity - self.bs.fixed_assets
 
-        # MT = Margine di Tesoreria = (Liquidità + Crediti) - Passivo Corrente
-        # MT = Attivo Corrente - Rimanenze - Passivo Corrente
-        mt = (
-            self.bs.sp06_crediti_breve +
-            self.bs.sp07_crediti_lungo +
-            self.bs.sp09_disponibilita_liquide -
-            self.bs.current_liabilities
-        )
+        # MT = Margine di Tesoreria = Attivo corrente - rimanenze - passivo corrente, simmetrico
+        # sui ratei (F6, lotto 2 fix rilievi 2026-09-26): stessa `attivo_corrente`/`passivo_corrente`
+        # di CCN/current ratio/quick ratio (C05) — non più una terza formula (sp06+sp07+sp09, coi
+        # crediti oltre 12 mesi dentro, meno i soli debiti a breve) che dava un numero diverso da
+        # quello della sezione 8 dello stesso report sullo stesso bilancio.
+        mt = attivo_corrente(field_value) - self.bs.sp05_rimanenze - passivo_corrente(field_value)
 
         return WorkingCapitalMetrics(
             ccln=self.round_decimal(ccln),
@@ -340,9 +338,15 @@ class FinancialRatiosCalculator(BaseCalculator):
             (self.bs.sp06a_crediti_clienti_breve or Decimal('0')) +
             (self.bs.sp07a_crediti_clienti_lungo or Decimal('0'))
         )
-        receivables_turnover_days = self.safe_divide(
-            Decimal(days_in_year) * trade_receivables,
-            self.inc.revenue
+        # F1 (Critico, revisione finale lotto 2, 2026-09-26): sp06a+sp07a a zero mentre
+        # l'aggregato sp06+sp07 resta positivo non è "zero crediti commerciali" — è un
+        # import che non ha classificato i crediti come clienti (finiscono nei secchi di
+        # ripiego sp06g/sp07g). Un DSO di 0 in quel caso sarebbe inventato: None, come
+        # ROD e DIO (fix round 1).
+        receivables_total = self.bs.sp06_crediti_breve + self.bs.sp07_crediti_lungo
+        receivables_turnover_days = (
+            None if trade_receivables == 0 and receivables_total > 0
+            else self.safe_divide(Decimal(days_in_year) * trade_receivables, self.inc.revenue)
         )
 
         # DDEB = Giorni di Debito (dilazione fornitori) = 360 * Debiti v/fornitori / Acquisti.
@@ -360,24 +364,30 @@ class FinancialRatiosCalculator(BaseCalculator):
             purchases if purchases > 0 else self.inc.revenue
         )
 
-        # DCCN = Giorni CCN = 360 * CCN / Fatturato
+        # DCCN = Giorni CCN = 360 * CCN / Fatturato — CCN di C05 (attivo corrente - passivo
+        # corrente, simmetrico sui ratei), non `working_capital_net` (F7, lotto 2 fix rilievi
+        # 2026-09-26): stesso CCN di TdCCN, e lo stesso della sezione 8/Allegato E (CCN, current
+        # ratio, quick ratio).
+        field_value = lambda field: getattr(self.bs, field)
+        ccn_giorni = attivo_corrente(field_value) - passivo_corrente(field_value)
         working_capital_days = self.safe_divide(
-            Decimal(days_in_year) * self.bs.working_capital_net,
+            Decimal(days_in_year) * ccn_giorni,
             self.inc.revenue
         )
 
-        # Cash Conversion Cycle = DMAG + DCRED - DDEB. Un DMAG indefinito rende indefinito anche
-        # il ciclo (fix round 1, review lotto 2): sommare None non è possibile, e sommare uno zero
-        # al suo posto dichiarerebbe un magazzino sereno che nessuno ha misurato.
+        # Cash Conversion Cycle = DMAG + DCRED - DDEB. Un DMAG o un DSO indefinito rende
+        # indefinito anche il ciclo (fix round 1 per il DMAG, F1 per il DSO — review lotto 2):
+        # sommare None non è possibile, e sommare uno zero al suo posto dichiarerebbe un
+        # magazzino o un credito sereno che nessuno ha misurato.
         cash_conversion_cycle = (
             inventory_turnover_days + receivables_turnover_days - payables_turnover_days
-            if inventory_turnover_days is not None else None
+            if inventory_turnover_days is not None and receivables_turnover_days is not None else None
         )
 
         return ActivityRatios(
             asset_turnover=self.round_decimal(asset_turnover, 4),
             inventory_turnover_days=self.round_decimal(inventory_turnover_days, 0) if inventory_turnover_days is not None else None,
-            receivables_turnover_days=self.round_decimal(receivables_turnover_days, 0),
+            receivables_turnover_days=self.round_decimal(receivables_turnover_days, 0) if receivables_turnover_days is not None else None,
             payables_turnover_days=self.round_decimal(payables_turnover_days, 0),
             working_capital_days=self.round_decimal(working_capital_days, 0),
             cash_conversion_cycle=self.round_decimal(cash_conversion_cycle, 0) if cash_conversion_cycle is not None else None
@@ -434,11 +444,17 @@ class FinancialRatiosCalculator(BaseCalculator):
             self.bs.sp05_rimanenze
         )
 
-        # TdC = RIC/LD (Revenue / Receivables)
-        total_receivables = self.bs.sp06_crediti_breve + self.bs.sp07_crediti_lungo
+        # TdC = RIC/LD (Revenue / Receivables) — sui soli crediti commerciali (F7, lotto 2 fix
+        # rilievi 2026-09-26: erano gli aggregati sp06+sp07, che comprendono crediti tributari e
+        # diversi). Stessa perimetrazione del DSO (`receivables_turnover_days`, C02): «360/TdC» in
+        # etichetta dev'essere lo stesso numeratore/denominatore del DSO che gli sta accanto.
+        trade_receivables = (
+            (self.bs.sp06a_crediti_clienti_breve or Decimal('0')) +
+            (self.bs.sp07a_crediti_clienti_lungo or Decimal('0'))
+        )
         receivables_turnover = self.safe_divide(
             self.inc.revenue,
-            total_receivables
+            trade_receivables
         )
 
         # TdD = (CO+AC+ODG)/PC (Operating Costs / Current Liabilities)
@@ -452,10 +468,14 @@ class FinancialRatiosCalculator(BaseCalculator):
             self.bs.current_liabilities
         )
 
-        # TdCCN = RIC/CCN (Revenue / Working Capital)
+        # TdCCN = RIC/CCN (Revenue / Working Capital) — CCN di C05 (attivo corrente - passivo
+        # corrente, simmetrico sui ratei), non `working_capital_net` (F7, lotto 2 fix rilievi
+        # 2026-09-26): altrimenti «360/TdCCN» (giorni CCN) e TdCCN userebbero due CCN diversi.
+        field_value = lambda field: getattr(self.bs, field)
+        ccn = attivo_corrente(field_value) - passivo_corrente(field_value)
         working_capital_turnover = self.safe_divide(
             self.inc.revenue,
-            self.bs.working_capital_net
+            ccn
         )
 
         # TdAT = RIC/TA (Revenue / Total Assets)

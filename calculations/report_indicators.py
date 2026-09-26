@@ -136,11 +136,22 @@ def indicator_results(bs, inc, analytical_ratios=None, cashflow=None) -> dict[st
     passivo = passivo_corrente(v)
     financial_debt = financial_debt_total(v)
     pfn = financial_debt - v('sp09_disponibilita_liquide') - v('sp08_attivita_finanziarie')
+    # F1 (Critico, revisione finale lotto 2, 2026-09-26): le sei sotto-voci finanziarie
+    # (sp16a/b/c, sp17a/b/c) tutte a zero mentre l'aggregato sp16+sp17 resta positivo non
+    # significa "nessun debito finanziario" — significa che l'import non ha classificato
+    # quel debito. Dichiarare PFN = -cassa in quel caso sarebbe falso: "non lo so", non
+    # zero. `financial_debt_unavailable` guida PFN, PFN/EBITDA e il ROD analitico.
+    financial_debt_unavailable = financial_debt == 0 and debt > 0
     revenue, interest = v('ce01_ricavi_vendite'), v('ce15_oneri_finanziari')
     # C02 (lotto 2 fix rilievi, 2026-09-26): il consumo di materie che governa il DIO, stessa
     # convenzione di `calculations/forecast_engine.py::consumo_base_materie` — un consumo non
     # positivo rende il DIO indefinito, mai zero né negativo.
     consumo_materie = v('ce05_materie_prime') + v('ce10_var_rimanenze_mat_prime')
+    # F1: sp06a+sp07a a zero mentre l'aggregato sp06+sp07 resta positivo — stessa diagnosi del
+    # debito finanziario, sui crediti commerciali. Guida il DSO analitico.
+    trade_receivables = v('sp06a_crediti_clienti_breve') + v('sp07a_crediti_clienti_lungo')
+    receivables_total = v('sp06_crediti_breve') + v('sp07_crediti_lungo')
+    trade_receivables_unavailable = trade_receivables == 0 and receivables_total > 0
     result = {}
     practice_convention = ('pratica-v1: attivo corrente senza crediti oltre 12 mesi, con ratei attivi; '
                            'CE canonico; flussi del periodo non annualizzati; nessun punteggio implicito.')
@@ -156,7 +167,10 @@ def indicator_results(bs, inc, analytical_ratios=None, cashflow=None) -> dict[st
     else:
         ratio('dscr', ce.ebitda - ce.taxes, interest + quota_capitale, DSCR_FORMULA, positive=True)
     ratio('ebitda_margin', ce.ebitda, revenue, 'EBITDA / ricavi × 100', percentage=True)
-    amount('mt', current - v('sp05_rimanenze') - short, 'Attivo corrente pratica - rimanenze - debiti entro 12 mesi')
+    # F6 (Importante, revisione finale lotto 2, 2026-09-26): MT allineato sul passivo corrente
+    # simmetrico di C05 (debiti a breve + ratei passivi), non più i soli debiti a breve — altrimenti
+    # il CCN (che invece li include già) e il MT dello stesso bilancio non tornano fra loro.
+    amount('mt', current - v('sp05_rimanenze') - passivo, 'Attivo corrente pratica - rimanenze - passivo corrente (debiti entro 12 mesi + ratei passivi)')
     # C05 (lotto 2 fix rilievi, 2026-09-26): CCN, current ratio e quick ratio sul passivo corrente
     # simmetrico sui ratei (debiti a breve + ratei passivi) — stessa formula usata dall'Allegato E,
     # cosicché sezione 8 e Allegato E non pubblichino più due current ratio diversi sullo stesso
@@ -168,9 +182,15 @@ def indicator_results(bs, inc, analytical_ratios=None, cashflow=None) -> dict[st
     # C07: il TFR è una fonte consolidata al pari del debito oltre 12 mesi, non fuori dal computo.
     ratio('copertura_immob', equity + long + v('sp15_tfr'), fixed, '(Patrimonio netto + debiti oltre 12 mesi + TFR) / immobilizzazioni × 100', percentage=True)
     ratio('indipendenza', equity, assets, 'Patrimonio netto / totale attivo × 100', percentage=True)
-    # C04: debito finanziario (banche, altri finanziatori, obbligazioni) meno cassa e attività finanziarie.
-    amount('pfn', pfn, 'Banche, altri finanziatori e obbligazioni (breve e lungo) meno cassa e attività finanziarie.')
-    ratio('pfn_ebitda', pfn, ce.ebitda, 'PFN pratica / EBITDA del periodo', positive=True)
+    # C04: debito finanziario (banche, altri finanziatori, obbligazioni) meno cassa e attività
+    # finanziarie. F1: indefinita, non -cassa, quando il debito finanziario non è dettagliato.
+    pfn_formula = 'Banche, altri finanziatori e obbligazioni (breve e lungo) meno cassa e attività finanziarie.'
+    if financial_debt_unavailable:
+        result['practice.pfn'] = IndicatorResult(None, 'financial_debt_detail_unavailable', pfn_formula, practice_convention)
+        result['practice.pfn_ebitda'] = IndicatorResult(None, 'financial_debt_detail_unavailable', 'PFN pratica / EBITDA del periodo', practice_convention)
+    else:
+        amount('pfn', pfn, pfn_formula)
+        ratio('pfn_ebitda', pfn, ce.ebitda, 'PFN pratica / EBITDA del periodo', positive=True)
     ratio('roi', ce.ebit, assets, 'EBIT / totale attivo × 100', percentage=True)
     ratio('roe', ce.net_profit, equity, 'Utile netto CE canonico / patrimonio netto × 100', percentage=True, positive=True)
     ratio('ros', ce.ebit, revenue, 'EBIT / ricavi × 100', percentage=True)
@@ -256,6 +276,12 @@ def indicator_results(bs, inc, analytical_ratios=None, cashflow=None) -> dict[st
         reason = 'source_calculation_unavailable' if value is None else 'zero_denominator' if any(d == 0 for d in bases) else 'non_positive_denominator' if non_positive else None
         if key in ('activity.payables_turnover_days', 'activity.cash_conversion_cycle') and any(f in detail_missing for f in ('sp16d_debiti_fornitori_breve', 'sp17d_debiti_fornitori_lungo')):
             reason = 'trade_payables_detail_unavailable'
+        # F1: stessa dichiarazione esplicita di trade_payables_detail_unavailable, sui crediti
+        # commerciali (DSO, e il ciclo di conversione che lo somma) e sul debito finanziario (ROD).
+        if key in ('activity.receivables_turnover_days', 'activity.cash_conversion_cycle') and trade_receivables_unavailable:
+            reason = 'trade_receivables_detail_unavailable'
+        if key == 'profitability.rod' and financial_debt_unavailable:
+            reason = 'financial_debt_detail_unavailable'
         result['analytical.' + key] = IndicatorResult(None if reason else value, reason, formula,
             'Motore FinancialRatiosCalculator: stock finali, anno commerciale 360 giorni, rapporti arrotondati a 4 decimali, giorni interi. Percentuali convertite in punti percentuali dal backend; flussi non annualizzati.')
     return result

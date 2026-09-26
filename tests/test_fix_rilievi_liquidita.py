@@ -171,3 +171,65 @@ def test_balance_sheet_current_assets_e_working_capital_net_non_si_toccano():
     assert bs.current_assets == vecchio_current_assets
     assert bs.current_liabilities == BASE_BS["sp16_debiti_breve"]
     assert bs.working_capital_net == bs.current_assets - bs.current_liabilities
+
+
+# ===========================================================================
+# F6 (Importante, revisione finale lotto 2, 2026-09-26): un solo Margine di Tesoreria.
+# Prima del fix, `report_indicators.py` toglieva solo `sp16` (non il passivo corrente
+# simmetrico di C05) e `ratios.py` usava una TERZA formula (sp06+sp07+sp09, coi crediti
+# oltre 12 mesi dentro) — tre numeri diversi per lo stesso indicatore nello stesso
+# documento/app. Ora: MT = attivo corrente - rimanenze - passivo corrente, in entrambi i
+# punti, con la stessa `passivo_corrente()` di CCN/current ratio/quick ratio.
+# ===========================================================================
+
+def test_mt_practice_usa_attivo_corrente_meno_rimanenze_meno_passivo_corrente():
+    """Sezione 8: MT = attivo corrente - rimanenze - passivo corrente (debiti a breve + ratei
+    passivi), non attivo corrente - rimanenze - soli debiti a breve."""
+    res = indicator_results(dict(BASE_BS), dict(BASE_CE), {})
+    v = _getter(**BASE_BS)
+    atteso = attivo_corrente(v) - BASE_BS["sp05_rimanenze"] - passivo_corrente(v)
+    r = res["practice.mt"]
+    assert r.value is not None and r.value == atteso, (r.value, atteso)
+
+
+def test_mt_practice_diverge_dalla_vecchia_formula_su_ambienta():
+    """Regressione: la vecchia formula (solo sp16 al denominatore, senza sp18) dava un MT diverso
+    su AMBIENTA — a riprova che il fix è entrato in vigore."""
+    res = indicator_results(dict(BASE_BS), dict(BASE_CE), {})
+    v = _getter(**BASE_BS)
+    vecchio = attivo_corrente(v) - BASE_BS["sp05_rimanenze"] - BASE_BS["sp16_debiti_breve"]
+    r = res["practice.mt"]
+    assert r.value != vecchio, (r.value, vecchio)
+
+
+def test_mt_allegato_e_usa_la_stessa_formula_di_sezione_8():
+    """`FinancialRatiosCalculator.calculate_working_capital_metrics().mt` (pagina Indici) dà lo
+    stesso numero della sezione 8 sullo stesso bilancio — non più la terza formula
+    (sp06+sp07+sp09-passivo) che includeva i crediti oltre 12 mesi."""
+    bs, inc = _statements()
+    mt_indici = FinancialRatiosCalculator(bs, inc).calculate_working_capital_metrics().mt
+    res = indicator_results(dict(BASE_BS), dict(BASE_CE), {})
+    mt_sez8 = res["practice.mt"].value
+    assert mt_sez8 is not None
+    assert abs(mt_sez8 - mt_indici) < D("0.01"), (mt_sez8, mt_indici)
+
+
+def test_mt_e_simmetrico_sui_ratei_come_il_ccn():
+    """Stessa guardia di `test_ccn_e_simmetrico_sui_ratei`, per il MT: un rateo attivo entra
+    nell'attivo corrente, un rateo passivo nel passivo corrente — non basta sommarne uno solo."""
+    v = _getter(sp05_rimanenze=D("100"), sp06_crediti_breve=D("200"), sp09_disponibilita_liquide=D("50"),
+                sp10_ratei_risconti_attivi=D("30"), sp16_debiti_breve=D("120"), sp18_ratei_risconti_passivi=D("10"))
+    atteso = (attivo_corrente(v) - D("100")) - passivo_corrente(v)
+    assert atteso == (D("200") + D("50") + D("30")) - (D("120") + D("10"))
+
+
+def test_acid_test_resta_una_definizione_diversa_dal_quick_ratio():
+    """F6 (nota del rilievo): l'acid test di `ratios.py` include i crediti oltre 12 mesi al
+    numeratore e solo `sp16` (non `sp18`) al denominatore — una definizione classica diversa
+    dal quick ratio pratica (`current_ratio`/`quick_ratio`, C05), non un refuso da allineare.
+    Decisione dichiarata nel rapporto di questo giro: resta così, non si tocca."""
+    bs, inc = _statements()
+    calc = FinancialRatiosCalculator(bs, inc)
+    quick = calc.calculate_liquidity_ratios().quick_ratio
+    acid = calc.calculate_liquidity_ratios().acid_test
+    assert quick != acid, (quick, acid)

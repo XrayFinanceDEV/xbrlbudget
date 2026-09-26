@@ -397,3 +397,158 @@ def test_schema_ratios_accetta_rod_e_dio_none():
     e = calc_schemas.ExtendedProfitabilityRatios(spread=None, financial_leverage_effect=1.0,
                                                   ebitda_on_sales=0.1, financial_charges_on_revenue=0.02)
     assert e.spread is None
+
+
+# ===========================================================================
+# F1 (Critico, revisione finale lotto 2, 2026-09-26): DSO e PFN/ROD non diventano
+# silenziosamente 0/−cassa quando i sottoconti di dettaglio sono tutti a zero ma
+# l'aggregato non lo è (import abbreviati/riconciliati: crediti e debiti finiscono nei
+# secchi di ripiego sp06g/sp16g/sp17g, ~98% dei bilanci annuali secondo CLAUDE.md).
+# `None` con una ragione dichiarata, mai un dato inventato.
+# ===========================================================================
+
+_CREDITI_COMMERCIALI_NON_DETTAGLIATI = {
+    "sp06a_crediti_clienti_breve": D("0"), "sp07a_crediti_clienti_lungo": D("0"),
+    "sp06g_crediti_altri_breve": BASE_BS["sp06a_crediti_clienti_breve"] + BASE_BS["sp06g_crediti_altri_breve"],
+    "sp07g_crediti_altri_lungo": (BASE_BS["sp07a_crediti_clienti_lungo"]
+                                  + BASE_BS.get("sp07g_crediti_altri_lungo", D("0"))),
+}
+
+
+def test_dso_none_quando_i_crediti_commerciali_non_sono_dettagliati_alla_fonte():
+    """DSO (`receivables_turnover_days`, ratios.py) = None quando sp06a+sp07a = 0 ma l'aggregato
+    sp06+sp07 resta positivo: i crediti ci sono, solo non classificati come commerciali — zero
+    giorni di credito sarebbe un dato inventato, non uno misurato."""
+    bs, inc = _statements(bs_over=_CREDITI_COMMERCIALI_NON_DETTAGLIATI)
+    activity = FinancialRatiosCalculator(bs, inc).calculate_activity_ratios()
+    assert activity.receivables_turnover_days is None
+
+
+def test_dso_resta_zero_quando_i_crediti_sono_davvero_zero():
+    """Zero crediti commerciali E zero aggregato: qui lo zero è reale, non un buco di dettaglio —
+    il DSO resta 0, non None."""
+    zero_crediti = {"sp06a_crediti_clienti_breve": D("0"), "sp07a_crediti_clienti_lungo": D("0"),
+                    "sp06_crediti_breve": D("0"), "sp07_crediti_lungo": D("0"),
+                    "sp06e_crediti_tributari_breve": D("0"), "sp06g_crediti_altri_breve": D("0"),
+                    "sp07e_crediti_tributari_lungo": D("0"), "sp07g_crediti_altri_lungo": D("0")}
+    bs, inc = _statements(bs_over=zero_crediti)
+    activity = FinancialRatiosCalculator(bs, inc).calculate_activity_ratios()
+    assert activity.receivables_turnover_days == D("0")
+
+
+def test_cash_conversion_cycle_none_quando_il_dso_lo_e():
+    """Il ciclo di conversione del denaro non somma un DSO indefinito: None, non un ciclo che
+    finge di conoscere i giorni di credito."""
+    bs, inc = _statements(bs_over=_CREDITI_COMMERCIALI_NON_DETTAGLIATI)
+    activity = FinancialRatiosCalculator(bs, inc).calculate_activity_ratios()
+    assert activity.cash_conversion_cycle is None
+
+
+def test_dso_dichiarato_nel_report_con_la_ragione_giusta():
+    """Il report (Sez. 1/7, All. E) dichiara `trade_receivables_detail_unavailable`, non un
+    generico `source_calculation_unavailable`: la pagina sa DIRE perché non lo sa."""
+    bs_dict = {**BASE_BS, **_CREDITI_COMMERCIALI_NON_DETTAGLIATI}
+    analytical = {"activity": {"receivables_turnover_days": None}}
+    res = indicator_results(bs_dict, dict(BASE_CE), analytical)
+    r = res["analytical.activity.receivables_turnover_days"]
+    assert r.value is None and r.reason == "trade_receivables_detail_unavailable", r
+
+
+_DEBITO_FINANZIARIO_NON_DETTAGLIATO = {
+    **_NESSUN_DEBITO_FINANZIARIO,
+    "sp16g_altri_debiti_breve": BASE_BS["sp16a_debiti_banche_breve"] + BASE_BS["sp16g_altri_debiti_breve"],
+    "sp17g_altri_debiti_lungo": (BASE_BS["sp17a_debiti_banche_lungo"] + BASE_BS["sp17b_debiti_altri_finanz_lungo"]
+                                  + BASE_BS.get("sp17g_altri_debiti_lungo", D("0"))),
+}
+
+
+def test_pfn_none_quando_il_debito_finanziario_non_e_dettagliato():
+    """PFN = None quando le sei sotto-voci finanziarie (sp16a/b/c, sp17a/b/c) sono tutte a zero
+    ma sp16+sp17 (l'aggregato) resta positivo: non si può sapere quanto di quel debito è
+    finanziario, e «PFN = −cassa» sarebbe falso — non «nessun debito», ma «non lo so»."""
+    bs_dict = {**BASE_BS, **_DEBITO_FINANZIARIO_NON_DETTAGLIATO}
+    res = indicator_results(bs_dict, dict(BASE_CE), {})
+    r = res["practice.pfn"]
+    assert r.value is None and r.reason == "financial_debt_detail_unavailable", r
+
+
+def test_pfn_ebitda_none_quando_il_debito_finanziario_non_e_dettagliato():
+    """PFN/EBITDA eredita la stessa indisponibilità della PFN: non può dividere un numeratore
+    indefinito, anche se l'EBITDA è misurato."""
+    bs_dict = {**BASE_BS, **_DEBITO_FINANZIARIO_NON_DETTAGLIATO}
+    res = indicator_results(bs_dict, dict(BASE_CE), {})
+    r = res["practice.pfn_ebitda"]
+    assert r.value is None and r.reason == "financial_debt_detail_unavailable", r
+
+
+def test_pfn_resta_calcolata_quando_il_debito_finanziario_e_dettagliato():
+    """Con almeno una delle sei sotto-voci finanziarie diversa da zero (il caso normale, base
+    AMBIENTA) la PFN resta un importo vero, non None: la nuova guardia non deve azzerare il
+    caso comune."""
+    res = indicator_results(dict(BASE_BS), dict(BASE_CE), {})
+    r = res["practice.pfn"]
+    assert r.value is not None and r.reason is None, r
+
+
+def test_rod_analitico_dichiara_debito_finanziario_non_dettagliato():
+    """`analytical.profitability.rod` distingue «nessun debito finanziario» (caso già gestito)
+    da «debito finanziario non dettagliato»: qui l'aggregato sp16+sp17 è positivo, quindi la
+    ragione dev'essere `financial_debt_detail_unavailable`, non un generico
+    `source_calculation_unavailable`."""
+    bs_dict = {**BASE_BS, **_DEBITO_FINANZIARIO_NON_DETTAGLIATO}
+    analytical = {"profitability": {"rod": None}}
+    res = indicator_results(bs_dict, dict(BASE_CE), analytical)
+    r = res["analytical.profitability.rod"]
+    assert r.value is None and r.reason == "financial_debt_detail_unavailable", r
+
+
+# ===========================================================================
+# F7 (Importante, revisione finale lotto 2, 2026-09-26): definizioni allineate, pagina Indici.
+# `receivables_turnover_days` (DSO) usa sp06a+sp07a, ma stava etichettato "360/TdC" con TdC =
+# RIC/(sp06+sp07): allineare TdC ai soli crediti commerciali. `working_capital_days` e TdCCN
+# usano ancora `bs.working_capital_net` (il vecchio CCN, con sp07 dentro e senza sp10/sp18):
+# passare al CCN nuovo di C05 (attivo corrente - passivo corrente).
+# ===========================================================================
+
+def test_tdc_turnover_sui_soli_crediti_commerciali():
+    """TdC = RIC / (sp06a + sp07a) — non l'aggregato sp06+sp07, che comprende crediti tributari e
+    diversi: altrimenti «360/TdC» e il DSO pubblicato (360 × crediti commerciali / ricavi) non sono
+    la stessa coppia numeratore/denominatore."""
+    bs, inc = _statements()
+    turnover = FinancialRatiosCalculator(bs, inc).calculate_turnover_ratios()
+    trade_receivables = BASE_BS["sp06a_crediti_clienti_breve"] + BASE_BS["sp07a_crediti_clienti_lungo"]
+    atteso = (BASE_CE["ce01_ricavi_vendite"] / trade_receivables).quantize(D("0.0001"), rounding=ROUND_HALF_UP)
+    assert turnover.receivables_turnover == atteso
+
+
+def test_working_capital_days_sul_nuovo_ccn():
+    """DCCN = 360 × CCN / ricavi, con il CCN di C05 (attivo corrente - passivo corrente,
+    simmetrico sui ratei) — non più `BalanceSheet.working_capital_net` (sp07 dentro l'attivo,
+    niente sp10/sp18)."""
+    from calculations.report_indicators import attivo_corrente, passivo_corrente
+    bs, inc = _statements()
+    activity = FinancialRatiosCalculator(bs, inc).calculate_activity_ratios()
+    field_value = lambda field: getattr(bs, field)
+    ccn = attivo_corrente(field_value) - passivo_corrente(field_value)
+    atteso = (D("360") * ccn / BASE_CE["ce01_ricavi_vendite"]).quantize(D("1"), rounding=ROUND_HALF_UP)
+    assert activity.working_capital_days == atteso
+
+
+def test_working_capital_days_diverge_dalla_vecchia_formula_su_ambienta():
+    """Regressione: la vecchia formula (working_capital_net) dava un DCCN diverso su AMBIENTA."""
+    bs, inc = _statements()
+    activity = FinancialRatiosCalculator(bs, inc).calculate_activity_ratios()
+    vecchio = (D("360") * bs.working_capital_net / BASE_CE["ce01_ricavi_vendite"]).quantize(D("1"), rounding=ROUND_HALF_UP)
+    assert activity.working_capital_days != vecchio, (activity.working_capital_days, vecchio)
+
+
+def test_tdccn_turnover_sul_nuovo_ccn():
+    """TdCCN = RIC / CCN, stesso CCN nuovo di `working_capital_days` — un solo CCN in ogni
+    formula che lo usa, non il vecchio `working_capital_net` qui e il nuovo altrove."""
+    from calculations.report_indicators import attivo_corrente, passivo_corrente
+    bs, inc = _statements()
+    turnover = FinancialRatiosCalculator(bs, inc).calculate_turnover_ratios()
+    field_value = lambda field: getattr(bs, field)
+    ccn = attivo_corrente(field_value) - passivo_corrente(field_value)
+    atteso = (BASE_CE["ce01_ricavi_vendite"] / ccn).quantize(D("0.0001"), rounding=ROUND_HALF_UP)
+    assert turnover.working_capital_turnover == atteso

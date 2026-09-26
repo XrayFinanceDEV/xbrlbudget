@@ -56,10 +56,10 @@ class ActivityRatios(BaseModel):
 
     asset_turnover: float         # Fatturato / Totale Attivo
     inventory_turnover_days: Optional[float] = None  # DMAG - Giorni di Magazzino; None con consumo non positivo
-    receivables_turnover_days: float  # DCRED - Giorni di Credito
+    receivables_turnover_days: Optional[float] = None  # DCRED - Giorni di Credito; None con crediti commerciali non dettagliati (F1)
     payables_turnover_days: float  # DDEB - Giorni di Debito
     working_capital_days: float    # DCCN - Giorni CCN
-    cash_conversion_cycle: Optional[float] = None   # Ciclo di conversione del denaro; None se il DMAG lo è
+    cash_conversion_cycle: Optional[float] = None   # Ciclo di conversione del denaro; None se il DMAG o il DSO lo è
 
 
 class CoverageRatios(BaseModel):

@@ -563,7 +563,13 @@ def _window_source(pid, year, basis, revenue):
     inc = {c.name: Decimal('0') for c in IncomeStatement.__table__.columns if c.name.startswith('ce')}
     bs.update({'sp02_immob_immateriali': Decimal('80'), 'sp05_rimanenze': Decimal('20'),
                'sp06_crediti_breve': revenue, 'sp09_disponibilita_liquide': Decimal('10'),
-               'sp11_capitale': revenue, 'sp16_debiti_breve': Decimal('100')})
+               'sp11_capitale': revenue, 'sp16_debiti_breve': Decimal('100'),
+               # F1 (lotto 2 fix rilievi, 2026-09-26): il debito a breve va dettagliato come
+               # banche, altrimenti sp16a/b/c tutte a zero con sp16 positivo dichiara la PFN
+               # indefinita (`financial_debt_detail_unavailable`) — questa fixture vuole un
+               # PFN vero su ogni periodo, per testare la meccanica del grafico, non la nuova
+               # diagnostica.
+               'sp16a_debiti_banche_breve': Decimal('100')})
     # Costi non proporzionali ai ricavi: i margini cambiano fra periodo,
     # quindi uno scambio di colonne nei test di mutazione è davvero rilevabile.
     inc.update({'ce01_ricavi_vendite': revenue, 'ce05_materie_prime': revenue * Decimal('0.6') + (year - 2024)})

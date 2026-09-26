@@ -230,10 +230,11 @@ export interface ActivityRatios {
   asset_turnover: number;
   /** `null` con consumo di materie prime non positivo (es. nessuna riga distinta, servizi): "n.d.". */
   inventory_turnover_days: number | null;
-  receivables_turnover_days: number;
+  /** `null` con crediti commerciali non dettagliati (F1, lotto 2 fix rilievi 2026-09-26): "n.d.". */
+  receivables_turnover_days: number | null;
   payables_turnover_days: number;
   working_capital_days: number;
-  /** `null` quando `inventory_turnover_days` lo è. */
+  /** `null` quando `inventory_turnover_days` o `receivables_turnover_days` lo è. */
   cash_conversion_cycle: number | null;
 }
 

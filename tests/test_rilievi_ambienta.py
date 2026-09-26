@@ -227,17 +227,14 @@ def test_E05_ammortamento_a_meta_aliquota_nel_primo_anno():
     assert quota_nuovo == D("5000.00")
 
 
-def test_E05_caratterizzazione_straordinari_ripetuti_ogni_anno():
-    """E05 · seconda metà, caratterizzazione: proventi e oneri straordinari della base (ce18/ce19) si ripetono
-    identici in ogni anno di piano (forecast_engine.py: `base_inc.ce18_proventi_straordinari` /
-    `ce19_oneri_straordinari` in assenza di override). Verde = rilievo riprodotto. Fallirà quando la scelta ⚖
-    del proprietario (non proiettare le componenti straordinarie) sarà implementata: è atteso."""
-    # Proventi = oneri: l'utile della base resta uguale a sp13, altrimenti l'anno base non è previsionabile.
+def test_E05_straordinari_a_zero_nel_piano():
+    """E05 · decisione del proprietario (2026-09-26): proventi e oneri straordinari della base non si
+    proiettano; valgono zero in ogni anno di piano, salvo override."""
     straord = {"ce18_proventi_straordinari": D("1234.00"), "ce19_oneri_straordinari": D("1234.00")}
     e = generato(genera(righe(), ce=straord))
     for y in (2027, 2028, 2029):
         ce = e.anni[y][1]
-        assert (ce["ce18_proventi_straordinari"], ce["ce19_oneri_straordinari"]) == (D("1234.00"), D("1234.00")), y
+        assert (ce["ce18_proventi_straordinari"], ce["ce19_oneri_straordinari"]) == (D("0.00"), D("0.00")), y
 
 
 def _bp():

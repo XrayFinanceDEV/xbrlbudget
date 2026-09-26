@@ -139,3 +139,9 @@ def test_asset_disposal_nbv_tocca_solo_i_residui_materiali():
     immateriali = e.det[2027]["ammortamenti"]["immateriali"]
     assert immateriali["esistente_residuo"] == D("302468.85")
     assert immateriali["cespiti_nuovi"][0]["residuo"] == D("45000")
+
+
+def test_E05_override_degli_straordinari_vince():
+    e = generato(genera(righe(ce18_override=500, ce19_override=200)))
+    ce = e.anni[2027][1]
+    assert (ce["ce18_proventi_straordinari"], ce["ce19_oneri_straordinari"]) == (D("500.00"), D("200.00"))

@@ -3201,8 +3201,11 @@ class ForecastEngine:
         ce17a = assumption.ce17a_override if assumption.ce17a_override is not None else (getattr(base_inc, 'ce17a_rivalutazioni', None) or Decimal('0'))
         ce17b = assumption.ce17b_override if assumption.ce17b_override is not None else (getattr(base_inc, 'ce17b_svalutazioni', None) or Decimal('0'))
         ce17 = assumption.ce17_override if assumption.ce17_override is not None else (ce17a - ce17b)
-        ce18 = assumption.ce18_override if assumption.ce18_override is not None else base_inc.ce18_proventi_straordinari
-        ce19 = assumption.ce19_override if assumption.ce19_override is not None else base_inc.ce19_oneri_straordinari
+        # E05 · decisione del proprietario (2026-09-26): i proventi e gli oneri straordinari
+        # della base non sono ricorrenti per definizione, quindi non si proiettano — valgono
+        # zero in ogni anno di piano, salvo override esplicito.
+        ce18 = assumption.ce18_override if assumption.ce18_override is not None else Decimal('0')
+        ce19 = assumption.ce19_override if assumption.ce19_override is not None else Decimal('0')
 
         # Financial income/costs: use override if set, otherwise carry forward from base year
         ce14 = assumption.ce14_override if assumption.ce14_override is not None else base_inc.ce14_altri_proventi_finanziari

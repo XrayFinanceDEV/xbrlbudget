@@ -148,13 +148,13 @@ def test_B01_variazione_rimanenze_del_ce_segue_lo_sp():
         prec = sp["sp05_rimanenze"]
 
 
-@pytest.mark.xfail(strict=True, raises=AssertionError, reason="B02 confermato dal triage 2026-09-25: l'ammortamento dei "
-                    "cespiti materiali esistenti continua alla quota piena anche oltre il residuo netto"
-                    " — togli il marcatore quando il fix lo fa passare")
 def test_B02_ammortamento_dei_cespiti_esistenti_si_ferma_al_residuo():
-    """B02 · Passo 6: materiali esistenti 72.797 netti ammortizzati 36.040/anno anche oltre il residuo.
-    Con un investimento di 250.000 nel 2027 al 10%: 2027 = 36.040 + 25.000, 2028 = 36.040 + 25.000,
-    2029 = residuo esistente (72.796,59 − 72.080 = 716,59) + 25.000."""
+    """B02 · Passo 6, fix 2026-09-26: materiali esistenti 72.797 netti, quota base 36.040/anno, ora si
+    ferma al residuo invece di continuare alla quota piena. Con un investimento di 250.000 nel 2027 al
+    10% (meta' aliquota nell'anno d'ingresso, E05): il nuovo cespite ammortizza 12.500 nel 2027 e 25.000
+    pieni dal 2028; l'esistente si esaurisce nel 2029 (residuo 716,59 invece dei 36.040 di prima),
+    quindi 2029 = 716,59 + 25.000 = 25.716,59. L'oracolo non cambia con la meta' aliquota: la meta'
+    riguarda solo l'anno d'ingresso del nuovo cespite (2027), non il 2029."""
     rows = righe(depreciation_rate=10)
     rows[0]["tangible_investments"] = 250000
     e = generato(genera(rows))
@@ -217,16 +217,14 @@ def test_B05_bis_rata_2030_scadenziata_sta_a_breve():
     assert e.anni[2029][0]["sp16a_debiti_banche_breve"] == D("353409.00")
 
 
-def test_E05_caratterizzazione_ammortamento_primo_anno_e_straordinari():
-    """E05 · caratterizzazione, non verdetto (spec §4): asserisce il comportamento CRITICATO dal consulente, quindi
-    verde = rilievo riprodotto. Investimento 2027 di 100.000 al 10%: quota 2027 del nuovo = 10.000 (aliquota
-    piena). Fallirà quando la scelta ⚖ del proprietario (metà aliquota nel primo anno) sarà implementata: è
-    atteso, e il test va allora riscritto sull'oracolo scelto."""
+def test_E05_ammortamento_a_meta_aliquota_nel_primo_anno():
+    """E05 · decisione del proprietario (2026-09-26): un investimento si ammortizza a metà aliquota
+    nell'anno in cui entra. Investimento 2027 di 100.000 al 10%: quota 2027 del nuovo = 5.000."""
     rows = righe(depreciation_rate=10)
     rows[0]["tangible_investments"] = 100000
     e = generato(genera(rows))
     quota_nuovo = e.anni[2027][1]["ce09b_ammort_materiali"] - BASE_CE["ce09b_ammort_materiali"]
-    assert quota_nuovo == D("10000.00")  # aliquota piena nel primo anno: stato di oggi
+    assert quota_nuovo == D("5000.00")
 
 
 def test_E05_caratterizzazione_straordinari_ripetuti_ogni_anno():

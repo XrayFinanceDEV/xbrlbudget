@@ -278,19 +278,24 @@ def test_senza_concessione_lo_stesso_piano_si_ferma_come_sempre():
 # muoverebbe a valle (`sp13`, `ce20`, il totale attivo). Una riga di costo non
 # puo' muoversi per questa correzione, e congelarla direbbe di piu' di quanto
 # questo test sa.
+# lotto 1 fix rilievi (2026-09-26): B02+E05 sostituiscono la catena `prev_ce09 + nuovo` con masse
+# separate a meta' aliquota nell'anno d'ingresso. `RIGHE_PARITA` investe (tangibili e intangibili)
+# ogni anno: il risultato e le imposte si spostano di conseguenza (meno ammortamento nell'anno
+# d'ingresso, piu' utile ante imposte); il debito bancario e gli oneri finanziari restano quelli di
+# prima, perche' nessuno scoperto si accende in questo scenario. Rimisurato sul motore nuovo.
 PARITA = {
-    2027: {"sp09_disponibilita_liquide": "94586.93", "sp16a_debiti_banche_breve": "0.00",
+    2027: {"sp09_disponibilita_liquide": "94586.96", "sp16a_debiti_banche_breve": "0.00",
            "sp16_debiti_breve": "140000.00", "sp17a_debiti_banche_lungo": "50000.00",
-           "sp13_utile_perdita": "61796.71", "ce15_oneri_finanziari": "5000.00",
-           "ce20_imposte": "23913.02", "_total_assets": "468088.00"},
-    2028: {"sp09_disponibilita_liquide": "230527.70", "sp16a_debiti_banche_breve": "0.00",
+           "sp13_utile_perdita": "62855.97", "ce15_oneri_finanziari": "5000.00",
+           "ce20_imposte": "24322.90", "_total_assets": "469147.26"},
+    2028: {"sp09_disponibilita_liquide": "229707.97", "sp16a_debiti_banche_breve": "0.00",
            "sp16_debiti_breve": "144564.52", "sp17a_debiti_banche_lungo": "50000.00",
-           "sp13_utile_perdita": "73592.47", "ce15_oneri_finanziari": "5000.00",
-           "ce20_imposte": "28477.54", "_total_assets": "552606.11"},
-    2029: {"sp09_disponibilita_liquide": "351099.36", "sp16a_debiti_banche_breve": "0.00",
+           "sp13_utile_perdita": "74651.72", "ce15_oneri_finanziari": "5000.00",
+           "ce20_imposte": "28887.42", "_total_assets": "554724.62"},
+    2029: {"sp09_disponibilita_liquide": "349869.76", "sp16a_debiti_banche_breve": "0.00",
            "sp16_debiti_breve": "144752.16", "sp17a_debiti_banche_lungo": "50000.00",
-           "sp13_utile_perdita": "85873.15", "ce15_oneri_finanziari": "5000.00",
-           "ce20_imposte": "33229.69", "_total_assets": "645098.63"},
+           "sp13_utile_perdita": "86932.38", "ce15_oneri_finanziari": "5000.00",
+           "ce20_imposte": "33639.58", "_total_assets": "648276.37"},
 }
 
 RIGHE_PARITA = [
@@ -612,6 +617,12 @@ def test_ruling_38_lo_scoperto_si_rimborsa_per_primo_anche_sotto_la_cassa_minima
     Cash sweep con cassa minima 20.000,55 nel 2028 e nel 2029: nel 2028 la cassa
     chiude a zero con lo scoperto ancora aperto, e `cassa_sotto_minimo` lo dice;
     nel 2029 lo scoperto e' chiuso (e, dal 2026-09-18, anche il pregresso: vedi sotto).
+
+    lotto 1 fix rilievi (2026-09-26): B02+E05 dimezzano l'ammortamento del 2027
+    (investimento di `_stress`) rispetto alla vecchia catena `prev_ce09 + nuovo`,
+    quindi l'utile ante imposte 2027 e' piu' alto e lo scoperto che ne segue anche:
+    64.288,76 -> 83.818,78 nel 2028, e la cassa 2029 assorbe la differenza cumulata
+    (45.002,71 -> 34.040,51). Rimisurato sul motore nuovo.
     """
     engine, sessions = memory_sessions()
     try:
@@ -624,12 +635,12 @@ def test_ruling_38_lo_scoperto_si_rimborsa_per_primo_anche_sotto_la_cassa_minima
             det, _ = _dettagli(db, sid, rows)
         assert _eur(det[2027]["cassa_sotto_minimo"]) == 0.0       # sweep spento: nessun minimo
         assert mappe[2028]["sp09_disponibilita_liquide"] == D("0.00")
-        assert D(str(det[2028]["scoperto_residuo"])) == D("64288.76")
+        assert D(str(det[2028]["scoperto_residuo"])) == D("83818.78")
         assert D(str(det[2028]["cassa_sotto_minimo"])) == D("20000.55")
         # Dal 2026-09-18 il 2028 compensa 44.425,60 di credito da acconti: nel 2029
         # lo sweep chiude scoperto E debito bancario pregresso, e la cassa resta
         # sopra il minimo (prima si fermava al minimo con parte del lungo aperto).
-        assert mappe[2029]["sp09_disponibilita_liquide"] == D("45002.71")
+        assert mappe[2029]["sp09_disponibilita_liquide"] == D("34040.51")
         assert mappe[2029]["sp17a_debiti_banche_lungo"] == D("0")
         assert _eur(det[2029]["scoperto_residuo"]) == 0.0
         assert _eur(det[2029]["cassa_sotto_minimo"]) == 0.0

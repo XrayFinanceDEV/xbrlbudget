@@ -14,7 +14,7 @@ from database.models import (
 )
 from calculations.projection_common import (
     base_bank_debt, financial_repayment_instalment, altri_finanz_repayment_instalment,
-    tfr_accrual_quota, deferred_tax_position,
+    tfr_accrual_quota, deferred_tax_position, ammortamento_categoria,
     new_financing_schedule, PREGRESSO_KEYS, PREGRESSO_LABELS,
     pregresso_opening_masses, runoff_schedule, validate_runoff,
     tax_settlement_saldo_acconto, soglia_giorni_magazzino,
@@ -3049,23 +3049,20 @@ class ForecastEngine:
         depreciation_rate_tangible = assumption.depreciation_rate / Decimal('100')
         depreciation_rate_intangible = (getattr(assumption, 'depreciation_rate_intangible', None) or assumption.depreciation_rate) / Decimal('100')
         intangible_inv, tangible_inv = self._get_split_investments(assumption)
-        new_depr_intangible = intangible_inv * depreciation_rate_intangible if intangible_inv > 0 else Decimal('0')
-        new_depr_tangible = tangible_inv * depreciation_rate_tangible if tangible_inv > 0 else Decimal('0')
 
-        # Depreciation sub-items: override, else carry the PREVIOUS year's charge forward
-        # (it already includes prior investments' depreciation) plus this year's new
-        # investment depreciation — so a one-off investment keeps being depreciated in
-        # later years instead of reverting to the base-year charge (#7). The charge is
-        # then capped at the available net book value (previous NBV + this year's
-        # investment) so depreciation stops once the asset is fully written down (#5).
+        # Depreciation sub-items: masse separate (spec B02, E05 — 2026-09-26).
+        # `ammortamento_categoria` (`calculations/projection_common.py`) tiene
+        # divise la massa esistente all'apertura del piano dai cespiti che il
+        # piano stesso genera, ognuno del proprio residuo — cosi' la quota
+        # sull'esistente SI FERMA quando il netto si esaurisce (B02, invece di
+        # continuare alla quota piena di sempre) e un investimento ammortizza a
+        # meta' aliquota nell'anno in cui entra (E05). Lo stato di apertura viene
+        # da `prev_details['ammortamenti']` (`None` sul primo anno di piano) e si
+        # dichiara sempre in `details['ammortamenti']`, a prescindere da override.
         base_ce09a = getattr(base_inc, 'ce09a_ammort_immateriali', None) or Decimal('0')
         base_ce09b = getattr(base_inc, 'ce09b_ammort_materiali', None) or Decimal('0')
         base_ce09c = getattr(base_inc, 'ce09c_svalutazioni', None) or Decimal('0')
         base_ce09d = getattr(base_inc, 'ce09d_svalutazione_crediti', None) or Decimal('0')
-
-        def _prev_inc_val(field, fallback):
-            v = getattr(previous_inc, field, None) if previous_inc is not None else None
-            return v if v is not None else fallback
 
         def _prev_bs_val(field):
             if previous_bs is None:
@@ -3074,19 +3071,35 @@ class ForecastEngine:
                 return previous_bs.get(field, Decimal('0')) or Decimal('0')
             return getattr(previous_bs, field, Decimal('0')) or Decimal('0')
 
-        prev_ce09a = _prev_inc_val('ce09a_ammort_immateriali', base_ce09a)
-        prev_ce09b = _prev_inc_val('ce09b_ammort_materiali', base_ce09b)
-        avail_intangible = max(Decimal('0'), _prev_bs_val('sp02_immob_immateriali') + intangible_inv)
-        avail_tangible = max(Decimal('0'), _prev_bs_val('sp03_immob_materiali') + tangible_inv)
-
-        if assumption.ce09a_override is not None:
-            ce09a = assumption.ce09a_override
-        else:
-            ce09a = min(prev_ce09a + new_depr_intangible, avail_intangible)
-        if assumption.ce09b_override is not None:
-            ce09b = assumption.ce09b_override
-        else:
-            ce09b = min(prev_ce09b + new_depr_tangible, avail_tangible)
+        stato_ammort = (prev_details or {}).get('ammortamenti') or {}
+        # Dismissione (asset_disposal_nbv): tocca solo il residuo dei cespiti
+        # MATERIALI, mai gli immateriali — l'eventuale plus/minusvalenza sul
+        # conto economico resta gestita piu' sotto (ce04/ce12), invariata.
+        disposal_nbv_ammort = getattr(assumption, 'asset_disposal_nbv', None) or Decimal('0')
+        ce09a, stato_ammort_immateriali = ammortamento_categoria(
+            stato_ammort.get('immateriali'),
+            _prev_bs_val('sp02_immob_immateriali'),
+            base_ce09a,
+            intangible_inv,
+            depreciation_rate_intangible,
+            assumption.forecast_year,
+            assumption.ce09a_override,
+        )
+        ce09b, stato_ammort_materiali = ammortamento_categoria(
+            stato_ammort.get('materiali'),
+            _prev_bs_val('sp03_immob_materiali'),
+            base_ce09b,
+            tangible_inv,
+            depreciation_rate_tangible,
+            assumption.forecast_year,
+            assumption.ce09b_override,
+            dismissione=disposal_nbv_ammort,
+        )
+        if details is not None:
+            details['ammortamenti'] = {
+                'immateriali': stato_ammort_immateriali,
+                'materiali': stato_ammort_materiali,
+            }
         ce09c = assumption.ce09c_override if assumption.ce09c_override is not None else base_ce09c
         # L'inesigibile scadenziato e' una svalutazione crediti dell'anno: si somma
         # alla svalutazione dell'anno base, che resta il portato di sempre. Non

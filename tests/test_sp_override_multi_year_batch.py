@@ -98,8 +98,13 @@ def _sp_overrides(db, scenario_id, year):
 # I due importi della sonda: derivati eseguendo il motore reale (non a mano),
 # gli unici per cui questo fixture produce esattamente "un anno solo fallisce,
 # insieme riescono" -- vedi il docstring del modulo.
+# lotto 1 fix rilievi (2026-09-26): B02+E05 dimezzano l'ammortamento 2027 (l'investimento di
+# `_stress`) rispetto alla vecchia catena `prev_ce09 + nuovo`, quindi l'utile ante imposte e il
+# fabbisogno ereditato dal 2028 sono piu' alti. OVERRIDE_2028 e' ritarato da 450.000 a 470.000
+# rieseguendo il motore nuovo (soglia reale fra 465.000 e 475.000); OVERRIDE_2027 resta 300.000,
+# ancora insufficiente da solo.
 OVERRIDE_2027 = 300000.0
-OVERRIDE_2028 = 450000.0
+OVERRIDE_2028 = 470000.0
 
 
 def test_solo_la_combinazione_e_valida_il_salvataggio_riesce():

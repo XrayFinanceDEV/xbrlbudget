@@ -115,6 +115,128 @@ def altri_finanz_repayment_instalment(getter: Callable[[str], Decimal], altri_ye
     return getter('sp17b_debiti_altri_finanz_lungo') / years
 
 
+# ── Ammortamento per masse separate (spec B02, E05 — 2026-09-26) ──
+def ammortamento_categoria(
+    stato_apertura: Optional[Dict[str, Any]],
+    netto_apertura: Decimal,
+    quota_base: Decimal,
+    investimento: Decimal,
+    aliquota: Decimal,
+    anno: int,
+    override: Optional[Decimal],
+    dismissione: Decimal = ZERO,
+) -> Tuple[Decimal, Dict[str, Any]]:
+    """Quota di ammortamento dell'anno per UNA categoria (immateriali o materiali),
+    tenendo separate la massa esistente all'apertura del piano e i cespiti che il
+    piano stesso genera — invece di sommarli in un'unica quota che non si ferma mai
+    al residuo netto (B02).
+
+    Regole:
+    - Primo anno (`stato_apertura is None`): la massa esistente parte dal netto di
+      bilancio dell'anno base (`netto_apertura`, sp02/sp03 dell'anno prima), senza
+      cespiti nuovi. Dal secondo anno in poi la massa esistente e i cespiti nuovi
+      vengono dallo stato dell'anno precedente (`esistente_residuo`, `cespiti_nuovi`
+      — le sole due chiavi lette da `stato_apertura`, cosi' un chiamante puo' passare
+      uno stato parziale).
+    - Un investimento dell'anno (`investimento > 0`) apre un cespite nuovo
+      `{'anno', 'importo', 'aliquota', 'residuo': importo}`; l'aliquota e' quella
+      dell'anno d'ingresso e resta la sua per tutta la vita del cespite.
+    - La quota sull'esistente e' `min(quota_base, esistente_apertura)`: si ferma al
+      residuo, non continua alla quota piena di sempre (B02). `quota_base` e'
+      `ce09a`/`ce09b` dell'ANNO BASE, costante per tutto il piano.
+    - Ogni cespite nuovo ammortizza alla propria aliquota piena, ECCETTO nell'anno
+      in cui entra: li' la quota e' meta' aliquota (E05, decisione del proprietario
+      2026-09-26), sempre limitata al proprio residuo.
+    - Guardia: `netto_apertura + investimento` e' il massimo ammortizzabile (un
+      `sp_overrides` sullo SP puo' averlo abbassato sotto la quota che le formule
+      produrrebbero). Se la somma calcolata lo supera, la quota si LIMITA a quel
+      massimo e si alloca come un override (`limitato_al_netto = True`).
+    - Un override esplicito (o la guardia sopra) toglie l'importo prima dalla massa
+      esistente fino al suo residuo, poi dai cespiti nuovi in ordine d'ingresso;
+      `override = True` solo per l'override vero, mai per la guardia.
+    - Una dismissione (`dismissione`, solo materiali) si toglie DOPO le quote, nello
+      stesso ordine (esistente poi nuovi), mai sotto zero: non e' una quota, e' una
+      radiazione del residuo.
+
+    Ritorna `(quota_dell_anno, stato_chiusura)`. Gli importi restano `Decimal`
+    grezzi, non quantizzati: la quantizzazione del CE persistito e' a valle.
+    """
+    netto_apertura = Decimal(str(netto_apertura or 0))
+    quota_base = Decimal(str(quota_base or 0))
+    investimento = Decimal(str(investimento or 0))
+    aliquota = Decimal(str(aliquota or 0))
+    dismissione = Decimal(str(dismissione or 0))
+
+    if stato_apertura is None:
+        esistente_apertura = netto_apertura
+        cespiti_nuovi: List[Dict[str, Any]] = []
+    else:
+        esistente_apertura = Decimal(str(stato_apertura.get('esistente_residuo') or 0))
+        cespiti_nuovi = [dict(c) for c in (stato_apertura.get('cespiti_nuovi') or [])]
+
+    if investimento > ZERO:
+        cespiti_nuovi = cespiti_nuovi + [
+            {'anno': anno, 'importo': investimento, 'aliquota': aliquota, 'residuo': investimento}
+        ]
+
+    quota_esistente = min(quota_base, esistente_apertura)
+
+    quote_nuovi = []
+    for cespite in cespiti_nuovi:
+        piena = cespite['importo'] * cespite['aliquota']
+        if cespite['anno'] == anno:
+            piena = piena / Decimal('2')
+        quote_nuovi.append(min(piena, cespite['residuo']))
+    quota_nuovi_totale = sum(quote_nuovi, ZERO)
+
+    quota_calcolata = quota_esistente + quota_nuovi_totale
+    max_disponibile = netto_apertura + investimento
+
+    is_override = override is not None
+    limitato_al_netto = (not is_override) and quota_calcolata > max_disponibile
+
+    if is_override or limitato_al_netto:
+        importo = Decimal(str(override)) if is_override else max_disponibile
+        preso_esistente = min(importo, esistente_apertura)
+        esistente_residuo = esistente_apertura - preso_esistente
+        restante = importo - preso_esistente
+        for cespite in cespiti_nuovi:
+            preso = min(restante, cespite['residuo'])
+            cespite['residuo'] = cespite['residuo'] - preso
+            restante -= preso
+        quota = importo
+        quota_esistente_dichiarata = preso_esistente
+        quota_nuovi_dichiarata = importo - preso_esistente
+    else:
+        esistente_residuo = esistente_apertura - quota_esistente
+        for cespite, quota_c in zip(cespiti_nuovi, quote_nuovi):
+            cespite['residuo'] = cespite['residuo'] - quota_c
+        quota = quota_calcolata
+        quota_esistente_dichiarata = quota_esistente
+        quota_nuovi_dichiarata = quota_nuovi_totale
+
+    if dismissione > ZERO:
+        preso = min(dismissione, esistente_residuo)
+        esistente_residuo -= preso
+        restante = dismissione - preso
+        for cespite in cespiti_nuovi:
+            if restante <= ZERO:
+                break
+            preso = min(restante, cespite['residuo'])
+            cespite['residuo'] = cespite['residuo'] - preso
+            restante -= preso
+
+    return quota, {
+        'esistente_apertura': esistente_apertura,
+        'quota_esistente': quota_esistente_dichiarata,
+        'esistente_residuo': esistente_residuo,
+        'quota_nuovi': quota_nuovi_dichiarata,
+        'cespiti_nuovi': cespiti_nuovi,
+        'override': is_override,
+        'limitato_al_netto': limitato_al_netto,
+    }
+
+
 # ── TFR (trattamento di fine rapporto) accrual ──
 # The yearly TFR accrual is the statutory quota "retribuzione / 13,5". We use the
 # projected "salari e stipendi" (ce08b) as the retribuzione base. When an import

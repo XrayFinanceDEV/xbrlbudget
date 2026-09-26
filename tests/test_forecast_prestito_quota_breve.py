@@ -223,10 +223,17 @@ CASI = [
         quota={2027: "25000.09", 2028: "25000.09", 2029: "25000.09"},
         esercita_scoperto=True,
         # Il debito bancario qui comprende lo scoperto in essere (184.786,42 nel 2027).
+        # lotto 1 fix rilievi (2026-09-26): B02+E05 sostituiscono la catena `prev_ce09 + nuovo`
+        # con masse separate a meta' aliquota nell'anno d'ingresso. STRESS investe 350.000,37 nel
+        # 2027: meta' quota quell'anno abbassa l'ammortamento e alza l'utile ante imposte di
+        # 35.000,037 (sp13 e ce20 2027 si muovono; debito e cassa 2027 no, perche' la maggiore
+        # imposta e' solo accantonata). Il saldo piu' alto si paga nel 2028 (piu' scoperto, sp16a+
+        # sp17a sale), e l'effetto di cassa arriva al 2029 (sp09 piu' bassa). Rimisurato sul motore
+        # nuovo, non sulla formula: `sp16a+sp17a` 2027 e 2029 e `ce15` non si muovono.
         prima={
-            2027: ("295589.17", "0", "9985.79", "11130.02", "3864.12"),
-            2028: ("118244.30", "0", "17808.94", "20924.93", "6891.39"),
-            2029: ("60802.57", "99722.00", "41028.07", "10053.68", "15876.33"),
+            2027: ("295589.17", "0", "35220.81", "11130.02", "13629.13"),
+            2028: ("137774.32", "0", "17808.94", "20924.93", "6891.39"),
+            2029: ("60802.57", "88759.80", "40164.90", "11250.87", "15542.31"),
         },
     ),
 ]

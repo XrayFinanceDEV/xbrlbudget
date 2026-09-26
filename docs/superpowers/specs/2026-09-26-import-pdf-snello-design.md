@@ -31,6 +31,10 @@ Decisioni del proprietario (2026-09-26):
 - Sistema attuale con i tre fornitori su gx10: `budget_948` (route C, contrapposte) **708 s**;
   `budget_949` **185 s**; il bilancio di verifica AMBIENTA 30.06.2026 **456 s e sbagliato**
   (sbilancio 330.223,99 = patrimonio netto + TFR non letti).
+- Profilo per fase del sistema attuale su `budget_948` (555 s): `extract_source_candidates` →
+  `ledger_evidence.read_accounts` **483 s** in 5 chiamate, una delle quali ha scritto il tetto intero di
+  14.000 token e da sola è durata 368 s; il pass CoGe 37 s in 4 chiamate, **3 delle quali identiche**
+  (stesso prompt da 11.545 token, stessa risposta); i dettagli 34 s. Qwen ha scritto 28.609 token.
 - Prototipo usa-e-getta (righe dal text layer, Qwen assegna il percorso di legge, il codice somma):
   stesso `budget_948` in pareggio in **26 s**; AMBIENTA verifica e depositato in pareggio al
   centesimo in **18-31 s**; 22 file di route C in 540 s complessivi. Il prototipo pareggiava solo 9

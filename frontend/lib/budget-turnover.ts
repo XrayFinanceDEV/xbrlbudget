@@ -23,9 +23,12 @@ import { num } from "@/lib/budget-format";
  * Il ramo `dio` (spec B01, 2026-09-26) non guida più le rimanenze sui ricavi: il motore
  * calcola le materie prime (`sp05a`) dal CONSUMO dell'anno (`ce05 + ce10`), perché
  * un'azienda che compra e consuma materie non le vende. Il segnaposto scorpora allo
- * stesso modo — numeratore le sole materie (`sp05a`, o l'aggregato meno `sp05e` quando
- * la base non ha alcuna sotto-voce di dettaglio), denominatore il consumo dell'anno base,
- * non il fatturato.
+ * stesso modo — numeratore le sole materie (`sp05a`), denominatore il consumo dell'anno
+ * base, non il fatturato. Il ripiego sull'aggregato meno `sp05e` scatta solo quando la
+ * base non ha ALCUNA sotto-voce di `sp05` (tutte e cinque a zero, aggregato positivo) —
+ * la stessa regola di `_materie_base` nel motore: un `sp05a` a zero con un'altra
+ * sotto-voce valorizzata (es. `sp05c`) NON è "nessun dettaglio", è materie davvero a
+ * zero, e il ripiego la confonderebbe con un'altra rimanenza.
  */
 export function computeAutoDays(
   kind: "dso" | "dio" | "dpo",
@@ -48,9 +51,15 @@ export function computeAutoDays(
   }
   if (kind === "dio") {
     const materiePrime = num(balance.sp05a_materie_prime);
-    numerator = materiePrime > 0
-      ? materiePrime
-      : num(balance.sp05_rimanenze) - num(balance.sp05e_acconti);
+    const sottoVociTotale = materiePrime
+      + num(balance.sp05b_prodotti_in_corso)
+      + num(balance.sp05c_lavori_in_corso)
+      + num(balance.sp05d_prodotti_finiti)
+      + num(balance.sp05e_acconti);
+    const aggregato = num(balance.sp05_rimanenze);
+    numerator = sottoVociTotale === 0 && aggregato > 0
+      ? aggregato - num(balance.sp05e_acconti)
+      : materiePrime;
     denominator = num(income.ce05_materie_prime) + num(income.ce10_var_rimanenze_mat_prime);
   }
   if (kind === "dpo") { numerator = num(balance.sp16d_debiti_fornitori_breve); denominator = purchases; }

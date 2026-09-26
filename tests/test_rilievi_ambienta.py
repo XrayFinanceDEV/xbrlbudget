@@ -130,9 +130,12 @@ def test_A06_previdenziali_seguono_il_personale_se_la_tendina_lo_dice():
 
 
 def test_B01_variazione_rimanenze_del_ce_segue_lo_sp():
-    """B01 · Passo 4 / CE B11: nello SP le rimanenze seguono il DIO, nel CE la variazione resta al valore
-    2026. Oracolo: ce10 di ogni anno = rimanenze di fine anno − rimanenze d'inizio (convenzione del CE:
-    un aumento delle rimanenze di materie riduce il costo)."""
+    """B01 · Passo 4 / CE B11, fix: le materie prime (sp05a) si calcolano nel CE dal consumo
+    dell'anno (ce05 + apertura − chiusura), prima delle imposte, e lo SP legge la chiusura da
+    li' — mai il contrario. Su questa base AMBIENTA (senza dettaglio sp05b–e) l'intero
+    aggregato sp05 coincide con le materie, quindi la Δ dello SP e ce10 devono coincidere
+    esattamente anno per anno. Oracolo: ce10 di ogni anno = rimanenze di fine anno − rimanenze
+    d'inizio (convenzione OIC B11: un aumento delle rimanenze di materie riduce il costo)."""
     rows = per_anno(righe(dio_days=22), "revenue_growth_pct", (5, 6, 7))
     e = generato(genera(rows))
     prec = BASE_BS["sp05_rimanenze"]

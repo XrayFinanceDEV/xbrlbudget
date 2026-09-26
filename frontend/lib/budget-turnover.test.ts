@@ -90,11 +90,24 @@ describe("computeAutoDays — dio sul consumo delle materie (B01)", () => {
     expect(computeAutoDays("dio", is, bs)).toBeNull();
   });
 
-  it("base senza sp05a usa l'aggregato meno gli acconti come materie", () => {
-    const bs = balance({ sp05_rimanenze: "36", sp05e_acconti: "6" });
+  it("base senza ALCUNA sotto-voce usa l'aggregato meno gli acconti come materie", () => {
+    // sp05a..sp05e tutte a zero, aggregato positivo: nessun dettaglio, stesso ripiego
+    // di `_alloc`/`_materie_base` nel motore.
+    const bs = balance({ sp05_rimanenze: "36" });
     const is = income({ ce01_ricavi_vendite: "1000", ce05_materie_prime: "260" });
-    // (36 - 6) / 260 x 360 = 41,54 -> 42.
-    expect(computeAutoDays("dio", is, bs)).toBe(42);
+    // (36 - 0) / 260 x 360 = 49,85 -> 50.
+    expect(computeAutoDays("dio", is, bs)).toBe(50);
+  });
+
+  // lotto 1 fix rilievi (2026-09-26), fix round 1: il ripiego sull'aggregato scatta SOLO
+  // quando NESSUNA sotto-voce di sp05 e' valorizzata — non quando sp05a e' a zero ma
+  // un'altra sotto-voce (qui sp05c) non lo e'. Materie davvero a zero non sono la stessa
+  // cosa di materie senza dettaglio: confonderle sposterebbe la giacenza di un'altra
+  // rimanenza sul DIO delle materie.
+  it("sp05a a zero con sp05c valorizzato non attiva il ripiego: materie restano zero", () => {
+    const bs = balance({ sp05_rimanenze: "36", sp05c_lavori_in_corso: "36" });
+    const is = income({ ce01_ricavi_vendite: "1000", ce05_materie_prime: "260" });
+    expect(computeAutoDays("dio", is, bs)).toBe(0);
   });
 });
 

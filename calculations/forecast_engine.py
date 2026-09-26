@@ -1737,7 +1737,10 @@ class ForecastEngine:
     # (fuori dal DSO e dalle masse del pregresso), `sp12h` (segno proprio),
     # `sp14b` (scritta dalle imposte differite), `sp14c` (derivato),
     # `sp16a-c`/`sp17a-c` (confine PFN e confine del rendiconto: sono un
-    # debito finanziario, mai il ripiego di un residuo di arrotondamento).
+    # debito finanziario, mai il ripiego di un residuo di arrotondamento),
+    # `sp05a_materie_prime` (spec B01, 2026-09-26: confine CE↔SP, la chiusura
+    # che il CE ha gia' calcolato dal consumo — un centesimo posato li' sopra
+    # romperebbe l'identita' `ce10 persistito == Δsp05a persistito`).
     _CAMPI_NEUTRI_RESIDUO: Dict[str, Tuple[str, ...]] = {
         "sp01_crediti_soci": ("sp01b_parte_da_richiamare", "sp01a_parte_richiamata"),
         "sp02_immob_immateriali": ("sp02g_altre_immob_imm", "sp02a_costi_impianto", "sp02b_costi_sviluppo",
@@ -1745,7 +1748,7 @@ class ForecastEngine:
         "sp03_immob_materiali": ("sp03d_altri_beni", "sp03a_terreni_fabbricati", "sp03b_impianti_macchinari",
                                  "sp03c_attrezzature", "sp03e_immob_in_corso"),
         "sp04_immob_finanziarie": ("sp04d_altri_titoli", "sp04a_partecipazioni", "sp04c_crediti_immob_lungo"),
-        "sp05_rimanenze": ("sp05e_acconti", "sp05a_materie_prime", "sp05b_prodotti_in_corso",
+        "sp05_rimanenze": ("sp05e_acconti", "sp05b_prodotti_in_corso",
                            "sp05c_lavori_in_corso", "sp05d_prodotti_finiti"),
         "sp06_crediti_breve": ("sp06g_crediti_altri_breve", "sp06d_crediti_controllanti_breve",
                                "sp06c_crediti_collegate_breve", "sp06b_crediti_controllate_breve",
@@ -3218,10 +3221,26 @@ class ForecastEngine:
 
         ce10_override = assumption.ce10_override
         if ce10_override is not None:
+            if ce10_override > apertura_materie:
+                # Un override oltre l'apertura svuoterebbe le rimanenze sotto zero: il CE
+                # direbbe ce10 = override, ma lo SP clamperebbe sp05a a zero, e i due
+                # divergerebbero dell'eccedenza — lo stesso guasto silenzioso che altrove in
+                # questo motore si rifiuta invece di tappare (`CLAUDE.md`, «diagnose, never
+                # fabricate»).
+                raise ValueError(
+                    f"L'override di ce10_var_rimanenze_mat_prime nell'anno "
+                    f"{assumption.forecast_year} ({eur_it(ce10_override)}) supera le materie "
+                    f"prime in apertura ({eur_it(apertura_materie)}): le rimanenze non possono "
+                    "scendere sotto zero. Abbassa l'override o svuota la cella (value: null) e "
+                    "lascia che il consumo lo derivi."
+                )
             ce10 = ce10_override
             chiusura_materie = max(Decimal('0'), apertura_materie - ce10_override).quantize(
                 Decimal('0.01'), rounding=ROUND_HALF_UP
             )
+            # L'override vince: i giorni dedotti sopra (e un'eventuale degenerazione) non sono
+            # mai stati USATI per determinare il risultato, quindi non si dichiarano.
+            degenere_materie = False
         elif degenere_materie:
             # Nessun giorno affidabile: le rimanenze di materie si riportano, la variazione
             # e' zero (diagnose, never fabricate — lo stesso principio del resto del motore).

@@ -180,6 +180,29 @@ def test_B01_override_ce10_muove_lo_sp():
     assert e.anni[2027][0]["sp05a_materie_prime"] == D("275000.00")
 
 
+def test_B01_override_ce10_maggiore_dell_apertura_si_rifiuta():
+    # AMBIENTA: apertura materie 287.312. Un override di 300.000 svuoterebbe le
+    # rimanenze sotto zero (CE e SP divergerebbero dell'eccedenza): si rifiuta.
+    e = genera(righe(ce10_override=300000))
+    assert e.res["forecast_generated"] is False
+    assert "300.000,00" in e.res["message"], e.res["message"]
+    assert "287.312,00" in e.res["message"], e.res["message"]
+
+
+def test_B01_override_ce10_uguale_all_apertura_e_accettato():
+    # Solo il primo anno: l'anno dopo apre da sp05a = 0 (l'anno prima l'ha svuotata), e lo
+    # stesso override varrebbe di nuovo "oltre l'apertura" — non e' il caso di questo test.
+    rows = righe()
+    rows[0]["ce10_override"] = 287312
+    e = generato(genera(rows))
+    sp, ce = e.anni[2027]
+    assert sp["sp05a_materie_prime"] == D("0.00")
+    assert ce["ce10_var_rimanenze_mat_prime"] == D("287312.00")
+    # L'override vince: i giorni dedotti non sono mai stati usati, quindi non
+    # si dichiara una degenerazione che non ha determinato nulla.
+    assert e.det[2027]["rimanenze_materie"]["degenere"] is False
+
+
 def test_B01_base_senza_sotto_voci_usa_l_aggregato_come_materie():
     e = generato(genera(righe(dio_days=22), bs={"sp05a_materie_prime": D("0")}))
     sp, ce = e.anni[2027]

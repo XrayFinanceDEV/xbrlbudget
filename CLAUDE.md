@@ -290,10 +290,18 @@ esistente**, storico compreso, non solo su quelli generati dopo il lotto.
   mai zero** — anche in Indici: i quattro campi diventano `Optional` in `ratios.py`,
   `schemas/calculations.py` e `frontend/types/api.ts`, e `calculation_service.py` non li
   riscrive più a `0.0`. A schermo: «n.d.».
-- **DSCR vero, non un proxy**: `(MOL − imposte) / (oneri finanziari + quota capitale rimborsata
-  nell'anno)`, quota capitale da `financing.third_party_funds.decreases` del rendiconto
-  dettagliato — `None` (`cashflow_unavailable`) quando il periodo non ha un rendiconto (prima
-  colonna storica, periodi infrannuale `observed`/`adjusted`), `None`
+- **DSCR vero, non un proxy**: `(MOL − imposte) / (oneri finanziari + quota capitale delle rate
+  dei piani)`. Decisione del proprietario 2026-09-26 (F2): sugli anni di piano la quota capitale
+  viene da `ForecastYear.engine_meta['rimborsi_piano']` del motore — le sole rate di uno
+  scadenziamento vero (contratti bancari, pregresso bancario su piano anni, altri finanziatori),
+  mai il rimborso di uno scoperto, di un fido o dello sweep di cassa: un rendiconto-derivato le
+  mischiava nella stessa riga, e uno scenario con crescita −40/+80/0 e scoperto concesso faceva
+  crollare il DSCR da 3,29× a 0,90× solo per il rimborso dello scoperto, senza alcuna rata
+  contrattuale in più. `None` (`rimborsi_piano_non_disponibile`) senza `rimborsi_piano`
+  dichiarato (nessun `engine_meta`, o un motore più vecchio di questa correzione). Sulla colonna
+  base/storica la quota resta quella di prima, da `financing.third_party_funds.decreases` del
+  rendiconto dettagliato — `None` (`cashflow_unavailable`) quando il periodo non ha un rendiconto
+  (prima colonna storica, periodi infrannuale `observed`/`adjusted`), `None`
   (`rimborsi_non_determinabili`) quando `erogazioni_incoerenti` è vero.
 - **Il rendiconto separa erogazioni e rimborsi quando l'anno le dichiara**:
   `ForecastYear.engine_meta['erogazioni']` (prestiti nuovi, altri finanziatori, tiraggio fidi e
@@ -310,10 +318,16 @@ esistente**, storico compreso, non solo su quelli generati dopo il lotto.
 - **Il punto di pareggio degli anni di piano viene dal motore**,
   `ForecastYear.engine_meta['pareggio']` (`costi_variabili`, `costi_fissi_operativi`,
   `fatturato_pareggio`, `margine_sicurezza_pct`), non più dalla ripartizione fissa 60/40 costi
-  fissi/variabili — quella resta solo per la colonna base/storica, che il motore non genera.
-  `None` con `engine_meta_missing` (nessun `engine_meta`, scenari pre-lotto) o
+  fissi/variabili. `None` con `engine_meta_missing` (nessun `engine_meta`, scenari pre-lotto) o
   `pareggio_non_definito` (`costi_variabili`/`costi_fissi_operativi` nulli, tipicamente ce05/ce06
-  sotto override) — mai un numero ricalcolato al posto di quello dichiarato.
+  sotto override) — mai un numero ricalcolato al posto di quello dichiarato. Decisione del
+  proprietario 2026-09-26 (F5): la colonna base/storica applica ORA la STESSA regola
+  (`calculations.projection_common.punto_di_pareggio`, un'unica implementazione condivisa) al CE
+  di base, con le quote fisso/variabile di ce05/ce06 del PRIMO anno di piano — mai più il 60/40
+  spalmato anche su ce07/ce08/ce12 (che il motore tratta come interamente fissi): a crescita zero
+  quella vecchia ripartizione rendeva le due colonne incomparabili, e il testo raccontava un finto
+  risanamento («negativo nell'anno base ... positivo dal primo anno di piano»). Senza ipotesi di
+  piano salvate: 60/40 di default, applicato solo a ce05/ce06.
 - **A01-bis, un secondo avviso di previsionale vecchio**: `engine_version_stale` (severità
   `error`, come `forecast_stale`) blocca il "finale" del Business plan quando un `ForecastYear`
   porta un `engine_version` inferiore a quello corrente — mai per l'infrannuale. In intestazione

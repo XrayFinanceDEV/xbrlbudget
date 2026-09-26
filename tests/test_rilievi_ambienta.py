@@ -299,9 +299,6 @@ def test_C01_il_dscr_del_report_comprende_la_quota_capitale():
     assert abs(D(str(piano(e.data, "dscr")[0])) - atteso) < D("0.01"), (piano(e.data, "dscr")[0], atteso)
 
 
-@pytest.mark.xfail(strict=True, raises=AssertionError, reason="C02 confermato dal triage 2026-09-25: il DSO del report include "
-                    "crediti tributari e oltre 12 mesi, non i soli crediti commerciali"
-                    " — togli il marcatore quando il fix lo fa passare")
 def test_C02_dso_sui_soli_crediti_commerciali():
     """C02 · Report sez. 1, 7, All. E: «DSO» su tutti i crediti (tributari e oltre 12 mesi compresi).
     Oracolo: DSO 2026 = clienti (sp06a + sp07a) / ricavi × 360."""
@@ -312,9 +309,6 @@ def test_C02_dso_sui_soli_crediti_commerciali():
     assert abs(D(str(base(e.data, "dso"))) - atteso) < D("1"), (base(e.data, "dso"), atteso)
 
 
-@pytest.mark.xfail(strict=True, raises=AssertionError, reason="C03 confermato dal triage 2026-09-25: il ROD del report divide "
-                    "per il totale debiti (fornitori compresi), non per i soli debiti finanziari"
-                    " — togli il marcatore quando il fix lo fa passare")
 def test_C03_rod_sui_debiti_finanziari():
     """C03 · ROD = oneri finanziari / totale debiti (fornitori compresi). Oracolo: oneri / debiti finanziari
     (banche + altri finanziatori), in percentuale."""
@@ -326,9 +320,6 @@ def test_C03_rod_sui_debiti_finanziari():
     assert abs(D(str(base(e.data, "rod"))) - atteso) < D("0.05"), (base(e.data, "rod"), atteso)
 
 
-@pytest.mark.xfail(strict=True, raises=AssertionError, reason="C04 confermato dal triage 2026-09-25: la PFN del report esclude "
-                    "gli altri finanziatori a lungo, che l'interfaccia (finDebt) include"
-                    " — togli il marcatore quando il fix lo fa passare")
 def test_C04_pfn_del_report_comprende_gli_altri_finanziatori():
     """C04 · PFN del report esclude gli altri finanziatori, l'interfaccia (budget-piano-step.ts, finDebt)
     li include. Oracolo: PFN 2026 = banche + altri finanziatori + obbligazioni − cassa."""
@@ -361,9 +352,6 @@ def test_C05_un_solo_current_ratio_nel_documento():
     assert abs(sez8 - all_e) < D("0.01"), (sez8, all_e)
 
 
-@pytest.mark.xfail(strict=True, raises=AssertionError, reason="C06 confermato dal triage 2026-09-25: «Indice di Indebitamento» "
-                    "nell'All. E è immobilizzazioni/PN, non debiti totali/PN"
-                    " — togli il marcatore quando il fix lo fa passare")
 def test_C06_indice_di_indebitamento_e_debiti_su_patrimonio():
     """C06 · All. E: «Indice di indebitamento» = immobilizzazioni / PN. Oracolo: debiti totali / PN oppure totale
     attivo / PN — il consulente accetta l'una o l'altra definizione; immobilizzazioni / PN no."""
@@ -378,9 +366,6 @@ def test_C06_indice_di_indebitamento_e_debiti_su_patrimonio():
     assert abs(val - debiti_pn) < D("0.01") or abs(val - attivo_pn) < D("0.01"), (val, debiti_pn, attivo_pn)
 
 
-@pytest.mark.xfail(strict=True, raises=AssertionError, reason="C07 confermato dal triage 2026-09-25: il TFR non è incluso fra "
-                    "le fonti consolidate della copertura immobilizzazioni"
-                    " — togli il marcatore quando il fix lo fa passare")
 def test_C07_copertura_immobilizzazioni_con_il_tfr():
     """C07 · Sez. 8, All. D: il TFR non è fra le fonti consolidate. Oracolo (in %):
     (PN + debiti a lungo + TFR) / immobilizzazioni × 100."""

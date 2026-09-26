@@ -52,26 +52,20 @@ def balance_aggregates(bs: Mapping[str, Decimal]) -> dict[str, Decimal]:
             'total_equity': equity, 'total_debt': debt, 'total_liabilities': liabilities}
 
 
-BANK_FIELDS = ('sp16a_debiti_banche_breve', 'sp17a_debiti_banche_lungo', 'sp16c_debiti_obbligazioni_breve', 'sp17c_debiti_obbligazioni_lungo')
-NONBANK_FINANCIAL_FIELDS = ('sp16b_debiti_altri_finanz_breve', 'sp17b_debiti_altri_finanz_lungo',
-                            'sp16d_debiti_fornitori_breve', 'sp17d_debiti_fornitori_lungo',
-                            'sp16e_debiti_tributari_breve', 'sp17e_debiti_tributari_lungo',
-                            'sp16f_debiti_previdenza_breve', 'sp17f_debiti_previdenza_lungo')
+FINANCIAL_DEBT_FIELDS = ('sp16a_debiti_banche_breve', 'sp17a_debiti_banche_lungo',
+                         'sp16b_debiti_altri_finanz_breve', 'sp17b_debiti_altri_finanz_lungo',
+                         'sp16c_debiti_obbligazioni_breve', 'sp17c_debiti_obbligazioni_lungo')
 
 
 def financial_debt_total(field_value: Callable[[str], Decimal]) -> Decimal:
-    """Debito finanziario con un'unica convenzione, quella della PFN.
-
-    Banche e obbligazioni se positive; altrimenti debito totale meno i dettagli
-    non bancari noti; altrimenti il debito totale. Usata dalla PFN e dalla
-    composizione delle fonti: un solo numero, una sola convenzione.
+    """Debito finanziario: banche, altri finanziatori e obbligazioni, breve e lungo (C03/C04,
+    lotto 2 fix rilievi 2026-09-26). Somma incondizionata — mai un ramo "banche positive altrimenti
+    fallback" che tagliava fuori gli altri finanziatori quando le banche c'erano già: stessa
+    convenzione di `BalanceSheet.financial_debt_total` (database/models.py) e di `finDebt` in
+    `frontend/lib/budget-piano-step.ts`. Fornitori, tributari e previdenziali non sono debito
+    finanziario. Usata dalla PFN, dal ROD e dalla composizione delle fonti: un solo numero.
     """
-    bank = sum((field_value(field) for field in BANK_FIELDS), ZERO)
-    if bank > 0:
-        return bank
-    nonbank = sum((field_value(field) for field in NONBANK_FINANCIAL_FIELDS), ZERO)
-    debt = field_value('sp16_debiti_breve') + field_value('sp17_debiti_lungo')
-    return debt - nonbank if nonbank > 0 else debt
+    return sum((field_value(field) for field in FINANCIAL_DEBT_FIELDS), ZERO)
 
 
 def indicator_results(bs, inc, analytical_ratios=None) -> dict[str, IndicatorResult]:
@@ -87,6 +81,10 @@ def indicator_results(bs, inc, analytical_ratios=None) -> dict[str, IndicatorRes
     financial_debt = financial_debt_total(v)
     pfn = financial_debt - v('sp09_disponibilita_liquide') - v('sp08_attivita_finanziarie')
     revenue, interest = v('ce01_ricavi_vendite'), v('ce15_oneri_finanziari')
+    # C02 (lotto 2 fix rilievi, 2026-09-26): il consumo di materie che governa il DIO, stessa
+    # convenzione di `calculations/forecast_engine.py::consumo_base_materie` — un consumo non
+    # positivo rende il DIO indefinito, mai zero né negativo.
+    consumo_materie = v('ce05_materie_prime') + v('ce10_var_rimanenze_mat_prime')
     result = {}
     practice_convention = ('pratica-v1: attivo corrente senza crediti oltre 12 mesi, con ratei attivi; '
                            'CE canonico; flussi del periodo non annualizzati; nessun punteggio implicito.')
@@ -103,9 +101,11 @@ def indicator_results(bs, inc, analytical_ratios=None) -> dict[str, IndicatorRes
     ratio('current_ratio', current, short, 'Attivo corrente pratica / debiti entro 12 mesi')
     ratio('quick_ratio', current - v('sp05_rimanenze'), short, 'Attivo corrente pratica - rimanenze / debiti entro 12 mesi')
     amount('ms', equity - fixed, 'Patrimonio netto - immobilizzazioni')
-    ratio('copertura_immob', equity + long, fixed, '(Patrimonio netto + debiti oltre 12 mesi) / immobilizzazioni × 100', percentage=True)
+    # C07: il TFR è una fonte consolidata al pari del debito oltre 12 mesi, non fuori dal computo.
+    ratio('copertura_immob', equity + long + v('sp15_tfr'), fixed, '(Patrimonio netto + debiti oltre 12 mesi + TFR) / immobilizzazioni × 100', percentage=True)
     ratio('indipendenza', equity, assets, 'Patrimonio netto / totale attivo × 100', percentage=True)
-    amount('pfn', pfn, 'Banche e obbligazioni se dettaglio positivo; altrimenti debito al netto dei dettagli non bancari noti; altrimenti debito totale; meno cassa e attività finanziarie.')
+    # C04: debito finanziario (banche, altri finanziatori, obbligazioni) meno cassa e attività finanziarie.
+    amount('pfn', pfn, 'Banche, altri finanziatori e obbligazioni (breve e lungo) meno cassa e attività finanziarie.')
     ratio('pfn_ebitda', pfn, ce.ebitda, 'PFN pratica / EBITDA del periodo', positive=True)
     ratio('roi', ce.ebit, assets, 'EBIT / totale attivo × 100', percentage=True)
     ratio('roe', ce.net_profit, equity, 'Utile netto CE canonico / patrimonio netto × 100', percentage=True, positive=True)
@@ -145,10 +145,10 @@ def indicator_results(bs, inc, analytical_ratios=None) -> dict[str, IndicatorRes
         'solvency.autonomy_index': assets, 'solvency.leverage_ratio': equity, 'solvency.debt_to_equity': equity,
         'solvency.debt_to_production': ce.production_value,
         'profitability.roe': equity, 'profitability.roi': assets, 'profitability.ros': revenue,
-        'profitability.rod': debt, 'profitability.ebitda_margin': revenue,
+        'profitability.rod': financial_debt, 'profitability.ebitda_margin': revenue,
         'coverage.fixed_assets_coverage_with_equity_and_ltdebt': fixed,
         'coverage.fixed_assets_coverage_with_equity': fixed, 'coverage.independence_from_third_parties': debt,
-        'activity.inventory_turnover_days': revenue, 'activity.receivables_turnover_days': revenue,
+        'activity.inventory_turnover_days': consumo_materie, 'activity.receivables_turnover_days': revenue,
         'activity.payables_turnover_days': dpo_base, 'activity.asset_turnover': assets,
         'extended_profitability.financial_leverage_effect': equity,
         'extended_profitability.ebitda_on_sales': revenue, 'extended_profitability.financial_charges_on_revenue': revenue,
@@ -159,17 +159,18 @@ def indicator_results(bs, inc, analytical_ratios=None) -> dict[str, IndicatorRes
         'liquidity.quick_ratio': '(Crediti entro e oltre 12 mesi + cassa) / debiti entro 12 mesi',
         'liquidity.acid_test': '(Crediti entro e oltre 12 mesi + attività finanziarie + cassa) / debiti entro 12 mesi',
         'solvency.autonomy_index': 'Patrimonio netto / totale attivo',
-        'solvency.leverage_ratio': 'Immobilizzazioni / patrimonio netto',
+        'solvency.leverage_ratio': 'Debiti totali / patrimonio netto',
         'solvency.debt_to_equity': 'Debiti totali / patrimonio netto',
         'solvency.debt_to_production': 'Debiti totali / valore della produzione',
         'profitability.roe': 'Utile netto / patrimonio netto', 'profitability.roi': 'EBIT / totale attivo',
         'profitability.ros': 'Utile netto / ricavi: convenzione analitica distinta dal ROS operativo della pratica',
-        'profitability.rod': 'Oneri finanziari / debiti totali', 'profitability.ebitda_margin': 'EBITDA / ricavi',
-        'coverage.fixed_assets_coverage_with_equity_and_ltdebt': '(Patrimonio netto + debiti oltre 12 mesi) / immobilizzazioni',
+        'profitability.rod': 'Oneri finanziari / debito finanziario (banche, altri finanziatori, obbligazioni)',
+        'profitability.ebitda_margin': 'EBITDA / ricavi',
+        'coverage.fixed_assets_coverage_with_equity_and_ltdebt': '(Patrimonio netto + debiti oltre 12 mesi + TFR) / immobilizzazioni',
         'coverage.fixed_assets_coverage_with_equity': 'Patrimonio netto / immobilizzazioni',
         'coverage.independence_from_third_parties': 'Patrimonio netto / debiti totali',
-        'activity.inventory_turnover_days': '360 × rimanenze / ricavi',
-        'activity.receivables_turnover_days': '360 × crediti entro e oltre 12 mesi / ricavi',
+        'activity.inventory_turnover_days': '360 × rimanenze / (materie prime + variazione rimanenze materie prime); indefinito con consumo non positivo',
+        'activity.receivables_turnover_days': '360 × crediti verso clienti entro e oltre 12 mesi / ricavi',
         'activity.payables_turnover_days': '360 × debiti verso fornitori entro e oltre 12 mesi / (materie + servizi); base ricavi se acquisti non positivi',
         'activity.cash_conversion_cycle': 'Giorni magazzino + giorni credito - giorni debito, prima degli arrotondamenti individuali',
         'activity.asset_turnover': 'Ricavi / totale attivo',
@@ -185,7 +186,8 @@ def indicator_results(bs, inc, analytical_ratios=None) -> dict[str, IndicatorRes
         category, name = key.split('.')
         value = (analytical_ratios or {}).get(category, {}).get(name)
         bases = [revenue, dpo_base] if key == 'activity.cash_conversion_cycle' else [assets, debt] if key == 'extended_profitability.spread' else [denominators[key]]
-        reason = 'source_calculation_unavailable' if value is None else 'zero_denominator' if any(d == 0 for d in bases) else 'non_positive_denominator' if key == 'profitability.roe' and equity < 0 else None
+        non_positive = (key == 'profitability.roe' and equity < 0) or (key == 'activity.inventory_turnover_days' and consumo_materie < 0)
+        reason = 'source_calculation_unavailable' if value is None else 'zero_denominator' if any(d == 0 for d in bases) else 'non_positive_denominator' if non_positive else None
         if key in ('activity.payables_turnover_days', 'activity.cash_conversion_cycle') and any(f in detail_missing for f in ('sp16d_debiti_fornitori_breve', 'sp17d_debiti_fornitori_lungo')):
             reason = 'trade_payables_detail_unavailable'
         result['analytical.' + key] = IndicatorResult(None if reason else value, reason, formula,

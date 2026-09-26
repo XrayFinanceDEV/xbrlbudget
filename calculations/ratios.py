@@ -26,7 +26,7 @@ class LiquidityRatios(NamedTuple):
 class SolvencyRatios(NamedTuple):
     """Solvency/Leverage ratios"""
     autonomy_index: Decimal           # Indice di Autonomia Finanziaria
-    leverage_ratio: Decimal           # Indice di Indebitamento
+    leverage_ratio: Decimal           # Indice di Indebitamento = Debiti Totali/Patrimonio Netto (C06)
     debt_to_equity: Decimal           # Rapporto Debiti/Patrimonio Netto
     debt_to_production: Decimal       # Debiti/Valore della Produzione
 
@@ -54,7 +54,7 @@ class ActivityRatios(NamedTuple):
 
 class CoverageRatios(NamedTuple):
     """Coverage/Solidity ratios (Indici di Solidità)"""
-    fixed_assets_coverage_with_equity_and_ltdebt: Decimal  # (CN+PF)/AF
+    fixed_assets_coverage_with_equity_and_ltdebt: Decimal  # (CN+PF+TFR)/AF (C07)
     fixed_assets_coverage_with_equity: Decimal              # CN/AF
     independence_from_third_parties: Decimal                # CN/(PC+PF)
 
@@ -204,17 +204,18 @@ class FinancialRatiosCalculator(BaseCalculator):
             self.bs.total_assets
         )
 
-        # Indice di Indebitamento = Immobilizzazioni / Patrimonio Netto
-        leverage_ratio = self.safe_divide(
-            self.bs.fixed_assets,
-            self.bs.total_equity
-        )
-
         # Debt to Equity = Debiti Totali / Patrimonio Netto
         debt_to_equity = self.safe_divide(
             self.bs.total_debt,
             self.bs.total_equity
         )
+
+        # Indice di Indebitamento = Debiti Totali / Patrimonio Netto (C06, lotto 2 fix rilievi
+        # 2026-09-26: era Immobilizzazioni/PN — una leva sugli investimenti, non un indice di
+        # indebitamento; l'Allegato E lo etichetta "Indice di Indebitamento" e il consulente si
+        # aspetta debiti/PN). Stessa definizione di Debt to Equity: un solo calcolo, due nomi
+        # storici nello stesso risultato.
+        leverage_ratio = debt_to_equity
 
         # Debt to Production Value = Debiti Totali / Valore della Produzione
         debt_to_production = self.safe_divide(
@@ -256,10 +257,12 @@ class FinancialRatiosCalculator(BaseCalculator):
             self.inc.revenue
         )
 
-        # ROD = Costo del Denaro = Oneri Finanziari / Debiti Totali
+        # ROD = Costo del Denaro = Oneri Finanziari / Debito Finanziario (banche, altri
+        # finanziatori, obbligazioni) — non Debiti Totali, che comprendono i fornitori (C03,
+        # lotto 2 fix rilievi 2026-09-26). Stessa definizione di `BalanceSheet.financial_debt_total`.
         rod = self.safe_divide(
             self.inc.ce15_oneri_finanziari,
-            self.bs.total_debt
+            self.bs.financial_debt_total
         )
 
         # EBITDA Margin = EBITDA / Fatturato
@@ -308,16 +311,27 @@ class FinancialRatiosCalculator(BaseCalculator):
             self.bs.total_assets
         )
 
-        # DMAG = Giorni di Magazzino = 360 * Rimanenze / Fatturato
+        # DMAG = Giorni di Magazzino = 360 * Rimanenze / Consumo di materie prime (C02, lotto 2 fix
+        # rilievi 2026-09-26: era / Fatturato, che non ha alcun legame col magazzino di materie).
+        # Consumo = ce05 + ce10 (variazione rimanenze materie prime, convenzione OIC B11), stessa
+        # convenzione di `calculations/forecast_engine.py::consumo_base_materie`. Un consumo non
+        # positivo lascia il DMAG a 0 qui (nessun ratio di questa classe restituisce None); la
+        # dichiarazione "indefinito, non zero" vive nel report (`report_indicators.indicator_results`).
+        consumo_materie = (self.inc.ce05_materie_prime or Decimal('0')) + (self.inc.ce10_var_rimanenze_mat_prime or Decimal('0'))
         inventory_turnover_days = self.safe_divide(
             Decimal(days_in_year) * self.bs.sp05_rimanenze,
-            self.inc.revenue
+            consumo_materie
         )
 
-        # DCRED = Giorni di Credito = 360 * Crediti / Fatturato
-        total_receivables = self.bs.sp06_crediti_breve + self.bs.sp07_crediti_lungo
+        # DCRED = Giorni di Credito = 360 * Crediti verso clienti / Fatturato (C02, lotto 2 fix
+        # rilievi 2026-09-26: erano gli aggregati sp06+sp07, che comprendono crediti tributari e
+        # diversi — non commerciali).
+        trade_receivables = (
+            (self.bs.sp06a_crediti_clienti_breve or Decimal('0')) +
+            (self.bs.sp07a_crediti_clienti_lungo or Decimal('0'))
+        )
         receivables_turnover_days = self.safe_divide(
-            Decimal(days_in_year) * total_receivables,
+            Decimal(days_in_year) * trade_receivables,
             self.inc.revenue
         )
 
@@ -367,8 +381,9 @@ class FinancialRatiosCalculator(BaseCalculator):
         Returns:
             CoverageRatios with fixed assets coverage indices
         """
-        # (CN+PF)/AF - Coverage of Fixed Assets with Equity and LT Debt
-        equity_plus_ltdebt = self.bs.total_equity + self.bs.sp17_debiti_lungo
+        # (CN+PF+TFR)/AF - Coverage of Fixed Assets with Equity, LT Debt and TFR (C07, lotto 2 fix
+        # rilievi 2026-09-26: il TFR è una fonte consolidata come il debito a lungo, non era incluso).
+        equity_plus_ltdebt = self.bs.total_equity + self.bs.sp17_debiti_lungo + self.bs.sp15_tfr
         fixed_assets_coverage_with_equity_and_ltdebt = self.safe_divide(
             equity_plus_ltdebt,
             self.bs.fixed_assets

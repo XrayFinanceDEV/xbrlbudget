@@ -161,7 +161,7 @@ export function StepPatrimonialePregresso(p: StepProps): JSX.Element {
   // opporrebbe, ma qui arriva mentre si digita. `pregresso` porta anche il
   // piano tributario quando c'e', quindi la validazione lo copre gia'.
   const errori = useMemo(
-    () => (baseBs ? validatePregresso(pregresso, openingMasses(baseBs), p.forecastYears.length) : []),
+    () => (baseBs ? validatePregresso(pregresso, openingMasses(baseBs, pregresso.acconti_tributari_storici ?? 0), p.forecastYears.length) : []),
     [pregresso, baseBs, p.forecastYears.length],
   );
   const breve = useMemo(
@@ -235,8 +235,10 @@ export function StepPatrimonialePregresso(p: StepProps): JSX.Element {
       <div className="mt-4 space-y-4">
         <Card>
           <CardHeader>
-            <CardTitle className="text-base">Altre voci oltre 12 mesi · scadenziamento a mano</CardTitle>
-            <CardDescription>importi incassati o pagati in ciascun anno</CardDescription>
+            <CardTitle className="text-base">Altre voci pregresse · scadenziamento manuale</CardTitle>
+            <CardDescription>
+              Inserisci gli importi incassati o pagati in ciascun anno. I crediti tributari storici hanno scadenze proprie.
+            </CardDescription>
           </CardHeader>
           <CardContent>
             <div className="overflow-x-auto">
@@ -354,8 +356,7 @@ export function StepPatrimonialePregresso(p: StepProps): JSX.Element {
               </table>
             </div>
             <p className="mt-2 text-xs text-muted-foreground">
-              Quello che non scadenzi resta aperto in bilancio a fine piano: è lecito, la colonna «resta» lo
-              dichiara.
+              Ciò che non incassi o paghi resta aperto in bilancio. Qui scadenzi solo gli altri crediti tributari; gli acconti già versati si indicano nel passo Imposte.
             </p>
             {errori.length > 0 && (
               <div className="mt-3 space-y-1 rounded-md bg-destructive/10 p-3 text-xs text-destructive">

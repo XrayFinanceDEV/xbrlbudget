@@ -11,7 +11,7 @@ import type { ForecastPreviewResponse } from "@/types/api";
 
 export interface PreviewCell { value: number | null; pct?: number | null; days?: number | null; note?: string }
 export type PreviewRowKind = "value" | "sub" | "total" | "kpi";
-export interface PreviewRow { key: string; label: string; kind: PreviewRowKind; base: PreviewCell; years: PreviewCell[] }
+export interface PreviewRow { key: string; label: string; hint?: string; kind: PreviewRowKind; base: PreviewCell; years: PreviewCell[] }
 
 const row = (key: string, label: string, kind: PreviewRowKind, base: PreviewCell, years: PreviewCell[]): PreviewRow =>
   ({ key, label, kind, base, years });
@@ -110,7 +110,7 @@ export function rowsAnnoBase(baseYear: number, historicalYears: number[], histor
     incidenceRow("ce08", "Personale", "ce08_costi_personale"),
     row("mol", "MOL", "kpi", { value: molOf(baseEntry) }, restEntries.map((e) => ({ value: molOf(e) }))),
     daysRow("dso", "Giorni incasso clienti (DSO)", "dso"),
-    daysRow("dio", "Giorni rotazione magazzino (DIO)", "dio"),
+    daysRow("dio", "Giorni di scorta materie prime (sul consumo)", "dio"),
     daysRow("dpo", "Giorni pagamento fornitori (DPO)", "dpo"),
   ];
 }
@@ -139,15 +139,17 @@ export function rowsFatturato(baseInc: IncomeStatement, years: ForecastPreviewYe
 }
 
 /**
- * «Costi e margine» del passo 3 (spec 2026-09-15 §4.3): ricavi, variabili, fissi con «di
- * cui personale», MOL — le percentuali sono sui ricavi dell'anno.
+ * «Costi e margine» del passo 3: ricavi, costi variabili e fissi, dettaglio
+ * distinto di materie prime e servizi, personale e MOL. Tutte le percentuali
+ * sono l'incidenza sui ricavi dello stesso anno.
  *
  * `fissi`/`variabili` non si sommano piu' qui dai `ce05_fixed`/`ce06_fixed` per anno: li
  * dichiara il motore in `details.pareggio.costi_fissi`/`costi_variabili` (Task 6), letti
  * con `numOrNull` perche' un valore nidificato in `details` puo' arrivare come stringa
  * (`Decimal` serializzato, regole comuni del lotto). Senza un pareggio definito — un
  * override di CE Prev. su materie prime o servizi azzera la ripartizione — le due celle
- * sono `null` con la loro nota, mai una somma inventata.
+ * sono `null` con la loro nota, mai una somma inventata. I quattro dettagli
+ * leggono `details.ce05_fixed/variable` e `ce06_fixed/variable` del motore.
  *
  * Il MOL resta quello canonico di `ceAggregates` (invariato): e' l'aggregatore unico del
  * modulo, e la riga deve continuare a coincidere col MOL di `rowsAnnoBase`
@@ -166,8 +168,15 @@ export function rowsCosti(
   };
   const bFixed = b.mat * fixedShare.materials / 100 + b.serv * fixedShare.services / 100 + b.pers + b.god + b.alt;
   const bVar = b.mat + b.serv - (b.mat * fixedShare.materials / 100 + b.serv * fixedShare.services / 100);
+  const bMatFixed = b.mat * fixedShare.materials / 100;
+  const bServFixed = b.serv * fixedShare.services / 100;
   const bMol = ceAggregates(baseInc as unknown as Record<string, unknown>).mol;
   const cell = (v: number | null, rev: number, note?: string): PreviewCell => ({ value: v, pct: pctOf(v, rev), ...(note ? { note } : {}) });
+  const splitCell = (v: number | null, rev: number): PreviewCell => ({
+    value: v,
+    pct: pctOf(v, rev),
+    ...(v === null ? { note: "forzato in CE Prev." } : {}),
+  });
   const cols = years.map((y) => {
     const i = y.income_statement, d = y.details;
     const rev = num(i.ce01_ricavi_vendite), pers = num(i.ce08_costi_personale);
@@ -178,6 +187,10 @@ export function rowsCosti(
     return {
       rev: { value: rev } as PreviewCell,
       variabili: cell(variabili, rev, note), fissi: cell(fissi, rev, note),
+      matVar: splitCell(numOrNull(d?.ce05_variable), rev),
+      matFixed: splitCell(numOrNull(d?.ce05_fixed), rev),
+      servVar: splitCell(numOrNull(d?.ce06_variable), rev),
+      servFixed: splitCell(numOrNull(d?.ce06_fixed), rev),
       pers: cell(pers, rev),
       mol: cell(ceAggregates(i).mol, rev),
     };
@@ -186,7 +199,11 @@ export function rowsCosti(
   return [
     row("ricavi", "Ricavi delle vendite", "sub", { value: b.rev }, pick("rev")),
     row("variabili", "variabili · materie prime e servizi", "value", cell(bVar, b.rev), pick("variabili")),
+    row("mat-variabili", "materie prime · quota variabile", "sub", splitCell(b.mat - bMatFixed, b.rev), pick("matVar")),
+    row("serv-variabili", "servizi · quota variabile", "sub", splitCell(b.serv - bServFixed, b.rev), pick("servVar")),
     row("fissi", "fissi · parti fisse, personale, godimento, oneri diversi", "value", cell(bFixed, b.rev), pick("fissi")),
+    row("mat-fissi", "materie prime · quota fissa", "sub", splitCell(bMatFixed, b.rev), pick("matFixed")),
+    row("serv-fissi", "servizi · quota fissa", "sub", splitCell(bServFixed, b.rev), pick("servFixed")),
     row("personale", "di cui personale", "sub", cell(b.pers, b.rev), pick("pers")),
     row("mol", "MOL", "kpi", cell(bMol, b.rev), pick("mol")),
   ];
@@ -264,7 +281,12 @@ export function rowsCircolante(baseBs: BalanceSheet, baseInc: IncomeStatement, y
     const cred = num(bs.sp06_crediti_breve) - num(bs.sp06e_crediti_tributari_breve) - num(bs.sp06f_imposte_anticipate_breve);
     const mag = num(bs.sp05_rimanenze), forn = num(bs.sp16d_debiti_fornitori_breve), rev = num(y.income_statement.ce01_ricavi_vendite);
     const ccn = cred + mag - forn;
-    const out = { cred: { value: cred, days: d.dso_applied }, mag: { value: mag, days: d.dio_applied },
+    // `mag` e' TUTTO sp05 (materie, semilavorati, prodotti finiti, acconti...), ma `d.dio_applied`
+    // (dal B01, lotto 1 fix rilievi) e' i giorni delle sole materie prime sul consumo: mostrarli
+    // accanto al totale suggerirebbe che il totale ruota a quei giorni, il che non e' vero non
+    // appena il magazzino ha altro oltre alle materie (rilievo I2 della revisione finale,
+    // 2026-09-26). Nessun giorno unico descrive il totale: si mostra il valore senza giorni.
+    const out = { cred: { value: cred, days: d.dso_applied }, mag: { value: mag },
       forn: { value: -forn, days: d.dpo_applied }, ccn: { value: ccn }, pct: { value: null, pct: pctOf(ccn, rev) },
       cash: { value: -(ccn - prevCcn) } };
     prevCcn = ccn;

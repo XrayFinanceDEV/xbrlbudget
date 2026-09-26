@@ -52,12 +52,11 @@ describe("buildPraticaSteps", () => {
     expect(ids(steps)).toEqual([
       "anagrafiche", "import", "rettifiche",
       "comparison", "projection", "results", "stampa",
-      "budget", "indici", "ce-previsionale", "sp-previsionale",
-      "riclassificato", "rendiconto", "report",
+      "budget", "ce-previsionale", "sp-previsionale", "rendiconto", "report",
     ]);
     expect(steps.filter((s) => s.phase === "dati").length).toBe(3);
     expect(steps.filter((s) => s.phase === "analisi").length).toBe(4);
-    expect(steps.filter((s) => s.phase === "previsionale").length).toBe(7);
+    expect(steps.filter((s) => s.phase === "previsionale").length).toBe(5);
   });
 
   it("marca come vista tutto ciò che è di sola lettura", () => {
@@ -69,7 +68,7 @@ describe("buildPraticaSteps", () => {
     expect(group("results")).toBe("vista");
     expect(group("stampa")).toBe("vista");
     expect(group("budget")).toBe("azione");
-    expect(group("indici")).toBe("vista");
+    expect(group("ce-previsionale")).toBe("vista");
     expect(group("report")).toBe("vista");
   });
 

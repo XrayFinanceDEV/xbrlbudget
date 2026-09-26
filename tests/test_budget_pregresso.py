@@ -147,6 +147,125 @@ def test_short_plan_pushes_the_rest_long_and_writeoff_hits_ce09d(monkeypatch):
         engine.dispose()
 
 
+def test_altri_crediti_tributari_scheduled_by_amount_without_regeneration(monkeypatch):
+    """Gli incassi cambiano la cassa e il residuo tributario, non l'utile."""
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    engine, sessions = memory_sessions()
+    try:
+        with sessions() as db:
+            company_id, _ = seed_base_year(db, user_id=USER)
+            fy = db.query(models.FinancialYear).filter_by(company_id=company_id).one()
+            bs = db.query(models.BalanceSheet).filter_by(financial_year_id=fy.id).one()
+            bs.sp06a_crediti_clienti_breve = D("100000")
+            bs.sp06e_crediti_tributari_breve = D("20000")
+            bs.sp07_crediti_lungo = D("10000")
+            bs.sp07e_crediti_tributari_lungo = D("10000")
+            bs.sp09_disponibilita_liquide = D("20000")
+            db.commit()
+
+            rows = [dict(forecast_year=y, revenue_growth_pct=0, **MANUAL_TAX) for y in (2027, 2028, 2029)]
+            rows[0]["pregresso"] = {
+                "acconti_tributari_storici": 5000,
+                "crediti_tributari_breve": {"opening": 15000, "amounts": [5000, 10000, 0]},
+                "crediti_tributari_lungo": {"opening": 10000, "amounts": [0, 4000, 6000]},
+            }
+            sc, _ = _run(db, company_id, rows)
+            years = read_forecast_maps(db, sc.id)
+            assert [b["sp07e_crediti_tributari_lungo"] for _, b, _ in years] == [D("10000"), D("6000"), D("0")]
+            assert [b["sp06e_crediti_tributari_breve"] for _, b, _ in years] == [D("15000"), D("5000"), D("5000")]
+            assert all(b["_total_assets"] == b["_total_liabilities"] for _, b, _ in years)
+    finally:
+        engine.dispose()
+
+
+@pytest.mark.parametrize("anno_override", [2027, 2028])
+def test_override_crediti_tributari_lunghi_con_piano_viene_rifiutato(monkeypatch, anno_override):
+    """Il calendario rigenera sp07e anche quando l'override cade dopo il primo anno."""
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    engine, sessions = memory_sessions()
+    try:
+        with sessions() as db:
+            company_id, _ = seed_base_year(db, user_id=USER)
+            fy = db.query(models.FinancialYear).filter_by(company_id=company_id).one()
+            bs = db.query(models.BalanceSheet).filter_by(financial_year_id=fy.id).one()
+            bs.sp07_crediti_lungo = D("10000")
+            bs.sp07e_crediti_tributari_lungo = D("10000")
+            bs.sp09_disponibilita_liquide = D("20000")
+            db.commit()
+
+            rows = [dict(forecast_year=y, revenue_growth_pct=0, **MANUAL_TAX)
+                    for y in (2027, 2028, 2029)]
+            rows[0]["pregresso"] = {
+                "crediti_tributari_lungo": {"opening": 10000, "amounts": [0, 4000, 6000]},
+            }
+            rows[anno_override - 2027]["sp_overrides"] = {
+                "sp07e_crediti_tributari_lungo": 7000,
+            }
+            sc, res = _run(db, company_id, rows, expect_ok=False)
+            assert res["forecast_generated"] is False
+            assert "sp07e_crediti_tributari_lungo" in res["message"]
+            assert "piano di scadenziamento" in res["message"]
+            assert read_forecast_maps(db, sc.id) == []
+    finally:
+        engine.dispose()
+
+
+def test_acconti_storici_compensano_imposte_senza_ridurre_altri_crediti(monkeypatch):
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    engine, sessions = memory_sessions()
+    try:
+        with sessions() as db:
+            company_id, _ = seed_base_year(db, user_id=USER)
+            fy = db.query(models.FinancialYear).filter_by(company_id=company_id).one()
+            bs = db.query(models.BalanceSheet).filter_by(financial_year_id=fy.id).one()
+            bs.sp06a_crediti_clienti_breve = D("100000")
+            bs.sp06e_crediti_tributari_breve = D("20000")
+            db.commit()
+
+            rows = [dict(forecast_year=y, revenue_growth_pct=0) for y in (2027, 2028)]
+            rows[0]["pregresso"] = {
+                "acconti_tributari_storici": 5000,
+                "crediti_tributari_breve": {"opening": 15000, "amounts": [0, 0]},
+            }
+            sc, _ = _run(db, company_id, rows)
+            out = budget_scenarios.preview_forecast_route(
+                company_id, sc.id, request={"assumptions": rows}, user_id=USER, db=db)
+            first = out["forecast_years"][0]
+            assert first["details"]["imposte"]["credito_compensato"] == D("5000")
+            assert first["details"]["imposte"]["crediti_tributari_consuntivo"] == D("15000")
+            assert first["details"]["pregresso"]["crediti_tributari_breve"]["residual_short"] + first["details"]["pregresso"]["crediti_tributari_breve"]["residual_long"] == D("15000")
+    finally:
+        engine.dispose()
+
+
+def test_passaggio_da_imposte_manuali_non_confonde_incasso_con_acconto(monkeypatch):
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    engine, sessions = memory_sessions()
+    try:
+        with sessions() as db:
+            company_id, _ = seed_base_year(db, user_id=USER)
+            fy = db.query(models.FinancialYear).filter_by(company_id=company_id).one()
+            bs = db.query(models.BalanceSheet).filter_by(financial_year_id=fy.id).one()
+            bs.sp06a_crediti_clienti_breve = D("100000")
+            bs.sp06e_crediti_tributari_breve = D("20000")
+            db.commit()
+            rows = [
+                dict(forecast_year=2027, **MANUAL_TAX, pregresso={
+                    "acconti_tributari_storici": 5000,
+                    "crediti_tributari_breve": {"opening": 15000, "amounts": [5000, 10000]},
+                }),
+                dict(forecast_year=2028),
+            ]
+            sc, _ = _run(db, company_id, rows)
+            out = budget_scenarios.preview_forecast_route(
+                company_id, sc.id, request={"assumptions": rows}, user_id=USER, db=db)
+            second = out["forecast_years"][1]
+            assert second["details"]["imposte"]["credito_compensato"] == D("5000")
+            assert second["details"]["imposte"]["crediti_tributari_consuntivo"] == D("0")
+    finally:
+        engine.dispose()
+
+
 def _split_base_payables(db, company_id):
     """Riparte i debiti dell'anno base su fornitori, previdenziali e altri debiti.
 
@@ -259,7 +378,16 @@ def test_the_scorporo_also_applies_to_previdenza_scaled_on_personnel(monkeypatch
     """L'aggancio al costo del personale e' pur sempre uno STOCK riportato, solo
     ancorato all'anno base invece che all'anno prima: se quello stock e' dichiarato
     a pregresso, moltiplicarlo per il fattore del personale lo rimetterebbe dentro
-    ogni anno. Anche li' il generato parte dalla base scorporata."""
+    ogni anno. Anche li' il generato parte dalla base scorporata.
+
+    Lotto 3 fix rilievi (2026-09-26, A06): la casella `previdenza_scales_with_personnel`
+    e' sparita e il motore non la legge piu' — l'aggancio al personale si scrive con
+    `sp_indexing: {"sp16f": "personale", "sp17f": "personale"}`, la stessa forma delle
+    altre voci minori. I numeri restano IDENTICI a quelli di prima del lotto (misurato):
+    senza piano perche' la formula e' la stessa (`_base × fattore del personale`), con un
+    piano perche' `validate_pregresso` impone che la massa dichiarata copra l'intero saldo
+    base — il generato scorporato e' zero in entrambe le forme, quindi il fattore del
+    personale moltiplica zero allo stesso modo."""
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
     engine, sessions = memory_sessions()
     try:
@@ -267,7 +395,7 @@ def test_the_scorporo_also_applies_to_previdenza_scaled_on_personnel(monkeypatch
             company_id, _ = seed_base_year(db, user_id=USER)
             _split_base_payables(db, company_id)
             rows = [dict(forecast_year=y, personnel_growth_pct=20,
-                         previdenza_scales_with_personnel=True, **MANUAL_TAX)
+                         sp_indexing={"sp16f": "personale", "sp17f": "personale"}, **MANUAL_TAX)
                     for y in (2027, 2028)]
             without = _run(db, company_id, [dict(r) for r in rows])[0]
             (_, bs_no_plan, _), _ = read_forecast_maps(db, without.id)
@@ -308,15 +436,19 @@ def test_writeoff_survives_the_ce09_rounding_residual(monkeypatch):
     arrotondamento dell'aggregato gli finisce sopra e l'importo scadenziato
     risulta di un centesimo diverso da quello chiesto — senza alcun errore.
 
-    Gli investimenti da 0,02 con ammortamento al 20% producono due quote da
-    0,004: i dettagli arrotondano in giu' (0,00) e l'aggregato in su (0,01),
-    cioe' esattamente un centesimo di residuo da posare."""
+    Gli investimenti da 0,04 con ammortamento al 20% (meta' aliquota nell'anno d'ingresso,
+    E05) producono due quote da 0,004: i dettagli arrotondano in giu' (0,00) e l'aggregato
+    in su (0,01), cioe' esattamente un centesimo di residuo da posare.
+
+    lotto 1 fix rilievi (2026-09-26): l'investimento raddoppia da 0,02 a 0,04 rispetto a
+    prima B02/E05, cosi' la quota effettiva del primo anno (0,04 × 20% / 2 = 0,004) resta
+    esattamente quella di prima e il residuo di arrotondamento continua a esistere."""
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
     engine, sessions = memory_sessions()
     try:
         with sessions() as db:
             company_id, _ = seed_base_year(db, user_id=USER)
-            rows = [dict(forecast_year=y, intangible_investments=0.02, tangible_investments=0.02,
+            rows = [dict(forecast_year=y, intangible_investments=0.04, tangible_investments=0.04,
                          depreciation_rate=20, depreciation_rate_intangible=20, **MANUAL_TAX)
                     for y in (2027, 2028)]
             rows[0]["pregresso"] = {"crediti_commerciali": {"opening": 120000, "amounts": [60000], "writeoff": [5000]}}

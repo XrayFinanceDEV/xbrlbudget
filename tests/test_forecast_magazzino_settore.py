@@ -23,7 +23,10 @@ from database.models import (BalanceSheet, BudgetAssumptions, BudgetScenario, Co
 from tests.e2e_kit import memory_sessions, read_forecast_maps, seed_base_year
 
 
-def _budget(settore):
+def _budget(settore, campo="sp05a_materie_prime"):
+    """`campo` sposta i 1.000.000 di rimanenze su una sotto-voce diversa: materie
+    (`sp05a`, il default) o lavori in corso (`sp05c`) — vedi il commento sul lotto 1
+    più sotto per il perché."""
     engine, sessions = memory_sessions()
     try:
         with sessions() as db:
@@ -32,7 +35,9 @@ def _budget(settore):
             fy = db.query(FinancialYear).filter(FinancialYear.company_id == company_id).one()
             b = db.query(BalanceSheet).filter(BalanceSheet.financial_year_id == fy.id).one()
             b.sp05_rimanenze = D("1000000.00")
-            b.sp05a_materie_prime = D("1000000.00")
+            if campo != "sp05a_materie_prime":
+                b.sp05a_materie_prime = D("0.00")
+            setattr(b, campo, D("1000000.00"))
             b.sp12_riserve += D("950000.00")
             b.sp12e_altre_riserve += D("950000.00")
             db.commit()
@@ -49,19 +54,26 @@ def _budget(settore):
         engine.dispose()
 
 
+# lotto 1 fix rilievi (2026-09-26): B01 — le materie (sp05a) non scalano più coi ricavi in
+# nessun settore: dividono sul CONSUMO di base (ce05 + ce10), che questo kit non fa crescere,
+# quindi restano piatte anche nei settori esentati dalla soglia dei giorni. La sotto-voce che
+# dimostra l'esenzione ora è un'altra rimanenza (sp05c, lavori in corso — proprio la voce di
+# un'edilizia/immobiliare con un cantiere pluriennale), che continua a dividere sui ricavi
+# (`dio_altre`) con la stessa soglia per settore di prima: stessi numeri di cassa, stesso 600
+# giorni, solo la chiave dei details che li porta è `dio_altre`/`dio_altre_applied`.
 @pytest.mark.parametrize("settore", [5, 6])
 def test_immobiliare_ed_edilizia_scalano_le_rimanenze_coi_ricavi(settore):
-    anni = _budget(settore)
+    anni = _budget(settore, campo="sp05c_lavori_in_corso")
     attesi = {2027: ("1100000.00", "44222.22"), 2028: ("1210000.00", "140704.44")}
     fuori = []
     for anno, (rimanenze, cassa) in attesi.items():
         sp, det = anni[anno]
         if sp["sp05_rimanenze"] != D(rimanenze) or sp["sp09_disponibilita_liquide"] != D(cassa):
             fuori.append(f"{anno}: sp05 {sp['sp05_rimanenze']} (atteso {rimanenze}), sp09 {sp['sp09_disponibilita_liquide']} (atteso {cassa})")
-        if "dio" in det["degenerate_turnover_ratio"]:
-            fuori.append(f"{anno}: dio dichiarato degenere")
-        if D(str(det["dio_applied"])).quantize(D("0.000001")) != D("600"):
-            fuori.append(f"{anno}: dio_applied {det['dio_applied']}")
+        if "dio_altre" in det["degenerate_turnover_ratio"]:
+            fuori.append(f"{anno}: dio_altre dichiarato degenere")
+        if D(str(det["dio_altre_applied"])).quantize(D("0.000001")) != D("600"):
+            fuori.append(f"{anno}: dio_altre_applied {det['dio_altre_applied']}")
         if det.get("soglia_giorni_magazzino") != {"settore": settore, "giorni_max": None}:
             fuori.append(f"{anno}: soglia dichiarata {det.get('soglia_giorni_magazzino')}")
     assert not fuori, "\n".join(fuori)

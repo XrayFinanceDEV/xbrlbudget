@@ -46,3 +46,10 @@ def test_apertura_mista_chiude_entrambe():
     assert t.saldo_paid == D("1000")
     assert t.credito_compensato == D("300")
     assert t.cash_out == D("1100")  # 1000 + 400 − 300
+
+
+def test_acconti_storici_eccedenti_restano_credito_per_l_anno_dopo():
+    t = _k(opening_credit=D("900"), previous_tax=D("100"), carry_excess_credit=True)
+    assert t.credito_compensato == D("100")
+    assert t.opening_credit_left == D("800")
+    assert t.cash_out == D("0")

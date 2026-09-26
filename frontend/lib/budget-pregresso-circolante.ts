@@ -20,6 +20,8 @@ const cents = (v: number) => Math.round(v * 100) / 100;
 
 export const PREGRESSO_LABELS: Record<PregressoKey, string> = {
   crediti_commerciali: "Crediti commerciali",
+  crediti_tributari_breve: "Crediti tributari entro 12 mesi",
+  crediti_tributari_lungo: "Crediti tributari oltre 12 mesi",
   debiti_fornitori: "Debiti verso fornitori",
   debiti_tributari: "Debiti tributari",
   debiti_previdenziali: "Debiti previdenziali",
@@ -42,11 +44,13 @@ function creditiComponents(b: Record<string, unknown>): { short: number; long: n
 /** Le masse di apertura per ciascuna voce di pregresso, spec §3.1: dal
  *  bilancio base, al netto delle sottovoci tributarie/imposte anticipate sui
  *  crediti (che hanno un proprio scadenziamento altrove, non in questo). */
-export function openingMasses(bs: BalanceSheet): Record<PregressoKey, number> {
+export function openingMasses(bs: BalanceSheet, accontiTributari = 0): Record<PregressoKey, number> {
   const b = bs as unknown as Record<string, unknown>;
   const cred = creditiComponents(b);
   return {
     crediti_commerciali: cents(cred.short + cred.long),
+    crediti_tributari_breve: cents(num(b.sp06e_crediti_tributari_breve) - accontiTributari),
+    crediti_tributari_lungo: cents(num(b.sp07e_crediti_tributari_lungo)),
     debiti_fornitori: cents(num(b.sp16d_debiti_fornitori_breve) + num(b.sp17d_debiti_fornitori_lungo)),
     debiti_tributari: cents(num(b.sp16e_debiti_tributari_breve) + num(b.sp17e_debiti_tributari_lungo)),
     debiti_previdenziali: cents(num(b.sp16f_debiti_previdenza_breve) + num(b.sp17f_debiti_previdenza_lungo)),
@@ -63,6 +67,8 @@ export function openingMassLong(bs: BalanceSheet, key: PregressoKey): number {
   const b = bs as unknown as Record<string, unknown>;
   switch (key) {
     case "crediti_commerciali": return cents(creditiComponents(b).long);
+    case "crediti_tributari_breve": return 0;
+    case "crediti_tributari_lungo": return cents(num(b.sp07e_crediti_tributari_lungo));
     case "debiti_fornitori": return cents(num(b.sp17d_debiti_fornitori_lungo));
     case "debiti_tributari": return cents(num(b.sp17e_debiti_tributari_lungo));
     case "debiti_previdenziali": return cents(num(b.sp17f_debiti_previdenza_lungo));
@@ -147,6 +153,9 @@ export function normalizePregresso(pregresso: Pregresso | null | undefined): Pre
   if (!pregresso) return null;
   const out: Pregresso = {};
   if (pregresso.crediti_commerciali) out.crediti_commerciali = normalizePlan(pregresso.crediti_commerciali);
+  if (pregresso.crediti_tributari_breve) out.crediti_tributari_breve = normalizePlan(pregresso.crediti_tributari_breve);
+  if (pregresso.crediti_tributari_lungo) out.crediti_tributari_lungo = normalizePlan(pregresso.crediti_tributari_lungo);
+  if (pregresso.acconti_tributari_storici !== undefined) out.acconti_tributari_storici = num(pregresso.acconti_tributari_storici);
   if (pregresso.debiti_fornitori) out.debiti_fornitori = normalizePlan(pregresso.debiti_fornitori);
   if (pregresso.debiti_tributari) out.debiti_tributari = normalizeTributari(pregresso.debiti_tributari);
   if (pregresso.debiti_previdenziali) out.debiti_previdenziali = normalizePlan(pregresso.debiti_previdenziali);
@@ -162,6 +171,9 @@ export function normalizePregresso(pregresso: Pregresso | null | undefined): Pre
  */
 export function validatePregresso(p: Pregresso, masses: Record<PregressoKey, number>, horizon: number): string[] {
   const errs: string[] = [];
+  if ((p.acconti_tributari_storici ?? 0) < 0 || masses.crediti_tributari_breve < -0.01) {
+    errs.push("Gli acconti già versati devono essere compresi nei crediti tributari entro 12 mesi del bilancio base");
+  }
   for (const key of Object.keys(PREGRESSO_LABELS) as PregressoKey[]) {
     const plan = p[key];
     if (!plan) continue;

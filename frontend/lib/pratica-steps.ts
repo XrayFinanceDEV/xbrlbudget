@@ -126,15 +126,6 @@ export function buildPraticaSteps(
       enabled: pratica.workflow === "startup" ? true : gates.budgetScenario,
     },
     {
-      id: "indici",
-      label: "Indici",
-      phase: "previsionale",
-      group: "vista",
-      kind: "route",
-      route: "/analysis",
-      enabled: gates.forecastReady,
-    },
-    {
       id: "ce-previsionale",
       label: "CE Prev.",
       phase: "previsionale",
@@ -150,15 +141,6 @@ export function buildPraticaSteps(
       group: "vista",
       kind: "route",
       route: "/forecast/balance",
-      enabled: gates.forecastReady,
-    },
-    {
-      id: "riclassificato",
-      label: "Riclassificato",
-      phase: "previsionale",
-      group: "vista",
-      kind: "route",
-      route: "/forecast/reclassified",
       enabled: gates.forecastReady,
     },
     {

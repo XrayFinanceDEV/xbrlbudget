@@ -193,6 +193,9 @@ MIGRATIONS = {
     "uploaded_files": [
         ("user_email",                         "VARCHAR(255)"),
     ],
+    "forecast_years": [
+        ("engine_meta",                        "JSON"),
+    ],
 }
 
 NEW_TABLES = {
@@ -248,6 +251,11 @@ for table, ddl in NEW_TABLES.items():
 added = 0
 skipped = 0
 for table, columns in MIGRATIONS.items():
+    # Una tabella assente (schema pre-esistente più vecchio di questa voce, es. i
+    # fixture di test) non è un errore: si salta, non si va in ALTER su niente.
+    cur.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?", (table,))
+    if not cur.fetchone():
+        continue
     cur.execute(f"PRAGMA table_info({table})")
     existing = {row[1] for row in cur.fetchall()}
 

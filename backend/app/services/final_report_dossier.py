@@ -3,9 +3,8 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass
-from decimal import Decimal
+from decimal import Decimal, ROUND_HALF_UP
 from pathlib import Path
-from types import SimpleNamespace
 
 from app.schemas.final_report import Diagnostic, FinalReportModel
 from app.schemas.final_report_v2 import (
@@ -14,7 +13,7 @@ from app.schemas.final_report_v2 import (
     ReportSeriesGroup, StatementPeriod,
 )
 from calculations.ce_result import calculate_ce_result
-from calculations.ratios import FinancialRatiosCalculator
+from calculations.projection_common import punto_di_pareggio
 from calculations.report_indicators import (
     balance_aggregates, financial_debt_total, indicator_results, unavailable_details,
 )
@@ -22,10 +21,9 @@ from calculations.report_indicators import (
 CATALOG = json.loads((Path(__file__).resolve().parents[3] / 'contracts/final_report_dossier_catalog.json').read_text(encoding='utf-8'))
 ZERO = Decimal('0')
 HUNDRED = Decimal('100')
-# La quota fissa di default di `calculate_break_even_analysis`: è quella che
-# vale per i costi che non hanno un'ipotesi per categoria.
+# La quota fissa di default del blocco pareggio (F5, decisione del proprietario 2026-09-26): è
+# quella che vale sulla colonna base/storica quando lo scenario non ha ancora ipotesi di piano.
 DEFAULT_FIXED_SHARE = Decimal('0.40')
-BREAK_EVEN_COST_FIELDS = ('ce05_materie_prime', 'ce06_servizi', 'ce07_godimento_beni', 'ce08_costi_personale', 'ce12_oneri_diversi')
 EQUITY_DEPS = ('sp11_capitale', 'sp12_riserve', 'sp13_utile_perdita')
 LIABILITIES_DEPS = EQUITY_DEPS + ('sp16_debiti_breve', 'sp17_debiti_lungo', 'sp14_fondi_rischi', 'sp15_tfr', 'sp18_ratei_risconti_passivi')
 UNITS = {'euro': 'eur', 'pct': 'percent', 'ratio': 'ratio', 'days': 'days'}
@@ -38,9 +36,40 @@ class DossierSource:
     income_statement: dict[str, Decimal] | None
     calculations: dict | None = None
     cashflow: dict | None = None
-    # Quota fissa per categoria delle ipotesi dello scenario (materie, servizi),
-    # in punti percentuali. `None` su un anno di piano = nessuna ipotesi.
+    # Quota fissa per categoria (materie, servizi), in punti percentuali — F5 (decisione del
+    # proprietario, 2026-09-26): le percentuali del PRIMO anno di piano
+    # (`final_report_service._fixed_split`), mai quelle dell'anno stesso di questa colonna.
+    # `None` senza alcuna ipotesi di piano salvata (il report dichiara il 60/40 di default). Resta
+    # letta solo dalle basi diverse da 'forecast' (`historical`/`closing`): un anno di piano vero
+    # usa `pareggio_motore`, mai più questa quota.
     fixed_split: tuple[Decimal, Decimal] | None = None
+    # A02 (lotto 2 fix rilievi, 2026-09-26): `ForecastYear.engine_meta["pareggio"]`
+    # dell'anno di piano, stringhe al centesimo o `None` per singola chiave (dizionario
+    # con le 7 chiavi di `calculations.forecast_engine.engine_meta`, o `None` quando
+    # l'anno non ha affatto un `engine_meta` persistito). Letto solo per basis=='forecast'.
+    pareggio_motore: dict[str, str | None] | None = None
+    # F2 (decisione del proprietario, 2026-09-26): `ForecastYear.engine_meta["rimborsi_piano"]`
+    # dell'anno di piano — stringa al centesimo, le sole rate di uno scadenziamento vero (mai
+    # scoperto/fidi/sweep) — per il DSCR. Letto solo per basis=='forecast'; `None` sia quando
+    # l'anno non ha affatto un `engine_meta` persistito, sia quando il motore che ha girato è più
+    # vecchio di questa correzione (nessuna chiave `rimborsi_piano`): in entrambi i casi il DSCR
+    # di quell'anno esce indefinito con la stessa ragione dichiarata (`_dscr_capital_quota`).
+    rimborsi_piano: str | None = None
+
+
+def pareggio_motore_from(engine_meta: dict | None) -> dict | None:
+    """`engine_meta['pareggio']` di un anno di piano, differenziando le due cause di assenza
+    (minore, revisione finale lotto 2, 2026-09-26): `None` solo quando l'anno non ha affatto un
+    `engine_meta` persistito (nessun motore ha mai girato per quell'anno — reason a valle
+    `engine_meta_missing`); un dizionario vuoto quando `engine_meta` c'è ma non porta la chiave
+    `pareggio` (un motore più vecchio del blocco pareggio) — reason a valle `pareggio_non_definito`,
+    perché il motore che ha girato per quell'anno non ha mai calcolato la scomposizione. Prima di
+    questa distinzione le due cause collassavano sullo stesso `None` e sulla stessa reason
+    `engine_meta_missing`, anche quando un `engine_meta` esisteva davvero.
+    """
+    if engine_meta is None:
+        return None
+    return engine_meta.get('pareggio') or {}
 
 
 def _path(data, key):
@@ -106,7 +135,17 @@ def build_detailed_statements(sources: list[DossierSource]) -> list[DetailedStat
 
 
 def build_indicator_catalog(sources: list[DossierSource]) -> list[IndicatorDefinition]:
-    results = [indicator_results(s.balance_sheet, s.income_statement, (s.calculations or {}).get('ratios')) for s in sources]
+    # F2 (decisione del proprietario, 2026-09-26): il DSCR di un anno di piano legge
+    # `rimborsi_piano` invece del rendiconto — `is_forecast_year` lo dice a `indicator_results`,
+    # `s.rimborsi_piano` resta `None` (dichiarato con la sua ragione) su ogni altra base.
+    results = [
+        indicator_results(
+            s.balance_sheet, s.income_statement, (s.calculations or {}).get('ratios'), s.cashflow,
+            is_forecast_year=s.period.basis == 'forecast',
+            rimborsi_piano=None if s.rimborsi_piano is None else Decimal(s.rimborsi_piano),
+        )
+        for s in sources
+    ]
     definitions = [('practice.' + row['key'], row, 'pratica') for row in CATALOG['practice_indicators']]
     definitions += [('practice.' + key, {'label': label, 'format': 'pct'}, 'incidenze') for key, label in (('materials_revenue', 'Materie prime / Ricavi'), ('services_revenue', 'Servizi / Ricavi'), ('personnel_revenue', 'Personale / Ricavi'))]
     # M2-02E: quattro indicatori canonici mancanti (pagine 7, 8, 12 del dossier v4). Come
@@ -134,14 +173,24 @@ def build_indicator_catalog(sources: list[DossierSource]) -> list[IndicatorDefin
                 value *= Decimal('100')
             values.append(value)
             reasons.append(reason)
-        label = 'DSCR — proxy della pratica' if identifier == 'practice.dscr' else row['label']
-        indicators.append(IndicatorDefinition(id=identifier, label=label, family=family, unit=unit,
+        indicators.append(IndicatorDefinition(id=identifier, label=row['label'], family=family, unit=unit,
             methodology=prototype.methodology if prototype else 'Fonte di calcolo non disponibile; nessuna formula applicata dal renderer.',
             convention=prototype.convention if prototype else 'Periodo e unità dichiarati; valori indisponibili distinti dallo zero.',
             periods=[s.period for s in sources], values=values, unavailable_reasons=reasons,
             source='calculations.report_indicators' if identifier.startswith('practice.') else 'FinancialRatiosCalculator',
         ))
     return indicators
+
+
+CENT = Decimal('0.01')
+
+
+def _q2(value: Decimal) -> Decimal:
+    """Al centesimo (F5, decisione del proprietario 2026-09-26): la colonna base/storica del
+    pareggio arrotonda come il motore (`_q2` in `calculations/forecast_engine.py`), cosi' resta
+    confrontabile al centesimo con gli anni di piano — che leggono `engine_meta['pareggio']` gia'
+    quantizzato."""
+    return value.quantize(CENT, rounding=ROUND_HALF_UP)
 
 
 def _share(value: Decimal | None, total: Decimal | None) -> tuple[Decimal | None, str | None]:
@@ -162,6 +211,12 @@ def _deps_sum(data: dict[str, Decimal], keys: tuple[str, ...]) -> Decimal | None
     return None if any(key not in data for key in keys) else sum((data[key] for key in keys), ZERO)
 
 
+def _pareggio_field(motore: dict[str, str | None], field: str) -> Decimal | None:
+    """Una chiave di `engine_meta['pareggio']` (stringa al centesimo o `None`) come `Decimal`."""
+    raw = motore.get(field)
+    return None if raw is None else Decimal(raw)
+
+
 def _column(series: dict[str, tuple[list, list]], key: str, value: Decimal | None, reason: str | None) -> None:
     series[key][0].append(value)
     series[key][1].append(value is None and (reason or 'source_field_unavailable') or None)
@@ -180,10 +235,10 @@ def build_structure_series(sources: list[DossierSource], indicators: list[Indica
     """Le serie delle pagine «Composizioni» e «Pareggio», dagli stessi numeri dei prospetti.
 
     Nulla qua ricalcola una formula: importi e quote vengono dagli aggregati
-    canonici (`balance_aggregates`, `financial_debt_total`) e il pareggio da
-    `FinancialRatiosCalculator.calculate_break_even_analysis` chiamato con la
-    quota fissa blended delle ipotesi dello scenario. Un valore che non c'è è
-    null con il proprio motivo, mai zero.
+    canonici (`balance_aggregates`, `financial_debt_total`) e il pareggio dalla stessa regola del
+    motore budget (`calculations.projection_common.punto_di_pareggio`, F5, decisione del
+    proprietario 2026-09-26), sia sulla colonna base/storica sia sugli anni di piano. Un valore
+    che non c'è è null con il proprio motivo, mai zero.
     """
     periods = [source.period for source in sources]
 
@@ -235,46 +290,82 @@ def build_structure_series(sources: list[DossierSource], indicators: list[Indica
             for key in pareggio:
                 _column(pareggio, key, None, 'source_period_unavailable')
             continue
-        if source.period.basis == 'forecast' and source.fixed_split is None:
-            for key in pareggio:
-                _column(pareggio, key, None, 'assumptions_missing')
+        if source.period.basis == 'forecast':
+            # A02 (lotto 2 fix rilievi, 2026-09-26): un anno di piano non ricalcola
+            # più fissi/variabili con una quota 60/40 (o quella delle ipotesi): usa
+            # integralmente `engine_meta['pareggio']` del motore, dichiarato per
+            # ogni anno in `calculations/forecast_engine.py`. `None` per l'intero
+            # anno (`engine_meta_missing`) quando non c'è affatto un `pareggio`
+            # persistito; `None` (`pareggio_non_definito`) quando il motore l'ha
+            # dichiarato lui stesso non definito (ce05/ce06 sotto override).
+            motore = source.pareggio_motore
+            if motore is None:
+                for key in pareggio:
+                    _column(pareggio, key, None, 'engine_meta_missing')
+                continue
+
+            variabili = _pareggio_field(motore, 'costi_variabili')
+            fissi_operativi = _pareggio_field(motore, 'costi_fissi_operativi')
+            if variabili is None or fissi_operativi is None:
+                for key in pareggio:
+                    _column(pareggio, key, None, 'pareggio_non_definito')
+                continue
+            _column(pareggio, 'variable_costs', variabili, None)
+            _column(pareggio, 'fixed_costs', fissi_operativi, None)
+            revenue = inc.get('ce01_ricavi_vendite')
+            # Stessa definizione della colonna base/storica: MdC = Ricavi − Costi
+            # variabili (qui i variabili sono quelli dichiarati dal motore).
+            margin = None if revenue is None else revenue - variabili
+            _column(pareggio, 'contribution_margin', margin, None if margin is not None else 'source_field_unavailable')
+            bep = _pareggio_field(motore, 'fatturato_pareggio')
+            sicurezza_pct = _pareggio_field(motore, 'margine_sicurezza_pct')
+            _column(pareggio, 'break_even_revenue', bep, None if bep is not None else 'pareggio_non_definito')
+            _column(pareggio, 'safety_margin_pct', sicurezza_pct, None if sicurezza_pct is not None else 'pareggio_non_definito')
             continue
-        costs = [inc.get(key) for key in BREAK_EVEN_COST_FIELDS]
-        if any(cost is None for cost in costs):
+        # F5 (decisione del proprietario, 2026-09-26): la colonna base/storica usa la STESSA
+        # regola del motore (`calculations.projection_common.punto_di_pareggio`), mai più
+        # `FinancialRatiosCalculator.calculate_break_even_analysis` — quella ignorava
+        # ce02/ce03/ce03a/ce04/ce10/ce11/ce11b e rendeva le due colonne incomparabili: a crescita
+        # zero il piano ripartiva costi diversi da quelli della base, e il testo raccontava un
+        # finto risanamento ("negativo nel <base> … positivo dal <primo anno di piano>"). Le
+        # quote fisso/variabile di ce05/ce06 vengono da `source.fixed_split` — le percentuali del
+        # PRIMO anno di piano (`final_report_service._fixed_split`) — cosi' base e piano
+        # applicano la stessa aritmetica alla stessa ripartizione; senza ipotesi di piano restano
+        # il 60/40 di default (`DEFAULT_FIXED_SHARE`), dichiarato, su entrambe le voci.
+        required = ('ce01_ricavi_vendite', 'ce04_altri_ricavi', 'ce05_materie_prime', 'ce06_servizi',
+                    'ce07_godimento_beni', 'ce08_costi_personale', 'ce12_oneri_diversi')
+        valori = {campo: inc.get(campo) for campo in required}
+        if any(v is None for v in valori.values()):
             for key in pareggio:
                 _column(pareggio, key, None, 'source_field_unavailable')
             continue
-        total_costs = sum(costs, ZERO)
-        if source.fixed_split is None or total_costs == ZERO:
-            fixed_share = DEFAULT_FIXED_SHARE
+        if source.fixed_split is None:
+            materials_pct = services_pct = DEFAULT_FIXED_SHARE * HUNDRED
         else:
-            materials_pct, services_pct = (percentage / HUNDRED for percentage in source.fixed_split)
-            fixed_share = (costs[0] * materials_pct + costs[1] * services_pct
-                           + sum(costs[2:], ZERO) * DEFAULT_FIXED_SHARE) / total_costs
-        revenue = inc.get('ce01_ricavi_vendite')
-        view = SimpleNamespace(revenue=ZERO if revenue is None else revenue,
-                               ebit=calculate_ce_result(inc).ebit,
-                               **{key: cost for key, cost in zip(BREAK_EVEN_COST_FIELDS, costs)})
-        analysis = FinancialRatiosCalculator(None, view).calculate_break_even_analysis(fixed_cost_percentage=fixed_share)
-        _column(pareggio, 'fixed_costs', analysis.fixed_costs, None)
-        _column(pareggio, 'variable_costs', analysis.variable_costs, None)
-        # Stessa guardia del blocco `pareggio` del motore budget: il ricavo di
-        # pareggio esiste solo con ricavi e margine di contribuzione positivi.
-        margin_raw = view.revenue - total_costs * (Decimal('1') - fixed_share)
-        if revenue is None:
-            reason = 'source_field_unavailable'
-        elif view.revenue == ZERO:
-            reason = 'zero_denominator'
-        elif view.revenue < 0 or margin_raw <= 0:
-            reason = 'non_positive_denominator'
+            materials_pct, services_pct = source.fixed_split
+        ce05, ce06 = valori['ce05_materie_prime'], valori['ce06_servizi']
+        ce05_fixed = ce05 * materials_pct / HUNDRED
+        ce06_fixed = ce06 * services_pct / HUNDRED
+        esito = punto_di_pareggio(
+            ce01=valori['ce01_ricavi_vendite'], ce02=inc.get('ce02_variazioni_rimanenze'),
+            ce03=inc.get('ce03_lavori_interni'), ce03a=inc.get('ce03a_incrementi_immobilizzazioni'),
+            ce04=valori['ce04_altri_ricavi'],
+            ce05_fixed=ce05_fixed, ce05_variable=ce05 - ce05_fixed,
+            ce06_fixed=ce06_fixed, ce06_variable=ce06 - ce06_fixed,
+            ce07=valori['ce07_godimento_beni'], ce08=valori['ce08_costi_personale'],
+            ce10=inc.get('ce10_var_rimanenze_mat_prime'), ce11=inc.get('ce11_accantonamenti'),
+            ce11b=inc.get('ce11b_altri_accantonamenti'), ce12=valori['ce12_oneri_diversi'],
+        )
+        _column(pareggio, 'fixed_costs', _q2(esito['costi_fissi_operativi']), None)
+        _column(pareggio, 'variable_costs', _q2(esito['costi_variabili']), None)
+        _column(pareggio, 'contribution_margin', _q2(valori['ce01_ricavi_vendite'] - esito['costi_variabili']), None)
+        if esito['fatturato_pareggio'] is not None:
+            _column(pareggio, 'break_even_revenue', _q2(esito['fatturato_pareggio']), None)
+            _column(pareggio, 'safety_margin_pct', _q2(esito['margine_sicurezza_pct']), None)
         else:
-            reason = None
-        _column(pareggio, 'contribution_margin', None if revenue is None else analysis.contribution_margin,
-                'source_field_unavailable')
-        if reason is None:
-            _column(pareggio, 'break_even_revenue', analysis.break_even_revenue, None)
-            _column(pareggio, 'safety_margin_pct', analysis.safety_margin * HUNDRED, None)
-        else:
+            # Stessa guardia del blocco `pareggio` del motore budget: il ricavo di pareggio
+            # esiste solo con ricavi e margine di contribuzione positivi.
+            reason = 'zero_denominator' if valori['ce01_ricavi_vendite'] == ZERO else 'non_positive_denominator'
             for key in ('break_even_revenue', 'safety_margin_pct'):
                 _column(pareggio, key, None, reason)
 
@@ -297,18 +388,26 @@ def build_structure_series(sources: list[DossierSource], indicators: list[Indica
                           methodology="Immobilizzazioni nette e disponibilità liquide dagli aggregati di bilancio; il circolante e altro è il residuo sul totale dell'attivo. Quote percentuali sullo stesso totale."),
         ReportSeriesGroup(id='composition_sources', title='Composizione delle fonti', periods=periods,
                           series=_finish(sources_group, labels, units), source='persisted_statement; balance_aggregates; financial_debt_total',
-                          methodology='Patrimonio netto dagli aggregati; debiti finanziari con la convenzione della PFN (banche'
-                                      ' e obbligazioni se positive, altrimenti debito meno i dettagli non bancari noti, altrimenti'
-                                      ' il debito totale); altre passività come residuo sul totale del passivo.'),
+                          # Minore (revisione finale lotto 2, 2026-09-26): testo allineato a C03/C04
+                          # — `financial_debt_total` è una somma incondizionata, mai un ramo "banche
+                          # positive altrimenti fallback" che tagliava fuori gli altri finanziatori.
+                          methodology='Patrimonio netto dagli aggregati; debiti finanziari con la convenzione della PFN (somma'
+                                      ' incondizionata di banche, altri finanziatori e obbligazioni, breve e lungo termine);'
+                                      ' altre passività come residuo sul totale del passivo.'),
         ReportSeriesGroup(id='cost_incidence', title='Incidenza dei costi sui ricavi', periods=periods,
                           series=incidence, source='calculations.report_indicators',
                           methodology="Valori del catalogo indicatori (practice.*): rapporto sull'articolo CE 1 × 100, con i flussi del periodo senza annualizzazione."),
         ReportSeriesGroup(id='break_even', title='Pareggio e margine di sicurezza', periods=periods,
-                          series=_finish(pareggio, labels, units), source='FinancialRatiosCalculator.calculate_break_even_analysis; BudgetAssumptions',
-                          methodology='calculate_break_even_analysis chiamato con la quota fissa desunta dalle ipotesi per'
-                                      ' categoria (materie e servizi) e con il 40% di default sugli altri costi operativi; i'
-                                      ' periodi non di piano usano il default. Ricavi di pareggio e margine di sicurezza solo'
-                                      ' con ricavi e margine di contribuzione positivi.'),
+                          series=_finish(pareggio, labels, units),
+                          source='calculations.projection_common.punto_di_pareggio (anni di piano e colonna base/storica)',
+                          methodology='Gli anni di piano riportano `engine_meta[\'pareggio\']` del motore (A02, lotto 2 fix'
+                                      ' rilievi 2026-09-26): costi variabili e fissi operativi dichiarati dal motore. La'
+                                      ' colonna base/storica applica la STESSA regola (`punto_di_pareggio`, F5, decisione'
+                                      ' del proprietario 2026-09-26) al CE di base, con le quote fisso/variabile di'
+                                      ' ce05/ce06 del primo anno di piano — così le due colonne sono confrontabili; senza'
+                                      ' ipotesi di piano resta il 60/40 di default, dichiarato. Ricavi di pareggio e'
+                                      ' margine di sicurezza assenti quando il motore non li dichiara (piano) o quando'
+                                      ' ricavi e margine di contribuzione non sono positivi (in entrambe le colonne).'),
     ]
 
 
@@ -319,7 +418,7 @@ DOSSIER_CHARTS = (
     ('practice_asset_coverage', 'Autonomia e copertura immobilizzazioni', ('practice.indipendenza', 'practice.copertura_immob')),
     ('practice_net_debt', 'Posizione finanziaria netta della pratica', ('practice.pfn',)),
     ('practice_net_debt_ebitda', 'PFN / EBITDA della pratica', ('practice.pfn_ebitda',)),
-    ('practice_dscr_proxy', 'Copertura degli oneri finanziari — proxy DSCR', ('practice.dscr',)),
+    ('practice_dscr', 'Copertura degli oneri finanziari — DSCR', ('practice.dscr',)),
     ('economic_incidence', 'Incidenze economiche sui ricavi', ('practice.ebitda_margin', 'practice.materials_revenue', 'practice.services_revenue')),
     ('financial_charges', 'Incidenza degli oneri finanziari', ('practice.of_revenue', 'practice.of_mol')),
     ('analytical_liquidity', 'Liquidità — convenzione analitica', ('analytical.liquidity.current_ratio', 'analytical.liquidity.quick_ratio', 'analytical.liquidity.acid_test')),

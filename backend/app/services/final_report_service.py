@@ -28,6 +28,7 @@ from app.services.final_report_domain import (
     ChainMatch, build_adjustments, build_infrannual_closing, reconcile_adjustments,
     resolve_source_scenario,
 )
+from calculations.forecast_engine import ENGINE_VERSION
 from calculations.intra_year_engine import CE_OVERRIDE_FIELDS as INTRA_YEAR_CE_OVERRIDE_FIELDS
 from importers.iv_cee_hierarchy import check_quadratura
 from database.models import BudgetScenario, FinancialYear, ForecastYear as ForecastYearRecord
@@ -54,6 +55,25 @@ ZERO = Decimal("0")
 
 def _diagnostic(code: str, severity: str, section: str, message: str) -> Diagnostic:
     return Diagnostic(code=code, severity=severity, section=section, message=message)
+
+
+def _engine_version_stale(workflow: str, forecast_years: Iterable[Any]) -> bool:
+    """A01-bis: `True` when a **budget** scenario (`workflow != "infrannuale"`) has at least one
+    persisted forecast year whose `engine_meta.engine_version` is present and older than
+    `calculations.forecast_engine.ENGINE_VERSION`. `engine_meta` `NULL`, or without a version, is
+    "non lo so" — never a verdict. Infrannuale scenarios never qualify (spec, Task 1)."""
+    if workflow == "infrannuale":
+        return False
+    for row in forecast_years:
+        version = (getattr(row, "engine_meta", None) or {}).get("engine_version")
+        if version is None:
+            continue
+        try:
+            if int(version) < int(ENGINE_VERSION):
+                return True
+        except (TypeError, ValueError):
+            continue
+    return False
 
 
 def _stamp(value: Any) -> datetime:
@@ -213,10 +233,14 @@ def _narrative(
                 freshness=item.get("freshness", "fresh"),
             ))
         else:
-            # Keep M1-06's draft signal, but only once: subsequent freshness
-            # projection must remain a pure hash-independent read operation.
+            # Declared once (freshness projection stays a pure read) and only as
+            # information: the prose belongs to the Typst dossier, detached from
+            # /report since 2026-09-24, and the Business plan writes its texts by
+            # rule. As a warning it kept every report in draft and refused the
+            # Business plan's «final» for texts nobody reads. The dossier keeps
+            # its own gate (EditorialPlanRequired) if it is ever called again.
             if current_source_hash is None:
-                diagnostics.append(_diagnostic("narrative_missing", "warning", "narrative", f"Blocco narrativo {ident} non disponibile."))
+                diagnostics.append(_diagnostic("narrative_missing", "info", "narrative", f"Blocco narrativo {ident} non disponibile."))
             output.append(NarrativeBlock(id=ident, text="", provenance="migrated", updated_at=generated_at,
                                          source_hash="0" * 64, freshness="missing"))
     return output
@@ -385,6 +409,9 @@ def assemble_final_report(db: Session, company_id: int, scenario_id: int, *, sch
             diagnostics.append(_diagnostic("forecast_years_missing", "error", "forecast", f"Anni forecast mancanti: {', '.join(map(str, missing))}."))
         if analysis.get("forecast_stale"):
             diagnostics.append(_diagnostic("forecast_stale", "error", "forecast", "Forecast precedente alle ipotesi salvate."))
+        if _engine_version_stale(workflow, scenario.forecast_years):
+            diagnostics.append(_diagnostic("engine_version_stale", "error", "forecast",
+                                           "Forecast generato da una versione precedente del motore."))
 
         by_forecast_year = {row.year: row for row in scenario.forecast_years}
         for year in wanted:
@@ -501,12 +528,23 @@ def assemble_final_report(db: Session, company_id: int, scenario_id: int, *, sch
             return report
 
         from app.schemas.final_report_v2 import StatementPeriod
-        from app.services.final_report_dossier import DossierSource, extend_dossier
+        from app.services.final_report_dossier import DossierSource, extend_dossier, pareggio_motore_from
         sources = []
         calculations = analysis.get('calculations', {}).get('by_year', {})
         cashflows = {entry['year']: entry for entry in cashflow_years if isinstance(entry, dict) and 'year' in entry}
+        # F5 (decisione del proprietario, 2026-09-26): la colonna base del pareggio (`historical`
+        # semplice, o `closing` sull'infrannuale promossa) usa le quote fisso/variabile del PRIMO
+        # anno di piano — non più `source_assumption` (l'ipotesi dell'anno di chiusura stesso, un
+        # concetto diverso) — così base e piano applicano la stessa aritmetica alla stessa
+        # ripartizione. `None` senza alcuna ipotesi di piano salvata: il report dichiara il 60/40
+        # di default (`DEFAULT_FIXED_SHARE`).
+        first_plan_assumption = (
+            next((item for item in scenario.assumptions if item.forecast_year == wanted[0]), None)
+            if wanted else None
+        )
+        base_fixed_split = _fixed_split(first_plan_assumption)
 
-        def add_source(identifier, year, basis, record, label, months=12, snapshot=None, calculation_available=True, fixed_split=None):
+        def add_source(identifier, year, basis, record, label, months=12, snapshot=None, calculation_available=True, fixed_split=None, pareggio_motore=None, rimborsi_piano=None):
             bs = _statement_map(getattr(record, 'balance_sheet', None)) if record and record.balance_sheet else None
             inc = _statement_map(getattr(record, 'income_statement', None)) if record and record.income_statement else None
             if snapshot is not None:
@@ -521,6 +559,8 @@ def assemble_final_report(db: Session, company_id: int, scenario_id: int, *, sch
                 calculations=calculations.get(str(year), calculations.get(year)) if annual_calculation else None,
                 cashflow=cashflows.get(year) if annual_calculation else None,
                 fixed_split=fixed_split,
+                pareggio_motore=pareggio_motore,
+                rimborsi_piano=rimborsi_piano,
             ))
 
         historical_years = sorted({row['year'] for row in analysis.get('historical_years', []) if isinstance(row, dict) and 'year' in row})
@@ -545,12 +585,27 @@ def assemble_final_report(db: Session, company_id: int, scenario_id: int, *, sch
             )
             add_source(f'closing:{scenario.base_year}', scenario.base_year, 'closing', closing_record,
                 f'{scenario.base_year} chiusura stimata', calculation_available=closing_metrics_match,
-                fixed_split=_fixed_split(source_assumption))
+                fixed_split=base_fixed_split)
         elif scenario.base_year not in historical_years:
             add_source(f'historical:{scenario.base_year}', scenario.base_year, 'historical', financial_year,
-                f'{scenario.base_year} base')
+                f'{scenario.base_year} base', fixed_split=base_fixed_split)
         for year in wanted:
-            add_source(f'forecast:{year}', year, 'forecast', by_forecast_year.get(year), f'{year} previsionale',
-                fixed_split=_fixed_split(next((a for a in scenario.assumptions if a.forecast_year == year), None)))
+            # A02 (lotto 2 fix rilievi, 2026-09-26): il BEP di un anno di piano vero
+            # viene dal motore (`ForecastYear.engine_meta['pareggio']`), mai più dalla
+            # quota fissa per categoria delle ipotesi — `fixed_split` resta solo per la
+            # colonna base/storica (sopra, `historical`/`closing`), che non è un anno di
+            # piano rigenerato da questo motore.
+            forecast_row = by_forecast_year.get(year)
+            # Minore (revisione finale lotto 2, 2026-09-26): `pareggio_motore_from` distingue
+            # "nessun engine_meta persistito" (`engine_meta_missing`) da "engine_meta c'è ma non
+            # ha mai calcolato il pareggio" (`pareggio_non_definito`) — un `.get('pareggio')`
+            # diretto le confondeva entrambe in `None`.
+            # F2 (decisione del proprietario, 2026-09-26): `rimborsi_piano` per il DSCR, stessa
+            # sorgente (`ForecastYear.engine_meta`) — assente quando l'engine_meta non c'è affatto
+            # o quando il motore che ha girato è più vecchio di questa correzione.
+            forecast_engine_meta = getattr(forecast_row, 'engine_meta', None) or {}
+            add_source(f'forecast:{year}', year, 'forecast', forecast_row, f'{year} previsionale',
+                pareggio_motore=pareggio_motore_from(getattr(forecast_row, 'engine_meta', None)),
+                rimborsi_piano=forecast_engine_meta.get('rimborsi_piano'))
         from app.services.editorial_notes_service import project_editorial_report
         return project_editorial_report(db, extend_dossier(report, sources), scenario.id)

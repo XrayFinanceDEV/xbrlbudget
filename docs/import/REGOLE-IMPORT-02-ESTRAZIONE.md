@@ -16,7 +16,7 @@ Ordine reale dei fatti per un PDF caricato (`pdf_importer.import_pdf_balance_she
 | 2 | **Routing** (pagina 01). XBRL e UNSUPPORTED escono qui con un errore |
 | 3 | **Rilevamento testo corrotto** → esclude i totali dichiarati da ogni decisione |
 | 4 | **Estrazione**, biforcata per route |
-| 5 | **Identità CE↔SP** — `enforce_ce_sp_identity`, diagnostica, su **tutte** le route, XBRL nativo compreso: l'utile ricostruito dai tag CE può divergere dallo `sp13` taggato (budget_361/404) |
+| 5 | **Identità CE↔SP** — nel PDF `enforce_ce_sp_identity` registra lo scarto senza alterare CE o SP; l'XBRL nativo usa il proprio `check_quadratura` |
 | 6 | **Gate strutturale** `validate_balance` → se fallisce, diagnosi motivata (pagina 04) |
 | 7 | **Gate contabile** `check_quadratura` → se non quadra, import **non salvato** |
 | 8 | Coerenza gerarchica (non bloccante) |

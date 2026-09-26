@@ -16,7 +16,10 @@ NEUTRI = {
     "sp03_immob_materiali": ("sp03d_altri_beni", "sp03a_terreni_fabbricati", "sp03b_impianti_macchinari",
                              "sp03c_attrezzature", "sp03e_immob_in_corso"),
     "sp04_immob_finanziarie": ("sp04d_altri_titoli", "sp04a_partecipazioni", "sp04c_crediti_immob_lungo"),
-    "sp05_rimanenze": ("sp05e_acconti", "sp05a_materie_prime", "sp05b_prodotti_in_corso",
+    # sp05a_materie_prime NON e' piu' un campo neutro (spec B01, fix round 1, 2026-09-26):
+    # e' un confine CE<->SP, la chiusura che il CE ha gia' calcolato dal consumo — un
+    # centesimo di residuo posato li' sopra romperebbe l'identita' `ce10 == Δsp05a`.
+    "sp05_rimanenze": ("sp05e_acconti", "sp05b_prodotti_in_corso",
                        "sp05c_lavori_in_corso", "sp05d_prodotti_finiti"),
     "sp06_crediti_breve": ("sp06g_crediti_altri_breve", "sp06d_crediti_controllanti_breve",
                            "sp06c_crediti_collegate_breve", "sp06b_crediti_controllate_breve", "sp06a_crediti_clienti_breve"),

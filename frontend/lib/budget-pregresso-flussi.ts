@@ -96,7 +96,7 @@ export function flussiPregresso(years: ForecastPreviewYear[], breve: Record<Oltr
       years.map((y, i) => -chiuso(y, "debiti_previdenziali") - altri[i]!),
     ),
     riga("banche", "Finanziamenti bancari esistenti", years.map((y) => -contrattiPregressi(y).reduce((a, c) => a + num(c.rimborso), 0))),
-    riga("fidi", "Fidi e anticipi · variazione", years.map((y) => {
+    riga("fidi", "Fidi, Anticipi Ft e Scoperti CC · variazione", years.map((y) => {
       const f = y.details?.debito_bancario?.fidi;
       return f ? num(f.residuo) - num(f.apertura) : 0;
     })),
@@ -104,6 +104,8 @@ export function flussiPregresso(years: ForecastPreviewYear[], breve: Record<Oltr
     riga("trib-rate", "Tributari rateizzati", years.map((y) => -num(y.details?.imposte?.rate_paid))),
     riga("altri-oltre", "Altri debiti oltre 12 mesi", years.map((y, i) => altri[i]! - chiuso(y, "altri_debiti"))),
     riga("crediti-oltre", "Incasso crediti oltre 12 mesi", years.map((y, i) => chiuso(y, "crediti_commerciali") - cred[i]!)),
+    riga("tributari-entro", "Incasso crediti tributari pregressi entro 12 mesi", years.map((y) => chiuso(y, "crediti_tributari_breve"))),
+    riga("tributari-oltre", "Incasso crediti tributari pregressi oltre 12 mesi", years.map((y) => chiuso(y, "crediti_tributari_lungo"))),
   ];
 
   const somma = (i: number) => flussi.reduce((a, r) => a + num(r.years[i]?.value), 0);

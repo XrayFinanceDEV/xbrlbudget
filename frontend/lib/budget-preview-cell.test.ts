@@ -2,11 +2,10 @@ import { describe, expect, it } from "vitest";
 import { describeCell, rowClass } from "./budget-preview-cell";
 
 describe("describeCell", () => {
-  it("un valore assente con una percentuale vera mostra la percentuale, non solo il trattino (C1)", () => {
+  it("una riga di sole percentuali mostra la percentuale come valore principale", () => {
     const d = describeCell({ value: null, pct: 21 });
-    expect(d.main).toBe("—");
-    expect(d.sub).not.toBeNull();
-    expect(d.sub).toContain("21");
+    expect(d.main).toBe("21,0%");
+    expect(d.sub).toBeNull();
   });
 
   it("un valore vero con una nota porta anche la nota (I2)", () => {

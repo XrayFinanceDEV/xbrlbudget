@@ -62,10 +62,15 @@ const dayLabel = (n: number | null): string => (n === null ? "n/d" : `${n} gg`);
 const autoPlaceholder = (n: number | null) => () => (n === null ? "auto" : `auto ${n}`);
 
 /** L'etichetta di ciascuno dei tre giorni medi, in un posto solo: le righe
- *  della tabella e gli avvisi devono chiamarli allo stesso modo. */
+ *  della tabella e gli avvisi devono chiamarli allo stesso modo.
+ *
+ *  `dio` (lotto 1 fix rilievi, rilievo I2 della revisione finale, 2026-09-26): dal B01 questo
+ *  campo e' i giorni delle sole MATERIE PRIME sul loro consumo (`ce05+ce10`), non piu' un giorno
+ *  di rotazione di tutto il magazzino sui ricavi — l'etichetta "(DIO)" da sola lo presenta ancora
+ *  come prima. */
 const GIORNI_LABELS: Record<string, string> = {
   dso: "Giorni incasso clienti (DSO)",
-  dio: "Giorni rotazione magazzino (DIO)",
+  dio: "Giorni di scorta materie prime (sul consumo)",
   dpo: "Giorni pagamento fornitori (DPO)",
 };
 
@@ -107,7 +112,7 @@ export function degenerateDaysAvvisi(data: ForecastPreviewResponse | null): stri
 }
 
 /**
- * Le 14 voci minori dell'attivo e del passivo, con il codice SP, l'importo base
+ * Le 15 voci minori dell'attivo e del passivo, con il codice SP, l'importo base
  * e chi le governa.
  *
  * `code` e' `null` sulle voci che nessun driver puo' agganciare, e `governata`
@@ -130,12 +135,12 @@ const MINOR_FIELDS: readonly {
     code: null, governata: "dalla posizione tributaria" },
   // Le imposte anticipate sono COSTANTI (commercialista, 2026-09-18): non
   // passano dal conto economico e non hanno una percentuale; si cambiano solo
-  // a mano nello SP previsionale, con contropartita le riserve. Entrambe le
+  // a mano nello SP previsionale, con effetto sulla cassa. Entrambe le
   // righe sono quindi di sola lettura (`inerte`).
   { field: "sp06f", label: "Imposte anticipate entro", baseField: "sp06f_imposte_anticipate_breve",
-    code: null, governata: "a mano nello SP previsionale: costanti, contro riserve", inerte: true },
+    code: null, governata: "a mano nello SP previsionale: costanti, effetto sulla cassa", inerte: true },
   { field: "sp07f", label: "Imposte anticipate oltre", baseField: "sp07f_imposte_anticipate_lungo",
-    code: null, governata: "a mano nello SP previsionale: costanti, contro riserve", inerte: true },
+    code: null, governata: "a mano nello SP previsionale: costanti, effetto sulla cassa", inerte: true },
   { field: "sp08_growth_pct", label: "Attività finanziarie", baseField: "sp08_attivita_finanziarie", code: "sp08" },
   { field: "sp10_growth_pct", label: "Ratei e risconti attivi", baseField: "sp10_ratei_risconti_attivi", code: "sp10" },
   { field: "sp14_growth_pct", label: "Fondi per rischi e oneri", baseField: "sp14_fondi_rischi", code: "sp14" },
@@ -185,6 +190,9 @@ export function pianiPregressoOf(
 }
 
 export interface MinorFieldRow extends CircolanteTableRow {
+  balanceField: string;
+  /** Saldo storico, usato per separare le voci a zero senza leggere l'etichetta formattata. */
+  baseAmount: number | null;
   /** Il codice SP, `null` quando nessun driver puo' agganciare la voce. */
   code: string | null;
   /** Il driver scelto per questa voce, `null` se nessuno. */
@@ -214,38 +222,39 @@ export function spIndexingOf(
   return raw ?? {};
 }
 
-/** Le 14 voci minori: importo base, driver scelto e frase di andamento. */
+/** Le 15 voci minori: importo base, driver scelto e frase di andamento.
+ *
+ * A06 (lotto 3 fix rilievi, 2026-09-26, decisione del proprietario): la
+ * casella «Debiti previdenziali scalano col costo del personale» e' sparita
+ * dal wizard — sp16f/sp17f sono voci agganciabili come le altre voci minori, col
+ * driver `personale` gia' fra i tre di `sp_indexing`. Non c'e' piu' un doppio
+ * comando da arbitrare qui.
+ */
 export function minorFieldsRows(
   baseBs: BalanceSheet | undefined | null,
   indexing: Record<string, SpIndexingDriver> = {},
-  previdenzaSuPersonale = false,
   pianiPregresso: readonly string[] = [],
 ): MinorFieldRow[] {
   const b = (k: string) => euro(baseBs ? numOrNull((baseBs as unknown as Record<string, unknown>)[k]) : null);
   return MINOR_FIELDS.map((v) => {
-    // L'interruttore E' gia' l'indicizzazione di sp16f/sp17f al costo del
-    // personale: con quello acceso il motore ignora una chiave su quelle due
-    // voci, quindi l'interfaccia mostra l'aggancio che vale davvero.
-    const switchOwned = previdenzaSuPersonale && (v.code === "sp16f" || v.code === "sp17f");
     // Ruling 17: con un piano la voce si estingue, e nessun driver la governa.
     const conPiano = Boolean(v.code && pianiPregresso.includes(PIANO_DI[v.code] ?? ""));
-    const driver = v.code && !switchOwned && !conPiano ? indexing[v.code] ?? null : null;
+    const driver = v.code && !conPiano ? indexing[v.code] ?? null : null;
     const andamento = conPiano
       ? "Governata dal piano di scadenziamento"
       : v.governata
         ? `Governata ${v.governata}`
-        : switchOwned
-          ? `Cresce con ${DRIVER_LABELS.personale}`
-          : driver
-            ? `Cresce con ${DRIVER_LABELS[driver]}`
-            : "Costante per tutto il piano, salvo variazione %";
+        : driver
+          ? `Cresce con ${DRIVER_LABELS[driver]}`
+          : "Costante per tutto il piano, salvo variazione %";
     // Con un piano il motore scrive `base − massa` (che vale zero) o il residuo
     // del runoff: la percentuale e' inerte tanto quanto il driver.
-    const inerte = Boolean(driver) || switchOwned || conPiano || v.inerte === true;
+    const inerte = Boolean(driver) || conPiano || v.inerte === true;
     return {
-      field: v.field, label: v.label, baseLabel: b(v.baseField),
-      code: switchOwned || conPiano ? null : v.code, driver, andamento,
-      agganciata: Boolean(driver) || switchOwned,
+      field: v.field, label: v.label, baseLabel: b(v.baseField), balanceField: v.baseField,
+      baseAmount: baseBs ? numOrNull((baseBs as unknown as Record<string, unknown>)[v.baseField]) : null,
+      code: conPiano ? null : v.code, driver, andamento,
+      agganciata: Boolean(driver),
       sub: andamento,
       // Un driver (o un piano) vince sulla percentuale: la casella resterebbe
       // viva senza alcun effetto, ed e' esattamente il difetto da cui nasce

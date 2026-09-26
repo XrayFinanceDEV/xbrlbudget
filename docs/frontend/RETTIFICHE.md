@@ -155,8 +155,9 @@ aggregati−dettagli. Rifiuta con 400 solo ciò che **peggiora** una delle tre. 
 scelta**: un foglio già sbilanciato all'import deve restare lavorabile, ed è esattamente il file
 per cui le Rettifiche esistono. Renderla assoluta lo renderebbe incorreggibile per sempre.
 
-**Auto-riconciliazione al load** (`reconcileSubfields`, `lib/pratica-reconcile.ts`). Fa due cose
-diverse, ed è importante non confonderle:
+**Riconciliazione al caricamento e chiusura alla conferma.** Al caricamento
+`reconcileSubfields` (`lib/pratica-reconcile.ts`) viene chiamata con `adjustBalance: false`.
+Le operazioni sono distinte:
 
 1. **Nove riconciliazioni aggregato → dettaglio**, `sp04`, `sp05`, `sp06`, `sp07`, `sp12`, `sp16`,
    `sp17`, `ce08`, `ce09`: se l'aggregato importato non è la somma dei suoi sotto-campi, il
@@ -168,9 +169,11 @@ diverse, ed è importante non confonderle:
    crediti a breve è quasi sempre quello, e con acconti/verso altri ogni import richiedeva una
    riclassifica. Con un dettaglio parziale il resto va ancora in `sp05e`/`sp06g`. La stessa regola
    vive negli importatori: `iv_cee_hierarchy.residual_bucket`.
-2. **Uno sbilancio Attivo/Passivo ≤ 5 €** da arrotondamento d'import, tappato in
-   `sp09_disponibilita_liquide`. Questo sì è cappato, e una sola volta: le rettifiche successive
-   sono in partita doppia, quindi il pareggio si conserva da sé.
+2. **Uno sbilancio Attivo/Passivo ≤ 2 €** da arrotondamento d'import viene chiuso solo alla
+   conferma (`preparaConfermaRettifiche`), con una voce visibile e cancellabile nel giornale.
+   La destinazione dipende dal lato dello scarto (`sp09_disponibilita_liquide` o
+   `sp16g_altri_debiti_breve`). Questo intervento è cappato; le rettifiche successive sono in
+   partita doppia, quindi il pareggio si conserva da sé.
 
 **Ripristino** (`onReset`): rimanda lo snapshot come BS/IS più un log vuoto, cancellando
 correzioni e giornale. Deve **riconciliare una copia** dello snapshot prima di inviarlo, per la

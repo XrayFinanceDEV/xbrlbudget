@@ -164,9 +164,17 @@ mostrano, su questo 422 come su ogni altro errore, un solo messaggio grezzo.
 
 ## 2. Gli override: due meccanismi, non uno
 
+Nel passo Costi del wizard, `variable_materials_growth_auto` e
+`variable_services_growth_auto` indicano se lo scostamento della parte variabile rispetto ai
+ricavi è automatico. Sono stato della schermata: il motore usa invece
+`variable_materials_growth_pct` e `variable_services_growth_pct`, che il client scrive come
+`revenue_growth_pct + scostamento` (limitato fra −100 e 100). Lo stesso principio vale per
+`fixed_materials_growth_auto` e `fixed_services_growth_auto`, che seguono l'inflazione finché
+la casella non viene personalizzata.
+
 ### 2.1 Conto economico — 32 colonne `ce*_override`
 
-`BudgetAssumptions` porta **32** colonne `ce*_override` (`database/models.py:703-736`), non 31:
+`BudgetAssumptions` porta **32** colonne `ce*_override` (`database/models.py`, modello `BudgetAssumptions`), non 31:
 `ce01`–`ce20` meno `ce17` (sostituito dalle sue due sotto-voci), più `ce03a` (incrementi di
 immobilizzazioni per lavori interni, A.4), `ce08a`–`d`, `ce09a`–`d`, `ce11b`, `ce17`, `ce17a`,
 `ce17b`. Lo stesso insieme di 32 compare in `backend/app/schemas/budget.py` (due volte),
@@ -214,7 +222,7 @@ fisso — e lo stato si legge dall'oggetto `assumptions` della risposta di `/ana
 
 ### 2.2 Stato patrimoniale — il sacco JSON `sp_overrides`
 
-`BudgetAssumptions.sp_overrides` è una colonna **JSON** (`models.py:700`), un dizionario
+`BudgetAssumptions.sp_overrides` è una colonna **JSON** (`database/models.py`), un dizionario
 `{campo_sp: valore}`. Non è un residuo: `/forecast/balance` è **editabile** e la scrive
 (`frontend/app/forecast/balance/page.tsx:153-158`), in un lotto UNICO che può toccare **più
 anni in una sola chiamata**:
@@ -515,8 +523,9 @@ somma resta `sp16a`/`sp17a`.
 `bank_lines_amount` sta **solo sulla riga del primo anno** di previsione: è l'apertura di fidi e
 anticipi su fatture. Assente = tutto come sempre (la linea di credito è debito bancario a breve
 scandagliato col piano, senza distinzione); presente = **regime esplicito** (spec 2026-09-15 §5.2,
-decisioni 5 e 9), con `bank_lines_rule` (`costante` | `ricavi`, default `costante`) e
-`bank_lines_rate` (%, tasso della linea in apertura d'anno).
+decisioni 5 e 9), con `bank_lines_rate` (%, tasso della linea in apertura d'anno).
+`bank_lines_rule` resta nello schema per leggere i payload legacy, ma il servizio salva
+`costante` quando c'è un importo dei fidi e il motore applica sempre quella regola.
 
 - **Controlli, al salvataggio.** I fidi non possono superare la `sp16a` dell'anno base (tolleranza
   0,01): «Fidi e anticipi (X) superano i debiti verso banche a breve dell'anno base (Y): correggi al
@@ -525,9 +534,8 @@ decisioni 5 e 9), con `bank_lines_rule` (`costante` | `ricavi`, default `costant
   debito bancario dell'anno base (Z)». Un `bank_lines_amount` su una riga che non è la prima è
   rifiutato. Il regime rende `use_detailed_existing_schedule` attivo anche senza contratti.
 - **Uno stato per anno.** Apertura = l'importo della prima riga, poi il `residuo` dichiarato
-  l'anno prima (dopo sweep e riconciliazione, come lo scoperto). Con la regola `ricavi` segue il
-  rapporto dei ricavi anno su anno e si dichiara in `variazione_ricavi`; nessun rimborso proprio
-  oltre allo sweep.
+  l'anno prima (dopo sweep e riconciliazione, come lo scoperto). La regola è sempre `costante`:
+  `variazione_ricavi` è zero; non c'è un rimborso proprio oltre allo sweep.
 - **Lo sweep paga solo i fidi** (`cash_sweep_enabled`): il perimetro a breve è il `fidi_residuo`
   dell'anno, `lungo_disponibile` è zero, e i contratti restano sul proprio piano intatti — misura
   in `tests/test_forecast_fidi.py`: riga `contratti` identica con e senza sweep.
@@ -556,8 +564,8 @@ decisioni 5 e 9), con `bank_lines_rule` (`costante` | `ricavi`, default `costant
   circolarmente sul tiraggio dell'anno — lo colpiscono dall'anno dopo. L'invariante Σ`breve` +
   `scoperto_residuo` = `sp16a` tiene anche col tiraggio.
 - **Il tetto è l'importo di partenza, e si dichiara.** `affidamento` = `bank_lines_amount` della
-  prima riga, costante per tutto il piano anche con regola `ricavi` (la crescita per regola conta
-  verso il tetto quanto un tiraggio); `oltre_affidamento` = `max(0, residuo − affidamento)`. Oltre
+  prima riga, costante per tutto il piano; `oltre_affidamento` =
+  `max(0, residuo − affidamento)`. Oltre
   zero il piano si fa comunque e `details['avviso_fidi']` (chiave presente **sempre** nel regime
   esplicito, `null` a zero) dichiara: «Nel {anno} il piano usa {residuo} € di fidi e anticipi,
   {oltre} € oltre i {affidamento} € del bilancio di partenza: servono affidamenti in più.»
@@ -828,13 +836,15 @@ PUT /companies/{id}/scenarios/{sid}/assumptions
 }
 ```
 
-Cinque chiavi, tutte opzionali (`backend/app/schemas/budget.py` — `PregressoInput`,
-`PregressoPlanInput`, `PregressoTributariInput`): `crediti_commerciali`, `debiti_fornitori`,
-`debiti_tributari`, `debiti_previdenziali`, `altri_debiti`. Una chiave **assente o `null`** vale
-«nessun piano»: il motore usa la formula di oggi **intera**, lato breve e lato lungo
+`PregressoInput` (`backend/app/schemas/budget.py`) contiene sette piani opzionali:
+`crediti_commerciali`, `crediti_tributari_breve`, `crediti_tributari_lungo`,
+`debiti_fornitori`, `debiti_tributari`, `debiti_previdenziali`, `altri_debiti`.
+Una chiave di piano **assente o `null`** vale «nessun piano»: il motore usa la formula di oggi
+**intera**, lato breve e lato lungo
 (`mode: "legacy"`, sotto). Il centesimo di arrotondamento del gruppo debiti resta su
 `sp16g`/`sp17g` come prima, ma può valere un centesimo diverso quando un'altra riga del gruppo
-è cambiata (i tributari, §9).
+è cambiata (i tributari, §9). L'ottavo campo, `acconti_tributari_storici`, è uno scalare
+non negativo con default zero: indica gli acconti già pagati e non accetta `null`.
 
 - **Solo sulla riga del primo anno di piano.** `pregresso` su una riga successiva alza
   `Lo scadenziamento del pregresso (pregresso) vale solo sulla riga del primo anno di previsione`
@@ -866,7 +876,7 @@ percentuale di crescita di quella voce (`receivables_long_growth_pct`, o
 `debiti_fornitori`/`debiti_previdenziali`/`altri_debiti` per gli altri). Nell'ultimo anno di piano tutto il residuo non scadenziato
 è oltre: non c'è un «anno dopo» nel piano, e il motore non inventa scadenze.
 
-### `details['pregresso'][chiave]` — una per ciascuna delle cinque voci, ogni anno
+### `details['pregresso'][chiave]` — una per ciascuna delle sette voci, ogni anno
 
 | Chiave | Valore |
 |---|---|
@@ -877,18 +887,18 @@ percentuale di crescita di quella voce (`receivables_long_growth_pct`, o
 | `residual_long` | il resto del residuo, oltre l'esercizio |
 | `generated` | il lato a breve **generato dalla formula di oggi**, prima di sommare `residual_short` |
 | `mode` | `"runoff"` con un piano dichiarato, `"legacy"` senza (formula di oggi, intera) |
-| `non_incassato` | solo sui `crediti_commerciali` (`false` sulle altre quattro voci): il piano ha dichiarato `non_incassato: true` sul JSON in ingresso (spec 2026-09-15 §5.5). È **solo dichiarativo** — accettato dallo schema, persistito e riportato tale e quale, ma il motore non lo usa: un piano a zero sulla parte oltre l'esercizio lascia già il residuo aperto per costruzione, quindi «non incassare» è il comportamento che un piano così scritto produce da sé |
+| `non_incassato` | solo sui `crediti_commerciali` (`false` sulle altre sei voci): il piano ha dichiarato `non_incassato: true` sul JSON in ingresso (spec 2026-09-15 §5.5). È **solo dichiarativo** — accettato dallo schema, persistito e riportato tale e quale, ma il motore non lo usa: un piano a zero sulla parte oltre l'esercizio lascia già il residuo aperto per costruzione, quindi «non incassare» è il comportamento che un piano così scritto produce da sé |
 
 `pregresso_ignored` è una **lista**, sempre presente anche vuota: i saldi il cui piano è stato
 scavalcato dalla via manuale (oggi il solo caso possibile è `debiti_tributari`, quando
-`sp06e_growth_pct` o `sp16e_growth_pct` sono valorizzati — §9). `pregresso_writeoff_ignored` è
+`sp16e_growth_pct` è valorizzato nel budget — §9). `pregresso_writeoff_ignored` è
 una lista di oggetti (`saldo`, `field`, `requested`, `reason`) per l'inesigibile che un override
 di CE ha impedito di scaricare: senza questa chiave il piano direbbe un importo inesigibile e il
 bilancio non ne mostrerebbe traccia, senza un solo avviso.
 
 ## 9. Le imposte a saldo + acconto
 
-È l'unico dei cinque saldi il cui comportamento cambia **anche senza un piano**: il vecchio
+È l'unico dei sette saldi il cui comportamento cambia **anche senza un piano**: il vecchio
 meccanismo (`precedente + imposte dell'anno − acconti`, con acconti a **zero** di default)
 accumulava debito tributario che non usciva mai — un difetto che quadrava, mai visto da un
 controllo. Ora ogni anno di piano paga **saldo + acconto + rate**
@@ -921,10 +931,13 @@ usa `posizione_tributaria_fine_anno`, con la stessa regola degli acconti (`accon
 
 Uscita di cassa dell'anno = saldo + acconti + rate, attraverso il plug come tutto il resto.
 
-**Via manuale.** `sp06e_growth_pct` o `sp16e_growth_pct` valorizzati saltano tutto questo, come
-prima del lotto: i debiti tributari si muovono per crescita percentuale, e un piano tributario
-scritto insieme a quelle percentuali produce `pregresso_ignored: ["debiti_tributari"]` invece di
-applicarsi a metà. Un anno **manuale seguito da un anno automatico**, con un piano tributario,
+**Via manuale nel budget.** Solo `sp16e_growth_pct` valorizzato salta il calcolo automatico
+della posizione tributaria: i debiti tributari si muovono per crescita percentuale, e un piano
+tributario scritto insieme produce `pregresso_ignored: ["debiti_tributari"]` invece di applicarsi
+a metà. `sp06e_growth_pct` non attiva la via manuale: scala la quota di credito tributario del
+consuntivo dentro il calcolo automatico, senza moltiplicare il credito generato dagli acconti.
+Nel motore infrannuale, invece, basta `sp06e_growth_pct` **o** `sp16e_growth_pct` per attivare
+la via manuale. Un anno **manuale seguito da un anno automatico** nel budget, con un piano tributario,
 non è però libero: il saldo dovuto si ricostruisce dal **totale** di debito tributario che
 l'anno manuale lascia in bilancio (`sp16e + sp17e`), e se quel totale è **inferiore** al
 rateizzato ancora aperto all'inizio dell'anno automatico il calendario ripartirebbe intero e la
@@ -1016,9 +1029,12 @@ a vincere come sempre, e un residuo eventuale si posa sul primo campo neutro lib
 Undici voci minori dello stato patrimoniale seguono, per default, la formula di sempre —
 `prev × (1 + %)`, cioè restano **ferme** se la percentuale non è impostata. `sp_indexing`
 (`BudgetAssumptions.sp_indexing`, colonna `JSON`) le aggancia invece a un driver di volume:
-`stock dell'anno BASE × fattore del driver`, la stessa forma già usata da
-`previdenza_scales_with_personnel`. Indicizzare sulla base non accumula deriva, mentre un
-`prev × (1+%)` composto per cinque anni sì.
+`stock dell'anno BASE × fattore del driver`. Indicizzare sulla base non accumula deriva, mentre un
+`prev × (1+%)` composto per cinque anni sì. `sp16f`/`sp17f` (debiti previdenziali) sono due di
+queste undici, agganciabili al driver `personale` come le altre: fino al lotto 3 fix rilievi
+(A06, 2026-09-26) avevano anche un interruttore a parte (`previdenza_scales_with_personnel`) che
+duplicava la stessa cosa — sparito dal wizard, e il motore lo ignora (resta nel modello/schema
+solo per compatibilità con un client vecchio).
 
 ```jsonc
 { "forecast_year": 2026, "revenue_growth_pct": 5.0,
@@ -1072,16 +1088,14 @@ Altre tre esclusioni, stesso pattern (`SP_INDEXING_GOVERNED`,
 di rimborso del debito, `sp06f`/`sp07f` (imposte anticipate) dalla posizione fiscale — nessuna di
 queste sette è comunque fra gli 11 codici indicizzabili, quindi l'esclusione dà solo un motivo più
 preciso, non un divieto altrimenti assente. Indicizzarle darebbe comunque due padroni allo stesso
-numero. E l'interruttore `previdenza_scales_with_personnel`, quando acceso, vince su un
-`sp_indexing` scritto per `sp16f`/`sp17f`: è già lui l'indicizzazione di quelle due voci al costo
-del personale, col motivo `"governata dall'interruttore previdenza/personale"`.
+numero.
 
 ### `details` — due chiavi, sempre presenti (anche vuote)
 
 | Chiave | Valore |
 |---|---|
 | `indicizzazione` | dizionario `{codice: {driver, fattore, percentuale_ignorata, valore}}` per ogni voce **davvero** indicizzata quest'anno. `percentuale_ignorata` è `true` quando la riga porta anche una `{codice}_growth_pct` non nulla sulla stessa voce — il driver vince, e la percentuale scritta non ha alcun effetto. `valore` è l'importo che l'indicizzazione ha **davvero** scritto sulla voce (non sempre ricostruibile come `base × fattore`: `sp04` sottrae le svalutazioni cumulate; le differenze temporanee non entrano piu' nel calcolo dal 2026-09-18) |
-| `indicizzazione_ignorata` | lista di `{voce, driver, motivo}` per ogni chiave di `sp_indexing` che non ha avuto effetto — motivi: `"voce non indicizzabile"`, `"governata dall'interruttore previdenza/personale"`, `"piano di scadenziamento"`, `"driver degenere"`, e `"driver sconosciuto"` per un nome di driver fuori dai tre. Quest'ultimo **è ancora raggiungibile, ma non più sulla porta normale**: dal lotto 3A (Task 7a) il bulk `PUT /scenarios/{id}/assumptions` (§1.2) valida ogni riga con lo schema tipizzato e risponde 422 con `campo: "sp_indexing.<codice>"`, senza salvare nulla. Lo dichiara ancora il motore quando il driver gli arriva da una porta senza quello schema — l'anteprima `POST /preview` (§7) o una riga scritta a mano nel DB — e lo rifiutano con 422 dal `Literal` le rotte tipizzate per singola riga (`POST /assumptions`, `PUT /assumptions/{year}`) |
+| `indicizzazione_ignorata` | lista di `{voce, driver, motivo}` per ogni chiave di `sp_indexing` che non ha avuto effetto — motivi: `"voce non indicizzabile"`, `"piano di scadenziamento"`, `"driver degenere"`, e `"driver sconosciuto"` per un nome di driver fuori dai tre. Quest'ultimo **è ancora raggiungibile, ma non più sulla porta normale**: dal lotto 3A (Task 7a) il bulk `PUT /scenarios/{id}/assumptions` (§1.2) valida ogni riga con lo schema tipizzato e risponde 422 con `campo: "sp_indexing.<codice>"`, senza salvare nulla. Lo dichiara ancora il motore quando il driver gli arriva da una porta senza quello schema — l'anteprima `POST /preview` (§7) o una riga scritta a mano nel DB — e lo rifiutano con 422 dal `Literal` le rotte tipizzate per singola riga (`POST /assumptions`, `PUT /assumptions/{year}`). Fino al lotto 3 fix rilievi (2026-09-26) c'era un quinto motivo, `"governata dall'interruttore previdenza/personale"`: sparito insieme all'interruttore (§11) |
 
 ## 12. Report finale — contratto di lettura canonico
 

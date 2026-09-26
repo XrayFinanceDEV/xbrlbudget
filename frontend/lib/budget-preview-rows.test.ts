@@ -27,7 +27,7 @@ const year = (y: number, over: Partial<Record<string, number>> = {}): ForecastPr
     sp16b_debiti_altri_finanz_breve: 0, sp16c_debiti_obbligazioni_breve: 0, sp17c_debiti_obbligazioni_lungo: 0,
     sp16e_debiti_tributari_breve: 33 },
   details: { ce05_fixed: 130, ce05_variable: 300, ce06_fixed: 120, ce06_variable: 90,
-    dso_applied: 60, dio_applied: 45, dpo_applied: 78, pregresso: { crediti_commerciali: { opening: 0, closed: 0, writeoff: 0, residual_short: 0, residual_long: 0, generated: 0, mode: "legacy" }, debiti_fornitori: { opening: 0, closed: 0, writeoff: 0, residual_short: 0, residual_long: 0, generated: 0, mode: "legacy" }, debiti_tributari: { opening: 0, closed: 0, writeoff: 0, residual_short: 0, residual_long: 0, generated: 0, mode: "legacy" }, debiti_previdenziali: { opening: 0, closed: 0, writeoff: 0, residual_short: 0, residual_long: 0, generated: 0, mode: "legacy" }, altri_debiti: { opening: 0, closed: 0, writeoff: 0, residual_short: 0, residual_long: 0, generated: 0, mode: "legacy" } }, imposte: { current_tax: 0, saldo_paid: 0, acconti_paid: 0, rate_paid: 0, generated_debt: 0, generated_credit: 0, opening_credit_left: 0, mode: "manual" }, degenerate_turnover_ratio: [], pregresso_ignored: [], indicizzazione: {}, indicizzazione_ignorata: [], svalutazioni_cumulate: 0, residuo_quadratura: [], pregresso_writeoff_ignored: [], debito_bancario: { pregresso_senza_piano: null, pregresso_piano_anni: null, contratti: [], fidi: null }, pareggio: { costi_variabili: null, costi_fissi: null, costi_fissi_operativi: null, margine_contribuzione_pct: null, fatturato_pareggio: null, margine_sicurezza: null, margine_sicurezza_pct: null }, tfr: { apertura: 0, accantonamento: 0, liquidazioni: 0, chiusura: 0, sospeso: false }, altri_finanziatori: { apertura: 0, rimborso: 0, interessi: 0, breve: 0, lungo: 0, mode: "legacy", contratti: [] }, override_conflicts: [] },
+    dso_applied: 60, dio_applied: 45, dpo_applied: 78, pregresso: { crediti_tributari_breve: { opening: 0, closed: 0, writeoff: 0, residual_short: 0, residual_long: 0, generated: 0, mode: "legacy" }, crediti_tributari_lungo: { opening: 0, closed: 0, writeoff: 0, residual_short: 0, residual_long: 0, generated: 0, mode: "legacy" }, crediti_commerciali: { opening: 0, closed: 0, writeoff: 0, residual_short: 0, residual_long: 0, generated: 0, mode: "legacy" }, debiti_fornitori: { opening: 0, closed: 0, writeoff: 0, residual_short: 0, residual_long: 0, generated: 0, mode: "legacy" }, debiti_tributari: { opening: 0, closed: 0, writeoff: 0, residual_short: 0, residual_long: 0, generated: 0, mode: "legacy" }, debiti_previdenziali: { opening: 0, closed: 0, writeoff: 0, residual_short: 0, residual_long: 0, generated: 0, mode: "legacy" }, altri_debiti: { opening: 0, closed: 0, writeoff: 0, residual_short: 0, residual_long: 0, generated: 0, mode: "legacy" } }, imposte: { current_tax: 0, saldo_paid: 0, acconti_paid: 0, rate_paid: 0, generated_debt: 0, generated_credit: 0, opening_credit_left: 0, mode: "manual" }, degenerate_turnover_ratio: [], pregresso_ignored: [], indicizzazione: {}, indicizzazione_ignorata: [], svalutazioni_cumulate: 0, residuo_quadratura: [], pregresso_writeoff_ignored: [], debito_bancario: { pregresso_senza_piano: null, pregresso_piano_anni: null, contratti: [], fidi: null }, pareggio: { costi_variabili: null, costi_fissi: null, costi_fissi_operativi: null, margine_contribuzione_pct: null, fatturato_pareggio: null, margine_sicurezza: null, margine_sicurezza_pct: null }, tfr: { apertura: 0, accantonamento: 0, liquidazioni: 0, chiusura: 0, sospeso: false }, altri_finanziatori: { apertura: 0, rimborso: 0, interessi: 0, breve: 0, lungo: 0, mode: "legacy", contratti: [] }, override_conflicts: [] },
 });
 
 // I valori attesi sono quelli che `calculate_ce_result` (calculations/ce_result.py)
@@ -103,7 +103,10 @@ describe("rowsCosti", () => {
       margine_sicurezza: 458333.33, margine_sicurezza_pct: 41.67,
     };
     const rows = rowsCosti(baseInc, { materials: 32.5, services: 60 }, [y]);
-    expect(rows.map((r) => r.key)).toEqual(["ricavi", "variabili", "fissi", "personale", "mol"]);
+    expect(rows.map((r) => r.key)).toEqual([
+      "ricavi", "variabili", "mat-variabili", "serv-variabili",
+      "fissi", "mat-fissi", "serv-fissi", "personale", "mol",
+    ]);
     expect(rows.find((r) => r.key === "variabili")!.years[0].value).toBe(300);
     expect(rows.find((r) => r.key === "fissi")!.years[0].value).toBe(385);
     expect(rows.find((r) => r.key === "personale")!.years[0].value).toBe(155);
@@ -115,6 +118,22 @@ describe("rowsCosti", () => {
     // base: quote dallo slider, oneri diversi (ce12) compresi nei fissi da questo giro di rilievi
     expect(rows.find((r) => r.key === "fissi")!.base.value).toBe(400 * 0.325 + 200 * 0.6 + 150 + 30 + 20);
     expect(rows.find((r) => r.key === "variabili")!.base.value).toBeCloseTo(600 - (400 * 0.325 + 200 * 0.6), 6);
+    expect(rows.find((r) => r.key === "mat-fissi")!.base).toMatchObject({ value: 130, pct: 13 });
+    expect(rows.find((r) => r.key === "mat-variabili")!.base).toMatchObject({ value: 270, pct: 27 });
+    expect(rows.find((r) => r.key === "serv-fissi")!.base).toMatchObject({ value: 120, pct: 12 });
+    expect(rows.find((r) => r.key === "serv-variabili")!.base).toMatchObject({ value: 80, pct: 8 });
+    expect(rows.find((r) => r.key === "mat-fissi")!.years[0]).toMatchObject({ value: 130, pct: 130 / 1100 * 100 });
+    expect(rows.find((r) => r.key === "serv-variabili")!.years[0]).toMatchObject({ value: 90, pct: 90 / 1100 * 100 });
+  });
+  it("un override materie prime nasconde solo la loro ripartizione, non quella dei servizi", () => {
+    const y = year(2029);
+    y.details.ce05_fixed = null;
+    y.details.ce05_variable = null;
+    const rows = rowsCosti(baseInc, { materials: 0, services: 50 }, [y]);
+    expect(rows.find((r) => r.key === "mat-fissi")!.years[0]).toEqual({ value: null, pct: null, note: "forzato in CE Prev." });
+    expect(rows.find((r) => r.key === "mat-variabili")!.years[0].value).toBeNull();
+    expect(rows.find((r) => r.key === "serv-fissi")!.years[0].value).toBe(120);
+    expect(rows.find((r) => r.key === "serv-variabili")!.years[0].value).toBe(90);
   });
   it("senza pareggio definito (override di CE Prev.) le celle sono null con la nota, il MOL canonico resta calcolabile", () => {
     const y = year(2027);
@@ -237,6 +256,13 @@ describe("rowsCircolante", () => {
     expect(rows.find((r) => r.key === "ccn-pct")!.years[0].pct).toBeCloseTo((220 / 1200) * 100, 6);
     // assorbimento di cassa = -(ccn - ccn_precedente) = -(220 - 180) = -40
     expect(rows.find((r) => r.key === "cassa")!.years[0].value).toBe(-40);
+  });
+
+  it("I2 (revisione finale, 2026-09-26): la riga Rimanenze non porta i giorni di dio_applied, che sono delle sole materie prime, non del totale sp05", () => {
+    const baseBs = { sp05_rimanenze: "120" } as unknown as BalanceSheet;
+    const y = year(2027); // details.dio_applied === 45 nel fixture condiviso `year()`
+    const rows = rowsCircolante(baseBs, baseInc, [y]);
+    expect(rows.find((r) => r.key === "rimanenze")!.years[0].days).toBeUndefined();
   });
 });
 

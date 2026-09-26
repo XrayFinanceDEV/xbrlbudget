@@ -2,7 +2,7 @@
 Database connection and session management
 """
 import os
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, inspect, text
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker, Session
 
@@ -50,6 +50,19 @@ def init_db():
     """
     from database.models import Company, FinancialYear, BalanceSheet, IncomeStatement, UploadedFile
     Base.metadata.create_all(bind=engine)
+    ensure_variable_growth_columns()
+
+
+def ensure_variable_growth_columns(bind=engine):
+    """Add the two nullable auto/manual markers to existing SQLite databases."""
+    inspector = inspect(bind)
+    if not inspector.has_table("budget_assumptions"):
+        return
+    existing = {column["name"] for column in inspector.get_columns("budget_assumptions")}
+    with bind.begin() as connection:
+        for column in ("variable_materials_growth_auto", "variable_services_growth_auto"):
+            if column not in existing:
+                connection.execute(text(f"ALTER TABLE budget_assumptions ADD COLUMN {column} BOOLEAN"))
 
 
 def drop_all():

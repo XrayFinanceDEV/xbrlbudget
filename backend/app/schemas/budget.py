@@ -275,6 +275,9 @@ class PregressoTributariInput(PregressoPlanInput):
 class PregressoInput(BaseModel):
     """Opening balances and runoff schedules for working capital items and tax payables."""
     crediti_commerciali: Optional[PregressoPlanInput] = None
+    crediti_tributari_breve: Optional[PregressoPlanInput] = None
+    crediti_tributari_lungo: Optional[PregressoPlanInput] = None
+    acconti_tributari_storici: Decimal = Field(default=Decimal("0"), ge=0)
     debiti_fornitori: Optional[PregressoPlanInput] = None
     debiti_tributari: Optional[PregressoTributariInput] = None
     debiti_previdenziali: Optional[PregressoPlanInput] = None
@@ -344,6 +347,8 @@ class BudgetAssumptionsBase(BaseModel):
     inflation_pct: Optional[Decimal] = Field(default=None, ge=-50, le=100)
     fixed_materials_growth_auto: bool = False
     fixed_services_growth_auto: bool = False
+    variable_materials_growth_auto: Optional[bool] = None
+    variable_services_growth_auto: Optional[bool] = None
     bank_lines_amount: Optional[Decimal] = Field(default=None, ge=0)
     bank_lines_rule: Optional[Literal["costante", "ricavi"]] = None
     bank_lines_rate: Optional[Decimal] = Field(default=None, ge=0, le=100)
@@ -487,6 +492,8 @@ class BudgetAssumptionsUpdate(BaseModel):
     inflation_pct: Optional[Decimal] = None
     fixed_materials_growth_auto: Optional[bool] = None
     fixed_services_growth_auto: Optional[bool] = None
+    variable_materials_growth_auto: Optional[bool] = None
+    variable_services_growth_auto: Optional[bool] = None
     bank_lines_amount: Optional[Decimal] = None
     bank_lines_rule: Optional[Literal["costante", "ricavi"]] = None
     bank_lines_rate: Optional[Decimal] = None

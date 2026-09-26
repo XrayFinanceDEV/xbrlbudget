@@ -7,7 +7,9 @@ import { useAuth } from "@/contexts/AuthContext";
 import { usePratica } from "@/contexts/PraticaContext";
 import { usePrimaryAction } from "@/contexts/PraticaActionContext";
 import { useInvalidateAnalysis } from "@/hooks/use-queries";
-import { useIntermedioDownload } from "@/hooks/use-intermedio-download";
+import { useInfrannualeDownload } from "@/hooks/use-infrannuale-download";
+import { useFileDownload } from "@/hooks/use-file-download";
+import { downloadReportDocx } from "@/lib/api";
 import { rigeneraBudgetRiusato } from "@/lib/budget-rigenera-riuso";
 import {
   bulkUpsertAssumptions,
@@ -22,7 +24,7 @@ import {
 } from "@/lib/api";
 import type { CrisiInfrannuale, IntraYearComparison, IntraYearComparisonItem, RatingCrisi } from "@/types/api";
 import { toast } from "sonner";
-import { AlertTriangle, Loader2, Printer, Sparkles, X } from "lucide-react";
+import { AlertTriangle, FileText, Loader2, Printer, Sparkles, X } from "lucide-react";
 import { cn, getErrorMessage } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
@@ -93,7 +95,8 @@ export function StampaContent({
   // L'avviso sui commenti stantii si chiude: chi ha fatto una modifica
   // piccola può decidere che i commenti vanno ancora bene e stampare senza
   // portarsi dietro il riquadro giallo (decisione del proprietario,
-  // 2026-09-16). Chiuso sparisce anche dal PDF, ed è richiamabile.
+  // 2026-09-16). Chiuso sparisce anche dalla stampa del browser, ed è richiamabile;
+  // il PDF consegnato (report infrannuale) non riporta i commenti.
   const [avvisoCommentiChiuso, setAvvisoCommentiChiuso] = useState(false);
   const [aiCommentsLoading, setAiCommentsLoading] = useState(false);
   const refYear = comparison.reference_year;
@@ -125,24 +128,21 @@ export function StampaContent({
     setAiComments((prev) => ({ ...prev, [key]: value }));
     setAiCommentsDirty(true);
   };
-  // Il documento che si consegna e' il report intermedio generato dal server
-  // (`POST .../infrannuale/report/pdf`), non la stampa del browser di questa
-  // pagina, che resta come anteprima a schermo. Un commento modificato e non
-  // ancora salvato si salva prima: il PDF legge i commenti dal server.
-  const { download: downloadPdf, downloading: downloadingPdf } = useIntermedioDownload();
+  // Il documento che si consegna e' il report infrannuale generato dal server
+  // (`POST .../infrannuale/pdf`, ReportLab), non la stampa del browser di
+  // questa pagina, che resta come anteprima a schermo. Il PDF ha testi a
+  // regole e non legge i commenti AI: quelli restano qui, modificabili.
+  const { download: downloadPdf, downloading: downloadingPdf } = useInfrannualeDownload();
   const handleDownloadPdf = async () => {
     if (!companyId || !scenarioId) return;
-    if (aiCommentsDirty) {
-      try {
-        await saveInfrannualeAIComments(companyId, scenarioId, aiComments);
-        setAiCommentsStale(false);
-        setAiCommentsDirty(false);
-      } catch {
-        toast.error("Errore nel salvataggio dei commenti: il PDF non è stato generato");
-        return;
-      }
-    }
-    await downloadPdf(companyId, scenarioId, !avvisoCommentiChiuso);
+    await downloadPdf(companyId, scenarioId);
+  };
+  // Lo stesso report in Word, per correggere i testi prima di consegnarlo.
+  const { download: downloadFile, downloading: downloadingWord } = useFileDownload();
+  const handleDownloadWord = async () => {
+    if (!companyId || !scenarioId) return;
+    await downloadFile(() => downloadReportDocx(companyId, scenarioId, "infrannuale"),
+      "Impossibile scaricare il Word del report");
   };
 
   const handleCommentBlur = async () => {
@@ -430,13 +430,23 @@ export function StampaContent({
           </Button>
         )}
         {companyId && scenarioId && (
-          <Button onClick={() => void handleDownloadPdf()} variant="outline" disabled={downloadingPdf}>
+          <Button onClick={() => void handleDownloadPdf()} variant="outline" disabled={downloadingPdf || downloadingWord}>
             {downloadingPdf ? (
               <Loader2 className="h-4 w-4 mr-2 animate-spin" />
             ) : (
               <Printer className="h-4 w-4 mr-2" />
             )}
             Scarica PDF
+          </Button>
+        )}
+        {companyId && scenarioId && (
+          <Button onClick={() => void handleDownloadWord()} variant="outline" disabled={downloadingPdf || downloadingWord}>
+            {downloadingWord ? (
+              <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+            ) : (
+              <FileText className="h-4 w-4 mr-2" />
+            )}
+            Scarica Word
           </Button>
         )}
       </div>
@@ -456,8 +466,8 @@ export function StampaContent({
           </Button>
           <AlertDescription>
             Questi commenti precedono l&apos;ultima proiezione e potrebbero non
-            descrivere i numeri riportati nel documento. Rigenera i commenti AI
-            oppure aggiornali manualmente prima di consegnare la stampa.
+            descrivere i numeri attuali. Rigenera i commenti AI oppure
+            aggiornali manualmente.
           </AlertDescription>
         </Alert>
       )}

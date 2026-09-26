@@ -53,6 +53,8 @@ export function migraScenario(
     if (num(r.variable_materials_growth_pct ?? 0) !== rev || num(r.variable_services_growth_pct ?? 0) !== rev) variabiliCambiate = true;
     r.variable_materials_growth_pct = rev;
     r.variable_services_growth_pct = rev;
+    r.variable_materials_growth_auto = true;
+    r.variable_services_growth_auto = true;
     r.fixed_materials_growth_auto = false;
     r.fixed_services_growth_auto = false;
     r.inflation_pct = INFLAZIONE_PREDEFINITA;

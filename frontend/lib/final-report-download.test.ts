@@ -1,6 +1,9 @@
 import { describe, expect, it, vi } from "vitest";
 import {
   FinalReportDownloadError,
+  REPORT_MODELS,
+  reportPdfPath,
+  wordAvailable,
   PREVIEW_BLOCKED_MESSAGE,
   PREVIEW_REVOKE_DELAY_MS,
   closePreviewTabOnError,
@@ -369,5 +372,23 @@ describe("nextInlinePreviewUrl", () => {
     const { revoked, sink: downloadSink } = sink();
     expect(nextInlinePreviewUrl(null, new Blob(["%PDF"]), downloadSink)).toBe("blob:nuovo-1");
     expect(revoked).toEqual([]);
+  });
+});
+
+describe("modelli di report", () => {
+  it("il Business plan è il primo, ed è il default", () => {
+    // Il dossier Typst è staccato da /report (2026-09-24): resta nel codice, pronto a tornare come prodotto a sé.
+    expect(REPORT_MODELS.map((m) => m.value)).toEqual(["business_plan"]);
+  });
+  it("ogni modello ha la sua rotta", () => {
+    expect(reportPdfPath("dossier")).toBe("final-report/pdf");
+    expect(reportPdfPath("business_plan")).toBe("business-plan/pdf");
+  });
+});
+
+describe("wordAvailable", () => {
+  it("il Word esiste solo per il Business plan, non per il dossier Typst", () => {
+    expect(wordAvailable("business_plan")).toBe(true);
+    expect(wordAvailable("dossier")).toBe(false);
   });
 });

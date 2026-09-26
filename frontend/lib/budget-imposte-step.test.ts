@@ -37,7 +37,7 @@ const year = (y: number, over: Partial<ForecastPreviewYear> = {}): ForecastPrevi
     ce15_oneri_finanziari: 10, ce20_imposte: 33,
   },
   balance_sheet: { sp16e_debiti_tributari_breve: 12 },
-  details: { ce05_fixed: null, ce05_variable: null, ce06_fixed: null, ce06_variable: null, dso_applied: 60, dio_applied: 45, dpo_applied: 78, pregresso: { crediti_commerciali: { opening: 0, closed: 0, writeoff: 0, residual_short: 0, residual_long: 0, generated: 0, mode: "legacy" }, debiti_fornitori: { opening: 0, closed: 0, writeoff: 0, residual_short: 0, residual_long: 0, generated: 0, mode: "legacy" }, debiti_tributari: { opening: 0, closed: 0, writeoff: 0, residual_short: 0, residual_long: 0, generated: 0, mode: "legacy" }, debiti_previdenziali: { opening: 0, closed: 0, writeoff: 0, residual_short: 0, residual_long: 0, generated: 0, mode: "legacy" }, altri_debiti: { opening: 0, closed: 0, writeoff: 0, residual_short: 0, residual_long: 0, generated: 0, mode: "legacy" } }, imposte: { current_tax: 0, saldo_paid: 0, acconti_paid: 0, rate_paid: 0, generated_debt: 0, generated_credit: 0, opening_credit_left: 0, mode: "manual" }, degenerate_turnover_ratio: [], pregresso_ignored: [], indicizzazione: {}, indicizzazione_ignorata: [], svalutazioni_cumulate: 0, residuo_quadratura: [], pregresso_writeoff_ignored: [], debito_bancario: { pregresso_senza_piano: null, pregresso_piano_anni: null, contratti: [], fidi: null }, pareggio: { costi_variabili: null, costi_fissi: null, costi_fissi_operativi: null, margine_contribuzione_pct: null, fatturato_pareggio: null, margine_sicurezza: null, margine_sicurezza_pct: null }, tfr: { apertura: 0, accantonamento: 0, liquidazioni: 0, chiusura: 0, sospeso: false }, altri_finanziatori: { apertura: 0, rimborso: 0, interessi: 0, breve: 0, lungo: 0, mode: "legacy", contratti: [] }, override_conflicts: [] },
+  details: { ce05_fixed: null, ce05_variable: null, ce06_fixed: null, ce06_variable: null, dso_applied: 60, dio_applied: 45, dpo_applied: 78, pregresso: { crediti_tributari_breve: { opening: 0, closed: 0, writeoff: 0, residual_short: 0, residual_long: 0, generated: 0, mode: "legacy" }, crediti_tributari_lungo: { opening: 0, closed: 0, writeoff: 0, residual_short: 0, residual_long: 0, generated: 0, mode: "legacy" }, crediti_commerciali: { opening: 0, closed: 0, writeoff: 0, residual_short: 0, residual_long: 0, generated: 0, mode: "legacy" }, debiti_fornitori: { opening: 0, closed: 0, writeoff: 0, residual_short: 0, residual_long: 0, generated: 0, mode: "legacy" }, debiti_tributari: { opening: 0, closed: 0, writeoff: 0, residual_short: 0, residual_long: 0, generated: 0, mode: "legacy" }, debiti_previdenziali: { opening: 0, closed: 0, writeoff: 0, residual_short: 0, residual_long: 0, generated: 0, mode: "legacy" }, altri_debiti: { opening: 0, closed: 0, writeoff: 0, residual_short: 0, residual_long: 0, generated: 0, mode: "legacy" } }, imposte: { current_tax: 0, saldo_paid: 0, acconti_paid: 0, rate_paid: 0, generated_debt: 0, generated_credit: 0, opening_credit_left: 0, mode: "manual" }, degenerate_turnover_ratio: [], pregresso_ignored: [], indicizzazione: {}, indicizzazione_ignorata: [], svalutazioni_cumulate: 0, residuo_quadratura: [], pregresso_writeoff_ignored: [], debito_bancario: { pregresso_senza_piano: null, pregresso_piano_anni: null, contratti: [], fidi: null }, pareggio: { costi_variabili: null, costi_fissi: null, costi_fissi_operativi: null, margine_contribuzione_pct: null, fatturato_pareggio: null, margine_sicurezza: null, margine_sicurezza_pct: null }, tfr: { apertura: 0, accantonamento: 0, liquidazioni: 0, chiusura: 0, sospeso: false }, altri_finanziatori: { apertura: 0, rimborso: 0, interessi: 0, breve: 0, lungo: 0, mode: "legacy", contratti: [] }, override_conflicts: [] },
   ...over,
 });
 
@@ -227,8 +227,8 @@ describe("manualTaxPosition — la via manuale, misurata sul motore", () => {
     expect(manualTaxPosition(asMap({ 2027: { sp16e_growth_pct: 0 } }), [2027])).toBe(true);
   });
 
-  it("sp06e_growth_pct (crediti tributari, passo Circolante) la accende allo stesso modo", () => {
-    expect(manualTaxPosition(asMap({ 2027: { sp06e_growth_pct: 3 } }), [2027])).toBe(true);
+  it("sp06e_growth_pct cambia il credito senza spegnere i pagamenti", () => {
+    expect(manualTaxPosition(asMap({ 2027: { sp06e_growth_pct: -100 } }), [2027])).toBe(false);
   });
 
   it("sp17e_growth_pct DA SOLO non accende nulla: nel motore compare una volta, dentro il ramo manuale", () => {
@@ -272,9 +272,8 @@ describe("spTributariRows — sulla via automatica il controllo inerte sparisce"
     expect(SP17E_NOTA_AUTOMATICA).not.toContain("qui sotto");
   });
 
-  it("cita l'etichetta del passo Circolante com'e' a schermo li', senza «%»", () => {
-    expect(SP17E_NOTA_AUTOMATICA).toContain("«Crediti tributari»");
-    expect(SP17E_NOTA_AUTOMATICA).not.toContain("Crediti tributari %");
+  it("non suggerisce più che la modifica dei crediti tributari attivi la via manuale", () => {
+    expect(SP17E_NOTA_AUTOMATICA).not.toContain("Crediti tributari");
   });
 
   // ── fix1 R2: la visibilita' di sp17e_growth_pct e' per ANNO, con la stessa
@@ -311,7 +310,7 @@ describe("manualTaxYears — il complemento per anno di manualTaxPosition", () =
 
   it("tutti gli anni manuali => lista intera", () => {
     const assumptions = asMap({ 2027: { sp16e_growth_pct: 0 }, 2028: { sp06e_growth_pct: 3 } });
-    expect(manualTaxYears(assumptions, [2027, 2028])).toEqual([2027, 2028]);
+    expect(manualTaxYears(assumptions, [2027, 2028])).toEqual([2027]);
   });
 });
 

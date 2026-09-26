@@ -49,7 +49,7 @@ import {
   type ChartConfig,
 } from "@/components/ui/chart";
 import { Input } from "@/components/ui/input";
-import { Loader2, TrendingUp, AlertTriangle, AlertCircle, Pencil, RefreshCw } from "lucide-react";
+import { Loader2, TrendingUp, AlertTriangle, AlertCircle, Pencil, RefreshCw, RotateCcw } from "lucide-react";
 import { cn, getErrorMessage } from "@/lib/utils";
 import { forecastPageState, forecastScenariosEmpty } from "@/lib/forecast-page-status";
 import { ForecastLoadError } from "@/components/budget/ForecastLoadError";
@@ -264,6 +264,16 @@ export default function ForecastIncomePage() {
 
   const historicalYears = analysisData?.historical_years ?? [];
   const forecastYears = analysisData?.forecast_years ?? [];
+  const activeCeOverrides = forecastYears.flatMap((yearData) =>
+    Object.entries(FIELD_TO_OVERRIDE)
+      .filter(([, overrideField]) =>
+        (yearData.assumptions as Record<string, unknown> | null | undefined)?.[overrideField] != null)
+      .map(([field]) => `${yearData.year}:${field}`)
+  );
+  const resetCeOverrides = () => {
+    setPendingEdits(Object.fromEntries(activeCeOverrides.map((key) => [key, null])));
+    toast.info("Ripristino preparato: premi Aggiorna Previsionale per applicarlo");
+  };
 
   return (
     <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
@@ -323,20 +333,19 @@ export default function ForecastIncomePage() {
                   </p>
                 )}
               </div>
-              {hasPendingEdits && (
-                <Button
-                  onClick={handleSaveAll}
-                  disabled={saving}
-                  size="sm"
-                >
-                  {saving ? (
-                    <Loader2 className="h-4 w-4 animate-spin mr-2" />
-                  ) : (
-                    <RefreshCw className="h-4 w-4 mr-2" />
-                  )}
-                  Aggiorna Previsionale
-                </Button>
-              )}
+              <div className="flex flex-wrap items-center gap-2">
+                {activeCeOverrides.length > 0 && (
+                  <Button variant="outline" size="sm" onClick={resetCeOverrides} disabled={saving}>
+                    <RotateCcw className="mr-2 h-4 w-4" /> Ripristina tutte le forzature
+                  </Button>
+                )}
+                {hasPendingEdits && (
+                  <Button onClick={handleSaveAll} disabled={saving} size="sm">
+                    {saving ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <RefreshCw className="h-4 w-4 mr-2" />}
+                    Aggiorna Previsionale
+                  </Button>
+                )}
+              </div>
             </CardHeader>
             <CardContent>
               <div className="overflow-x-auto">
@@ -481,6 +490,7 @@ function EditableCell({
   pendingValue,
   year,
   field,
+  label,
   isOverridden,
   isBold,
   onEdit,
@@ -489,6 +499,7 @@ function EditableCell({
   pendingValue: number | null | undefined; // undefined = no pending edit
   year: number;
   field: string;
+  label: string;
   isOverridden: boolean;
   isBold: boolean;
   onEdit: (year: number, field: string, value: number | null) => void;
@@ -550,23 +561,34 @@ function EditableCell({
   }
 
   return (
-    <span
-      onClick={startEdit}
-      className={cn(
-        "cursor-pointer hover:bg-primary/20 rounded px-1 -mx-1 transition-colors",
-        hasPending && "bg-yellow-100 dark:bg-yellow-900/30 border-b-2 border-yellow-500",
-        !hasPending && isOverridden && "border-b-2 border-primary",
-        isBold && "font-semibold"
-      )}
-      title={
-        hasPending
+    <span className="inline-flex items-center justify-end gap-1">
+      <span
+        onClick={startEdit}
+        className={cn(
+          "cursor-pointer hover:bg-primary/20 rounded px-1 -mx-1 transition-colors",
+          hasPending && "bg-yellow-100 dark:bg-yellow-900/30 border-b-2 border-yellow-500",
+          !hasPending && isOverridden && "border-b-2 border-primary",
+          isBold && "font-semibold"
+        )}
+        title={hasPending
           ? "Modifica in sospeso — clicca \"Aggiorna Previsionale\" per applicare"
           : isOverridden
-          ? "Valore modificato manualmente (svuota per ripristinare)"
-          : "Clicca per modificare"
-      }
-    >
-      {formatCurrency(displayValue)}
+          ? "Valore modificato manualmente"
+          : "Clicca per modificare"}
+      >
+        {formatCurrency(displayValue)}
+      </span>
+      {pendingValue !== null && (isOverridden || hasPending) && (
+        <button
+          type="button"
+          onClick={() => onEdit(year, field, null)}
+          className="rounded p-1 text-muted-foreground hover:bg-muted hover:text-foreground"
+          title="Ripristina il valore calcolato dal budget; poi aggiorna il previsionale"
+          aria-label={`Ripristina ${label} ${year} al valore calcolato`}
+        >
+          <RotateCcw className="h-3.5 w-3.5" />
+        </button>
+      )}
     </span>
   );
 }
@@ -691,6 +713,7 @@ function IncomeStatementTable({
                         pendingValue={pendingVal}
                         year={yd.year}
                         field={row.field!}
+                        label={row.label}
                         isOverridden={isOverridden(yd, row.field!)}
                         isBold={false}
                         onEdit={onCellEdit}

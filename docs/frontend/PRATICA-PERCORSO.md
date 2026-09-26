@@ -23,9 +23,12 @@ esattamente la via che lasciava un bilancio di verifica **saltare le Rettifiche*
 suoi errori in Confronto, Proiezione, Indicatori e nei due modelli di rating. `/infrannuale`, la
 vecchia rotta del wizard, è oggi un `redirect()` a `/pratica` (`app/infrannuale/page.tsx`).
 
-Altri due ingressi, entrambi in `app/page.tsx`: `startForCompany` (avvia una pratica `bilancio`
-già puntata su un'azienda esistente) e `resume` (riapre una pratica da uno scenario già creato —
-vedi §4 per il caso «scenario budget legacy»).
+Per un'azienda esistente `app/page.tsx` offre anche `nuovaPratica` (nuovo bilancio),
+`riprendi` (scenario già creato; vedi §4 per il caso «scenario budget legacy») e l'ingresso
+da bilancio esistente (`scegliBilancioEsistente` / `creaDaBilancioEsistente`). Quest'ultimo usa
+`GET /companies/{company_id}/existing-balances` e propone i `FinancialYear` annuali con SP e CE
+presenti. La rotta non filtra la provenienza: può restituire anche una proiezione promossa.
+La schermata li presenta come «bilanci annuali esistenti».
 
 Spec: `docs/superpowers/specs/2026-08-08-percorso-unico-pratica-design.md`. Piano:
 `docs/superpowers/plans/2026-08-08-percorso-unico-pratica.md`. Registro di esecuzione, con ogni
@@ -277,7 +280,7 @@ riaprire» e ritorno allo step Import. Un 500, timeout o errore di rete non risc
 | `lib/pratica-format.ts` | formattazione |
 | `lib/pratica-codes.ts` | tabelle di codici IV-CEE, `DETAIL_PARENTS`, `EXTRA_ALERT_DEFS` |
 | `lib/pratica-reconcile.ts` | `reconcileSubfields` |
-| `lib/pratica-indicators.ts` | indicatori, scoring, `computeCrisisRating`, `buildIndicatorChartData` |
+| `lib/pratica-indicators.ts` | tipo ed etichette degli indicatori, colori, grafici e assi; calcolo, punteggio e rating sono in `calculations/crisi_impresa.py` |
 | `lib/pratica-statement-rows.ts` | costruzione delle righe SP/CE |
 | `lib/pratica-rettifiche-rules.ts` | la politica di partita doppia (→ `RETTIFICHE.md`) |
 | `lib/pratica-projected-bs.ts` | `projectedItemsFromForecast`: legge lo SP proiettato dal forecast del motore, non lo ricalcola |
@@ -298,43 +301,22 @@ wizard — stato, effetti di caricamento, i sette rami `activeTab` — vive anco
 quando fu scritta, ed era **la prima suite frontend del progetto** — ora ce ne sono dieci in
 `lib/`). Si eseguono con `npm test` (Vitest) da `frontend/`.
 
-Le tre suite di caratterizzazione dei calcoli (`pratica-reconcile.test.ts`,
-`pratica-indicators.test.ts`, `pratica-statement-rows.test.ts`) fissano il comportamento
-**attuale**, non lo giudicano corretto. Un mutation harness (review finale 2026-08-10) ha misurato
-quanto valgono come rete:
+Le suite client di `pratica-reconcile`, `pratica-indicators` e `pratica-statement-rows` verificano
+le funzioni ancora presenti nel frontend. La misura con mutation harness del 2026-08-10
+(11 mutazioni uccise su 61, 18%) riguardava il codice di allora: dal 2026-09-21 il calcolo
+degli indicatori, il punteggio e il rating stanno in `calculations/crisi_impresa.py`.
+`pratica-indicators.test.ts` verifica oggi il colore dei pallini e le 15 etichette; i casi di
+calcolo sono in `tests/test_crisi_impresa.py`. Quella misura storica non descrive la copertura
+attuale del calcolo sul server.
 
-- **18% sul totale (11 mutazioni uccise su 61):** la maggioranza delle mutazioni introdotte
-  nell'implementazione sopravvive ai test invariata.
-- **3/29 per `lib/pratica-indicators.ts`** — quasi non funzionale come rete di regressione. Il test
-  di `computeIndicators` scorre 19 campi di `IndicatorSet` con `Number.isFinite(...)`, che nessuna
-  mutazione aritmetica (segno scambiato, operando sbagliato, soglia spostata) può violare. Oggi
-  cinque di quei campi sono fissati **per valore** (`_ebitda_raw`, `ebitda_margin`, `indipendenza`,
-  `roi`, `current_ratio`); gli altri quattordici no.
+### Crediti oltre l'esercizio e totale attivo
 
-Due asserzioni deboli sono state corrette in quella review: `scoreDotColor` fissa le stringhe
-colore esatte invece di limitarsi a «sono diverse a coppie», e il test di `computeCrisisRating` sui
-segnali extracontabili fissa i due codici concreti (A3 → C3) invece di «sono diversi».
-
-**Non leggere questo come «gli indicatori sono coperti».** Rafforzare la suite — valori distinti e
-non nulli per ogni codice nominato in ogni array sommato, asserzioni per valore esatto al posto di
-`Number.isFinite` — è un follow-up noto e deliberatamente non fatto.
-
-### `sp07_crediti_lungo` mancante da `totalAssets` (corretto il 2026-08-10)
-
-`computeIndicators` escludeva correttamente `sp07_crediti_lungo` (crediti esigibili oltre
-l'esercizio successivo) da `currentAssets` — non è attivo circolante — ma **non lo riaggiungeva mai
-a `totalAssets`**, disallineandosi da `ATTIVO_CODES` (`lib/pratica-codes.ts`) e da `attivoKeys`
-(`lib/pratica-reconcile.ts`), che lo includono entrambi. Su un'azienda con crediti a lungo termine
-significativi il totale attivo risultava sottostimato, e quindi `indipendenza` (equity/TA) e `roi`
-(EBIT/TA) **sovrastimati** — la direzione sbagliata per uno strumento di rischio creditizio.
-
-Il fix somma `sp07_crediti_lungo` a `totalAssets` e lascia `currentAssets` invariato, con un
-commento nel codice che spiega l'asimmetria. La suite esistente non avrebbe intercettato il bug né
-una sua reintroduzione: il fixture `BS_SANA` non contiene affatto `sp07_crediti_lungo`. Sono stati
-aggiunti due test mirati — `indipendenza` e `roi` per valore esatto su un fixture con `sp07` non
-nullo, e un confronto che il `current_ratio` resta invariato in sua presenza (fissa la metà «non va
-in `currentAssets`» della regola). Questo corregge **una** omissione; non rende adeguata la suite
-degli indicatori nel complesso.
+Nel calcolo della crisi sul server, `sp07_crediti_lungo` è escluso da `current_assets` e incluso
+in `total_assets` (`calculations/crisi_impresa.py`). Entrando nel denominatore di `indipendenza`
+e `roi`, evita che un attivo sottostimato li sovrastimi. I due test in
+`tests/test_crisi_impresa.py` verificano i valori di `indipendenza` e `roi` con `sp07` non nullo
+e che `current_ratio` resti invariato. La correzione nacque nel client il 2026-08-10; dopo il
+trasferimento del calcolo è questa la regola e la suite attuale.
 
 ## 9. Storia — perché alcune cose sono come sono
 
@@ -369,7 +351,7 @@ degli indicatori nel complesso.
 | `frontend/contexts/PraticaActionContext.tsx` | `usePrimaryAction`, il registro a token |
 | `frontend/components/pratica/PraticaActionBar.tsx` | la barra unica di avanzamento |
 | `frontend/app/pratica/page.tsx` | il wizard: stato, auto-load, riidratazione, i sette rami `activeTab` |
-| `frontend/app/page.tsx` | le due card «Nuova pratica», `startForCompany`, `resume` |
+| `frontend/app/page.tsx` | le due card «Nuova pratica», `nuovaPratica`, `riprendi`, scelta e creazione da bilancio annuale esistente |
 | `frontend/app/budget/page.tsx` | il doppio ingresso: dentro e fuori da una pratica |
 | `frontend/app/layout.tsx` | l'ordine dei provider (`PraticaProvider` sopra `AppProvider`) |
 
@@ -424,8 +406,9 @@ tengono la colonna coerente con sé stessa:
    diversi. Se `forecast_generated` è `false` la tabella resta vuota con l'avviso — dipingere una
    proiezione che non è stata salvata era il difetto di partenza.
 
-Il `tax_rate` inviato è la costante **27,9** (IRES + IRAP), non un'aliquota derivata dalle
-imposte modificate: le imposte proiettate arrivano al motore come `ce20_override`, che vince
+Il `tax_rate` inviato è la proposta di `getAliquotaProposta`, ricavata dall'ultimo consuntivo
+depositato quando disponibile (altrimenti 27,9), e non deriva dalle imposte modificate nella
+tabella. Le imposte proiettate arrivano al motore come `ce20_override`, che vince
 sull'aliquota. Il resto — precedenza degli override, che cosa li azzera, come si legge
 `forecast_generated` — è in [`docs/budget/API-PREVISIONALE.md`](../budget/API-PREVISIONALE.md).
 
@@ -514,11 +497,11 @@ mappa campo → passo sono dati puri in `frontend/lib/budget-wizard-steps.ts`
 |---|---|---|---|
 | 1 | Scenario | Impostazione | `inflation_pct` |
 | 2 | Fatturato | Conto economico | `revenue_growth_pct`, `other_revenue_growth_pct` |
-| 3 | Costi | Conto economico | `fixed_materials_percentage`, `fixed_services_percentage`, `variable_materials_growth_pct`, `variable_services_growth_pct`, `fixed_materials_growth_pct`, `fixed_services_growth_pct`, `fixed_materials_growth_auto`, `fixed_services_growth_auto`, `personnel_growth_pct`, `rent_growth_pct`, `other_costs_growth_pct` |
+| 3 | Costi | Conto economico | `fixed_materials_percentage`, `fixed_services_percentage`, `variable_materials_growth_pct`, `variable_services_growth_pct`, `fixed_materials_growth_pct`, `fixed_services_growth_pct`, `fixed_materials_growth_auto`, `fixed_services_growth_auto`, `variable_materials_growth_auto`, `variable_services_growth_auto`, `personnel_growth_pct`, `rent_growth_pct`, `other_costs_growth_pct` |
 | 4 | Capitale circolante | Stato patrimoniale | `dso_days`, `dio_days`, `dpo_days`, `receivables_long_growth_pct` |
-| 5 | Patrimoniale pregresso | Stato patrimoniale | `bank_lines_amount`, `bank_lines_rule`, `bank_lines_rate`, `financing_loans`, `existing_debt_repayment_years`, `altri_finanz_repayment_years` |
-| 6 | Patrimoniale piano | Stato patrimoniale | tredici `sp*_growth_pct` (sp01, sp04, sp06e, sp06f, sp08, sp10, sp14, sp16f, sp16g, sp17d, sp17f, sp17g, sp18), `previdenza_scales_with_personnel`, `tfr_accrual_suspended`, `tfr_payments`, `financing_amount`, `financing_duration_years`, `financing_interest_rate`, `tangible_investments`, `intangible_investments`, `depreciation_rate`, `depreciation_rate_intangible`, `asset_disposal_nbv`, `asset_disposal_proceeds`, `cash_sweep_enabled`, `cash_sweep_min_cash`, `overdraft_allowed`, `overdraft_limit` |
-| 7 | Imposte | Stato patrimoniale | `tax_rate` (proposta dall'ultimo consuntivo depositato), `tax_advances_paid`, `sp16e_growth_pct`, `sp17e_growth_pct` |
+| 5 | Patrimoniale pregresso | Stato patrimoniale | `bank_lines_amount`, `bank_lines_rate`, `financing_loans`, `existing_debt_repayment_years`, `altri_finanz_repayment_years`, `sp06e_growth_pct` |
+| 6 | Patrimoniale piano | Stato patrimoniale | undici `sp*_growth_pct` (sp01, sp04, sp08, sp10, sp14, sp16f, sp16g, sp17d, sp17f, sp17g, sp18), `tfr_accrual_suspended`, `tfr_payments`, `financing_amount`, `financing_duration_years`, `financing_interest_rate`, `tangible_investments`, `intangible_investments`, `depreciation_rate`, `depreciation_rate_intangible`, `asset_disposal_nbv`, `asset_disposal_proceeds`, `cash_sweep_enabled`, `cash_sweep_min_cash`, `overdraft_allowed`, `overdraft_limit` |
+| 7 | Imposte | Stato patrimoniale | `tax_rate` (proposta dall'ultimo consuntivo depositato), `tax_advances_paid`, `tax_temporary_differences`, `sp16e_growth_pct`, `sp17e_growth_pct` |
 
 Il giro di rilievi del 15/09 ha spostato i confini fra i passi (`fixed_materials_growth_auto` e
 `other_costs_growth_pct` sono entrati nel 3; le quindici voci minori dello SP e i loro driver
@@ -575,7 +558,7 @@ differenza dello scoperto spento di default fuori da quel regime.
 
 **`sp17e_growth_pct` è visibile per anno, non per scenario.** Dentro l'accordion «Posizione
 tributaria manuale» del passo 7, la riga «Debiti tributari oltre %» compare solo quando almeno un
-anno del piano usa la via manuale (`sp06e_growth_pct`/`sp16e_growth_pct` valorizzati su quella
+anno del piano usa la via manuale (`sp16e_growth_pct` valorizzato su quella
 riga), e su un piano **misto** — alcuni anni manuali, altri no — le celle degli anni automatici
 restano inerti con un titolo che lo spiega (`SP17E_NOTA_ANNO_AUTOMATICO`), invece di applicarsi a
 un anno che il motore governa altrove. Quando nessun anno è manuale la riga sparisce del tutto
@@ -600,22 +583,27 @@ tetto dello scoperto superato o una liquidazione TFR oltre il fondo; al passo «
 — che è anche il ripiego di default. Il progresso persiste per scenario in `localStorage`
 (`stepStorageKey`).
 
-**`DEAD_FIELDS`** (`investments`, `receivables_short_growth_pct`, `payables_short_growth_pct`,
-`interest_rate_receivables`, `interest_rate_payables`) sono le colonne che **nessun passo mostra**.
-«Morte» però vuol dire due cose diverse, e la distinzione conta:
+**`DEAD_FIELDS`** comprende `investments`, `receivables_short_growth_pct`,
+`payables_short_growth_pct`, `interest_rate_receivables`, `interest_rate_payables`,
+`bank_lines_rule`, `sp06f_growth_pct` e `working_capital_mode`: **nessun passo le mostra**.
+Per le prime cinque colonne legacy, «morte» vuol dire due cose diverse:
 
 - il giro del salvataggio le divide in due: `investments`,
   `receivables_short_growth_pct` e `payables_short_growth_pct` sono fra le chiavi che
   `hydrateAssumptions` (`lib/budget-horizon.ts`) legge dallo scenario salvato e rispedisce al
   bulk; `interest_rate_receivables` e `interest_rate_payables` **non ci sono** — esistono nel
-  tipo, ma non passano da `hydrateAssumptions` e non fanno neppure il giro. Il commento del
-  codice (`lib/budget-wizard-steps.ts`) lo dice così;
+  tipo, ma non passano da `hydrateAssumptions` e non fanno neppure il giro;
 - il motore le legge o no: `investments` **lo legge ancora**. `ForecastEngine._get_total_investments`
   lo usa come totale legacy quando né `tangible_investments` né `intangible_investments` sono
   valorizzati, e `_get_split_investments` **alza `ValueError`** se è valorizzato senza split
   («Investments must be split into intangible_investments and tangible_investments») — cioè un
   valore non nullo in quella colonna non è inerte, ferma la generazione. Le altre quattro il
   motore non le legge davvero: non compaiono in `calculations/`.
+
+`bank_lines_rule` viene normalizzato a `costante` dal servizio di salvataggio;
+`working_capital_mode` appartiene al percorso infrannuale. La percentuale
+`sp06f_growth_pct` può ancora arrivare da uno scenario precedente, ma il motore budget
+la ignora: le imposte anticipate restano costanti salvo un override SP esplicito.
 
 Il componente del passo 3 «Costi» (`components/budget/wizard/steps/StepCosti.tsx`) applica
 l'invariante di CLAUDE.md sulla quota fissa: lo slider chiama `p.updateAll(field, v)` e scrive lo

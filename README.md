@@ -111,11 +111,12 @@ curl -H "Authorization: Bearer <supabase-jwt-token>" \
 
 Questo elimina la necessità di fare 15+ chiamate API - solo **3 chiamate totali**!
 
-#### Phase 1: INPUT - Data Import (3 endpoints)
+#### Phase 1: INPUT - Data Import (4 endpoints)
 ```bash
-POST /api/v1/import/xbrl    # Italian XBRL files (6 taxonomies supported)
-POST /api/v1/import/csv     # CSV files (TEBE format)
-POST /api/v1/import/pdf     # PDF balance sheets (Claude AI extraction)
+POST /api/v1/import/xbrl     # Italian XBRL files (6 taxonomies supported)
+POST /api/v1/import/csv      # CSV files (TEBE format)
+POST /api/v1/import/pdf      # PDF balance sheets (LLM extraction)
+POST /api/v1/import/pdf-ocr  # PDF via MinerU OCR (off on the VPS)
 ```
 
 #### Phase 2: ASSUMPTIONS - Budget Scenarios (2 endpoints)
@@ -210,7 +211,8 @@ GET /companies/{id}/years/{year}/calculations/complete        # Complete analysi
 ```
 POST /import/xbrl                              # Upload XBRL file (Italian GAAP)
 POST /import/csv                               # Upload CSV file (TEBE format)
-POST /import/pdf                               # Upload PDF file (Claude AI extraction)
+POST /import/pdf                               # Upload PDF file (LLM extraction)
+POST /import/pdf-ocr                           # Upload PDF via MinerU OCR
 ```
 
 #### Interactive API Documentation
@@ -584,7 +586,7 @@ docker compose down -v
 
 ## Upload Tracking & Admin Debug
 
-Every file uploaded via `/api/v1/import/{xbrl,csv,pdf}` is persisted to disk and recorded in the `uploaded_files` table. This lets the developer reproduce user-reported problems (wrong numbers, wrong signs, misclassified accounts, hard parser crashes) by retrieving the exact input that caused the issue.
+Every file uploaded via `/api/v1/import/{xbrl,csv,pdf,pdf-ocr}` is persisted to disk and recorded in the `uploaded_files` table. This lets the developer reproduce user-reported problems (wrong numbers, wrong signs, misclassified accounts, hard parser crashes) by retrieving the exact input that caused the issue.
 
 ### Storage
 - Files saved to `data/uploads/{user_id}/{YYYY-MM}/{timestamp}_{uuid}.{ext}` (Docker: `/app/data/uploads/...`, inside the `db-data` volume)

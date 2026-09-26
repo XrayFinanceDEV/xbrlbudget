@@ -84,9 +84,22 @@ describe("budget-piano-step", () => {
     expect(regole.sp16f_debiti_previdenza_breve).toBe("variazione +2,0%");
     expect(regole.sp16g_altri_debiti_breve).toBe("segue i ricavi");
     expect(regole.sp14_fondi_rischi).toBe("costante");
+    const conImporto = regoleVociMinori(asMap({
+      2027: { sp_overrides: { sp14_fondi_rischi: 45000 } }, 2028: {},
+    }), [2027, 2028]);
+    expect(conImporto.sp14_fondi_rischi).toBe("importo manuale");
     const rows = rowsAltriCreditiDebiti(bs, [y(2027)], regole);
     expect(rows.map((r) => r.key)).toEqual(["h-attivo", "sp06g", "sp10", "sp06e", "tot-attivo", "h-passivo", "sp16f", "sp16g", "sp14", "sp18", "tot-passivo", "cassa"]);
     expect(rows.find((r) => r.key === "cassa")?.years[0].value).toBe((28000 + 45000 + 20000 + 10000 - 103000) - (48000 + 12000 + 18000 - 78000));
+  });
+  // A06 (lotto 3 fix rilievi, 2026-09-26): la casella previdenza/personale e' sparita e
+  // `regoleVociMinori` non la legge piu' — un flag `true` senza `sp_indexing` non fa dire
+  // "segue il personale", la riga si legge come qualunque altra voce senza driver.
+  it("A06 il flag previdenza/personale non governa piu' la regola di sp16f", () => {
+    const map = asMap({ 2027: { previdenza_scales_with_personnel: true }, 2028: {} });
+    const regole = regoleVociMinori(map, [2027, 2028]);
+    expect(regole.sp16f_debiti_previdenza_breve).toBe("costante");
+    expect(regole.sp16f_debiti_previdenza_breve).not.toMatch(/personale/);
   });
   it("withNuovoCampo aggiorna solo l'indice indicato", () => {
     const loans = [nuovoPrestito(2027), { ...nuovoPrestito(2028), name: "Secondo" }];

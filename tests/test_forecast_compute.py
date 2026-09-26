@@ -92,14 +92,37 @@ def test_details_are_declared_and_sum_to_the_line(monkeypatch):
             assert comp.years[0].details["ce05_fixed"] == Decimal("61200.00")
             assert comp.years[0].details["ce05_variable"] == Decimal("154000.00")
             assert comp.years[0].income_statement["ce05_materie_prime"] == Decimal("215200.00")
-            # Anno 3, il caso per cui la ripartizione esiste: le due quote analitiche
-            # sono 70855,8912 e 178297,504, e la loro somma arrotonda a 249.153,40
-            # mentre i due arrotondamenti separati darebbero 249.153,39. La quota
-            # variabile porta quindi il centesimo di residuo (…,51, non …,50) e i due
-            # addendi ricompongono la riga esatti.
-            assert comp.years[2].details["ce05_fixed"] == Decimal("70855.89")
-            assert comp.years[2].details["ce05_variable"] == Decimal("178297.51")
-            assert comp.years[2].income_statement["ce05_materie_prime"] == Decimal("249153.40")
+            # Le quote proseguono separatamente: non si ridivide ogni anno il
+            # totale aggiornato usando la percentuale del primo anno.
+            assert comp.years[2].details["ce05_fixed"] == Decimal("63672.48")
+            assert comp.years[2].details["ce05_variable"] == Decimal("186340.00")
+            assert comp.years[2].income_statement["ce05_materie_prime"] == Decimal("250012.48")
+    finally:
+        engine.dispose()
+
+
+def test_variable_services_incidence_stays_constant_when_it_follows_revenue(monkeypatch):
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    engine, sessions = memory_sessions()
+    try:
+        with sessions() as db:
+            company_id, _ = seed_base_year(db, user_id=USER)
+            sc = _scenario(db, company_id, {
+                "revenue_growth_pct": 5,
+                "fixed_services_percentage": 50,
+                "variable_services_growth_pct": 5,
+                "fixed_services_growth_pct": 0,
+            })
+            source = load_forecast_source(db, sc.id)
+            rows = (db.query(models.BudgetAssumptions)
+                      .filter(models.BudgetAssumptions.scenario_id == sc.id)
+                      .order_by(models.BudgetAssumptions.forecast_year).all())
+            comp = ForecastEngine(db).compute_forecast(source, rows)
+            assert comp.error is None
+            for year in comp.years:
+                revenue = year.income_statement["ce01_ricavi_vendite"]
+                assert abs(year.details["ce06_variable"] - revenue * Decimal("0.125")) <= Decimal("0.01")
+                assert year.details["ce06_fixed"] == Decimal("75000.00")
     finally:
         engine.dispose()
 

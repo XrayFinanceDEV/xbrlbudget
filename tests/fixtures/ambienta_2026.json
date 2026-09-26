@@ -1,0 +1,32 @@
+{
+  "_fonte": "financial_analysis.db locale, financial_years.id=493 (AMBIENTA, company 575, settore 1), congelato il 2026-09-25",
+  "bs": {
+    "sp02_immob_immateriali": "331692.85", "sp02a_costi_impianto": "113711.10", "sp02d_concessioni": "46566.68",
+    "sp02e_avviamento": "84634.26", "sp02f_immob_in_corso": "86780.81",
+    "sp03_immob_materiali": "72796.59", "sp03b_impianti_macchinari": "24154.00", "sp03c_attrezzature": "30719.42",
+    "sp03d_altri_beni": "17923.17",
+    "sp04_immob_finanziarie": "52550.00", "sp04a_partecipazioni": "52550.00",
+    "sp05_rimanenze": "287312.00", "sp05a_materie_prime": "287312.00",
+    "sp06_crediti_breve": "1294367.10", "sp06a_crediti_clienti_breve": "1068527.42",
+    "sp06e_crediti_tributari_breve": "184140.58", "sp06g_crediti_altri_breve": "41699.10",
+    "sp07_crediti_lungo": "62356.48", "sp07a_crediti_clienti_lungo": "45000.00", "sp07e_crediti_tributari_lungo": "17356.48",
+    "sp09_disponibilita_liquide": "54.82", "sp10_ratei_risconti_attivi": "216226.30",
+    "sp11_capitale": "110000.00", "sp12_riserve": "69484.43", "sp12c_riserva_legale": "3506.40",
+    "sp12e_altre_riserve": "65978.03", "sp13_utile_perdita": "24131.11", "sp15_tfr": "170193.73",
+    "sp16_debiti_breve": "1400851.61", "sp16a_debiti_banche_breve": "493408.90",
+    "sp16d_debiti_fornitori_breve": "548578.07", "sp16e_debiti_tributari_breve": "4227.00",
+    "sp16f_debiti_previdenza_breve": "163536.55", "sp16g_altri_debiti_breve": "191101.09",
+    "sp17_debiti_lungo": "504032.26", "sp17a_debiti_banche_lungo": "467528.52",
+    "sp17b_debiti_altri_finanz_lungo": "36503.74", "sp18_ratei_risconti_passivi": "38663.00"
+  },
+  "ce": {
+    "ce01_ricavi_vendite": "4109510.00", "ce03_lavori_interni": "93000.00", "ce04_altri_ricavi": "140706.00",
+    "ce05_materie_prime": "129308.00", "ce06_servizi": "1432482.00", "ce07_godimento_beni": "234534.00",
+    "ce08_costi_personale": "2344742.00", "ce08a_tfr_accrual": "81014.85", "ce08b_salari_stipendi": "1772346.75",
+    "ce08c_oneri_sociali": "453027.54", "ce08d_altri_costi_personale": "38352.86",
+    "ce09_ammortamenti": "75264.00", "ce09a_ammort_immateriali": "29224.00", "ce09b_ammort_materiali": "36040.00",
+    "ce09d_svalutazione_crediti": "10000.00", "ce10_var_rimanenze_mat_prime": "-1217.11",
+    "ce12_oneri_diversi": "37530.00", "ce14_altri_proventi_finanziari": "11750.00",
+    "ce15_oneri_finanziari": "45192.00", "ce20_imposte": "33000.00"
+  }
+}

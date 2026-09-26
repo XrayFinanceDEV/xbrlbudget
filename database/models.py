@@ -657,16 +657,20 @@ class BudgetAssumptions(Base):
     # (sp15) stops growing for this forecast year (the ce08a cost stays in the P&L).
     tfr_accrual_suspended = Column(Boolean, default=False, nullable=False)
 
-    # Previdenza scaling (opt-in, per forecast year): when enabled, social-security
-    # payables (sp16f/sp17f) scale with the personnel cost (ce08) relative to the base
-    # year — e.g. personnel 100k→200k ⇒ previdenza 20k→40k. Default OFF (carry forward
-    # / manual sp16f_growth_pct), so existing scenarios are unaffected.
+    # DEAD (lotto 3 fix rilievi, 2026-09-26, A06): used to scale sp16f/sp17f with the
+    # personnel cost when enabled, duplicating what `sp_indexing` (driver "personale")
+    # already did on the same two fields. The engine no longer reads this column at
+    # all — the checkbox is gone from the wizard too — it stays only so a client that
+    # still sends it `true` does not error; scenarios that relied on it need the
+    # one-off migration (`scripts/migra_previdenza_tendina.py --apply`).
     previdenza_scales_with_personnel = Column(Boolean, default=False, nullable=False)
 
     # ── Giro di rilievi del 14/09 (spec 2026-09-15 §6): tutto additivo ──
     inflation_pct = Column(Numeric(10, 6), nullable=True)  # inflazione attesa del passo 1; NULL = scenario precedente
     fixed_materials_growth_auto = Column(Boolean, default=False, nullable=False)  # la parte fissa segue l'inflazione
     fixed_services_growth_auto = Column(Boolean, default=False, nullable=False)
+    variable_materials_growth_auto = Column(Boolean, nullable=True)  # NULL = scenario precedente a questa scelta
+    variable_services_growth_auto = Column(Boolean, nullable=True)
     bank_lines_amount = Column(Numeric(15, 2), nullable=True)  # fidi e anticipi su fatture (prima riga); NULL = regime di prima
     bank_lines_rule = Column(String(16), nullable=True)        # 'costante' | 'ricavi'
     bank_lines_rate = Column(Numeric(10, 6), nullable=True)    # tasso % su fidi e scoperto
@@ -702,9 +706,12 @@ class BudgetAssumptions(Base):
     # Indicizzazione delle voci minori dello SP a un driver di volume (Task 15):
     # {"sp16g": "ricavi", "sp17d": "acquisti", "sp16f": "personale"}. Chiave
     # ASSENTE = costante, cioe' il comportamento di sempre (`prev × (1+%)`).
-    # Il motore applica `stock dell'anno base × fattore del driver` — la forma
-    # gia' cablata su `previdenza_scales_with_personnel`, che indicizza e non
-    # compone, cosi' un piano a cinque anni non accumula deriva.
+    # Il motore applica `stock dell'anno base × fattore del driver`, che indicizza
+    # e non compone, cosi' un piano a cinque anni non accumula deriva — la stessa
+    # forma con cui sp16f/sp17f si agganciano al personale (driver "personale";
+    # `previdenza_scales_with_personnel` sotto era l'interruttore dedicato che
+    # faceva la stessa cosa, non piu' letto dal motore dal lotto 3 fix rilievi,
+    # 2026-09-26, A06).
     sp_indexing = Column(JSON, nullable=True)
 
     # SP line item growth % overrides (nullable = 0% / carry forward unchanged)
@@ -789,6 +796,11 @@ class ForecastYear(Base):
     year = Column(Integer, nullable=False, index=True)
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    # Firma della generazione (spec fix rilievi 2026-09-26): versione del motore che ha prodotto
+    # questi numeri e il punto di pareggio dichiarato. NULL = generato prima della firma, cioè
+    # «non lo so» — mai un verdetto negativo.
+    engine_meta = Column(JSON, nullable=True)
 
     # Relationships
     scenario = relationship("BudgetScenario", back_populates="forecast_years")

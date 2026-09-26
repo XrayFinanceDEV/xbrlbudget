@@ -89,7 +89,7 @@ export const ADVANCED_GROUPS: { title: string; rows: AssumptionRowDef[] }[] = [
     title: "Capitale circolante",
     rows: [
       rule(["dso_days"], { key: "dso", label: "Giorni incasso clienti (DSO)", autoPlaceholder: "dso" }),
-      rule(["dio_days"], { key: "dio", label: "Giorni rotazione magazzino (DIO)", autoPlaceholder: "dio" }),
+      rule(["dio_days"], { key: "dio", label: "Giorni di scorta materie prime (sul consumo)", autoPlaceholder: "dio" }),
       rule(["dpo_days"], { key: "dpo", label: "Giorni pagamento fornitori (DPO)", autoPlaceholder: "dpo" }),
       rule(["receivables_long_growth_pct"], { key: "crediti-oltre", label: "Crediti oltre 12 mesi %" }),
     ],
@@ -118,8 +118,9 @@ export const ADVANCED_GROUPS: { title: string; rows: AssumptionRowDef[] }[] = [
       rule(["depreciation_rate"], { key: "amm-mat", label: "Ammortamento nuovi investimenti materiali %" }),
       rule(["depreciation_rate_intangible"], { key: "amm-imm", label: "Ammortamento nuovi investimenti immateriali %" }),
       rule(["tfr_accrual_suspended"], { key: "tfr-inps", label: "TFR versato a INPS/fondi (accantonamento sospeso)" }),
-      rule(["previdenza_scales_with_personnel"], { key: "previdenza-personale",
-            label: "Debiti previdenziali scalano col costo del personale" }),
+      // A06 (lotto 3 fix rilievi, 2026-09-26): la casella previdenza/personale e'
+      // sparita dal wizard — sp16f/sp17f si agganciano solo dalla tendina del
+      // passo 6 (sp_indexing "personale"), gia' coperta da quella riga.
       rule(["cash_sweep_enabled"], { key: "cash-sweep",
             label: "Cash sweep (usa cassa in eccesso per rimborsare debito)" }),
       rule(["cash_sweep_min_cash"], { key: "cash-sweep-min", label: "Cash sweep: cassa minima €" }),

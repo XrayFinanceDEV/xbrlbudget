@@ -29,8 +29,7 @@ import type { BalanceSheet, FinancingLoanInput, OtherLenderInput } from "@/types
 import { baseBankDebt } from "@/lib/base-bank-debt";
 import { num } from "@/lib/budget-format";
 
-/** Le parole della regola dei fidi (`bank_lines_rule`), in un posto solo: le usano la tendina del
- *  passo e le tabelle del report, che senza questa tabella stampava «costante» grezzo. */
+/** Etichette per leggere report storici che contengono ancora la vecchia regola. */
 export const ETICHETTE_REGOLA_FIDI: Readonly<Record<string, string>> = {
   costante: "Costanti",
   ricavi: "Seguono i ricavi",
@@ -235,6 +234,13 @@ export function nuovoFinanziatore(n: number, horizon: number): OtherLenderInput 
   };
 }
 
+/** Per un nuovo piano, riporta il debito storico degli altri finanziatori in
+ * una sola riga modificabile. Non inventa rate o tassi non presenti nel bilancio. */
+export function finanziatoreDalBilancio(baseBs: FonteBilancio, horizon: number): OtherLenderInput | null {
+  const residuo = v(baseBs, "sp16b_debiti_altri_finanz_breve") + v(baseBs, "sp17b_debiti_altri_finanz_lungo");
+  return residuo > 0 ? { ...nuovoFinanziatore(1, horizon), opening_residual: residuo } : null;
+}
+
 /** Un solo finanziamento: somma dei residui, tasso medio ponderato sui residui (un decimale),
  *  rimborsi sommati anno per anno. «Per fare in fretta»: uno scadenziario invece di N. */
 export function unisciContratti(items: FinancingLoanInput[], horizon: number): FinancingLoanInput[] {
@@ -321,7 +327,7 @@ export function controlliBanche(
   const fidiOltre: Controllo | null = fidi > sp16a + 0.5
     ? {
       ok: false,
-      testo: `Fidi e anticipi (${eurAuto(fidi)} €) superano i debiti a breve del bilancio (${eurAuto(sp16a)} €)`,
+      testo: `Fidi, Anticipi Ft e Scoperti CC (${eurAuto(fidi)} €) superano i debiti a breve del bilancio (${eurAuto(sp16a)} €)`,
       esito: "da correggere",
       differenza: sp16a - fidi,
     }
@@ -361,7 +367,7 @@ export function controlloAltri(baseBs: FonteBilancio, items: readonly Scadenziab
 
 /**
  * Vero quando la riga del primo anno di piano ESISTE ma non ha ancora un valore per i fidi: è il
- * segnale per la scrittura una tantum (`bank_lines_amount = 0`, `bank_lines_rule = "costante"`)
+ * segnale per la scrittura una tantum (`bank_lines_amount = 0`)
  * alla prima visita del passo. Prima che la riga arrivi (ipotesi non ancora idratate) non è MAI
  * vero — `riga === undefined` torna `false` senza guardare altro — perché scrivere su una mappa
  * vuota scriverebbe 0 e "costante" PRIMA che i valori salvati (se lo scenario ne aveva già uno)
@@ -370,8 +376,8 @@ export function controlloAltri(baseBs: FonteBilancio, items: readonly Scadenziab
  * riga assente).
  */
 export function serveInizializzareFidi(
-  riga: { bank_lines_amount?: number | null; bank_lines_rule?: string | null } | null | undefined,
+  riga: { bank_lines_amount?: number | null } | null | undefined,
 ): boolean {
   if (riga == null) return false;
-  return riga.bank_lines_amount == null && riga.bank_lines_rule == null;
+  return riga.bank_lines_amount == null;
 }

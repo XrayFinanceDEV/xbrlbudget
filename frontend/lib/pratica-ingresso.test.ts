@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   ingressoNuovaPratica,
+  ingressoDaBilancioEsistente,
   ingressoRiprendi,
   patchPraticaPerScenarioAperto,
   rifiutoIngressoStartup,
@@ -70,6 +71,22 @@ describe("ingressoNuovaPratica", () => {
     const i = ingressoNuovaPratica(42, "bilancio");
     expect(i.pratica.infrannualeScenarioId ?? null).toBeNull();
     expect(i.pratica.budgetScenarioId ?? null).toBeNull();
+  });
+});
+
+describe("ingressoDaBilancioEsistente", () => {
+  it("apre subito un nuovo budget dal bilancio annuale scelto", () => {
+    const ingresso = ingressoDaBilancioEsistente(42, { id: 5, year: 2026, period_months: null }, 81);
+    expect(ingresso.route).toBe("/budget?open=81");
+    expect(ingresso.pratica).toMatchObject({
+      companyId: 42, fiscalYear: 2026, periodMonths: 12,
+      budgetScenarioId: 81, infrannualeScenarioId: null,
+    });
+  });
+
+  it("esclude un bilancio infrannuale come base del budget", () => {
+    expect(() => ingressoDaBilancioEsistente(42, { id: 6, year: 2026, period_months: 6 }, 82))
+      .toThrow("Il budget deve partire da un bilancio annuale");
   });
 });
 

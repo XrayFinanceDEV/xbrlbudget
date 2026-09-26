@@ -33,7 +33,7 @@ describe("budget-pregresso-oltre", () => {
   });
   it("oltreRows: righe con massa oltre, stati neutri", () => {
     const rows = oltreRows(bs, pianoBase(bs, anni, {}), anni);
-    expect(rows.map((r) => r.key)).toEqual(["crediti_commerciali", "altri_debiti"]);
+    expect(rows.map((r) => r.key)).toEqual(["crediti_commerciali", "crediti_tributari_breve", "altri_debiti"]);
     expect(rows[0]).toMatchObject({ opening: 30000, amounts: [0, 0, 0], resta: 30000, stato: "nessun movimento nel piano", dir: "in" });
   });
   it("withOltreAmount scrive nell'anno la sola parte oltre e aggiorna resta e stato", () => {
@@ -79,7 +79,7 @@ describe("budget-pregresso-oltre", () => {
   });
   it("breveRows: cinque saldi piu' banche e finanziatori, con l'avviso sui fornitori", () => {
     const rows = breveRows(bs, 2026, "non risultano debiti verso fornitori");
-    expect(rows.map((r) => r.label)).toEqual(["Crediti verso clienti", "Debiti verso fornitori", "Debiti tributari a breve", "Debiti previdenziali", "Altri debiti a breve", "Debiti verso banche e altri finanziatori"]);
+    expect(rows.map((r) => r.label)).toEqual(["Crediti commerciali e altri a breve", "Debiti verso fornitori", "Debiti tributari a breve", "Debiti previdenziali", "Altri debiti a breve", "Debiti verso banche e altri finanziatori"]);
     expect(rows[0]).toMatchObject({ importo: 422000, dir: "in", small: "incassati nel 2027" });
     expect(rows[1].alert).toBe("non risultano debiti verso fornitori");
     expect(rows[2].small).toBe("saldo pagato nel 2027");

@@ -7,12 +7,15 @@ const income = (over: Record<string, unknown>) =>
     ce01_ricavi_vendite: "0",
     ce05_materie_prime: "0",
     ce06_servizi: "0",
+    ce10_var_rimanenze_mat_prime: "0",
     ...over,
   }) as unknown as IncomeStatement;
 
 const balance = (over: Record<string, unknown>) =>
   ({
     sp05_rimanenze: "0",
+    sp05a_materie_prime: "0",
+    sp05e_acconti: "0",
     sp06_crediti_breve: "0",
     sp06e_crediti_tributari_breve: "0",
     sp06f_imposte_anticipate_breve: "0",
@@ -67,13 +70,48 @@ describe("computeAutoDays — dso", () => {
   });
 });
 
-describe("computeAutoDays — dio e dpo restano invariati", () => {
-  it("dio sulle rimanenze sui ricavi", () => {
-    const bs = balance({ sp05_rimanenze: "410000", sp06e_crediti_tributari_breve: "387213" });
-    // Lo scorporo non tocca il ramo dio: 410.000 / 3.600.000 x 360 = 41.
-    expect(computeAutoDays("dio", income({ ce01_ricavi_vendite: "3600000" }), bs)).toBe(41);
+// lotto 1 fix rilievi (2026-09-26): B01 — il ramo `dio` non guida più le rimanenze sui
+// ricavi, ma le sole materie prime (sp05a) sul CONSUMO dell'anno base (ce05 + ce10), perché
+// il motore ora calcola sp05a dal consumo, non più dal fatturato. Il vecchio test pinnava
+// "410.000 / 3.600.000 x 360 = 41" sull'aggregato intero e sui ricavi: comportamento che la
+// spec B01 cambia di proposito, quindi si aggiorna qui invece di restare xfail.
+describe("computeAutoDays — dio sul consumo delle materie (B01)", () => {
+  it("scorpora le materie prime e divide sul consumo, non sui ricavi", () => {
+    const bs = balance({ sp05_rimanenze: "36", sp05a_materie_prime: "36" });
+    const is = income({ ce01_ricavi_vendite: "1000", ce05_materie_prime: "260" });
+    // 36 / (260 + 0) x 360 = 49,85 -> 50. I ricavi (1.000) non intervengono più.
+    expect(computeAutoDays("dio", is, bs)).toBe(50);
   });
 
+  it("tace quando il consumo (ce05 + ce10) non è positivo", () => {
+    const bs = balance({ sp05_rimanenze: "36", sp05a_materie_prime: "36" });
+    // ce05 260 + ce10 -260 = consumo 0.
+    const is = income({ ce01_ricavi_vendite: "1000", ce05_materie_prime: "260", ce10_var_rimanenze_mat_prime: "-260" });
+    expect(computeAutoDays("dio", is, bs)).toBeNull();
+  });
+
+  it("base senza ALCUNA sotto-voce usa l'aggregato meno gli acconti come materie", () => {
+    // sp05a..sp05e tutte a zero, aggregato positivo: nessun dettaglio, stesso ripiego
+    // di `_alloc`/`_materie_base` nel motore.
+    const bs = balance({ sp05_rimanenze: "36" });
+    const is = income({ ce01_ricavi_vendite: "1000", ce05_materie_prime: "260" });
+    // (36 - 0) / 260 x 360 = 49,85 -> 50.
+    expect(computeAutoDays("dio", is, bs)).toBe(50);
+  });
+
+  // lotto 1 fix rilievi (2026-09-26), fix round 1: il ripiego sull'aggregato scatta SOLO
+  // quando NESSUNA sotto-voce di sp05 e' valorizzata — non quando sp05a e' a zero ma
+  // un'altra sotto-voce (qui sp05c) non lo e'. Materie davvero a zero non sono la stessa
+  // cosa di materie senza dettaglio: confonderle sposterebbe la giacenza di un'altra
+  // rimanenza sul DIO delle materie.
+  it("sp05a a zero con sp05c valorizzato non attiva il ripiego: materie restano zero", () => {
+    const bs = balance({ sp05_rimanenze: "36", sp05c_lavori_in_corso: "36" });
+    const is = income({ ce01_ricavi_vendite: "1000", ce05_materie_prime: "260" });
+    expect(computeAutoDays("dio", is, bs)).toBe(0);
+  });
+});
+
+describe("computeAutoDays — dpo resta invariato", () => {
   it("dpo sui fornitori sugli acquisti (materie + servizi)", () => {
     const bs = balance({ sp16d_debiti_fornitori_breve: "470000" });
     const is = income({ ce05_materie_prime: "2600000", ce06_servizi: "1000000" });

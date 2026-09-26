@@ -14,15 +14,94 @@ from database.models import (
 )
 from calculations.projection_common import (
     base_bank_debt, financial_repayment_instalment, altri_finanz_repayment_instalment,
-    tfr_accrual_quota, deferred_tax_position,
-    new_financing_schedule, PREGRESSO_KEYS, PREGRESSO_LABELS,
+    tfr_accrual_quota, deferred_tax_position, ammortamento_categoria,
+    new_financing_schedule, rata_anno_dopo, PREGRESSO_KEYS, PREGRESSO_LABELS,
     pregresso_opening_masses, runoff_schedule, validate_runoff,
-    tax_settlement_saldo_acconto, soglia_giorni_magazzino,
+    tax_settlement_saldo_acconto, soglia_giorni_magazzino, rimanenze_materie,
     e_contratto_pregresso, contratti_da_riga_finanziamento,
     quota_breve_prestiti_nuovi, separa_prestiti_nuovi,
-    eur_it, scarto_it,
+    eur_it, scarto_it, punto_di_pareggio,
 )
 from calculations.ce_result import calculate_ce_result
+
+# Si incrementa a ogni cambiamento dei numeri che il motore produce a parità di ipotesi: un
+# ForecastYear con una versione più vecchia è un previsionale da rigenerare (lotto 2, A01-bis).
+ENGINE_VERSION = "2"
+
+
+def _erogazioni_anno(details: Dict[str, Any]) -> str:
+    """Le erogazioni dell'anno (C08, lotto 2 fix rilievi 2026-09-26): la somma di quanto l'anno ha
+    davvero incassato da terzi, per il rendiconto — separata dai rimborsi invece di uscire netta
+    sulla stessa riga (`cashflow_detailed.DetailedCashFlowCalculator`). Somma, al centesimo:
+    - `erogato` di ogni contratto in `details['debito_bancario']['contratti']`;
+    - `erogato` di ogni contratto in `details['altri_finanziatori']['contratti']` (prima scartato
+      qui, ora dichiarato — vedi il commento sul blocco che lo produce);
+    - il tiraggio dei fidi dell'anno (`details['debito_bancario']['fidi']['tiraggio']`, regime
+      esplicito §5.2-bis);
+    - lo scoperto generato nell'anno (`details['scoperto_generato']`).
+    Una chiave diagnostica assente vale zero: senza debito, senza fidi e senza scoperto la somma è
+    "0.00", non `None` — è una vera assenza di erogazioni, non un dato mancante.
+    """
+    zero = Decimal('0')
+    debito = details.get('debito_bancario') or {}
+    totale = sum(
+        (Decimal(str(c.get('erogato') or 0)) for c in (debito.get('contratti') or [])),
+        zero,
+    )
+    altri = details.get('altri_finanziatori') or {}
+    totale += sum(
+        (Decimal(str(c.get('erogato') or 0)) for c in (altri.get('contratti') or [])),
+        zero,
+    )
+    fidi = debito.get('fidi') or {}
+    totale += Decimal(str(fidi.get('tiraggio') or 0))
+    totale += Decimal(str(details.get('scoperto_generato') or 0))
+    return str(totale.quantize(Decimal('0.01'), rounding=ROUND_HALF_UP))
+
+
+def _rimborsi_piano_anno(details: Dict[str, Any]) -> str:
+    """La quota capitale rimborsata nell'anno secondo IL PIANO (F2, decisione del proprietario
+    2026-09-26): il DSCR conta solo le rate che uno scadenziamento vero prevede, mai il rimborso
+    di uno scoperto, di un fido o dello sweep di cassa — quella e' liquidita' libera che rientra,
+    non un servizio del debito contrattuale (il rilievo del revisore: uno scenario con crescita
+    -40/+80/0 e scoperto concesso faceva scendere il DSCR da 3,29 a 0,90 solo per il rimborso
+    dello scoperto). Somma, al centesimo:
+    - `rimborso` di ogni contratto in `details['debito_bancario']['contratti']` (nuovi e
+      pregressi CON un calendario: `_contratti_dell_anno` lo scrive dal kernel sul singolo
+      contratto, mai dallo sweep — vedi `_dichiara_debito_bancario`);
+    - `rimborso` di `details['debito_bancario']['pregresso_piano_anni']`, quando il pregresso
+      bancario segue un piano ad anni (`existing_debt_repayment_years`) invece dello sweep;
+    - `rimborso` di `details['altri_finanziatori']` (qualunque `mode` — `legacy`/`anni`/
+      `contratti` seguono sempre un proprio scadenziamento, mai lo sweep).
+    ESCLUSI per costruzione, perche' non hanno una chiave `rimborso` qui: il pregresso bancario
+    SENZA piano (`pregresso_senza_piano` porta solo `rimborso_sweep`), i fidi (`fidi` porta
+    `tiraggio` e `rimborso_sweep`, mai una rata schedulata) e lo scoperto di c/c generato dal
+    piano (non vive in `debito_bancario` affatto).
+    Una chiave diagnostica assente vale zero: senza alcun piano di rimborso la somma e' "0.00",
+    non `None` — un anno interamente a sweep non ha rate, per davvero.
+    """
+    zero = Decimal('0')
+    debito = details.get('debito_bancario') or {}
+    totale = sum(
+        (Decimal(str(c.get('rimborso') or 0)) for c in (debito.get('contratti') or [])),
+        zero,
+    )
+    piano_anni = debito.get('pregresso_piano_anni')
+    if piano_anni:
+        totale += Decimal(str(piano_anni.get('rimborso') or 0))
+    altri = details.get('altri_finanziatori') or {}
+    totale += Decimal(str(altri.get('rimborso') or 0))
+    return str(totale.quantize(Decimal('0.01'), rounding=ROUND_HALF_UP))
+
+
+def engine_meta(details: Dict[str, Any]) -> Dict[str, Any]:
+    """La firma persistita su `ForecastYear.engine_meta`: JSON puro, importi come stringhe al centesimo."""
+    pareggio = details.get('pareggio')
+    if pareggio is not None:
+        pareggio = {k: (None if v is None else str(Decimal(str(v)).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)))
+                    for k, v in pareggio.items()}
+    return {'engine_version': ENGINE_VERSION, 'pareggio': pareggio, 'erogazioni': _erogazioni_anno(details),
+            'rimborsi_piano': _rimborsi_piano_anno(details)}
 
 
 def _importo_it(value) -> str:
@@ -46,9 +125,12 @@ def _importo_it(value) -> str:
 # lasciata in pace resta ferma per tutto il piano.
 #
 # La forma dell'aggancio NON e' nuova: e' quella gia' cablata sui debiti
-# previdenziali (`previdenza_scales_with_personnel`), cioe' `stock dell'ANNO
+# previdenziali via `sp_indexing` (driver "personale"), cioe' `stock dell'ANNO
 # BASE × fattore del driver`. Indicizzare sulla base non accumula deriva, mentre
-# un `prev × (1+%)` composto per cinque anni si'.
+# un `prev × (1+%)` composto per cinque anni si'. (`previdenza_scales_with_personnel`
+# era l'interruttore dedicato che faceva la stessa cosa: dal lotto 3 fix rilievi,
+# 2026-09-26, A06, il motore non lo legge piu' — resta nel modello/schema solo
+# per compatibilita' con un client vecchio.)
 
 # ── GIORNI MEDI DERIVATI: la soglia oltre cui non descrivono piu' l'azienda ──
 #
@@ -367,7 +449,9 @@ def _residuo_contratto(loan, fino_al_anno: int) -> Decimal:
 
 
 def _contratti_dell_anno(loans, anno: int, quota_breve_nuovi: Decimal, residuo_nuovi: Decimal,
-                         breve_pregresso: Decimal, lungo_pregresso: Decimal) -> List[Dict[str, Any]]:
+                         breve_pregresso: Decimal, lungo_pregresso: Decimal,
+                         ultimo_anno_piano: Optional[int] = None,
+                         pregresso_riclassificato: bool = False) -> List[Dict[str, Any]]:
     """Le righe `contratti` di `details['debito_bancario']`, grezze (le quantizza `_dichiara_debito_bancario`).
 
     Per ogni contratto: erogato, rimborso e interessi dell'anno dal kernel sul solo contratto, e il
@@ -378,11 +462,26 @@ def _contratti_dell_anno(loans, anno: int, quota_breve_nuovi: Decimal, residuo_n
       `residuo_nuovi - quota_breve_nuovi`;
     - contratti col residuo iniziale: `breve_pregresso` si assegna in ordine, fino al residuo di
       ciascuno; l'ultimo assorbe la differenza verso `breve_pregresso` e verso `lungo_pregresso`.
+
+    `rata_ripetuta` (spec B05, lotto 1 fix rilievi 2026-09-26; ristretta dal rilievo M1 della
+    revisione finale, 2026-09-26): SEMPRE dichiarata, ma vale `rata_anno_dopo` del contratto solo
+    dove la ripetizione sposta davvero il breve dichiarato — sui contratti NUOVI (la cui quota a
+    breve viene proprio da li', via `_quota_breve_prestiti_nuovi`) e sui contratti col residuo
+    iniziale quando il chiamante segnala `pregresso_riclassificato=True` (regime esplicito dei fidi,
+    dove `breve_pregresso` e' la somma di `rata_anno_dopo` di ogni contratto). FUORI da quel regime
+    `breve_pregresso` e' quanto il bilancio gia' porta (`sp16a` dell'anno, invariato dalla lista di
+    rimborsi), quindi la ripetizione non sposta nulla: dichiarare `True` li' suggerirebbe un
+    movimento inesistente, ed e' il difetto che M1 corregge.
     """
     zero = Decimal('0')
     righe: List[Dict[str, Any]] = []
     for indice, loan in enumerate(loans or []):
         erogato, rimborso, interessi = new_financing_schedule([loan], anno)
+        pregresso = _e_contratto_pregresso(loan)
+        if pregresso and not pregresso_riclassificato:
+            rata_ripetuta = False
+        else:
+            _, rata_ripetuta = rata_anno_dopo(loan, anno, ultimo_anno_piano)
         righe.append({
             'indice': indice,
             'anno': int(loan['year']),
@@ -392,14 +491,15 @@ def _contratti_dell_anno(loans, anno: int, quota_breve_nuovi: Decimal, residuo_n
             'residuo_iniziale': Decimal(str(loan.get('opening_residual') or 0)),
             'rimborso': rimborso,
             'interessi': interessi,
+            'rata_ripetuta': rata_ripetuta,
             '_residuo': _residuo_contratto(loan, anno),
-            '_pregresso': _e_contratto_pregresso(loan),
+            '_pregresso': pregresso,
             '_loan': loan,
         })
     nuovi = [r for r in righe if not r['_pregresso']]
     pregressi = [r for r in righe if r['_pregresso']]
     for r in nuovi:
-        r['breve'] = _quota_breve_prestiti_nuovi([r['_loan']], anno, r['_residuo'])
+        r['breve'] = _quota_breve_prestiti_nuovi([r['_loan']], anno, r['_residuo'], ultimo_anno_piano)
         r['lungo'] = r['_residuo'] - r['breve']
     if nuovi:
         ultimo = nuovi[-1]
@@ -577,6 +677,35 @@ _e_contratto_pregresso = e_contratto_pregresso
 _quota_breve_prestiti_nuovi = quota_breve_prestiti_nuovi
 
 
+def _consuma_in_ordine(totale: Decimal, valori_base: "List[Decimal]") -> "List[Decimal]":
+    """A04 (spec fix rilievi 2026-09-26, decisione del proprietario): ripartizione del residuo
+    lungo dei crediti commerciali (`sp07a/b/c/d/g`) quando il piano `crediti_commerciali` incassa
+    parte della massa oltre 12 mesi.
+
+    Se il totale SCENDE sotto la somma delle basi (un incasso), la riduzione si toglie prima dalla
+    prima voce (`sp07a`, i clienti), poi dalle successive nello stesso ordine, mai sotto zero — un
+    incasso consuma prima i clienti, non «un po' di ognuno». Se il totale è pari o sopra la somma
+    delle basi (crescita, o nessuna base da cui ripartire proporzione), la ripartizione resta
+    proporzionale come `_alloc`: sulla base nulla tutto sulla prima voce.
+    """
+    zero = Decimal('0')
+    tot_base = sum(valori_base, zero)
+    if totale >= tot_base or tot_base == 0:
+        if tot_base > 0:
+            return [totale * (v / tot_base) for v in valori_base]
+        out = [zero] * len(valori_base)
+        if valori_base:
+            out[0] = totale
+        return out
+    riduzione = tot_base - totale
+    risultato = []
+    for v in valori_base:
+        taglio = min(riduzione, v)
+        risultato.append(v - taglio)
+        riduzione -= taglio
+    return risultato
+
+
 def load_forecast_source(db: Session, scenario_id: int) -> ForecastSource:
     """Scenario, anno base e i due prospetti, con gli stessi controlli di
     generate_forecast: scenario assente, base assente o incompleto, gate
@@ -640,7 +769,7 @@ def prune_out_of_plan_forecast_years(db: Session, scenario_id: int, planned_year
     return len(stale)
 
 
-def validate_pregresso(pregresso, base_bs, horizon: int) -> Dict[str, Dict[str, Any]]:
+def validate_pregresso(pregresso, base_bs, horizon: int) -> Dict[str, Any]:
     """Normalizza lo scadenziamento del pregresso in Decimal, o alza ValueError.
 
     Tre controlli, tutti con messaggi in italiano perche' li legge l'utente:
@@ -656,8 +785,11 @@ def validate_pregresso(pregresso, base_bs, horizon: int) -> Dict[str, Dict[str, 
     if not pregresso:
         return {}
     cent = Decimal('0.01')
-    masses = pregresso_opening_masses(lambda field: getattr(base_bs, field, None))
-    out: Dict[str, Dict[str, Any]] = {}
+    acconti_storici = Decimal(str(pregresso.get('acconti_tributari_storici') or 0))
+    if acconti_storici < 0 or acconti_storici > Decimal(str(getattr(base_bs, 'sp06e_crediti_tributari_breve', None) or 0)):
+        raise ValueError("Gli acconti tributari storici devono essere compresi nei crediti tributari entro 12 mesi del bilancio base")
+    masses = pregresso_opening_masses(lambda field: getattr(base_bs, field, None), acconti_storici)
+    out: Dict[str, Any] = {'acconti_tributari_storici': acconti_storici}
     for key in PREGRESSO_KEYS:
         plan = pregresso.get(key)
         if not plan:
@@ -987,6 +1119,10 @@ class ForecastEngine:
         "debiti_tributari": ("sp17e_debiti_tributari_lungo",),
         "debiti_previdenziali": ("sp17f_debiti_previdenza_lungo",),
         "altri_debiti": ("sp17g_altri_debiti_lungo",),
+        # Il piano della componente tributaria lunga riscrive `sp07e` dal
+        # residuo del calendario anche quando i crediti commerciali non hanno
+        # un piano. Un override su quella riga sparirebbe l'anno dopo.
+        "crediti_tributari_lungo": ("sp07e_crediti_tributari_lungo",),
         # Il piano dei crediti commerciali scrive l'AGGREGATO `sp07` come
         # residuo lungo del runoff piu' la quota tributaria cresciuta: lo
         # stesso meccanismo degli altri quattro saldi, sullo stesso lato. Che
@@ -1026,6 +1162,9 @@ class ForecastEngine:
     # degli altri debiti deve pagare».
     _PREGRESSO_ARTICOLI: Dict[str, Tuple[str, str]] = {
         "crediti_commerciali": ("i crediti commerciali", "dei crediti commerciali"),
+        "crediti_tributari_lungo": (
+            "i crediti tributari oltre 12 mesi", "dei crediti tributari oltre 12 mesi"
+        ),
         "debiti_fornitori": ("i debiti verso fornitori", "dei debiti verso fornitori"),
         "debiti_tributari": ("i debiti tributari", "dei debiti tributari"),
         "debiti_previdenziali": ("i debiti previdenziali", "dei debiti previdenziali"),
@@ -1041,15 +1180,15 @@ class ForecastEngine:
         """Se questa riga di ipotesi governa la posizione tributaria a mano.
 
         E' la stessa condizione del calcolatore (`manual_tax_position`):
-        percentuali esplicite su `sp06e`/`sp16e`. In quel ramo `sp17e` segue
+        una percentuale esplicita sul debito `sp16e`. La variazione del credito
+        `sp06e` non deve spegnere i pagamenti delle imposte. In quel ramo `sp17e` segue
         `_prev × (1 + crescita)` e il piano e' dichiarato ignorato
         (`pregresso_ignored`), quindi l'override SUPERVIVE all'anno dopo —
         rifiutarlo significherebbe negare una liberta' che il motore onora
         (rilievo M-1; la sonda `X2` della revisione misura il base che porta
         avanti 250,25 dal 2027 al 2030).
         """
-        return (getattr(assumption, 'sp06e_growth_pct', None) is not None
-                or getattr(assumption, 'sp16e_growth_pct', None) is not None)
+        return getattr(assumption, 'sp16e_growth_pct', None) is not None
 
     @classmethod
     def _rifiuto_override_governati(cls, pregresso, assumptions) -> None:
@@ -1519,7 +1658,6 @@ class ForecastEngine:
         if not isinstance(raw, dict) or not raw:
             return applied, ignored
         factors = cls._sp_indexing_factors(base_inc, forecast_inc)
-        previdenza_switch = bool(getattr(assumption, "previdenza_scales_with_personnel", False))
         # Ordine per codice: i `details` sono una dichiarazione, e una
         # dichiarazione che cambia ordine a ogni esecuzione non e' confrontabile.
         for code in sorted(raw):
@@ -1534,11 +1672,6 @@ class ForecastEngine:
                 _skip(SP_INDEXING_GOVERNED[code])
             elif code not in SP_INDEXABLE_FIELDS:
                 _skip("voce non indicizzabile")
-            elif previdenza_switch and code in ("sp16f", "sp17f"):
-                # L'interruttore E' gia' l'indicizzazione di queste due voci al
-                # costo del personale: vince lui, cosi' gli scenari che lo usano
-                # non cambiano di un centesimo.
-                _skip("governata dall'interruttore previdenza/personale")
             elif (pregresso or {}).get(SP_INDEXING_PLAN_KEY.get(code, "")):
                 _skip("piano di scadenziamento")
             elif factors.get(driver) is None:
@@ -1721,7 +1854,10 @@ class ForecastEngine:
     # (fuori dal DSO e dalle masse del pregresso), `sp12h` (segno proprio),
     # `sp14b` (scritta dalle imposte differite), `sp14c` (derivato),
     # `sp16a-c`/`sp17a-c` (confine PFN e confine del rendiconto: sono un
-    # debito finanziario, mai il ripiego di un residuo di arrotondamento).
+    # debito finanziario, mai il ripiego di un residuo di arrotondamento),
+    # `sp05a_materie_prime` (spec B01, 2026-09-26: confine CE↔SP, la chiusura
+    # che il CE ha gia' calcolato dal consumo — un centesimo posato li' sopra
+    # romperebbe l'identita' `ce10 persistito == Δsp05a persistito`).
     _CAMPI_NEUTRI_RESIDUO: Dict[str, Tuple[str, ...]] = {
         "sp01_crediti_soci": ("sp01b_parte_da_richiamare", "sp01a_parte_richiamata"),
         "sp02_immob_immateriali": ("sp02g_altre_immob_imm", "sp02a_costi_impianto", "sp02b_costi_sviluppo",
@@ -1729,7 +1865,7 @@ class ForecastEngine:
         "sp03_immob_materiali": ("sp03d_altri_beni", "sp03a_terreni_fabbricati", "sp03b_impianti_macchinari",
                                  "sp03c_attrezzature", "sp03e_immob_in_corso"),
         "sp04_immob_finanziarie": ("sp04d_altri_titoli", "sp04a_partecipazioni", "sp04c_crediti_immob_lungo"),
-        "sp05_rimanenze": ("sp05e_acconti", "sp05a_materie_prime", "sp05b_prodotti_in_corso",
+        "sp05_rimanenze": ("sp05e_acconti", "sp05b_prodotti_in_corso",
                            "sp05c_lavori_in_corso", "sp05d_prodotti_finiti"),
         "sp06_crediti_breve": ("sp06g_crediti_altri_breve", "sp06d_crediti_controllanti_breve",
                                "sp06c_crediti_collegate_breve", "sp06b_crediti_controllate_breve",
@@ -2079,8 +2215,7 @@ class ForecastEngine:
         return Decimal('0'), Decimal('0')
 
     @staticmethod
-    def _apply_sp_overrides(result: Dict, assumption, *, overdraft: "Optional[_Overdraft]" = None,
-                            anticipate_contro_riserve: bool = False) -> Dict:
+    def _apply_sp_overrides(result: Dict, assumption, *, overdraft: "Optional[_Overdraft]" = None) -> Dict:
         """Apply absolute balance-sheet overrides and rebuild affected totals.
 
         Overrides target persisted forecast field names.  Detail edits win over
@@ -2096,10 +2231,9 @@ class ForecastEngine:
         e' il chiamante INFRANNUALE (`intra_year_engine`), il cui plug negativo
         va clampato a zero con la propria diagnostica e non alza mai.
 
-        `anticipate_contro_riserve` (previsionale budget, commercialista
-        2026-09-18): un override delle imposte anticipate (`sp06f`/`sp07f`) ha
-        contropartita `sp12e` altre riserve, non la cassa — le anticipate non
-        passano dal conto economico e non sono un incasso.
+        Tutte le forzature SP, comprese le imposte anticipate, hanno come
+        contropartita la cassa. Le variazioni di riserve devono essere ipotesi
+        esplicite o forzature della relativa voce SP.
         """
         raw_overrides = getattr(assumption, 'sp_overrides', None) or {}
         if not isinstance(raw_overrides, dict):
@@ -2107,20 +2241,13 @@ class ForecastEngine:
 
         applied = set()
         signed_fields = {'sp13_utile_perdita', 'sp12h_riserva_neg_azioni_proprie'}
-        riserva_anticipate = Decimal('0')
         for field, raw_value in raw_overrides.items():
             if field not in result or raw_value is None:
                 continue
             value = Decimal(str(raw_value))
             new_value = value if field in signed_fields else max(Decimal('0'), value)
-            if anticipate_contro_riserve and field in ('sp06f_imposte_anticipate_breve',
-                                                       'sp07f_imposte_anticipate_lungo'):
-                riserva_anticipate += new_value - result.get(field, Decimal('0'))
             result[field] = new_value
             applied.add(field)
-        if riserva_anticipate and 'sp12e_altre_riserve' not in applied:
-            result['sp12e_altre_riserve'] = result.get('sp12e_altre_riserve', Decimal('0')) + riserva_anticipate
-            applied.add('sp12e_altre_riserve')
 
         detail_groups = {
             'sp04_immob_finanziarie': (
@@ -2419,7 +2546,6 @@ class ForecastEngine:
         # L'apertura della prima riga (validata in `assemble_financing`) e poi il
         # residuo dichiarato l'anno prima: mai una ri-derivazione dal saldo.
         fidi_prima_riga = getattr(assumptions[0], 'bank_lines_amount', None)
-        fidi_regola = getattr(assumptions[0], 'bank_lines_rule', None) or 'costante'
         fidi_tasso = Decimal(str(getattr(assumptions[0], 'bank_lines_rate', None) or 0))
         # Il settore comanda SOLO la soglia dei giorni di magazzino dedotti
         # (Task 10): nessun altro punto del motore budget legge il settore.
@@ -2498,9 +2624,12 @@ class ForecastEngine:
                     year_index=year_index,
                     details=details,
                     prev_details=prev_details,
+                    previous_assumption=(assumptions[year_index - 1] if year_index else None),
                     fidi_apertura=fidi_apertura,
                     fidi_tasso=fidi_tasso,
                     altri_finanziatori=contratti_altri,
+                    base_bs=source.base_bs,
+                    settore=settore,
                 )
                 forecast_inc = self._normalize_income_statement_cents(
                     forecast_inc,
@@ -2535,10 +2664,7 @@ class ForecastEngine:
                     sweep=sweep,
                     debito_bancario=debito,
                     fidi_apertura=fidi_apertura,
-                    fidi_regola=fidi_regola,
                     altri_finanziatori=contratti_altri,
-                    prev_revenue=(getattr(prev_inc, 'ce01_ricavi_vendite', None)
-                                  if fidi_apertura is not None else None),
                 )
                 forecast_bs = self._normalize_balance_sheet_cents(
                     forecast_bs,
@@ -2781,6 +2907,8 @@ class ForecastEngine:
                 # dichiarerebbe stantia pur essendo allineata.
                 fy.updated_at = datetime.utcnow()
 
+            fy.engine_meta = engine_meta(result.details)
+
             # Save or update forecast balance sheet
             existing_bs = self.db.query(ForecastBalanceSheet).filter(
                 ForecastBalanceSheet.forecast_year_id == fy.id
@@ -2849,8 +2977,8 @@ class ForecastEngine:
         # Le imposte anticipate non passano piu' dal conto economico
         # (commercialista, 2026-09-18): nessuna differenza temporanea, nessuna
         # imposta differita in `ce20`. La griglia salvata si ignora; le
-        # anticipate restano costanti e si cambiano solo con un override SP, con
-        # contropartita le riserve (`_apply_sp_overrides`).
+        # anticipate restano costanti e si cambiano solo con un override SP,
+        # che segue la regola generale delle forzature SP: contropartita cassa.
         deferred = deferred_tax_position(None, assumption.tax_rate)
         if assumption.ce20_override is not None:
             total_tax = Decimal(str(assumption.ce20_override))
@@ -2879,9 +3007,12 @@ class ForecastEngine:
         year_index: int = 0,
         details=None,
         prev_details=None,
+        previous_assumption=None,
         fidi_apertura=None,
         fidi_tasso=Decimal('0'),
         altri_finanziatori=None,
+        base_bs=None,
+        settore=None,
     ) -> Dict:
         """
         Calculate forecasted income statement based on assumptions
@@ -2894,8 +3025,9 @@ class ForecastEngine:
         `year_index`, che e' una svalutazione crediti (ce09d).
 
         `prev_details` sono i `details` dell'anno precedente (`None` sul primo):
-        di questo prospetto riguarda solo `scoperto_residuo`, il saldo su cui
-        maturano gli oneri dello scoperto di c/c.
+        portano le componenti fissa/variabile dei costi e lo scoperto residuo.
+        `previous_assumption` consente di riconoscere un cambio della quota
+        fissa nell'anno corrente, che richiede una nuova ripartizione.
 
         `fidi_apertura`/`fidi_tasso` (regime esplicito, spec 2026-09-15 §5.2):
         il saldo dei fidi in apertura d'anno e il loro tasso %. `None` = regime
@@ -2906,6 +3038,13 @@ class ForecastEngine:
         si sommano a ce15 solo nel ramo senza override, e si dichiarano sempre
         in `details['oneri_altri_finanziatori']`. `None`/`[]` = niente lista,
         nessun centesimo in piu' sul prospetto.
+
+        `base_bs` (spec B01, 2026-09-26): lo SP dell'anno base, per l'apertura
+        delle rimanenze di materie (`sp05a`) del primo anno di piano — mai
+        `previous_bs` a quel punto, perche' il primo anno DEVE leggere la base
+        anche se un chiamante futuro passasse un `previous_bs` diverso.
+        `settore` e' lo stesso passato al calcolo dello SP: comanda solo la
+        soglia dei giorni di magazzino oltre cui un DIO dedotto e' degenere.
         """
         # Growth rates apply YEAR OVER YEAR: each forecast year grows from the
         # PREVIOUS year, not from the consuntivo base year. So +5/+5/+5 compounds
@@ -2927,6 +3066,21 @@ class ForecastEngine:
         else:
             ce04 = _pinc('ce04_altri_ricavi') * (Decimal('1') + assumption.other_revenue_growth_pct / Decimal('100'))
 
+        # Split the first year (or a year with a changed slider) from the
+        # previous total. Otherwise carry each previous component forward on
+        # its own growth rate: re-splitting the total every year moves part of
+        # fixed services into the variable base and breaks its promised
+        # proportionality to revenue.
+        def _cost_component_bases(total, share, previous_share, fixed_key, variable_key):
+            previous_fixed = (prev_details or {}).get(fixed_key)
+            previous_variable = (prev_details or {}).get(variable_key)
+            if (previous_assumption is not None
+                    and previous_fixed is not None and previous_variable is not None
+                    and previous_share == share):
+                return Decimal(str(previous_variable)), Decimal(str(previous_fixed))
+            fixed = total * share / Decimal('100')
+            return total - fixed, fixed
+
         # Calculate costs - split between variable and fixed components based on user-defined percentages
 
         # Materials
@@ -2937,10 +3091,11 @@ class ForecastEngine:
             ce05_fixed_part = ce05_variable_part = None
         else:
             base_materials = _pinc('ce05_materie_prime')
-            fixed_pct_materials = assumption.fixed_materials_percentage / Decimal('100')
-            variable_pct_materials = Decimal('1') - fixed_pct_materials
-            variable_materials = base_materials * variable_pct_materials
-            fixed_materials = base_materials * fixed_pct_materials
+            variable_materials, fixed_materials = _cost_component_bases(
+                base_materials, assumption.fixed_materials_percentage,
+                (previous_assumption.fixed_materials_percentage if previous_assumption else None),
+                'ce05_fixed', 'ce05_variable',
+            )
             ce05_variable_part = variable_materials * (Decimal('1') + assumption.variable_materials_growth_pct / Decimal('100'))
             ce05_fixed_part = fixed_materials * (Decimal('1') + assumption.fixed_materials_growth_pct / Decimal('100'))
             ce05 = ce05_variable_part + ce05_fixed_part
@@ -2951,10 +3106,11 @@ class ForecastEngine:
             ce06_fixed_part = ce06_variable_part = None
         else:
             base_services = _pinc('ce06_servizi')
-            fixed_pct_services = assumption.fixed_services_percentage / Decimal('100')
-            variable_pct_services = Decimal('1') - fixed_pct_services
-            variable_services = base_services * variable_pct_services
-            fixed_services = base_services * fixed_pct_services
+            variable_services, fixed_services = _cost_component_bases(
+                base_services, assumption.fixed_services_percentage,
+                (previous_assumption.fixed_services_percentage if previous_assumption else None),
+                'ce06_fixed', 'ce06_variable',
+            )
             ce06_variable_part = variable_services * (Decimal('1') + assumption.variable_services_growth_pct / Decimal('100'))
             ce06_fixed_part = fixed_services * (Decimal('1') + assumption.fixed_services_growth_pct / Decimal('100'))
             ce06 = ce06_variable_part + ce06_fixed_part
@@ -2978,10 +3134,14 @@ class ForecastEngine:
             ce08 = _pinc('ce08_costi_personale') * (Decimal('1') + assumption.personnel_growth_pct / Decimal('100'))
 
         # Personnel sub-items — override or maintain same proportions as the previous year.
-        # Salari/oneri scale with the personnel total; TFR (ce08a) is instead the statutory
-        # accrual salari/13,5 (so the sp15 fund — which reads ce08a — grows every year even
-        # when the base import only carried the aggregate personnel cost); ce08d absorbs the
-        # remainder so the four sub-items still sum to the personnel total.
+        # Salari/oneri scale with the personnel total; TFR (ce08a) is the statutory accrual
+        # salari/13,5 (spec B03, 2026-09-26 — so the sp15 fund, which reads ce08a, grows every
+        # year even when the base import only carried the aggregate personnel cost); ce08d
+        # absorbs the remainder. When TFR+salari+oneri exceed the personnel total the total is
+        # RICOMPOSTO as their sum — unless the total itself is forced (ce08_override), in which
+        # case the forced total wins and TFR is capped at what salari+oneri leave, as before.
+        # Either way it is declared in details['personale_ricomposto'], always present (None
+        # when the four sub-items already fit inside the total).
         prev_ce08 = _pinc('ce08_costi_personale')
         if prev_ce08 > 0:
             growth_factor = ce08 / prev_ce08
@@ -2989,33 +3149,51 @@ class ForecastEngine:
             growth_factor = Decimal('1')
         ce08b = assumption.ce08b_override if assumption.ce08b_override is not None else _pinc('ce08b_salari_stipendi') * growth_factor
         ce08c = assumption.ce08c_override if assumption.ce08c_override is not None else _pinc('ce08c_oneri_sociali') * growth_factor
-        # Cap the derived TFR quota at the remainder left by salari+oneri so the four
-        # sub-items never sum to more than the personnel total (an explicit override is
-        # trusted as-is). ce08d then absorbs the exact remainder.
-        ce08a = assumption.ce08a_override if assumption.ce08a_override is not None else min(tfr_accrual_quota(ce08b, ce08), max(Decimal('0'), ce08 - ce08b - ce08c))
-        ce08d = assumption.ce08d_override if assumption.ce08d_override is not None else max(Decimal('0'), ce08 - ce08a - ce08b - ce08c)
+        ce08a = assumption.ce08a_override if assumption.ce08a_override is not None else tfr_accrual_quota(ce08b, ce08)
+        resto = ce08 - ce08a - ce08b - ce08c
+        personale_ricomposto = None
+        if assumption.ce08d_override is not None:
+            ce08d = assumption.ce08d_override
+        elif resto < 0:
+            if assumption.ce08_override is not None:
+                ce08_ipotesi = ce08
+                ce08a = max(Decimal('0'), ce08 - ce08b - ce08c)
+                ce08d = Decimal('0')
+                personale_ricomposto = {
+                    'ce08_ipotesi': ce08_ipotesi, 'ce08': ce08,
+                    'eccedenza': -resto, 'tfr_limitato': True,
+                }
+            else:
+                ce08_ipotesi = ce08
+                ce08 = ce08a + ce08b + ce08c
+                ce08d = Decimal('0')
+                personale_ricomposto = {
+                    'ce08_ipotesi': ce08_ipotesi, 'ce08': ce08,
+                    'eccedenza': -resto, 'tfr_limitato': False,
+                }
+        else:
+            ce08d = resto
+        if details is not None:
+            details['personale_ricomposto'] = personale_ricomposto
 
         # Depreciation — override total or calculate from investments
         depreciation_rate_tangible = assumption.depreciation_rate / Decimal('100')
         depreciation_rate_intangible = (getattr(assumption, 'depreciation_rate_intangible', None) or assumption.depreciation_rate) / Decimal('100')
         intangible_inv, tangible_inv = self._get_split_investments(assumption)
-        new_depr_intangible = intangible_inv * depreciation_rate_intangible if intangible_inv > 0 else Decimal('0')
-        new_depr_tangible = tangible_inv * depreciation_rate_tangible if tangible_inv > 0 else Decimal('0')
 
-        # Depreciation sub-items: override, else carry the PREVIOUS year's charge forward
-        # (it already includes prior investments' depreciation) plus this year's new
-        # investment depreciation — so a one-off investment keeps being depreciated in
-        # later years instead of reverting to the base-year charge (#7). The charge is
-        # then capped at the available net book value (previous NBV + this year's
-        # investment) so depreciation stops once the asset is fully written down (#5).
+        # Depreciation sub-items: masse separate (spec B02, E05 — 2026-09-26).
+        # `ammortamento_categoria` (`calculations/projection_common.py`) tiene
+        # divise la massa esistente all'apertura del piano dai cespiti che il
+        # piano stesso genera, ognuno del proprio residuo — cosi' la quota
+        # sull'esistente SI FERMA quando il netto si esaurisce (B02, invece di
+        # continuare alla quota piena di sempre) e un investimento ammortizza a
+        # meta' aliquota nell'anno in cui entra (E05). Lo stato di apertura viene
+        # da `prev_details['ammortamenti']` (`None` sul primo anno di piano) e si
+        # dichiara sempre in `details['ammortamenti']`, a prescindere da override.
         base_ce09a = getattr(base_inc, 'ce09a_ammort_immateriali', None) or Decimal('0')
         base_ce09b = getattr(base_inc, 'ce09b_ammort_materiali', None) or Decimal('0')
         base_ce09c = getattr(base_inc, 'ce09c_svalutazioni', None) or Decimal('0')
         base_ce09d = getattr(base_inc, 'ce09d_svalutazione_crediti', None) or Decimal('0')
-
-        def _prev_inc_val(field, fallback):
-            v = getattr(previous_inc, field, None) if previous_inc is not None else None
-            return v if v is not None else fallback
 
         def _prev_bs_val(field):
             if previous_bs is None:
@@ -3024,19 +3202,59 @@ class ForecastEngine:
                 return previous_bs.get(field, Decimal('0')) or Decimal('0')
             return getattr(previous_bs, field, Decimal('0')) or Decimal('0')
 
-        prev_ce09a = _prev_inc_val('ce09a_ammort_immateriali', base_ce09a)
-        prev_ce09b = _prev_inc_val('ce09b_ammort_materiali', base_ce09b)
-        avail_intangible = max(Decimal('0'), _prev_bs_val('sp02_immob_immateriali') + intangible_inv)
-        avail_tangible = max(Decimal('0'), _prev_bs_val('sp03_immob_materiali') + tangible_inv)
-
-        if assumption.ce09a_override is not None:
-            ce09a = assumption.ce09a_override
-        else:
-            ce09a = min(prev_ce09a + new_depr_intangible, avail_intangible)
-        if assumption.ce09b_override is not None:
-            ce09b = assumption.ce09b_override
-        else:
-            ce09b = min(prev_ce09b + new_depr_tangible, avail_tangible)
+        stato_ammort = (prev_details or {}).get('ammortamenti') or {}
+        # Dismissione (asset_disposal_nbv): tocca solo il residuo dei cespiti
+        # MATERIALI, mai gli immateriali — l'eventuale plus/minusvalenza sul
+        # conto economico resta gestita piu' sotto (ce04/ce12), invariata.
+        disposal_nbv_ammort = getattr(assumption, 'asset_disposal_nbv', None) or Decimal('0')
+        netto_apertura_immateriali = _prev_bs_val('sp02_immob_immateriali')
+        netto_apertura_materiali = _prev_bs_val('sp03_immob_materiali')
+        # M3 (revisione finale, 2026-09-26): un override oltre il netto disponibile si
+        # RIFIUTA, come ce10_override oltre le materie d'apertura — `ammortamento_categoria`
+        # da sola onorerebbe l'override nel CE mentre i pool clampano a zero, e la cassa
+        # assorbirebbe la differenza in silenzio (`CLAUDE.md`, «diagnose, never fabricate»).
+        max_ammortizzabile_immateriali = netto_apertura_immateriali + intangible_inv
+        if assumption.ce09a_override is not None and assumption.ce09a_override > max_ammortizzabile_immateriali:
+            raise ValueError(
+                f"L'override di ce09a_ammort_immateriali nell'anno {assumption.forecast_year} "
+                f"({eur_it(assumption.ce09a_override)}) supera il netto disponibile "
+                f"({eur_it(max_ammortizzabile_immateriali)}): gli immobilizzi immateriali non "
+                "possono scendere sotto zero. Abbassa l'override o svuota la cella (value: null) "
+                "e lascia che l'ammortamento lo derivi."
+            )
+        max_ammortizzabile_materiali = netto_apertura_materiali + tangible_inv - disposal_nbv_ammort
+        if assumption.ce09b_override is not None and assumption.ce09b_override > max_ammortizzabile_materiali:
+            raise ValueError(
+                f"L'override di ce09b_ammort_materiali nell'anno {assumption.forecast_year} "
+                f"({eur_it(assumption.ce09b_override)}) supera il netto disponibile "
+                f"({eur_it(max_ammortizzabile_materiali)}): gli immobilizzi materiali non "
+                "possono scendere sotto zero. Abbassa l'override o svuota la cella (value: null) "
+                "e lascia che l'ammortamento lo derivi."
+            )
+        ce09a, stato_ammort_immateriali = ammortamento_categoria(
+            stato_ammort.get('immateriali'),
+            netto_apertura_immateriali,
+            base_ce09a,
+            intangible_inv,
+            depreciation_rate_intangible,
+            assumption.forecast_year,
+            assumption.ce09a_override,
+        )
+        ce09b, stato_ammort_materiali = ammortamento_categoria(
+            stato_ammort.get('materiali'),
+            netto_apertura_materiali,
+            base_ce09b,
+            tangible_inv,
+            depreciation_rate_tangible,
+            assumption.forecast_year,
+            assumption.ce09b_override,
+            dismissione=disposal_nbv_ammort,
+        )
+        if details is not None:
+            details['ammortamenti'] = {
+                'immateriali': stato_ammort_immateriali,
+                'materiali': stato_ammort_materiali,
+            }
         ce09c = assumption.ce09c_override if assumption.ce09c_override is not None else base_ce09c
         # L'inesigibile scadenziato e' una svalutazione crediti dell'anno: si somma
         # alla svalutazione dell'anno base, che resta il portato di sempre. Non
@@ -3081,65 +3299,157 @@ class ForecastEngine:
         # "380.423 che sparisce / non si azzera" issue) and it had no override.
         _base_ce03a = getattr(base_inc, 'ce03a_incrementi_immobilizzazioni', None) or Decimal('0')
         ce03a = assumption.ce03a_override if getattr(assumption, 'ce03a_override', None) is not None else _base_ce03a
-        ce10 = assumption.ce10_override if assumption.ce10_override is not None else base_inc.ce10_var_rimanenze_mat_prime
+        # ── RIMANENZE DI MATERIE PRIME (sp05a) DAL CONSUMO (spec B01, 2026-09-26) ──
+        # Il calcolo sta QUI, nel CE, non nello SP: `ce10` deve essere noto prima delle
+        # imposte, e lo SP legge `details['rimanenze_materie']['chiusura']` per `sp05a` —
+        # mai il contrario. Le altre rimanenze (sp05b-e) restano guidate dai ricavi nello
+        # SP, che non le tocca: solo le materie hanno un consumo a cui ancorarsi.
+        def _base_bs_val(field):
+            if base_bs is None:
+                return Decimal('0')
+            if isinstance(base_bs, dict):
+                return base_bs.get(field, Decimal('0')) or Decimal('0')
+            return getattr(base_bs, field, Decimal('0')) or Decimal('0')
+
+        def _materie_base():
+            """Materie dell'anno base: `sp05a`, o l'aggregato meno `sp05e` quando la base
+            non ha ALCUNA sotto-voce di `sp05` (stesso ripiego di `_alloc`, primary_idx=0,
+            usato nello SP per le voci senza dettaglio)."""
+            sp05a_base = _base_bs_val('sp05a_materie_prime')
+            sotto_voci = (
+                sp05a_base + _base_bs_val('sp05b_prodotti_in_corso')
+                + _base_bs_val('sp05c_lavori_in_corso') + _base_bs_val('sp05d_prodotti_finiti')
+                + _base_bs_val('sp05e_acconti')
+            )
+            sp05_tot_base = _base_bs_val('sp05_rimanenze')
+            if sotto_voci == 0 and sp05_tot_base > 0:
+                return sp05_tot_base - _base_bs_val('sp05e_acconti')
+            return sp05a_base
+
+        # Apertura: il primo anno di piano legge la base (mai `previous_bs`, che al primo
+        # anno coincide comunque con essa, ma un chiamante futuro potrebbe cambiarlo); gli
+        # anni dopo leggono `sp05a` persistito dell'anno prima.
+        materie_base = _materie_base()
+        apertura_materie = materie_base if year_index == 0 else _prev_bs_val('sp05a_materie_prime')
+
+        base_ce05_materie = getattr(base_inc, 'ce05_materie_prime', None) or Decimal('0')
+        base_ce10_materie = getattr(base_inc, 'ce10_var_rimanenze_mat_prime', None) or Decimal('0')
+        consumo_base_materie = base_ce05_materie + base_ce10_materie
+        soglia_dio_materie = soglia_giorni_magazzino(settore)
+
+        dio_days_esplicito = getattr(assumption, 'dio_days', None)
+        degenere_materie = False
+        if dio_days_esplicito is not None:
+            derivati_materie = False
+            giorni_materie = Decimal(str(dio_days_esplicito))
+        else:
+            derivati_materie = True
+            if not materie_base:
+                # Giacenza di apertura nulla: zero giorni, e non c'e' nulla di degenere —
+                # qualunque denominatore, il saldo resta zero (stessa regola di `_derived_days`
+                # nello SP).
+                giorni_materie = Decimal('0')
+            elif consumo_base_materie <= 0:
+                degenere_materie = True
+                giorni_materie = None
+            else:
+                _giorni = materie_base / consumo_base_materie * Decimal('360')
+                if _giorni < 0 or (soglia_dio_materie is not None and _giorni > soglia_dio_materie):
+                    degenere_materie = True
+                    giorni_materie = None
+                else:
+                    giorni_materie = _giorni
+
+        ce10_override = assumption.ce10_override
+        if ce10_override is not None:
+            if ce10_override > apertura_materie:
+                # Un override oltre l'apertura svuoterebbe le rimanenze sotto zero: il CE
+                # direbbe ce10 = override, ma lo SP clamperebbe sp05a a zero, e i due
+                # divergerebbero dell'eccedenza — lo stesso guasto silenzioso che altrove in
+                # questo motore si rifiuta invece di tappare (`CLAUDE.md`, «diagnose, never
+                # fabricate»).
+                raise ValueError(
+                    f"L'override di ce10_var_rimanenze_mat_prime nell'anno "
+                    f"{assumption.forecast_year} ({eur_it(ce10_override)}) supera le materie "
+                    f"prime in apertura ({eur_it(apertura_materie)}): le rimanenze non possono "
+                    "scendere sotto zero. Abbassa l'override o svuota la cella (value: null) e "
+                    "lascia che il consumo lo derivi."
+                )
+            ce10 = ce10_override
+            chiusura_materie = max(Decimal('0'), apertura_materie - ce10_override).quantize(
+                Decimal('0.01'), rounding=ROUND_HALF_UP
+            )
+            # L'override vince: i giorni dedotti sopra (e un'eventuale degenerazione) non sono
+            # mai stati USATI per determinare il risultato, quindi non si dichiarano.
+            degenere_materie = False
+        elif degenere_materie:
+            # Nessun giorno affidabile: le rimanenze di materie si riportano, la variazione
+            # e' zero (diagnose, never fabricate — lo stesso principio del resto del motore).
+            chiusura_materie = apertura_materie
+            ce10 = Decimal('0')
+        else:
+            chiusura_raw, _ = rimanenze_materie(apertura_materie, ce05, giorni_materie)
+            # La chiusura si quantizza al centesimo PRIMA di derivarne ce10: cosi' ce10
+            # persistito e' esattamente la Δ di sp05a persistito al centesimo (la funzione
+            # pura resta a precisione piena per i suoi test).
+            chiusura_materie = chiusura_raw.quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+            ce10 = apertura_materie - chiusura_materie
+
+        consumo_materie = ce05 + apertura_materie - chiusura_materie
+        if giorni_materie is None:
+            # Degenere: il giorno DAVVERO applicato e' quello che il saldo riportato vale sul
+            # consumo dell'anno (stessa regola di `_effective_days` nello SP), mai `None` — a
+            # valle una chiave diagnostica assente vale zero, quindi tacere sarebbe dichiararsi
+            # puliti.
+            giorni_dichiarati = (
+                chiusura_materie / consumo_materie * Decimal('360') if consumo_materie > 0 else Decimal('0')
+            )
+        else:
+            giorni_dichiarati = giorni_materie
+
+        if details is not None:
+            details['rimanenze_materie'] = {
+                'apertura': apertura_materie,
+                'chiusura': chiusura_materie,
+                'giorni': giorni_dichiarati,
+                'consumo': consumo_materie,
+                'derivati': derivati_materie,
+                'degenere': degenere_materie,
+                'override': ce10_override is not None,
+            }
+            details['dio_applied'] = giorni_dichiarati
+
         ce11 = assumption.ce11_override if assumption.ce11_override is not None else base_inc.ce11_accantonamenti
         ce11b = assumption.ce11b_override if assumption.ce11b_override is not None else base_inc.ce11b_altri_accantonamenti
 
-        # ── PUNTO DI PAREGGIO SUL MOL (spec 2026-09-15 §4.3, §5.5) ──
-        # Dichiarato, mai calcolato dal client: costi_variabili/costi_fissi
-        # leggono la scomposizione fisso/variabile appena scritta in `details`
-        # (None su entrambe le quote quando ce05/ce06 sono sotto override, nel
-        # qual caso l'intero blocco resta None — la scomposizione non esiste
-        # piu'). costi_fissi_operativi porta dentro TUTTO cio' che separa ricavi,
-        # variabili e fissi dal MOL canonico (`ceAggregates`/`calculate_ce_result`):
-        # meno altri ricavi (ce04, gia' comprensivo dell'eventuale plusvalenza da
-        # dismissione), variazioni di rimanenze di prodotti (ce02) e lavori interni
-        # (ce03, ce03a); piu' variazioni di rimanenze di materie (ce10) e
-        # accantonamenti (ce11, ce11b). Per questo il blocco sta DOPO quelle righe:
-        # prima calcolava sui soli ce04 e un'azienda con 150.000 di lavori interni
-        # aveva pareggio e margine di sicurezza coerenti con un MOL di 150.000 piu'
-        # basso di quello del CE (collaudo di fine lotto, R1). Per costruzione
-        # (ce01 - fatturato_pareggio) x margine = MOL. Il margine di
-        # contribuzione e il margine di sicurezza restano None con ricavi o
-        # margine non positivi, mai zero.
+        # ── PUNTO DI PAREGGIO SUL MOL (spec 2026-09-15 §4.3, §5.5; F5, decisione del
+        # proprietario 2026-09-26) ── Dichiarato, mai calcolato dal client: la formula vive
+        # UNA SOLA VOLTA in `calculations.projection_common.punto_di_pareggio`, usata sia qui
+        # sia dalla colonna base/storica del report finale, cosi' le due colonne sono
+        # confrontabili per costruzione. costi_variabili/costi_fissi leggono la scomposizione
+        # fisso/variabile appena scritta in `details` (None su entrambe le quote quando ce05/ce06
+        # sono sotto override, nel qual caso l'intero blocco resta None — la scomposizione non
+        # esiste piu'). Il blocco sta DOPO quelle righe: prima calcolava sui soli ce04 e
+        # un'azienda con 150.000 di lavori interni aveva pareggio e margine di sicurezza coerenti
+        # con un MOL di 150.000 piu' basso di quello del CE (collaudo di fine lotto, R1).
         if details is not None:
-            fissi_def = all(
-                details.get(k) is not None
-                for k in ('ce05_fixed', 'ce05_variable', 'ce06_fixed', 'ce06_variable')
+            pareggio = punto_di_pareggio(
+                ce01=ce01, ce02=ce02, ce03=ce03, ce03a=ce03a, ce04=ce04,
+                ce05_fixed=details.get('ce05_fixed'), ce05_variable=details.get('ce05_variable'),
+                ce06_fixed=details.get('ce06_fixed'), ce06_variable=details.get('ce06_variable'),
+                ce07=ce07, ce08=ce08, ce10=ce10, ce11=ce11, ce11b=ce11b, ce12=ce12,
             )
-            pareggio = {k: None for k in (
-                'costi_variabili', 'costi_fissi', 'costi_fissi_operativi',
-                'margine_contribuzione_pct', 'fatturato_pareggio',
-                'margine_sicurezza', 'margine_sicurezza_pct',
-            )}
-            if fissi_def:
-                cv = details['ce05_variable'] + details['ce06_variable']
-                cf = details['ce05_fixed'] + details['ce06_fixed'] + ce07 + ce08 + ce12
-                _z = lambda v: v if v is not None else Decimal('0')
-                cf_op = (cf + _z(ce10) + _z(ce11) + _z(ce11b)
-                         - ce04 - _z(ce02) - _z(ce03) - _z(ce03a))
-                pareggio.update({
-                    'costi_variabili': _q2(cv),
-                    'costi_fissi': _q2(cf),
-                    'costi_fissi_operativi': _q2(cf_op),
-                })
-                if ce01 > Decimal('0') and ce01 - cv > Decimal('0'):
-                    mdc = (ce01 - cv) / ce01
-                    bep = cf_op / mdc
-                    pareggio.update({
-                        'margine_contribuzione_pct': _q2(mdc * Decimal('100')),
-                        'fatturato_pareggio': _q2(bep),
-                        'margine_sicurezza': _q2(ce01 - bep),
-                        'margine_sicurezza_pct': _q2((ce01 - bep) / ce01 * Decimal('100')),
-                    })
-            details['pareggio'] = pareggio
+            details['pareggio'] = {k: (None if v is None else _q2(v)) for k, v in pareggio.items()}
         ce13 = assumption.ce13_override if assumption.ce13_override is not None else base_inc.ce13_proventi_partecipazioni
         ce16 = assumption.ce16_override if assumption.ce16_override is not None else base_inc.ce16_utili_perdite_cambi
         ce17a = assumption.ce17a_override if assumption.ce17a_override is not None else (getattr(base_inc, 'ce17a_rivalutazioni', None) or Decimal('0'))
         ce17b = assumption.ce17b_override if assumption.ce17b_override is not None else (getattr(base_inc, 'ce17b_svalutazioni', None) or Decimal('0'))
         ce17 = assumption.ce17_override if assumption.ce17_override is not None else (ce17a - ce17b)
-        ce18 = assumption.ce18_override if assumption.ce18_override is not None else base_inc.ce18_proventi_straordinari
-        ce19 = assumption.ce19_override if assumption.ce19_override is not None else base_inc.ce19_oneri_straordinari
+        # E05 · decisione del proprietario (2026-09-26): i proventi e gli oneri straordinari
+        # della base non sono ricorrenti per definizione, quindi non si proiettano — valgono
+        # zero in ogni anno di piano, salvo override esplicito.
+        ce18 = assumption.ce18_override if assumption.ce18_override is not None else Decimal('0')
+        ce19 = assumption.ce19_override if assumption.ce19_override is not None else Decimal('0')
 
         # Financial income/costs: use override if set, otherwise carry forward from base year
         ce14 = assumption.ce14_override if assumption.ce14_override is not None else base_inc.ce14_altri_proventi_finanziari
@@ -3282,8 +3592,6 @@ class ForecastEngine:
         debito_bancario: "Optional[_DebitoBancarioAnno]" = None,
         settore: Optional[int] = None,
         fidi_apertura=None,
-        fidi_regola: Optional[str] = None,
-        prev_revenue=None,
         altri_finanziatori=None,
     ) -> Dict:
         """
@@ -3318,10 +3626,8 @@ class ForecastEngine:
         Assenti (`None`), come li passano i chiamanti diretti e l'infrannuale,
         non cambia nulla: nessun perimetro dichiarato, nessuna componente.
 
-        `fidi_apertura`/`fidi_regola`/`prev_revenue` (regime esplicito, spec
-        2026-09-15 §5.2): il saldo dei fidi in apertura d'anno, la regola
-        (`costante` | `ricavi`) e i ricavi dell'anno precedente, necessari per
-        applicarla. `fidi_apertura = None` = regime di sempre, nessun cambio.
+        `fidi_apertura` (regime esplicito): il saldo dei fidi in apertura
+        d'anno resta costante, salvo rimborsi sweep. `None` = regime di prima.
 
         `altri_finanziatori` (spec 2026-09-15 §5.3): i contratti della lista
         `other_lenders` assemblati da `assemble_financing`. Con la lista,
@@ -3333,6 +3639,13 @@ class ForecastEngine:
         D = Decimal
         ZERO = D('0')
         DAYS = D('360')
+        # B05 (spec, lotto 1 fix rilievi 2026-09-26): l'anno di calendario dell'ULTIMA
+        # riga di piano, `None` se questo non e' l'ultimo anno. Ogni lettura «la rata
+        # dell'anno dopo» di un contratto passa da qui verso `rata_anno_dopo`: nell'anno
+        # in cui `anno == ultimo_anno_piano` un contratto scadenziato a mano la cui lista
+        # non copre l'anno dopo ripete l'ultima rata invece di lasciare a lungo termine
+        # un residuo che nessun anno del piano vedra' mai scadere.
+        ultimo_anno_piano = assumption.forecast_year if year_index == horizon - 1 else None
         # Senza `overdraft` nessun cancello gira a valle: il plug negativo alza qui,
         # come ha sempre fatto. Con `overdraft` la cassa resta netta fino alla
         # quadratura finale, che e' l'unico cancello.
@@ -3565,24 +3878,34 @@ class ForecastEngine:
             details['dso_applied'] = dso
         sp06 = sp06_trade + sp06e + sp06f
 
-        # DIO → sp05 (inventory)
+        # DIO → sp05 (inventory). Dal B01 (2026-09-26) `sp05a` (materie prime) non segue piu'
+        # i ricavi: il CE l'ha gia' calcolata dal CONSUMO (`ce10`, prima delle imposte) e
+        # scritta in `details['rimanenze_materie']` sullo STESSO `details` di questo giro —
+        # qui si legge, non si ricalcola, e `dio_days`/`details['dio_applied']` restano di sua
+        # competenza. Le altre rimanenze (prodotti in corso, lavori in corso, prodotti finiti,
+        # acconti) restano guidate dai ricavi come prima, coi giorni dedotti dalla base SOLO
+        # sulla loro somma (`dio_days` esplicito non le tocca piu').
         soglia_dio = soglia_giorni_magazzino(settore)
-        dio = getattr(assumption, 'dio_days', None)
-        if dio is not None:
-            dio = D(str(dio))
-            sp05 = forecast_revenue * dio / DAYS
+        rim_materie = details['rimanenze_materie']
+        sp05a_dio = rim_materie['chiusura']
+        if rim_materie['degenere']:
+            degenerate_days.append('dio')
+
+        base_sp05_altre = (
+            _base('sp05b_prodotti_in_corso') + _base('sp05c_lavori_in_corso')
+            + _base('sp05d_prodotti_finiti') + _base('sp05e_acconti')
+        )
+        dio_altre = _derived_days(base_sp05_altre, base_revenue, 'dio_altre', soglia=soglia_dio)
+        if dio_altre is None:
+            # Nessun piano di scadenziamento su queste rimanenze: nulla da scorporare.
+            sp05_altre = base_sp05_altre
+            dio_altre = _effective_days(sp05_altre, forecast_revenue)
         else:
-            # Auto-derive DIO from base year: base_sp05 / base_revenue * 360
-            base_sp05 = _base('sp05_rimanenze')
-            dio = _derived_days(base_sp05, base_revenue, 'dio', soglia=soglia_dio)
-            if dio is None:
-                # Le rimanenze non hanno piano di scadenziamento: nulla da scorporare.
-                sp05 = base_sp05
-                dio = _effective_days(sp05, forecast_revenue)
-            else:
-                sp05 = forecast_revenue * dio / DAYS
+            sp05_altre = forecast_revenue * dio_altre / DAYS
         if details is not None:
-            details['dio_applied'] = dio
+            details['dio_altre_applied'] = dio_altre
+
+        sp05 = sp05a_dio + sp05_altre
 
         # Long-term receivables, other current assets
         long_growth = D('1') + assumption.receivables_long_growth_pct / D('100')
@@ -3595,6 +3918,7 @@ class ForecastEngine:
             sp07 = sp07_non_deferred + sp07f
         else:
             sp07 = _prev('sp07_crediti_lungo') * long_growth
+            sp07_non_deferred = sp07 - _prev('sp07f_imposte_anticipate_lungo') * long_growth
 
         # ── PREGRESSO: il circolante e' generato + residuo (spec lotto 2 §3.1) ──
         # `generated` conserva il lato breve PRIMA del residuo: e' il numero che il
@@ -3602,6 +3926,36 @@ class ForecastEngine:
         # Senza piano non si entra in nessuno di questi rami e i saldi restano
         # identici al centesimo a quelli di prima del lotto.
         pregresso_runoff: Dict[str, Any] = {}
+        acconti_tributari_storici = (pregresso or {}).get('acconti_tributari_storici') or ZERO
+        piano_crediti_tributari_breve = (pregresso or {}).get('crediti_tributari_breve')
+        credito_tributario_altro_precedente = None
+        if piano_crediti_tributari_breve:
+            credito_tributario_altro_precedente = (
+                piano_crediti_tributari_breve['opening'] if year_index == 0
+                else runoff_schedule(
+                    piano_crediti_tributari_breve['opening'],
+                    piano_crediti_tributari_breve['amounts'], [], year_index - 1, horizon,
+                ).residual
+            )
+            r = runoff_schedule(
+                piano_crediti_tributari_breve['opening'],
+                piano_crediti_tributari_breve['amounts'], [], year_index, horizon,
+            )
+            pregresso_runoff['crediti_tributari_breve'] = r
+        piano_crediti_tributari_lungo = (pregresso or {}).get('crediti_tributari_lungo')
+        if piano_crediti_tributari_lungo:
+            r = runoff_schedule(
+                piano_crediti_tributari_lungo['opening'],
+                piano_crediti_tributari_lungo['amounts'], [], year_index, horizon,
+            )
+            pregresso_runoff['crediti_tributari_lungo'] = r
+            # Il piano governa la sola componente tributaria del lungo; le
+            # altre componenti conservano la loro regola di crescita.
+            sp07_non_deferred += r.residual - _prev('sp07e_crediti_tributari_lungo') * long_growth
+            sp07 = (
+                sp07_non_deferred + sp07f if tax_difference_lines
+                else sp07 + r.residual - _prev('sp07e_crediti_tributari_lungo') * long_growth
+            )
         generated: Dict[str, Decimal] = {'crediti_commerciali': sp06_trade}
         crediti_plan = (pregresso or {}).get('crediti_commerciali')
         if crediti_plan:
@@ -3617,7 +3971,10 @@ class ForecastEngine:
             # fuori dal piano, esattamente come restano fuori dal DSO.
             sp06_trade = sp06_trade + runoff_crediti.residual_short
             sp06 = sp06_trade + sp06e + sp06f
-            sp07e_long = _prev('sp07e_crediti_tributari_lungo') * long_growth
+            sp07e_long = (
+                pregresso_runoff['crediti_tributari_lungo'].residual
+                if piano_crediti_tributari_lungo else _prev('sp07e_crediti_tributari_lungo') * long_growth
+            )
             if tax_difference_lines:
                 sp07_non_deferred = runoff_crediti.residual_long + sp07e_long
                 sp07 = sp07_non_deferred + sp07f
@@ -3648,14 +4005,9 @@ class ForecastEngine:
         sp12b = _base('sp12b_riserve_rivalutazione')
         sp12c = _base('sp12c_riserva_legale')
         sp12d = _base('sp12d_riserve_statutarie')
-        # `sp12e` riparte dall'anno base, piu' la contropartita cumulata degli
-        # override delle anticipate: costanti per regola (2026-09-18), si scostano
-        # dalla base solo per override, e quello scostamento e' la riserva che
-        # `_apply_sp_overrides` ha scritto. Senza, l'anno dopo la riserva
-        # tornerebbe alla base e la cassa assorbirebbe la differenza.
-        sp12e = _base('sp12e_altre_riserve') + (
-            _prev('sp06f_imposte_anticipate_breve') + _prev('sp07f_imposte_anticipate_lungo')
-            - _base('sp06f_imposte_anticipate_breve') - _base('sp07f_imposte_anticipate_lungo'))
+        # Le imposte anticipate restano costanti; un override SP mantiene
+        # la cassa come contropartita anche negli anni successivi.
+        sp12e = _base('sp12e_altre_riserve')
         sp12f = _base('sp12f_riserva_copertura_flussi')
         sp12g = _prev('sp12g_utili_perdite_portati') + previous_profit
         sp12h = _base('sp12h_riserva_neg_azioni_proprie')
@@ -3774,8 +4126,7 @@ class ForecastEngine:
         apertura_pregresso = sp16a + sp17a_pregresso
 
         # ── FIDI E ANTICIPI (spec 2026-09-15 §5.2): uno stato, separato dai contratti ──
-        # La regola `ricavi` li fa seguire il giro d'affari; la regola
-        # `costante` li lascia fermi. Il rimborso loro proprio e' SOLO lo sweep
+        # Il saldo resta costante. Il rimborso loro proprio e' SOLO lo sweep
         # (sotto): nessun piano di ammortamento, nessuna rata.
         fidi_residuo = None
         fidi_prev = ZERO
@@ -3783,9 +4134,6 @@ class ForecastEngine:
         if fidi_apertura is not None:
             fidi_prev = Decimal(str(fidi_apertura))
             fidi_residuo = fidi_prev
-            if fidi_regola == 'ricavi' and prev_revenue is not None and prev_revenue > ZERO:
-                fidi_residuo = fidi_prev * forecast_revenue / prev_revenue
-                fidi_variazione = fidi_residuo - fidi_prev
             # I fidi stanno dentro `sp16a` pregresso: la rata dei contratti non li tocca.
             sp16a = max(ZERO, sp16a - fidi_prev)
 
@@ -3863,15 +4211,16 @@ class ForecastEngine:
         # sull'automatismo; se c'e' anche un piano, i details lo dichiarano
         # ignorato invece di applicarlo a meta'.
         plan_tax = (pregresso or {}).get('debiti_tributari')
-        manual_tax_position = (
-            getattr(assumption, 'sp06e_growth_pct', None) is not None
-            or getattr(assumption, 'sp16e_growth_pct', None) is not None
-        )
+        manual_tax_position = getattr(assumption, 'sp16e_growth_pct', None) is not None
         tax_year = None
         tax_generated_short = None
         if manual_tax_position:
             sp16e = _prev('sp16e_debiti_tributari_breve') * (D('1') + _sp_growth('sp16e_growth_pct'))
             sp17e = _prev('sp17e_debiti_tributari_lungo') * (D('1') + _sp_growth('sp17e_growth_pct'))
+            if piano_crediti_tributari_breve:
+                credito_da_imposte = max(ZERO, _prev('sp06e_crediti_tributari_breve') - credito_tributario_altro_precedente)
+                sp06e = pregresso_runoff['crediti_tributari_breve'].residual + credito_da_imposte
+                sp06 = sp06_trade + sp06e + sp06f
             if plan_tax and details is not None:
                 details.setdefault('pregresso_ignored', []).append('debiti_tributari')
         else:
@@ -3896,15 +4245,21 @@ class ForecastEngine:
             previous_tax = prev_tax_details.get('current_tax')
             if previous_tax is None:
                 previous_tax = _base_inc('ce20_imposte')
-            # I crediti tributari del consuntivo (IVA, ritenute, …) restano FUORI
-            # dal meccanismo acconti/saldo: costanti per tutto il piano, il credito
-            # da acconti si somma sopra (decisione del proprietario, 2026-09-18).
+            # Gli altri crediti tributari restano fuori dal meccanismo
+            # acconti/saldo e seguono il calendario, quando dichiarato.
             # Si leggono dall'anno prima per portare avanti un override di `sp06e`.
             if prev_tax_details.get('mode') == 'saldo_acconto':
                 crediti_consuntivo = D(str(
                     prev_tax_details.get('crediti_tributari_consuntivo') or 0))
             else:
-                crediti_consuntivo = _base('sp06e_crediti_tributari_breve')
+                crediti_consuntivo = _base('sp06e_crediti_tributari_breve') - acconti_tributari_storici if year_index == 0 else _base('sp06e_crediti_tributari_breve')
+            # L'utente puo' cambiare il credito tributario storico senza
+            # disattivare la liquidazione di saldo e acconti. La crescita si
+            # applica solo alla quota del consuntivo; il credito da acconti
+            # resta distinto e non viene moltiplicato una seconda volta.
+            crediti_consuntivo *= D('1') + _sp_growth('sp06e_growth_pct')
+            if piano_crediti_tributari_breve:
+                crediti_consuntivo = pregresso_runoff['crediti_tributari_breve'].residual
             if prev_tax_details.get('mode') == 'saldo_acconto':
                 # L'anno prima e' passato di qui: sa dire quanto di se' e' saldo
                 # e quanto e' rata, e lo consegna gia' scomposto.
@@ -3982,8 +4337,11 @@ class ForecastEngine:
                 # quindi non c'e' nulla da compensare. Dopo un anno manuale conta
                 # solo cio' che quell'anno porta OLTRE la quota del consuntivo.
                 opening_credit = (
-                    ZERO if year_index == 0
-                    else max(ZERO, _prev('sp06e_crediti_tributari_breve') - crediti_consuntivo)
+                    acconti_tributari_storici if year_index == 0
+                    else max(ZERO, _prev('sp06e_crediti_tributari_breve') - (
+                        credito_tributario_altro_precedente
+                        if credito_tributario_altro_precedente is not None else crediti_consuntivo
+                    ))
                 )
             # Solo un piano vero mette il saldo in `mode: runoff` (spec §5.3):
             # senza piano non c'e' nulla di scadenziato da dichiarare, e l'unica
@@ -4001,11 +4359,12 @@ class ForecastEngine:
                 # kernel ricade allora sulla percentuale. Chi vuole zero acconti
                 # mette `acconto_pct = 0`.
                 explicit_advances=getattr(assumption, 'tax_advances_paid', None),
+                carry_excess_credit=acconti_tributari_storici > ZERO,
             )
             tax_generated_short = tax_year.generated_debt
             sp16e = tax_year.generated_debt + r.residual_short
             sp17e = r.residual_long
-            sp06e = crediti_consuntivo + tax_year.generated_credit
+            sp06e = crediti_consuntivo + tax_year.generated_credit + tax_year.opening_credit_left
             sp06 = sp06_trade + sp06e + sp06f
         # Con un piano l'indicizzazione e' gia' stata scartata (Ruling 17),
         # quindi l'ancora torna a essere `_prev` e lo scorporo resta quello di
@@ -4017,29 +4376,29 @@ class ForecastEngine:
         sp17g_anchor, sp17g_factor = _sp_scale('sp17g', 'sp17g_growth_pct')
         sp17g = _declare_indexed('sp17g', sp17g_anchor('sp17g_altri_debiti_lungo') * sp17g_factor)
 
-        # Previdenza (sp16f/sp17f): opt-in scaling with the personnel cost (P5).
-        # When enabled, social-security payables move in proportion to ce08 vs the BASE
-        # year (e.g. personnel 100k→200k ⇒ previdenza 20k→40k), anchored on the base-year
-        # amount so multi-year chains stay consistent. Default OFF → carry forward with
-        # the manual sp16f/sp17f_growth_pct, exactly as before (zero regression).
-        if getattr(assumption, 'previdenza_scales_with_personnel', False):
-            base_ce08 = (getattr(base_inc, 'ce08_costi_personale', ZERO) or ZERO)
-            fc_ce08 = (forecast_inc.get('ce08_costi_personale', ZERO) or ZERO)
-            pers_factor = (fc_ce08 / base_ce08) if base_ce08 > 0 else D('1')
-            sp16f = _net_of_pregresso(
-                _base('sp16f_debiti_previdenza_breve'), 'debiti_previdenziali',
-                'sp16f_debiti_previdenza_breve', from_base=True,
-            ) * pers_factor
-            sp17f = _base('sp17f_debiti_previdenza_lungo') * pers_factor
-        else:
-            sp16f_anchor, sp16f_factor = _sp_scale('sp16f', 'sp16f_growth_pct')
-            sp16f = _declare_indexed('sp16f', _net_of_pregresso(
-                sp16f_anchor('sp16f_debiti_previdenza_breve'), 'debiti_previdenziali',
-                'sp16f_debiti_previdenza_breve',
-            ) * sp16f_factor)
-            sp17f_anchor, sp17f_factor = _sp_scale('sp17f', 'sp17f_growth_pct')
-            sp17f = _declare_indexed(
-                'sp17f', sp17f_anchor('sp17f_debiti_previdenza_lungo') * sp17f_factor)
+        # Previdenza (sp16f/sp17f): A06 (lotto 3 fix rilievi, 2026-09-26, decisione del
+        # proprietario). Fino a questo lotto un interruttore dedicato
+        # (`previdenza_scales_with_personnel`) duplicava cio' che `sp_indexing`
+        # sa gia' fare col driver "personale": un doppio comando sugli stessi
+        # due campi, e lo schermo poteva dire una cosa mentre il motore ne
+        # faceva un'altra. Il motore non legge piu' l'interruttore — resta nel
+        # modello/schema per compatibilita', ma un client vecchio che lo manda
+        # `true` non cambia piu' nulla — e sp16f/sp17f seguono la stessa forma
+        # delle altre voci minori indicizzabili: `sp_indexing: {"sp16f":
+        # "personale"}` da' esattamente i numeri che l'interruttore dava prima
+        # (misurato: identico con e senza un piano pregresso su
+        # `debiti_previdenziali`, perche' `validate_pregresso` impone che quel
+        # piano copra l'intero saldo base, e allora il generato e' zero in
+        # entrambe le forme). Gli scenari salvati col solo interruttore vanno
+        # migrati una volta (`scripts/migra_previdenza_tendina.py`).
+        sp16f_anchor, sp16f_factor = _sp_scale('sp16f', 'sp16f_growth_pct')
+        sp16f = _declare_indexed('sp16f', _net_of_pregresso(
+            sp16f_anchor('sp16f_debiti_previdenza_breve'), 'debiti_previdenziali',
+            'sp16f_debiti_previdenza_breve',
+        ) * sp16f_factor)
+        sp17f_anchor, sp17f_factor = _sp_scale('sp17f', 'sp17f_growth_pct')
+        sp17f = _declare_indexed(
+            'sp17f', sp17f_anchor('sp17f_debiti_previdenza_lungo') * sp17f_factor)
 
         # ── PREGRESSO: gli altri tre saldi, stessa regola dei crediti ──
         # Il lato breve e' generato + dovuto l'anno dopo, il lato oltre e' tutto
@@ -4171,16 +4530,27 @@ class ForecastEngine:
             anno = assumption.forecast_year
             righe, tot_res, tot_breve, tot_rimb, tot_int = [], ZERO, ZERO, ZERO, ZERO
             for c in altri_finanziatori:
-                _, rimborso, interessi = new_financing_schedule([c], anno)
+                erogato, rimborso, interessi = new_financing_schedule([c], anno)
                 residuo = _residuo_contratto(c, anno)
-                _, rata_dopo, _ = new_financing_schedule([c], anno + 1)
+                # B05: la rata dell'anno dopo passa da `rata_anno_dopo`, non da una lettura
+                # diretta del kernel — nell'ultimo anno di piano un contratto scadenziato a
+                # mano la cui lista non copre l'anno dopo ripete l'ultima rata invece di
+                # lasciare a lungo termine un residuo che nessun anno vedra' mai scadere.
+                rata_dopo, rata_ripetuta = rata_anno_dopo(c, anno, ultimo_anno_piano)
                 breve = min(residuo, rata_dopo)
                 righe.append({
                     'indice': c['indice'], 'nome': c['nome'],
                     'residuo_iniziale': _q2(c['opening_residual']),
-                    'rimborso': _q2(rimborso), 'interessi': _q2(interessi),
+                    # C08 (lotto 2 fix rilievi, 2026-09-26): l'erogazione del contratto, prima
+                    # scartata qui (`_, rimborso, interessi = ...`), ora si dichiara — il
+                    # rendiconto la somma in `engine_meta['erogazioni']` per separarla dai
+                    # rimborsi invece di uscire netta sulla stessa riga.
+                    'erogato': _q2(erogato), 'rimborso': _q2(rimborso), 'interessi': _q2(interessi),
                     'residuo': _q2(residuo), 'breve': _q2(breve),
                     'lungo': _q2(residuo - breve),
+                    # B05, esteso agli altri finanziatori (ruling del controller, Task 6):
+                    # una chiave diagnostica si dichiara sempre, anche a False.
+                    'rata_ripetuta': rata_ripetuta,
                 })
                 tot_res += _q2(residuo)
                 tot_breve += _q2(breve)
@@ -4223,8 +4593,12 @@ class ForecastEngine:
         quota_dopo_contratti = None
         if fidi_apertura is not None:
             residuo_pregresso = sp16a + sp17a_pregresso
+            # B05: per contratto, non sul kernel grezzo — nell'ultimo anno di piano un
+            # contratto scadenziato a mano la cui lista non copre l'anno dopo ripete la
+            # sua ultima rata invece di lasciare a lungo termine un residuo che nessun
+            # anno del piano vedra' mai scadere.
             quota_dopo_contratti = min(
-                sum((new_financing_schedule([c], assumption.forecast_year + 1)[1]
+                sum((rata_anno_dopo(c, assumption.forecast_year, ultimo_anno_piano)[0]
                      for c in contratti_pregresso), ZERO),
                 max(ZERO, residuo_pregresso),
             )
@@ -4335,7 +4709,8 @@ class ForecastEngine:
         # prima spostata di `quota`, e l'apertura dell'anno dopo la ricompone
         # senza perdere un centesimo. `sp16a`/`sp17a` sono in
         # `_BANK_DEBT_SPLIT_FIELDS`: il residuo di quadratura non li riscrive.
-        quota_breve = _quota_breve_prestiti_nuovi(prestiti_nuovi, assumption.forecast_year, sp17a)
+        quota_breve = _quota_breve_prestiti_nuovi(prestiti_nuovi, assumption.forecast_year, sp17a,
+                                                   ultimo_anno_piano)
         breve_pregresso_fine = sp16a
         sp16a += quota_breve; sp16 += quota_breve
         sp17a -= quota_breve; sp17 -= quota_breve
@@ -4352,6 +4727,12 @@ class ForecastEngine:
                 (quota_dopo_contratti if fidi_apertura is not None else breve_pregresso_fine)
                 if use_detailed_existing_schedule else ZERO,
                 sp17a_pregresso if use_detailed_existing_schedule else ZERO,
+                ultimo_anno_piano,
+                # M1 (revisione finale, 2026-09-26): solo nel regime esplicito dei fidi
+                # `breve_pregresso` sopra e' la somma di `rata_anno_dopo` dei contratti
+                # (`quota_dopo_contratti`) — fuori da li' e' `breve_pregresso_fine`, cio' che
+                # `sp16a` gia' porta, e la ripetizione dell'ultima rata non lo tocca.
+                use_detailed_existing_schedule and fidi_apertura is not None,
             )
             if fidi_apertura is not None:
                 # `rimborso_sweep` a zero qui: lo scrive `_dichiara_debito_bancario`
@@ -4361,7 +4742,7 @@ class ForecastEngine:
                     'variazione_ricavi': fidi_variazione,
                     'rimborso_sweep': ZERO,
                     'residuo': fidi_residuo,
-                    'regola': fidi_regola or 'costante',
+                    'regola': 'costante',
                 }
 
         # ── DETAIL BREAKDOWNS ──
@@ -4430,19 +4811,55 @@ class ForecastEngine:
             'sp07c_crediti_collegate_lungo', 'sp07d_crediti_controllanti_lungo',
             'sp07e_crediti_tributari_lungo', 'sp07g_crediti_altri_lungo',
         ]
-        if tax_difference_lines:
-            sp07a, sp07b, sp07c, sp07d, sp07e, sp07g = _alloc(
-                sp07_non_deferred, sp07_non_deferred_fields
-            )
+        # A04 (spec fix rilievi 2026-09-26): col piano `crediti_commerciali` (`crediti_plan`) il
+        # lato oltre commerciale (a/b/c/d/g) si ripartisce con `_consuma_in_ordine`, non `_alloc`
+        # — un incasso scadenziato consuma prima i clienti. `sp07e` (tributari) e `sp07f`
+        # (anticipate) restano calcolati esattamente come oggi: quando entrano nello stesso
+        # `_alloc` dei commerciali (i due rami sotto) si estrae il loro valore da quella stessa
+        # chiamata, invariata, e solo il residuo commerciale passa da `_consuma_in_ordine`.
+        campi_commerciali_lunghi = sp07_non_deferred_fields[:4] + sp07_non_deferred_fields[5:]
+        if piano_crediti_tributari_lungo:
+            sp07e = pregresso_runoff['crediti_tributari_lungo'].residual
+            residuo_commerciale = sp07_non_deferred - sp07e
+            if crediti_plan:
+                sp07a, sp07b, sp07c, sp07d, sp07g = _consuma_in_ordine(
+                    residuo_commerciale, [_base(f) for f in campi_commerciali_lunghi]
+                )
+            else:
+                sp07a, sp07b, sp07c, sp07d, sp07g = _alloc(
+                    residuo_commerciale, campi_commerciali_lunghi
+                )
+            if not tax_difference_lines:
+                sp07f = sp07 - sp07_non_deferred
+        elif tax_difference_lines:
+            if crediti_plan:
+                _, _, _, _, sp07e, _ = _alloc(sp07_non_deferred, sp07_non_deferred_fields)
+                sp07a, sp07b, sp07c, sp07d, sp07g = _consuma_in_ordine(
+                    sp07_non_deferred - sp07e, [_base(f) for f in campi_commerciali_lunghi]
+                )
+            else:
+                sp07a, sp07b, sp07c, sp07d, sp07e, sp07g = _alloc(
+                    sp07_non_deferred, sp07_non_deferred_fields
+                )
         else:
             sp07_fields = sp07_non_deferred_fields[:5] + [
                 'sp07f_imposte_anticipate_lungo', 'sp07g_crediti_altri_lungo'
             ]
-            sp07a, sp07b, sp07c, sp07d, sp07e, sp07f, sp07g = _alloc(sp07, sp07_fields)
+            if crediti_plan:
+                _, _, _, _, sp07e, sp07f, _ = _alloc(sp07, sp07_fields)
+                sp07a, sp07b, sp07c, sp07d, sp07g = _consuma_in_ordine(
+                    sp07 - sp07e - sp07f, [_base(f) for f in campi_commerciali_lunghi]
+                )
+            else:
+                sp07a, sp07b, sp07c, sp07d, sp07e, sp07f, sp07g = _alloc(sp07, sp07_fields)
 
-        sp05_fields = ['sp05a_materie_prime', 'sp05b_prodotti_in_corso', 'sp05c_lavori_in_corso',
-                       'sp05d_prodotti_finiti', 'sp05e_acconti']
-        sp05a, sp05b, sp05c, sp05d, sp05e = _alloc(sp05, sp05_fields)
+        # sp05a viene dal CE (spec B01): non e' una quota proporzionale dell'aggregato, e'
+        # esattamente `rim_materie['chiusura']` (gia' quantizzata al centesimo). Le altre
+        # quattro voci si ripartiscono `sp05_altre` sulle proporzioni della base, come sempre.
+        sp05a = sp05a_dio
+        sp05_altre_fields = ['sp05b_prodotti_in_corso', 'sp05c_lavori_in_corso',
+                              'sp05d_prodotti_finiti', 'sp05e_acconti']
+        sp05b, sp05c, sp05d, sp05e = _alloc(sp05_altre, sp05_altre_fields)
 
         # ── DETAILS DEL PREGRESSO: dichiarati SEMPRE, tutti e cinque i saldi ──
         # Anche senza alcun piano, e anche a zero: a valle una chiave assente vale
@@ -4461,7 +4878,7 @@ class ForecastEngine:
         # massa intera faceva della riga tributaria l'unica delle cinque che non
         # torna: 90.000 di apertura con 60.000 di rate a spiegarla.
         if details is not None:
-            masses = pregresso_opening_masses(_base)
+            masses = pregresso_opening_masses(_base, acconti_tributari_storici)
             details['pregresso'] = {}
             for key in PREGRESSO_KEYS:
                 r = pregresso_runoff.get(key)
@@ -4607,8 +5024,7 @@ class ForecastEngine:
             'sp17g_altri_debiti_lungo': sp17g,
             'sp18_ratei_risconti_passivi': sp18
         }
-        return self._apply_sp_overrides(result, assumption, overdraft=overdraft,
-                                        anticipate_contro_riserve=True)
+        return self._apply_sp_overrides(result, assumption, overdraft=overdraft)
 
 
 def generate_forecast_for_scenario(scenario_id: int, db_session: Session) -> Dict:

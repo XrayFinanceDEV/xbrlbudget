@@ -17,12 +17,13 @@ Rules, and where each one comes from:
   comparing it with a schema default — a user may have confirmed the default
   on purpose.  A row whose list is NULL predates provenance tracking and makes
   the whole series ``legacy_unknown``, with one non-blocking diagnostic.
-* **DEAD_FIELDS** (``investments``, ``receivables_short_growth_pct``,
+* **DEAD_FIELDS** (``investments``, ``sp06f_growth_pct``, ``bank_lines_rule``,
+  ``working_capital_mode``, ``receivables_short_growth_pct``,
   ``payables_short_growth_pct``, ``interest_rate_receivables``,
-  ``interest_rate_payables``) are columns no wizard step shows and no active
-  driver path reads; they can never appear as an assumption here because only
-  catalog fields are mapped.  The legacy ``investments`` total is the one dead
-  column that is *not* inert: ``ForecastEngine._get_split_investments`` raises
+  ``interest_rate_payables``) are columns no budget wizard step shows; they can
+  never appear as an assumption here because only catalog fields are mapped.
+  In the budget forecast, the legacy ``investments`` total is not inert:
+  ``ForecastEngine._get_split_investments`` raises
   when it is valued without the tangible/intangible splits, so it is declared
   through a diagnostic instead of being presented as an active driver.
 * **Nested structures** (financing loans, pregresso runoff plans, temporary
@@ -134,6 +135,8 @@ FIELD_LABELS: Mapping[str, str] = {
     "inflation_pct": "Inflazione attesa %",
     "fixed_materials_growth_auto": "Materie fissa: segue l'inflazione",
     "fixed_services_growth_auto": "Servizi fissa: segue l'inflazione",
+    "variable_materials_growth_auto": "Materie variabili: seguono i ricavi",
+    "variable_services_growth_auto": "Servizi variabili: seguono i ricavi",
     # altre voci CE
     "other_costs_growth_pct": "Crescita oneri diversi %",
     "ce_overrides": "Override CE",
@@ -145,7 +148,6 @@ FIELD_LABELS: Mapping[str, str] = {
     "sp01_growth_pct": "Crescita crediti verso soci %",
     "sp04_growth_pct": "Crescita immobilizzazioni finanziarie %",
     "sp06e_growth_pct": "Crescita crediti tributari %",
-    "sp06f_growth_pct": "Crescita imposte anticipate %",
     "sp08_growth_pct": "Crescita attività finanziarie correnti %",
     "sp10_growth_pct": "Crescita ratei e risconti attivi %",
     "sp14_growth_pct": "Crescita fondi per rischi e oneri %",
@@ -155,7 +157,6 @@ FIELD_LABELS: Mapping[str, str] = {
     "sp17f_growth_pct": "Crescita debiti previdenziali (lungo) %",
     "sp17g_growth_pct": "Crescita altri debiti (lungo) %",
     "sp18_growth_pct": "Crescita ratei e risconti passivi %",
-    "previdenza_scales_with_personnel": "Previdenza scala con personale",
     "tfr_accrual_suspended": "Accantonamento TFR sospeso",
     "sp_indexing": "Indicizzazione SP",
     "sp_overrides": "Override SP",
@@ -176,8 +177,7 @@ FIELD_LABELS: Mapping[str, str] = {
     "cash_sweep_min_cash": "Cassa minima del cash sweep",
     "overdraft_allowed": "Scoperto di conto consentito",
     "overdraft_limit": "Tetto dello scoperto",
-    "bank_lines_amount": "Fidi e anticipi su fatture",
-    "bank_lines_rule": "Fidi: regola nel piano",
+    "bank_lines_amount": "Fidi, Anticipi Ft e Scoperti CC",
     "bank_lines_rate": "Tasso fidi e scoperto %",
     "other_lenders": "Altri finanziatori",
     "tfr_payments": "Liquidazioni TFR",

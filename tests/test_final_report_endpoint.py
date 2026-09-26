@@ -78,7 +78,7 @@ def test_get_is_read_only_and_foreign_scenario_or_source_is_404(client):
         }
     baseline = client.get(_url(client, client.ids["scenario"]))
     assert baseline.status_code == 200, baseline.text
-    assert baseline.json()["readiness"]["status"] == "draft"  # narrative is honestly missing
+    assert baseline.json()["readiness"]["status"] == "ready"  # missing dossier prose is only info since 2026-09-24
     assert len(baseline.json()["chart_series"]) == 6
     repeat = client.get(_url(client, client.ids["scenario"]))
     assert (baseline.json()["source_hash"], baseline.json()["model_hash"]) == (repeat.json()["source_hash"], repeat.json()["model_hash"])

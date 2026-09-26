@@ -17,6 +17,7 @@ import {
   type FinalReportDownloadSink,
   type FinalReportPreviewSink,
   type FinalReportPreviewTab,
+  type ReportModel,
 } from "@/lib/final-report-download";
 import { getErrorMessage } from "@/lib/utils";
 
@@ -66,11 +67,16 @@ export function useFinalReportDownload() {
   const guardRef = useRef(createDownloadGuardState());
 
   const download = useCallback(
-    async (companyId: number, scenarioId: number, documentState: FinalReportDocumentState) => {
+    async (
+      companyId: number,
+      scenarioId: number,
+      documentState: FinalReportDocumentState,
+      model: ReportModel = "dossier",
+    ) => {
       const outcome = await withDownloadGuard<DownloadOutcome>(guardRef.current, async () => {
         setDownloading(true);
         try {
-          const { blob, filename } = await downloadFinalReportPdf(companyId, scenarioId, { documentState });
+          const { blob, filename } = await downloadFinalReportPdf(companyId, scenarioId, { documentState, model });
           saveBlobAsFile(blob, filename, browserSink);
           return { ok: true };
         } catch (error) {
@@ -88,7 +94,7 @@ export function useFinalReportDownload() {
       toast.error(
         message,
         retryable
-          ? { action: { label: "Riprova", onClick: () => download(companyId, scenarioId, documentState) } }
+          ? { action: { label: "Riprova", onClick: () => download(companyId, scenarioId, documentState, model) } }
           : undefined
       );
     },
@@ -101,7 +107,12 @@ export function useFinalReportDownload() {
    * asincrono, o il popup blocker la intercetta.
    */
   const preview = useCallback(
-    async (companyId: number, scenarioId: number, documentState: FinalReportDocumentState) => {
+    async (
+      companyId: number,
+      scenarioId: number,
+      documentState: FinalReportDocumentState,
+      model: ReportModel = "dossier",
+    ) => {
       const rawTab = typeof window !== "undefined" ? window.open("", "_blank") : null;
       const tab: FinalReportPreviewTab | null = rawTab
         ? {
@@ -115,7 +126,7 @@ export function useFinalReportDownload() {
       const outcome = await withDownloadGuard<DownloadOutcome>(guardRef.current, async () => {
         setPreviewing(true);
         try {
-          const { blob, filename } = await downloadFinalReportPdf(companyId, scenarioId, { documentState });
+          const { blob, filename } = await downloadFinalReportPdf(companyId, scenarioId, { documentState, model });
           const result = showPdfPreview(tab, blob, filename, previewSink);
           if (!result.opened) {
             toast.info(PREVIEW_BLOCKED_MESSAGE);
@@ -143,7 +154,7 @@ export function useFinalReportDownload() {
       toast.error(
         message,
         retryable
-          ? { action: { label: "Riprova", onClick: () => preview(companyId, scenarioId, documentState) } }
+          ? { action: { label: "Riprova", onClick: () => preview(companyId, scenarioId, documentState, model) } }
           : undefined
       );
     },
@@ -157,11 +168,16 @@ export function useFinalReportDownload() {
    * del download e dell'anteprima in scheda: una sola richiesta PDF per volta.
    */
   const loadInline = useCallback(
-    async (companyId: number, scenarioId: number, documentState: FinalReportDocumentState) => {
+    async (
+      companyId: number,
+      scenarioId: number,
+      documentState: FinalReportDocumentState,
+      model: ReportModel = "dossier",
+    ) => {
       const outcome = await withDownloadGuard<DownloadOutcome>(guardRef.current, async () => {
         setPreviewing(true);
         try {
-          const { blob } = await downloadFinalReportPdf(companyId, scenarioId, { documentState });
+          const { blob } = await downloadFinalReportPdf(companyId, scenarioId, { documentState, model });
           setInlineUrl((previous) => nextInlinePreviewUrl(previous, blob, previewSink));
           return { ok: true };
         } catch (error) {
@@ -178,7 +194,7 @@ export function useFinalReportDownload() {
       toast.error(
         message,
         retryable
-          ? { action: { label: "Riprova", onClick: () => loadInline(companyId, scenarioId, documentState) } }
+          ? { action: { label: "Riprova", onClick: () => loadInline(companyId, scenarioId, documentState, model) } }
           : undefined
       );
     },

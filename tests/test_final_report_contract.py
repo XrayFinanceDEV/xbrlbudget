@@ -239,7 +239,7 @@ def test_fixture_has_non_vacuous_financing_tax_and_boolean_assumptions():
     assert values["financing_loans"].financing_loans[0].amount == Decimal("100000.00")
     assert values["pregresso"].pregresso.debiti_tributari.rateizzato == Decimal("90")
     assert values["tax_temporary_differences"].temporary_differences[0].kind == "deductible"
-    for field in ("cash_sweep_enabled", "overdraft_allowed", "previdenza_scales_with_personnel", "tfr_accrual_suspended"):
+    for field in ("cash_sweep_enabled", "overdraft_allowed", "tfr_accrual_suspended"):
         assert all(isinstance(value, bool) for value in values[field].values)
 
 

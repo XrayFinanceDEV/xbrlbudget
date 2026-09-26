@@ -580,6 +580,7 @@ LATO_OLTRE_DEL_PIANO = {
     "debiti_tributari": ("sp17e_debiti_tributari_lungo",),
     "debiti_previdenziali": ("sp17f_debiti_previdenza_lungo",),
     "altri_debiti": ("sp17g_altri_debiti_lungo",),
+    "crediti_tributari_lungo": ("sp07e_crediti_tributari_lungo",),
     # Le cinque sotto-voci oltre `sp07` le aggiunge il rilievo I-d del giro 2:
     # il piano le ripartisce dall'aggregato che rigenera lui, quindi un override
     # su una di loro e' cancellato l'anno dopo come quello sull'aggregato.

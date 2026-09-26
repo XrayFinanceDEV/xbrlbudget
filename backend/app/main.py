@@ -43,6 +43,12 @@ app = FastAPI(
     redoc_url="/redoc"
 )
 
+
+@app.on_event("startup")
+def migrate_variable_growth_columns():
+    from database.db import ensure_variable_growth_columns
+    ensure_variable_growth_columns()
+
 # Configure CORS
 cors_origins = list(settings.BACKEND_CORS_ORIGINS)
 if settings.ALLOWED_ORIGINS:

@@ -12,7 +12,7 @@ const bs = { sp06_crediti_breve: "500", sp06e_crediti_tributari_breve: "20", sp0
 
 describe("budget-pregresso-circolante", () => {
   it("masse di apertura come la spec §3.1", () => {
-    expect(openingMasses(bs)).toEqual({ crediti_commerciali: 510, debiti_fornitori: 300, debiti_tributari: 96,
+    expect(openingMasses(bs)).toEqual({ crediti_commerciali: 510, crediti_tributari_breve: 20, crediti_tributari_lungo: 0, debiti_fornitori: 300, debiti_tributari: 96,
       debiti_previdenziali: 41, altri_debiti: 58 });
   });
   it("residuo dopo importi e inesigibile", () => {

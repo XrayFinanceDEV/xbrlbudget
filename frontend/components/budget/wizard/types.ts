@@ -14,23 +14,22 @@ export type { PreviewState };
 export interface StepProps {
   companyId: number;
   scenarioId: number | null;
+  isNew: boolean;
   baseYear: number;
   forecastYears: number[];
   assumptions: AssumptionsMap;
   historical: HistoricalData;
   historicalYears: number[];
   preview: PreviewState;
-  // `string` (Task 14, revisione): `bank_lines_rule` ("costante" | "ricavi")
-  // e' la prima voce del wizard che scrive un enum testuale — allargato in
-  // coppia con `updateAssumption` (hooks/use-scenario-assumptions.ts), la
-  // sola implementazione che questa firma descrive.
+  // Alcune ipotesi del wizard sono enum testuali; la firma coincide con
+  // `updateAssumption` (hooks/use-scenario-assumptions.ts).
   update: (year: number, field: string, value: number | boolean | string | null) => void;
   updateAll: (field: string, value: number | boolean | null) => void;
   updateFinancingLoans: (year: number, loans: FinancingLoanInput[]) => void;
   updateTemporaryDifferences: (year: number, lines: TemporaryDifferenceInput[]) => void;
-  /** Aggancia (o slega, con `null`) una voce minore dello SP a un driver di
-   *  volume, su tutti gli anni di piano. */
-  updateSpIndexing: (code: string, driver: SpIndexingDriver | null) => void;
+  /** Sceglie un driver oppure Manuale (il saldo dell'anno base, costante — A05) per una voce SP. */
+  updateSpRule: (code: string, field: string, growthField: string, driver: SpIndexingDriver | null, baseAmount: number | null) => void;
+  updateManualSpAmount: (year: number, code: string, field: string, growthField: string, amount: number, projected: Record<number, number | null>) => void;
   /** Il setter tipizzato del piano di scadenziamento del pregresso: scrive
    *  SEMPRE nella riga del PRIMO anno di piano (spec §3.5) — non e' ne' un
    *  numero ne' un interruttore, quindi non passa da `update` (conflitto B

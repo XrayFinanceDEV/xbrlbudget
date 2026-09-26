@@ -76,7 +76,7 @@ const RATIO_SECTIONS: Array<{
   {
     title: "Indici di Solidita (Copertura)",
     ratios: [
-      { key: "coverage.fixed_assets_coverage_with_equity_and_ltdebt", label: "(CN+PF)/AF", category: "coverage", format: "ratio" },
+      { key: "coverage.fixed_assets_coverage_with_equity_and_ltdebt", label: "(CN+PF+TFR)/AF", category: "coverage", format: "ratio" },
       { key: "coverage.fixed_assets_coverage_with_equity", label: "CN/AF", category: "coverage", format: "ratio" },
       { key: "coverage.independence_from_third_parties", label: "CN/(PC+PF)", category: "coverage", format: "ratio" },
     ],

@@ -356,8 +356,9 @@ async def upload_csv(
     - Bilancio Abbreviato (abbreviated format)
     - Bilancio Ordinario (full format)
 
-    Uses PyMuPDF + Claude Haiku to extract table data from PDF and maps to Italian GAAP schema.
-    Requires ANTHROPIC_API_KEY.
+    Uses PyMuPDF + an LLM to extract table data from PDF and maps to Italian GAAP schema.
+    Text passes use Anthropic by default or gx10 when PDF_LLM_PROVIDER_COGE,
+    PDF_LLM_PROVIDER_IVCEE or PDF_LLM_PROVIDER_DETTAGLI is set to gx10. Vision uses Anthropic.
 
     Processing time: ~5 seconds per PDF.
     """

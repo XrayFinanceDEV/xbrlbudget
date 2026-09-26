@@ -23,7 +23,9 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { calculateTrend, TREND_ITEMS } from "@/lib/budget-trend";
 import { inflazioneOf } from "@/lib/budget-inflazione";
+import { parseFieldValue } from "@/lib/budget-field-rules";
 import { rowsAnnoBase } from "@/lib/budget-preview-rows";
+import { PercentInput } from "@/components/budget/PercentInput";
 import { PreviewPanel } from "../PreviewPanel";
 import type { StepProps } from "../types";
 
@@ -152,15 +154,12 @@ export function StepScenario(props: StepScenarioProps) {
           <CardContent className="space-y-4">
             <div className="flex items-center gap-3">
               <Label htmlFor="wiz-inflation" className="text-xs font-medium whitespace-nowrap">Inflazione attesa</Label>
-              <Input
+              <PercentInput
                 id="wiz-inflation"
-                type="number"
-                step="0.1"
-                min="-10"
-                max="50"
                 value={inflazione}
-                onChange={(e) => updateAll("inflation_pct", parseFloat(e.target.value) || 0)}
-                className="w-24"
+                onRawChange={(raw) => updateAll("inflation_pct", parseFieldValue("inflation_pct", raw) ?? 0)}
+                allowNegative
+                className="flex h-10 w-24 rounded-md border border-input bg-background px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
               />
               <span className="text-xs text-muted-foreground">%</span>
             </div>
@@ -209,12 +208,13 @@ export function StepScenario(props: StepScenarioProps) {
           baseYear={baseYear}
           years={anniPrecedenti}
           rows={annoBaseRows}
+          baseYearLast
           loading={false}
           error={null}
         >
           {anniPrecedenti.length > 0 && (
             <p className="mt-2 text-[11px] text-muted-foreground">
-              Le colonne a destra sono gli anni storici precedenti, non anni di previsione.
+              Gli anni storici sono in ordine cronologico; non sono anni di previsione.
             </p>
           )}
         </PreviewPanel>

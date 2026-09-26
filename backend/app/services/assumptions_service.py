@@ -247,8 +247,12 @@ def build_assumption_row(
         inflation_pct=data.get("inflation_pct", None),
         fixed_materials_growth_auto=data.get("fixed_materials_growth_auto", False) or False,
         fixed_services_growth_auto=data.get("fixed_services_growth_auto", False) or False,
+        variable_materials_growth_auto=data.get("variable_materials_growth_auto"),
+        variable_services_growth_auto=data.get("variable_services_growth_auto"),
         bank_lines_amount=data.get("bank_lines_amount", None),
-        bank_lines_rule=data.get("bank_lines_rule", None),
+        # La vecchia regola 'ricavi' resta accettata nel payload per
+        # compatibilita', ma non crea piu' fidi previsionali automatici.
+        bank_lines_rule="costante" if data.get("bank_lines_amount") is not None else None,
         bank_lines_rate=data.get("bank_lines_rate", None),
         other_lenders=jsonable_encoder(data.get("other_lenders", None)),
         tfr_payments=data.get("tfr_payments", 0.0) or 0.0,

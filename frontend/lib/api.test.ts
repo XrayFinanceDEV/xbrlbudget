@@ -25,7 +25,7 @@ vi.mock("axios", () => {
   };
 });
 
-import { downloadFinalReportPdf, generateEditorialNotes, getEditorialSession, getFinalReport, getFinalReportV2, prepareEditorialSession, previewForecast, saveEditorialNotes, setAuthToken } from "./api";
+import { downloadFinalReportPdf, downloadInfrannualePdf, downloadReportDocx, generateEditorialNotes, getEditorialSession, getFinalReport, getFinalReportV2, prepareEditorialSession, previewForecast, saveEditorialNotes, setAuthToken } from "./api";
 import { FinalReportDownloadError } from "./final-report-download";
 import v1 from "../../tests/fixtures/final_report/bilancio.json";
 import v2 from "../../tests/fixtures/final_report/v2/bilancio.json";
@@ -149,6 +149,15 @@ describe("downloadFinalReportPdf", () => {
     setAuthToken(null);
   });
 
+  it("con model business_plan chiama la rotta del Business plan e manda solo document_state", async () => {
+    const blob = new Blob(["%PDF-1.4"], { type: "application/pdf" });
+    fetchMock.mockResolvedValue({ ok: true, status: 200, headers: { get: () => null }, blob: async () => blob, json: async () => ({}) });
+    await downloadFinalReportPdf(1, 2, { documentState: "draft", model: "business_plan" });
+    const [url, init] = fetchMock.mock.calls[0];
+    expect(url).toContain("/companies/1/scenarios/2/business-plan/pdf");
+    expect(JSON.parse(init.body)).toEqual({ document_state: "draft" });
+  });
+
   it("posta document_state e grayscale, con Bearer quando il token è impostato, e legge blob e nome file dagli header", async () => {
     setAuthToken("un-jwt");
     const blob = new Blob(["%PDF-1.4"], { type: "application/pdf" });
@@ -219,5 +228,63 @@ describe("downloadFinalReportPdf", () => {
     expect(error).toBeInstanceOf(FinalReportDownloadError);
     expect(error.status).toBe(503);
     expect(error.message).toMatch(/disponibile/);
+  });
+});
+
+describe("downloadInfrannualePdf", () => {
+  const fetchMock = vi.fn();
+  beforeEach(() => {
+    fetchMock.mockReset();
+    vi.stubGlobal("fetch", fetchMock);
+    setAuthToken(null);
+  });
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("chiama la rotta del report infrannuale con corpo vuoto e legge il nome file", async () => {
+    const blob = new Blob(["%PDF-1.4"], { type: "application/pdf" });
+    fetchMock.mockResolvedValue({
+      ok: true, status: 200, blob: async () => blob, json: async () => ({}),
+      headers: { get: (n: string) => (n === "Content-Disposition" ? "attachment; filename=\"Report.pdf\"; filename*=UTF-8''Report%20infrannuale%20X%206M%202026.pdf" : null) },
+    });
+    const result = await downloadInfrannualePdf(1, 2);
+    const [url, init] = fetchMock.mock.calls[0];
+    expect(url).toContain("/companies/1/scenarios/2/infrannuale/pdf");
+    expect(JSON.parse(init.body)).toEqual({});
+    expect(result.filename).toBe("Report infrannuale X 6M 2026.pdf");
+  });
+});
+
+describe("downloadReportDocx", () => {
+  const fetchMock = vi.fn();
+  beforeEach(() => {
+    fetchMock.mockReset();
+    vi.stubGlobal("fetch", fetchMock);
+    setAuthToken(null);
+  });
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("chiama la rotta Word giusta col corpo della rotta PDF", async () => {
+    const blob = new Blob(["PK"]);
+    fetchMock.mockResolvedValue({
+      ok: true, status: 200, blob: async () => blob, json: async () => ({}),
+      headers: { get: (n: string) => (n === "Content-Disposition" ? 'attachment; filename="Report.docx"' : null) },
+    });
+    const result = await downloadReportDocx(1, 2, "infrannuale");
+    expect(fetchMock.mock.calls[0][0]).toContain("/companies/1/scenarios/2/infrannuale/docx");
+    expect(JSON.parse(fetchMock.mock.calls[0][1].body)).toEqual({});
+    expect(result.filename).toBe("Report.docx");
+    await downloadReportDocx(1, 3, "business-plan", "final");
+    expect(fetchMock.mock.calls[1][0]).toContain("/companies/1/scenarios/3/business-plan/docx");
+    expect(JSON.parse(fetchMock.mock.calls[1][1].body)).toEqual({ document_state: "final" });
+  });
+
+  it("un errore del server diventa FinalReportDownloadError", async () => {
+    fetchMock.mockResolvedValue({ ok: false, status: 404, json: async () => ({ detail: "non trovato" }), headers: { get: () => null } });
+    const error = await downloadReportDocx(1, 2, "infrannuale").catch((e) => e);
+    expect(error.status).toBe(404);
   });
 });

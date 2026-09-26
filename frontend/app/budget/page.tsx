@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { useApp } from "@/contexts/AppContext";
 import { usePratica } from "@/contexts/PraticaContext";
@@ -11,6 +11,7 @@ import {
   createFinancialYear,
   updateBalanceSheet,
   createBudgetScenario,
+  getBudgetScenario,
   updateBudgetScenario,
   deleteBudgetScenario,
   createBudgetAssumptions,
@@ -72,6 +73,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Alert, AlertTitle, AlertDescription } from "@/components/ui/alert";
 import {
@@ -94,6 +96,7 @@ import {
   AccordionTrigger,
 } from "@/components/ui/accordion";
 import { AssumptionsGrid } from "@/components/budget/AssumptionsGrid";
+import { PercentInput } from "@/components/budget/PercentInput";
 import {
   ADVANCED_GROUPS,
   ESSENTIAL_ROWS,
@@ -126,6 +129,59 @@ export default function BudgetPage() {
   const [activeTab, setActiveTab] = useState<string>("list");
   const [editingScenario, setEditingScenario] = useState<BudgetScenario | null>(null);
   const [recoveringBudget, setRecoveringBudget] = useState(false);
+  const [newPlanFrom, setNewPlanFrom] = useState<BudgetScenario | null>(null);
+  const [newPlanName, setNewPlanName] = useState("");
+  const [creatingPlan, setCreatingPlan] = useState(false);
+  const aperturaDaHome = useRef(false);
+
+  useEffect(() => {
+    if (!selectedCompanyId || selectedCompanyId !== pratica?.companyId || aperturaDaHome.current) return;
+    const raw = new URLSearchParams(window.location.search).get("open");
+    const scenarioId = Number(raw);
+    if (!raw || !Number.isSafeInteger(scenarioId) || scenarioId <= 0) return;
+    aperturaDaHome.current = true;
+    getBudgetScenario(selectedCompanyId, scenarioId)
+      .then((scenario) => {
+        setEditingScenario(scenario);
+        setActiveTab("info");
+        const patch = patchPraticaPerScenarioAperto(pratica, scenario);
+        if (patch) updatePratica(patch);
+        router.replace("/budget");
+      })
+      .catch((err: unknown) => {
+        toast.error(getErrorMessage(err, "Impossibile aprire il nuovo budget"));
+        router.replace("/budget");
+      });
+    // Il query param e' un comando d'ingresso: una sola lettura per mount.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedCompanyId, pratica?.companyId]);
+
+  const handleCreateAdditionalPlan = async () => {
+    if (
+      creatingPlan || !selectedCompanyId || !newPlanFrom ||
+      newPlanFrom.company_id !== selectedCompanyId || !newPlanName.trim()
+    ) return;
+    setCreatingPlan(true);
+    try {
+      const scenario = await createBudgetScenario(selectedCompanyId, {
+        company_id: selectedCompanyId,
+        name: newPlanName.trim(),
+        base_year: newPlanFrom.base_year,
+        scenario_type: "budget",
+      });
+      invalidateScenarios(selectedCompanyId);
+      const patch = patchPraticaPerScenarioAperto(pratica, scenario);
+      if (patch) updatePratica(patch);
+      setNewPlanFrom(null);
+      setEditingScenario(scenario);
+      setActiveTab("info");
+      toast.success("Business plan creato. Scegli l'orizzonte di 3 o 5 anni nel primo passo.");
+    } catch (err: unknown) {
+      toast.error(getErrorMessage(err, "Impossibile creare il business plan"));
+    } finally {
+      setCreatingPlan(false);
+    }
+  };
 
   const handleDeleteScenario = async (scenarioId: number) => {
     if (!selectedCompanyId) return;
@@ -231,8 +287,8 @@ export default function BudgetPage() {
     setEditingScenario(null);
     setActiveTab("list");
     if (selectedCompanyId) invalidateScenarios(selectedCompanyId);
-    toast.success("Vai agli Indici per verificare il risultato", {
-      action: { label: "Indici", onClick: () => router.push("/analysis") },
+    toast.success("Apri il CE Previsionale per verificare il risultato", {
+      action: { label: "CE Previsionale", onClick: () => router.push("/forecast/income") },
     });
   };
 
@@ -353,13 +409,6 @@ export default function BudgetPage() {
               </Button>
             </div>
           )}
-          {/* Manual "Nuovo Scenario" creation is intentionally removed outside
-              startupMode (spec 2026-08-08-percorso-unico-pratica-design.md:239-240):
-              base_year here would default to Math.max(...years), which is not tied
-              to the pratica's corrected FinancialYear and can create a budget
-              scenario on data that never passed Rettifiche. The only creation
-              offered here is the recovery of that exact pratica bridge after its
-              budget was deleted. */}
           <ScenariosList
             scenarios={scenarios}
             loading={loading}
@@ -367,6 +416,10 @@ export default function BudgetPage() {
             onEdit={handleEditScenario}
             onDelete={handleDeleteScenario}
             onRegenerate={setRegenScenarioId}
+            onCreateFrom={startupMode ? undefined : (scenario) => {
+              setNewPlanFrom(scenario);
+              setNewPlanName("");
+            }}
             recoveries={recoveries}
             onRecover={handleRecoverBudget}
             recovering={recoveringBudget}
@@ -388,11 +441,10 @@ export default function BudgetPage() {
         />
       ) : editingScenario ? (
         // Fuori dallo startup la vecchia tab «Ipotesi» e' sostituita dal
-        // percorso a sette passi (spec 2026-09-08). `editingScenario` e'
-        // sempre valorizzato qui: la creazione manuale di uno scenario e'
-        // disattivata (vedi il commento su ScenariosList sopra), quindi si
-        // arriva a questo ramo solo da «Modifica» su uno scenario esistente.
+        // percorso a sette passi (spec 2026-09-08). Lo scenario puo' essere
+        // gia' salvato oppure appena creato da un bilancio base esistente.
         <BudgetWizard
+          key={`${selectedCompanyId}:${editingScenario.id}`}
           companyId={selectedCompanyId}
           years={years}
           scenario={editingScenario}
@@ -402,6 +454,47 @@ export default function BudgetPage() {
           }}
         />
       ) : null}
+
+      <Dialog open={newPlanFrom !== null} onOpenChange={(open) => {
+        if (!open && !creatingPlan) setNewPlanFrom(null);
+      }}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Nuovo business plan</DialogTitle>
+            <DialogDescription>
+              Usa il bilancio {newPlanFrom?.base_year} come base. Il nuovo piano avrà
+              ipotesi indipendenti; nel primo passo potrai scegliere 3 o 5 anni.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-2">
+            <Label htmlFor="new-budget-plan-name">Nome del piano</Label>
+            <Input
+              id="new-budget-plan-name"
+              value={newPlanName}
+              onChange={(event) => setNewPlanName(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === "Enter") {
+                  event.preventDefault();
+                  void handleCreateAdditionalPlan();
+                }
+              }}
+              placeholder="es. Piano a 5 anni"
+              maxLength={255}
+              autoFocus
+              disabled={creatingPlan}
+            />
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setNewPlanFrom(null)} disabled={creatingPlan}>
+              Annulla
+            </Button>
+            <Button onClick={handleCreateAdditionalPlan} disabled={creatingPlan || !newPlanName.trim()}>
+              {creatingPlan ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />}
+              Crea piano
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       <AlertDialog open={regenScenarioId !== null} onOpenChange={(open) => !open && setRegenScenarioId(null)}>
         <AlertDialogContent>
@@ -762,9 +855,13 @@ function StartupSetup({
                   <td className="px-3 py-2 font-medium text-foreground border-r border-border">Margine EBITDA (%)</td>
                   {years.map((year) => (
                     <td key={year} className="px-2 py-1 border-r border-border">
-                      <input type="number" step="0.5" className={cellCls} onPaste={incollaNumeroItaliano}
+                      <PercentInput
                         value={getVal(year, "margine")}
-                        onChange={(e) => setVal(year, "margine", parseFloat(e.target.value) || 0)} />
+                        onRawChange={(raw) => setVal(year, "margine", raw === "" ? 0 : parseFloat(raw.replace(",", ".")))}
+                        allowNegative
+                        ariaLabel={`Margine EBITDA ${year}`}
+                        className={cellCls}
+                      />
                     </td>
                   ))}
                 </tr>
@@ -836,6 +933,7 @@ function ScenariosList({
   onEdit,
   onDelete,
   onRegenerate,
+  onCreateFrom,
   recoveries,
   onRecover,
   recovering,
@@ -846,6 +944,7 @@ function ScenariosList({
   onEdit: (scenario: BudgetScenario) => void;
   onDelete: (id: number) => void;
   onRegenerate: (id: number) => void;
+  onCreateFrom?: (scenario: BudgetScenario) => void;
   recoveries: BudgetRecovery[];
   onRecover: (recovery: BudgetRecovery) => void;
   recovering: boolean;
@@ -944,6 +1043,12 @@ function ScenariosList({
                   <RefreshCw className="h-4 w-4" />
                   Ricalcola
                 </Button>
+                {onCreateFrom && (
+                  <Button variant="outline" size="sm" onClick={() => onCreateFrom(scenario)}>
+                    <Plus className="h-4 w-4" />
+                    Nuovo piano da questa base
+                  </Button>
+                )}
                 <AlertDialog>
                   <AlertDialogTrigger asChild>
                     <Button variant="destructive" size="sm">
@@ -1511,15 +1616,12 @@ function AutoGeneratorCard({
             <Label htmlFor="inflation-rate" className="text-xs font-medium whitespace-nowrap">
               Inflazione attesa:
             </Label>
-            <Input
+            <PercentInput
               id="inflation-rate"
-              type="number"
-              step="0.1"
-              min="-10"
-              max="50"
               value={inflationRate}
-              onChange={(e) => setInflationRate(parseFloat(e.target.value) || 0)}
-              className="w-24 h-8 text-xs"
+              onRawChange={(raw) => setInflationRate(raw === "" ? 0 : parseFloat(raw.replace(",", ".")))}
+              allowNegative
+              className="flex w-24 h-8 rounded-md border border-input bg-background px-3 py-2 text-xs focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
             />
             <span className="text-xs text-muted-foreground">%</span>
           </div>

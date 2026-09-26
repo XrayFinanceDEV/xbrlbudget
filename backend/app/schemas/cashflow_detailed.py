@@ -107,6 +107,15 @@ class FinancingActivities(BaseModel):
     third_party_funds: FinancingSource = Field(description="Mezzi di terzi (debt)")
     own_funds: FinancingSource = Field(description="Mezzi propri (equity)")
     total_financing_cashflow: Decimal = Field(description="Flusso finanziario dell'attività di finanziamento (C)")
+    erogazioni_incoerenti: bool = Field(
+        default=False,
+        description=(
+            "C08: le erogazioni note dell'anno (motore, `engine_meta['erogazioni']`) non bastano a "
+            "spiegare l'aumento del debito finanziario — `third_party_funds` e' tornato al netto "
+            "di sempre (increases/decreases dal solo segno di `net`), come prima di questo lotto, "
+            "invece di inventare un rimborso negativo."
+        ),
+    )
 
 
 # ===== Cash Reconciliation =====

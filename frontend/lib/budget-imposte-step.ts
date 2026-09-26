@@ -73,11 +73,12 @@ export interface SpTributariRow extends YearCellOff {
 
 /**
  * Gli anni sui quali la via manuale e' DAVVERO accesa: quelli in cui
- * `sp06e_growth_pct` o `sp16e_growth_pct` sono valorizzati su QUELL'anno.
+ * `sp16e_growth_pct` e' valorizzato su QUELL'anno. La variazione dei crediti
+ * tributari (`sp06e_growth_pct`) resta indipendente dai pagamenti.
  *
  * Misurato sul motore, non dedotto: `forecast_engine.py` decide
- * `manual_tax_position` da quei due soli campi (`getattr(...) is not None`),
- * **per anno** (`forecast_engine.py:2038-2041`) — quindi **uno zero e' un
+ * `manual_tax_position` dal solo debito `sp16e` (`getattr(...) is not None`),
+ * **per anno** — quindi **uno zero e' un
  * valore**, non un'assenza, e un piano misto (2027 automatico, 2028 manuale)
  * non accende la via sul 2027 anche se `manualTaxPosition` (sotto) e' `true`
  * perche' governa il 2028. Serve la lista, non solo il booleano: e' cosi' che
@@ -88,7 +89,7 @@ export interface SpTributariRow extends YearCellOff {
 export function manualTaxYears(assumptions: AssumptionsMap, years: number[]): number[] {
   return years.filter((y) => {
     const a = assumptions[y] as Record<string, unknown> | undefined;
-    return (a?.sp06e_growth_pct ?? null) !== null || (a?.sp16e_growth_pct ?? null) !== null;
+    return (a?.sp16e_growth_pct ?? null) !== null;
   });
 }
 
@@ -100,7 +101,7 @@ export function manualTaxPosition(assumptions: AssumptionsMap, years: number[]):
 }
 
 const SP16E_SUB =
-  "valorizzarla passa alla via manuale: i debiti tributari crescono di percentuale e il piano qui sopra viene ignorato";
+  "attiva la crescita manuale del debito: saldo, rate e acconti non vengono calcolati";
 const SP17E_SUB = "governa il debito oltre l'esercizio soltanto sulla via manuale";
 
 /**
@@ -115,13 +116,12 @@ const SP17E_SUB = "governa il debito oltre l'esercizio soltanto sulla via manual
  *
  * «qui sopra», non «qui sotto»: in `StepImposte.tsx` la `YearInputTable` con
  * la riga «Debiti tributari entro %» viene resa PRIMA di questa nota, quindi
- * quella riga sta sopra la nota, non sotto (fix1 R4). E l'etichetta del passo
- * Circolante e' «Crediti tributari», senza «%» (`budget-circolante-step.ts`).
+ * quella riga sta sopra la nota, non sotto (fix1 R4).
  */
 export const SP17E_NOTA_AUTOMATICA =
   "«Debiti tributari oltre %» non compare finché il piano governa i tributari: il debito oltre l'esercizio " +
   "è il residuo delle rate, e una percentuale di crescita non lo muoverebbe. Torna valorizzando «Debiti " +
-  "tributari entro %» qui sopra, o «Crediti tributari» al passo Circolante.";
+  "tributari entro %» qui sopra.";
 
 /** Il motivo per cui la cella `sp17e_growth_pct` di UN anno automatico resta
  *  inerte su un piano MISTO (qualche anno manuale, altri no): stesso
@@ -132,8 +132,8 @@ export const SP17E_NOTA_ANNO_AUTOMATICO = SP17E_NOTA_AUTOMATICA;
 /** L'avviso della via manuale, dentro l'accordion: valorizzare una di quelle
  *  percentuali fa ignorare saldo, rate e acconti dichiarati sopra. */
 export const MANUAL_TAX_AVVISO =
-  "Con una di queste percentuali valorizzata il motore muove i debiti tributari per crescita e ignora il " +
-  "piano di saldo, rate e acconti: sono due vie alternative, non due ipotesi che si sommano.";
+  "Valorizzando «Debiti tributari entro %» il motore muove i debiti per crescita e non calcola saldo, " +
+  "rate e acconti. «Debiti tributari oltre %» si applica solo in questa modalità.";
 
 /** Il motore l'ha davvero ignorato, e lo dichiara: `pregresso_ignored`. Non e'
  *  la stessa cosa della previsione fatta sulle ipotesi — questo e' misurato. */
@@ -278,7 +278,7 @@ export function draftDisplay(draft: string | null, saved: number): number | "" {
  * dedurre da «se valorizzati» (fix1 C1).
  */
 export const ACCONTO_CHIOSA =
-  "percentuale dell'imposta dell'anno prima; un acconto per anno qui sopra, se MAGGIORE DI ZERO, la " +
+  "percentuale dell'imposta dell'anno prima; un acconto per anno qui sotto, se MAGGIORE DI ZERO, la " +
   "scavalca — zero vuol dire «usa la percentuale di acconto», non «zero acconti».";
 
 /** Il motore ha davvero ignorato il piano dei tributari, su almeno un anno:

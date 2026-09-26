@@ -17,8 +17,8 @@ export const WIZARD_STEPS: readonly WizardStep[] = [
   { n: 2, key: "fatturato", title: "Fatturato", subtitle: "ricavi e altri ricavi", group: "Conto economico" },
   { n: 3, key: "costi", title: "Costi", subtitle: "quota fissa, inflazione, ipotesi manuali", group: "Conto economico" },
   { n: 4, key: "circolante", title: "Capitale circolante", subtitle: "giorni medi", group: "Stato patrimoniale" },
-  { n: 5, key: "patrimoniale-pregresso", title: "Patrimoniale pregresso", subtitle: "come si chiude ciò che c'è già", group: "Stato patrimoniale", badge: "nuovo" },
-  { n: 6, key: "patrimoniale-piano", title: "Patrimoniale piano", subtitle: "ciò che il previsionale genera", group: "Stato patrimoniale", badge: "nuovo" },
+  { n: 5, key: "patrimoniale-pregresso", title: "Patrimoniale pregresso", subtitle: "come si chiude ciò che c'è già", group: "Stato patrimoniale" },
+  { n: 6, key: "patrimoniale-piano", title: "Patrimoniale piano", subtitle: "ciò che il previsionale genera", group: "Stato patrimoniale" },
   { n: 7, key: "imposte", title: "Imposte", subtitle: "aliquota e pagamento", group: "Stato patrimoniale" },
 ];
 
@@ -34,18 +34,19 @@ export const STEP_FIELDS: Record<WizardStepKey, readonly string[]> = {
     "variable_materials_growth_pct", "variable_services_growth_pct",
     "fixed_materials_growth_pct", "fixed_services_growth_pct",
     "fixed_materials_growth_auto", "fixed_services_growth_auto",
+    "variable_materials_growth_auto", "variable_services_growth_auto",
     "personnel_growth_pct", "rent_growth_pct", "other_costs_growth_pct",
   ],
   circolante: ["dso_days", "dio_days", "dpo_days", "receivables_long_growth_pct"],
   "patrimoniale-pregresso": [
-    "bank_lines_amount", "bank_lines_rule", "bank_lines_rate", "financing_loans",
-    "existing_debt_repayment_years", "altri_finanz_repayment_years",
+    "bank_lines_amount", "bank_lines_rate", "financing_loans",
+    "existing_debt_repayment_years", "altri_finanz_repayment_years", "sp06e_growth_pct",
   ],
   "patrimoniale-piano": [
-    "sp01_growth_pct", "sp04_growth_pct", "sp06e_growth_pct", "sp06f_growth_pct",
+    "sp01_growth_pct", "sp04_growth_pct",
     "sp08_growth_pct", "sp10_growth_pct", "sp14_growth_pct", "sp16f_growth_pct",
     "sp16g_growth_pct", "sp17d_growth_pct", "sp17f_growth_pct", "sp17g_growth_pct",
-    "sp18_growth_pct", "previdenza_scales_with_personnel", "tfr_accrual_suspended", "tfr_payments",
+    "sp18_growth_pct", "tfr_accrual_suspended", "tfr_payments",
     "financing_amount", "financing_duration_years", "financing_interest_rate",
     "tangible_investments", "intangible_investments", "depreciation_rate", "depreciation_rate_intangible",
     "asset_disposal_nbv", "asset_disposal_proceeds", "cash_sweep_enabled", "cash_sweep_min_cash",
@@ -55,23 +56,23 @@ export const STEP_FIELDS: Record<WizardStepKey, readonly string[]> = {
 };
 
 /**
- * Colonne che nessun passo mostra. Le prime tre (`investments`,
- * `receivables_short_growth_pct`, `payables_short_growth_pct`) sono fra le 87
- * chiavi idratate e rispedite dal salvataggio; le due `interest_rate_*` NON lo
- * sono — esistono nel tipo ma non passano da `hydrateAssumptions`, quindi non
- * fanno neppure il giro.
- *
- * «Il motore non le legge» vale per quattro su cinque: `investments` lo legge
- * ancora (`ForecastEngine._get_total_investments` come totale legacy, e
- * `_get_split_investments` ALZA `ValueError` se e' valorizzato senza split),
- * quindi un valore non nullo li' non e' inerte — ferma la generazione.
+ * Campi fuori dal percorso del wizard. Alcuni restano nello schema per leggere
+ * payload legacy. `investments` puo' ancora fermare la generazione se arriva
+ * senza la ripartizione dei nuovi investimenti.
  */
 export const DEAD_FIELDS = [
   "investments", "receivables_short_growth_pct", "payables_short_growth_pct",
   "interest_rate_receivables", "interest_rate_payables",
+  // La vecchia regola di crescita dei fidi e' conservata solo per leggere i payload legacy.
+  "bank_lines_rule",
+  // Le imposte anticipate restano costanti; una crescita salvata in passato non e' letta dal motore.
+  "sp06f_growth_pct",
   // Scelta dell'INFRANNUALE (quali giorni di circolante proiettare), non del
   // percorso budget: nessun passo del wizard la scrive.
   "working_capital_mode",
+  // A06 (lotto 3 fix rilievi, 2026-09-26): la casella e' sparita dal passo 6 e il motore
+  // non legge piu' il flag — sp16f/sp17f si agganciano al personale solo da `sp_indexing`.
+  "previdenza_scales_with_personnel",
 ] as const;
 
 export interface WizardStepGroup { group: WizardStep["group"]; steps: WizardStep[] }

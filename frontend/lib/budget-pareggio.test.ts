@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { ForecastPreviewYear } from "@/types/api";
-import { pareggioBarre, pareggioFormula, rowsPareggio } from "./budget-pareggio";
+import { pareggioAnnoBase, pareggioBarre, pareggioFormula, rowsPareggio } from "./budget-pareggio";
+import type { IncomeStatement } from "@/types/api";
 
 const anno = (year: number, pareggio: Record<string, number | null>, ce01 = 600000): ForecastPreviewYear => ({
   year, income_statement: { ce01_ricavi_vendite: ce01, ce04_altri_ricavi: 0 }, balance_sheet: {},
@@ -14,6 +15,34 @@ const nd = { costi_variabili: null, costi_fissi: null, costi_fissi_operativi: nu
 const okStringa = Object.fromEntries(Object.entries(ok).map(([k, v]) => [k, String(v)])) as unknown as Record<string, number | null>;
 
 describe("budget-pareggio", () => {
+  it("calcola anche l'anno base con slider e voci operative del bilancio storico", () => {
+    const income = {
+      ce01_ricavi_vendite: 600000, ce05_materie_prime: 200000, ce06_servizi: 100000,
+      ce07_godimento_beni: 30000, ce08_costi_personale: 200000, ce12_oneri_diversi: 20000,
+      ce04_altri_ricavi: 50000, ce02_variazioni_rimanenze: 10000,
+      ce10_var_rimanenze_mat_prime: 5000, ce11b_altri_accantonamenti: 2000,
+    } as unknown as IncomeStatement;
+    const base = pareggioAnnoBase(2026, income, { materials: 25, services: 50 });
+    expect(base.details?.pareggio).toMatchObject({
+      costi_variabili: 200000, costi_fissi: 350000, costi_fissi_operativi: 297000,
+      margine_contribuzione_pct: 66.67, fatturato_pareggio: 445500,
+      margine_sicurezza: 154500, margine_sicurezza_pct: 25.75,
+    });
+    const rows = rowsPareggio([anno(2027, ok)], base);
+    expect(rows.find((r) => r.key === "ricavi")?.base.value).toBe(600000);
+    expect(rows.find((r) => r.key === "pareggio")?.base.value).toBe(445500);
+    expect(rows.find((r) => r.key === "mdc")?.base.pct).toBe(66.67);
+    expect(pareggioBarre([base, anno(2027, ok)]).map((b) => b.year)).toEqual([2026, 2027]);
+    expect(pareggioFormula(base)?.anno).toBe(2026);
+  });
+
+  it("con ricavi o margine di contribuzione non positivi non inventa un pareggio", () => {
+    const income = { ce01_ricavi_vendite: 100, ce05_materie_prime: 150 } as unknown as IncomeStatement;
+    const base = pareggioAnnoBase(2026, income, { materials: 0, services: 0 });
+    expect(base.details?.pareggio?.fatturato_pareggio).toBeNull();
+    expect(rowsPareggio([], base).find((r) => r.key === "pareggio")?.base.value).toBeNull();
+  });
+
   it("le barre: ricavi, tacca del pareggio e segmento del margine, sulla scala del massimo", () => {
     const [b] = pareggioBarre([anno(2027, ok)]);
     expect(b.ok).toBe(true);
@@ -46,6 +75,8 @@ describe("budget-pareggio", () => {
     const rows = rowsPareggio([anno(2027, ok)]);
     expect(rows.map((r) => r.key)).toEqual(["ricavi", "mdc", "pareggio", "margine-pct", "margine"]);
     expect(rows[2].years[0].value).toBe(423076.92);
+    expect(rows[2].label).toBe("Fatturato di BEP");
+    expect(rows[2].hint).toBe("Fatturato minimo per coprire i costi arrivando a MOL = 0");
   });
 
   // Deviazione dichiarata dal coordinatore (dispatch Task 11): `details.pareggio` e'

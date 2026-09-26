@@ -6,6 +6,7 @@
 // gia' calcolato da `rowsFatturato` (lib/budget-preview-rows.ts), che a sua
 // volta ricapitola solo numeri che il motore ha gia' restituito nel preview.
 import { useMemo } from "react";
+import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { euro, num, numOrNull } from "@/lib/budget-format";
 import { trendRicaviNota } from "@/lib/budget-inflazione";
@@ -44,6 +45,8 @@ function RevenueBars({ base, years }: { base: number; years: ForecastPreviewYear
 
 export function StepFatturato(p: StepProps) {
   const baseInc = p.historical[p.baseYear]?.income;
+  const forcedRevenueYears = p.forecastYears.filter((year) => p.assumptions[year]?.ce01_override != null);
+  const forcedOtherRevenueYears = p.forecastYears.filter((year) => p.assumptions[year]?.ce04_override != null);
   // Gli anni delle colonne sono quelli che il motore ha davvero prodotto
   // (`data.forecast_years`), non quelli richiesti (`p.forecastYears`): se il
   // motore si e' fermato a meta' (fabbisogno scoperto) le intestazioni non
@@ -68,9 +71,34 @@ export function StepFatturato(p: StepProps) {
               // Senza anno base si scrive «—», non «€ 0»: uno zero vero e uno
               // zero di ripiego non sono la stessa cosa, ed e' la regola degli
               // altri sei passi (lib/budget-costi-step.ts).
-              { field: "revenue_growth_pct", label: "Ricavi delle vendite", baseLabel: euro(numOrNull(baseInc?.ce01_ricavi_vendite)) },
-              { field: "other_revenue_growth_pct", label: "Altri ricavi e proventi", baseLabel: euro(numOrNull(baseInc?.ce04_altri_ricavi)) },
+              {
+                field: "revenue_growth_pct", label: "Ricavi delle vendite",
+                baseLabel: euro(numOrNull(baseInc?.ce01_ricavi_vendite)),
+                offYears: forcedRevenueYears,
+                offYearsNote: "Importo fissato in CE Prev.: questa percentuale non viene applicata.",
+              },
+              {
+                field: "other_revenue_growth_pct", label: "Altri ricavi e proventi",
+                baseLabel: euro(numOrNull(baseInc?.ce04_altri_ricavi)),
+                offYears: forcedOtherRevenueYears,
+                offYearsNote: "Importo fissato in CE Prev.: questa percentuale non viene applicata.",
+              },
             ]} />
+          {(forcedRevenueYears.length > 0 || forcedOtherRevenueYears.length > 0) && (
+            <div className="mt-3 space-y-2 text-xs text-amber-800 dark:text-amber-300">
+              {([
+                ["Ricavi delle vendite", "ce01_override", forcedRevenueYears],
+                ["Altri ricavi e proventi", "ce04_override", forcedOtherRevenueYears],
+              ] as const).flatMap(([label, field, years]) => years.map((year) => (
+                <div key={`${field}-${year}`} className="flex flex-wrap items-center gap-2">
+                  <span>{label} {year}: prevale l&apos;importo fissato in CE Prev.; la percentuale non viene applicata.</span>
+                  <Button type="button" variant="outline" size="sm" onClick={() => p.update(year, field, null)}>
+                    Usa la percentuale
+                  </Button>
+                </div>
+              )))}
+            </div>
+          )}
           <p className="mt-2 text-xs text-muted-foreground">Le percentuali si applicano all&apos;anno precedente, non al {p.baseYear}.</p>
           {nota && <p className="mt-1 text-xs text-muted-foreground">{nota}</p>}
         </CardContent>

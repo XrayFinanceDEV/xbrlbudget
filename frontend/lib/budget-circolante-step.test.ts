@@ -71,6 +71,12 @@ describe("minorFieldsRows", () => {
   it("anno base assente ⇒ '—' su tutte le righe, mai '€ 0'", () => {
     const rows = minorFieldsRows(undefined);
     expect(rows.every((r) => r.baseLabel === "—")).toBe(true);
+    // Il chiamante (StepPatrimonialePiano) usa `baseAmount === null` su OGNI riga per
+    // sapere che l'anno base non e' ancora caricato e disabilitare la tendina Manuale/
+    // driver: se questo tornasse un numero (anche zero), «Manuale» scriverebbe quel
+    // numero in sp_overrides come se fosse il vero saldo di base (rilievo del giro
+    // finale, lotto 3 fix rilievi 2026-09-26).
+    expect(rows.every((r) => r.baseAmount === null)).toBe(true);
   });
 
   it("senza aggancio ogni voce dichiara di restare costante, e la % resta viva", () => {
@@ -112,13 +118,13 @@ describe("minorFieldsRows", () => {
   it("le imposte anticipate sono escluse per INTERO, entro e oltre, e di sola lettura", () => {
     // Dal 2026-09-18 (commercialista) sono costanti: nessuna percentuale, ne'
     // entro ne' oltre; si cambiano solo a mano nello SP previsionale, con
-    // contropartita le riserve.
+    // effetto sulla cassa.
     const rows = minorFieldsRows(balance());
     const coppia = rows.filter((r) => r.field.startsWith("sp06f") || r.field === "sp07f");
     expect(coppia).toHaveLength(2);
     for (const r of coppia) {
       expect(r.code).toBeNull();
-      expect(r.andamento).toBe("Governata a mano nello SP previsionale: costanti, contro riserve");
+      expect(r.andamento).toBe("Governata a mano nello SP previsionale: costanti, effetto sulla cassa");
       expect(r.off).toBe(true);
     }
   });
@@ -129,7 +135,7 @@ describe("minorFieldsRows", () => {
     // estinguendo la voce e' peggio del divieto: e' una bugia a schermo.
     const rows = minorFieldsRows(
       balance(), { sp16g: "ricavi", sp17g: "ricavi", sp16f: "ricavi" },
-      false, ["altri_debiti"],
+      ["altri_debiti"],
     );
     for (const field of ["sp16g_growth_pct", "sp17g_growth_pct"]) {
       const r = rows.find((x) => x.field === field);
@@ -145,10 +151,14 @@ describe("minorFieldsRows", () => {
     expect(previdenza?.code).toBe("sp16f");
   });
 
-  it("l'interruttore previdenza/personale toglie sp16f e sp17f dagli agganciabili", () => {
-    const rows = minorFieldsRows(balance(), { sp16f: "ricavi" }, true);
+  // A06 (lotto 3 fix rilievi, 2026-09-26): la casella previdenza/personale e' sparita —
+  // `minorFieldsRows` non la legge piu' e sp16f/sp17f sono agganciabili come le altre
+  // undici voci, "personale" compreso fra i driver offerti.
+  it("sp16f si aggancia al costo del personale dalla sola tendina", () => {
+    const rows = minorFieldsRows(balance(), { sp16f: "personale" });
     const sp16f = rows.find((r) => r.field === "sp16f_growth_pct");
-    expect(sp16f?.code).toBeNull();
+    expect(sp16f?.code).toBe("sp16f");
+    expect(sp16f?.driver).toBe("personale");
     expect(sp16f?.andamento).toBe("Cresce con il costo del personale");
     expect(sp16f?.agganciata).toBe(true);
     expect(sp16f?.off).toBe(true);
@@ -241,7 +251,9 @@ describe("degenerateDaysAvvisi", () => {
     expect(avvisi).toHaveLength(2);
     const dpo = avvisi.find((a) => a.includes("(DPO)"))!;
     expect(dpo).toContain("2025, 2026");
-    expect(avvisi.find((a) => a.includes("(DIO)"))).toContain("2026");
+    // lotto 1 fix rilievi (2026-09-26, rilievo I2 della revisione finale): l'etichetta "dio" non
+    // dice piu' "(DIO)" — dal B01 e' i giorni delle sole materie prime sul consumo.
+    expect(avvisi.find((a) => a.includes("materie prime"))).toContain("2026");
   });
 
   it("circolantePreview porta gli avvisi al passo, invece di lasciarli nei details", () => {

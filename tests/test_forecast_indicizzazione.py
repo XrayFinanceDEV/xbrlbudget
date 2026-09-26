@@ -108,6 +108,28 @@ def test_details_declare_the_two_keys_without_any_indexing(monkeypatch):
         engine.dispose()
 
 
+def test_importi_manuali_sp_sono_saldi_assoluti_per_anno(monkeypatch):
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    engine, sessions = memory_sessions()
+    try:
+        with sessions() as db:
+            company_id, _ = seed_base_year(db, user_id=USER)
+            rows = [
+                dict(forecast_year=2027, revenue_growth_pct=5,
+                     sp_overrides={"sp04_immob_finanziarie": 52550, "sp10_ratei_risconti_attivi": 10000},
+                     **MANUAL_TAX),
+                dict(forecast_year=2028, revenue_growth_pct=5,
+                     sp_overrides={"sp04_immob_finanziarie": 60000, "sp10_ratei_risconti_attivi": 12000},
+                     **MANUAL_TAX),
+            ]
+            sc, _ = _run(db, company_id, rows)
+            balances = [bs for _, bs, _ in read_forecast_maps(db, sc.id)]
+            assert [bs["sp04_immob_finanziarie"] for bs in balances] == [D("52550.00"), D("60000.00")]
+            assert [bs["sp10_ratei_risconti_attivi"] for bs in balances] == [D("10000.00"), D("12000.00")]
+    finally:
+        engine.dispose()
+
+
 # ── (a) Il driver moltiplica lo stock dell'anno BASE, e non compone ──
 
 def test_ricavi_driver_multiplies_the_base_stock_year_after_year(monkeypatch):
@@ -345,12 +367,13 @@ def test_tax_and_bank_codes_are_ignored_and_declared(monkeypatch):
         engine.dispose()
 
 
-def test_the_previdenza_switch_keeps_its_two_voci(monkeypatch):
-    """`previdenza_scales_with_personnel` E' gia' l'indicizzazione di sp16f/sp17f
-    al costo del personale, cablata su un interruttore. Con l'interruttore acceso
-    una chiave su quelle due voci avrebbe due padroni: vince l'interruttore
-    (cosi' gli scenari esistenti non cambiano di un centesimo) e la chiave e'
-    dichiarata ignorata."""
+def test_the_previdenza_switch_is_ignored_and_indexing_applies(monkeypatch):
+    """Lotto 3 fix rilievi (2026-09-26, A06, decisione del proprietario): il doppio comando
+    e' sparito. `previdenza_scales_with_personnel` resta nel modello per compatibilita', ma
+    il motore non lo legge piu' — il salto «governata dall'interruttore» in
+    `_resolve_sp_indexing` non c'e' piu', quindi un `sp_indexing` su sp16f/sp17f si applica
+    SEMPRE, flag acceso o no. Riscrive `test_the_previdenza_switch_keeps_its_two_voci`, che
+    difendeva il comportamento opposto."""
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
     engine, sessions = memory_sessions()
     try:
@@ -358,18 +381,21 @@ def test_the_previdenza_switch_keeps_its_two_voci(monkeypatch):
             company_id, _ = seed_base_year(db, user_id=USER)
             _split_debts(db, company_id)
             rows = [dict(forecast_year=2027, revenue_growth_pct=20, personnel_growth_pct=25,
-                         previdenza_scales_with_personnel=True, **MANUAL_TAX)]
-            sc_plain, _ = _run(db, company_id, rows)
-            rows_i = [dict(r, sp_indexing={"sp16f": "ricavi", "sp17f": "ricavi"}) for r in rows]
-            sc, _ = _run(db, company_id, rows_i)
+                         sp_indexing={"sp16f": "ricavi", "sp17f": "ricavi"}, **MANUAL_TAX)]
+            sc_no_flag, _ = _run(db, company_id, [dict(r) for r in rows])
+            rows_flag = [dict(r, previdenza_scales_with_personnel=True) for r in rows]
+            sc_flag, _ = _run(db, company_id, rows_flag)
+            # Il flag non cambia piu' un centesimo: acceso o spento da' gli stessi numeri.
             for (_, bs_a, ce_a), (_, bs_b, ce_b) in zip(
-                read_forecast_maps(db, sc_plain.id), read_forecast_maps(db, sc.id)
+                read_forecast_maps(db, sc_no_flag.id), read_forecast_maps(db, sc_flag.id)
             ):
                 assert bs_a == bs_b and ce_a == ce_b
-            det = _preview(db, company_id, sc.id, rows_i)["forecast_years"][0]["details"]
-            assert det["indicizzazione"] == {}
-            assert [v["motivo"] for v in det["indicizzazione_ignorata"]] == [
-                "governata dall'interruttore previdenza/personale"] * 2
+            _, bs, _ = read_forecast_maps(db, sc_flag.id)[0]
+            assert bs["sp16f_debiti_previdenza_breve"] == D("18000.00")  # 15.000 × 1,2 (ricavi)
+            det = _preview(db, company_id, sc_flag.id, rows_flag)["forecast_years"][0]["details"]
+            assert det["indicizzazione"]["sp16f"]["driver"] == "ricavi"
+            assert det["indicizzazione"]["sp17f"]["driver"] == "ricavi"
+            assert det["indicizzazione_ignorata"] == []
     finally:
         engine.dispose()
 

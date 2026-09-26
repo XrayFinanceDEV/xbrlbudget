@@ -49,7 +49,6 @@ import {
 import { formatEuro, formatEuroPreciso, formatInputNumber, parseInputNumber } from "@/lib/pratica-format";
 import {
   SOGLIA_CHIUSURA_AUTOMATICA,
-  chiusuraAutomatica,
   chiusuraSbilancio,
   quadra,
   scartoQuadratura,
@@ -189,7 +188,7 @@ export function RettificheTab({
     ...adjustableData.original_income_statement,
   } as Record<string, number>;
   // Reconcile debt sub-fields so "Altri debiti" absorbs any gap vs imported aggregate
-  reconcileSubfields(original);
+  reconcileSubfields(original, { adjustBalance: false });
 
   // Handle field changes — only direct edit + conditional sub-field aggregates + sp13 recalc.
   // Double-entry counterparts are proposed via dialog, not auto-applied.
@@ -484,54 +483,6 @@ export function RettificheTab({
     if (!ok) return;
     setCorrections(final);
     setLog(newLog);
-  };
-
-  // La conferma chiude da sola lo scarto di arrotondamento dell'importazione
-  // (fino a 2 €, decisione del proprietario del 2026-09-16): la correzione
-  // finisce in giornale come ogni altra — visibile, spiegata e cancellabile —
-  // e il foglio che la proiezione legge quadra davvero. Sopra i 2 € non si
-  // tocca nulla: quell'importo non è rumore, e chiuderlo resta un gesto
-  // dell'utente dal pulsante «Chiudi sbilancio».
-  //
-  // Stessa disciplina di confirmActiveEdit: lo stato locale si muove SOLO se
-  // il server ha accettato. Un salvataggio rifiutato non deve far proseguire
-  // con un foglio che a schermo sembra chiuso e sul server non lo è.
-  const confermaEProsegui = async () => {
-    const chiusura = chiusuraAutomatica(scartoProiettato());
-    if (chiusura) {
-      const updated = { ...corrections };
-      updated[chiusura.field] =
-        (updated[chiusura.field] ?? original[chiusura.field] ?? 0) + chiusura.delta;
-      const newEntry: RettificaEntry = {
-        id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-        edited_field: chiusura.field,
-        edited_label: chiusura.label,
-        edit_delta: chiusura.delta,
-        counterpart_field: "_correzione_import",
-        counterpart_label: "Correzione importazione",
-        counterpart_delta: 0,
-        explanation: chiusura.explanation,
-        created_at: new Date().toISOString(),
-      };
-      const final = recalcAggregates(updated);
-      const newLog = [...log, newEntry];
-      if (newLog.filter((e) => e.entry_type !== "confirm").length > RETTIFICHE_MAX) {
-        toast.error(
-          `Massimo ${RETTIFICHE_MAX} rettifiche: cancellane una per chiudere lo scarto ` +
-          `di ${formatEuroPreciso(Math.abs(chiusura.delta))}`,
-        );
-        return;
-      }
-      const ok = await onSave(final, newLog);
-      if (!ok) return;
-      setCorrections(final);
-      setLog(newLog);
-      toast.success(
-        `Scarto di quadratura ${formatEuroPreciso(Math.abs(chiusura.delta))} chiuso su ${chiusura.label}`,
-      );
-    }
-    setShowSummaryDialog(false);
-    onNext();
   };
 
   // Compute totals
@@ -1525,7 +1476,7 @@ export function RettificheTab({
             <Button variant="outline" onClick={() => setShowSummaryDialog(false)}>
               Torna alle Rettifiche
             </Button>
-            <Button onClick={confermaEProsegui} disabled={saving}>
+            <Button onClick={() => { setShowSummaryDialog(false); onNext(); }} disabled={saving}>
               <Check className="h-4 w-4 mr-1.5" />
               Conferma e Prosegui
             </Button>

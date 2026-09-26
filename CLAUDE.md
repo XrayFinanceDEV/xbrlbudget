@@ -417,8 +417,14 @@ ciò che non si può non sapere. Ogni voce dice la regola e **cosa si rompe** a 
   straordinari (`ce18`, `ce19`) valgono zero in ogni anno di piano salvo override esplicito: non si
   ripetono più dall'anno base. Un contratto scadenziato a mano (`repayments`) che nell'ultimo anno
   di piano non copre l'anno dopo ripete l'ultima rata a breve invece di lasciare l'intero residuo a
-  lungo termine oltre l'orizzonte (`rata_ripetuta` in `details['debito_bancario']['contratti']` e in
-  `details['altri_finanziatori']['contratti']`). Con un piano `crediti_commerciali`, l'incasso della
+  lungo termine oltre l'orizzonte — sempre per gli `altri_finanziatori`, e per i contratti bancari
+  pregressi **solo sotto il regime esplicito dei fidi**: fuori da lì il breve pregresso resta quanto
+  il bilancio già porta (`sp16a`), invariato dalla lista di rimborsi, e la riga dichiara
+  `rata_ripetuta: false` (restretto dal rilievo M1 della revisione finale, 2026-09-26 — dichiarare
+  `true` lì suggeriva un movimento che non c'era). Un prestito bancario NUOVO non ha mai una lista
+  di rimborsi scritta a mano: la validazione bulk la rifiuta (`repayments` vale solo sul residuo
+  pregresso). Diagnostica in `details['debito_bancario']['contratti']` e in
+  `details['altri_finanziatori']['contratti']`. Con un piano `crediti_commerciali`, l'incasso della
   massa oltre 12 mesi consuma prima `sp07a` (clienti), poi le altre sotto-voci in ordine, mai sotto
   zero — non più un riparto proporzionale che spostava la riga sbagliata quando clienti e altri
   crediti oltre 12 mesi convivono (`_consuma_in_ordine`). → sezione «Forecasting Engine (Budget)»
@@ -690,13 +696,22 @@ breve-pregresso-plus-quota (overriding it subtracts the quota too, −25.000,09 
 test kit), while `sp17a` fixes only what is beyond the quota (the quota still lands on top in
 `sp16a`, +25.000,09 of debt and cash). Without an override on either field, cash, P&L and total bank
 debt do not move.
-**B05 (lotto 1 fix rilievi, 2026-09-26): in the last plan year, a hand-scheduled loan
-(`repayments`) whose list stops before next year repeats its last positive instalment into the
-short-term share**, instead of leaving the whole residual long-term past the plan's horizon that no
-year will ever see fall due — declared per contract as `rata_ripetuta` in
-`details['debito_bancario']['contratti']` and, same kernel and same defect, in
+**B05 (lotto 1 fix rilievi, 2026-09-26; restricted by finding M1 of the final review, same date):
+in the last plan year, a hand-scheduled loan (`repayments`) whose list stops before next year
+repeats its last positive instalment into the short-term share**, instead of leaving the whole
+residual long-term past the plan's horizon that no year will ever see fall due — declared per
+contract as `rata_ripetuta` in `details['debito_bancario']['contratti']` and, same kernel, in
 `details['altri_finanziatori']['contratti']` too (`rata_anno_dopo` in
-`calculations/projection_common.py`). Existing scenarios move only when a contract's own
+`calculations/projection_common.py`). This only actually moves the short-term share **for
+`altri_finanziatori` contracts (always) and for bank pregresso contracts under the explicit
+credit-lines regime** (`bank_lines_amount` set — there the short-term pregresso total IS the sum of
+every contract's `rata_anno_dopo`). **Outside that regime a bank pregresso contract's short-term
+share is whatever the balance sheet already carries (`sp16a`), untouched by the repayment list**, so
+`rata_ripetuta` there is always `False` — declaring `True` would describe a reclassification that
+never happens (M1: `_contratti_dell_anno`'s `pregresso_riclassificato` flag). A NEW bank loan
+(`amount > 0`) never has a hand-written `repayments` list at all: the bulk validation rejects it
+(`repayments` is only valid on the pregresso residual, `amount == 0`). Existing scenarios move only
+under the credit-lines regime or for `altri_finanziatori`, and only when a contract's own
 `repayments` list ends before the plan does: their last plan year's short-term share grows by that
 repeated instalment, long-term shrinks by the same amount.
 DSO/DIO/DPO that are not set explicitly are derived from the base year on 360

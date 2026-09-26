@@ -6,7 +6,7 @@ from calculations.projection_common import ammortamento_categoria, rata_anno_dop
 from tests.rilievi_kit import BASE_BS, BASE_CE, genera, generato, righe
 from tests.test_forecast_altri_finanziatori import _genera as _genera_altri_finanziatori
 from tests.test_forecast_altri_finanziatori import _rows as _rows_altri_finanziatori
-from tests.test_rilievi_ambienta import _banche
+from tests.test_rilievi_ambienta import MUTUO_A, _banche
 
 
 def test_consuma_in_ordine_toglie_prima_dalla_prima_voce():
@@ -418,3 +418,30 @@ def test_M3_override_ce09b_entro_il_netto_disponibile_e_accettato():
     rows[0]["ce09b_override"] = float(netto)
     e = generato(genera(rows))
     assert e.anni[2027][1]["ce09b_ammort_materiali"] == netto.quantize(D("0.01"))
+
+
+# ── M1 (revisione finale, 2026-09-26): fuori dal regime esplicito dei fidi, il breve
+# pregresso resta quanto il bilancio gia' porta (`sp16a`), non la rata dell'anno dopo — una
+# lista di rimborsi scritta a mano che non copre l'anno dopo non sposta nulla li', e la riga
+# non deve dichiarare `rata_ripetuta: True` come se lo facesse. ──
+
+def test_M1_pregresso_fuori_dal_regime_fidi_rata_ripetuta_non_sposta_nulla():
+    banche = float(BASE_BS["sp16a_debiti_banche_breve"] + BASE_BS["sp17a_debiti_banche_lungo"])
+
+    def _scenario(repayments):
+        rows = righe()
+        rows[0]["financing_loans"] = [{**MUTUO_A, "opening_residual": banche, "repayments": repayments}]
+        return generato(genera(rows))
+
+    non_scadenziato = _scenario([53409, 53409, 53409])       # non copre il 2030
+    scadenziato = _scenario([53409, 53409, 53409, 53409])    # copre il 2030
+
+    c_non = non_scadenziato.det[2029]["debito_bancario"]["contratti"][0]
+    c_si = scadenziato.det[2029]["debito_bancario"]["contratti"][0]
+
+    # Fuori dal regime fidi il breve pregresso e' sempre `breve_pregresso_fine` (cio' che
+    # sp16a gia' porta), mai la rata dell'anno dopo: la ripetizione non sposta nulla.
+    assert c_non["breve"] == c_si["breve"]
+    assert c_non["lungo"] == c_si["lungo"]
+    assert c_non["rata_ripetuta"] is False
+    assert c_si["rata_ripetuta"] is False

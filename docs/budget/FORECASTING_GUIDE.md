@@ -295,9 +295,13 @@ riclassifica oltre 12 mesi in Rettifiche (o nell'infrannuale) e li scadenzia qui
   partenza il motore calcola comunque il piano e **dichiara un avviso**, in euro, con l'anno e
   l'eccedenza. Un override sullo stesso totale (`sp16a`/`sp16`) con un fabbisogno aperto si
   rifiuta: il totale forzato non lascia posto al tiraggio.
-- I **finanziamenti pregressi** scadenziano il capitale rimborsato **anno per anno**: la quota che
-  cade l'anno dopo sta a breve nel passivo, il resto oltre. **Gli altri finanziatori** seguono lo
-  stesso schema, per proprio conto.
+- I **finanziamenti pregressi**, **solo sotto il regime esplicito dei fidi** (fidi e anticipi
+  divisi al passo 5), scadenziano il capitale rimborsato **anno per anno**: la quota che cade
+  l'anno dopo sta a breve nel passivo, il resto oltre. Senza quella divisione il breve pregresso
+  resta quanto il bilancio già porta (`sp16a`), non la rata dell'anno dopo — il rimborso scritto a
+  mano non lo sposta (rilievo M1 della revisione finale, 2026-09-26). **Gli altri finanziatori**
+  seguono sempre lo schema con la rata dell'anno dopo, per proprio conto: il regime dei fidi non
+  li riguarda.
 
 **Che cosa mostra l'anteprima**
 
@@ -373,10 +377,13 @@ foglio.»
   passo. L'uscita di cassa passa dal plug, il rendiconto la legge dal movimento del fondo.
 - **Nuovi finanziamenti**: ciascuno ha il proprio calendario — quote capitale costanti dopo
   l'eventuale preammortamento, interessi sul residuo di apertura. La quota che cade l'anno dopo sta
-  a breve, il resto oltre. Nell'**ultimo anno di piano**, un finanziamento con rate scritte a mano la
-  cui lista non arriva all'anno dopo ripete l'ultima rata a breve, invece di lasciare l'intero
-  residuo oltre l'orizzonte del piano dove nessun anno lo vedrà mai scadere — vale anche per gli
-  altri finanziatori scadenziati a mano al passo 5.
+  a breve, il resto oltre. Un prestito NUOVO non ha mai una lista di rate scritte a mano (la
+  validazione la rifiuta: `repayments` vale solo sul residuo pregresso). Nell'**ultimo anno di
+  piano**, sotto il regime esplicito dei fidi, un finanziamento pregresso scadenziato a mano la cui
+  lista non arriva all'anno dopo ripete l'ultima rata a breve, invece di lasciare l'intero residuo
+  oltre l'orizzonte del piano dove nessun anno lo vedrà mai scadere — fuori da quel regime la rata
+  scritta a mano non sposta il breve pregresso, che resta quanto il bilancio già porta. Vale sempre,
+  con o senza fidi, per gli altri finanziatori scadenziati a mano al passo 5.
 - **La cassa è il pareggio e pareggia solo verso l'alto.** Se hai diviso fidi e mutui al passo 5,
   un fabbisogno tira sui fidi (descritto lì) e il piano non si ferma mai per questo. Senza quella
   divisione vale la regola di sempre: spento, il motore si ferma sul primo anno che non si

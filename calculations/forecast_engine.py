@@ -381,7 +381,8 @@ def _residuo_contratto(loan, fino_al_anno: int) -> Decimal:
 
 def _contratti_dell_anno(loans, anno: int, quota_breve_nuovi: Decimal, residuo_nuovi: Decimal,
                          breve_pregresso: Decimal, lungo_pregresso: Decimal,
-                         ultimo_anno_piano: Optional[int] = None) -> List[Dict[str, Any]]:
+                         ultimo_anno_piano: Optional[int] = None,
+                         pregresso_riclassificato: bool = False) -> List[Dict[str, Any]]:
     """Le righe `contratti` di `details['debito_bancario']`, grezze (le quantizza `_dichiara_debito_bancario`).
 
     Per ogni contratto: erogato, rimborso e interessi dell'anno dal kernel sul solo contratto, e il
@@ -393,15 +394,25 @@ def _contratti_dell_anno(loans, anno: int, quota_breve_nuovi: Decimal, residuo_n
     - contratti col residuo iniziale: `breve_pregresso` si assegna in ordine, fino al residuo di
       ciascuno; l'ultimo assorbe la differenza verso `breve_pregresso` e verso `lungo_pregresso`.
 
-    `rata_ripetuta` (spec B05, lotto 1 fix rilievi 2026-09-26): SEMPRE dichiarata su ogni riga,
-    dal `rata_anno_dopo` del solo contratto — vera quando l'anno e' l'ultimo di piano e la sua
-    rata a breve e' la ripetizione dell'ultima rata scadenziata, mai la lettura del calendario.
+    `rata_ripetuta` (spec B05, lotto 1 fix rilievi 2026-09-26; ristretta dal rilievo M1 della
+    revisione finale, 2026-09-26): SEMPRE dichiarata, ma vale `rata_anno_dopo` del contratto solo
+    dove la ripetizione sposta davvero il breve dichiarato — sui contratti NUOVI (la cui quota a
+    breve viene proprio da li', via `_quota_breve_prestiti_nuovi`) e sui contratti col residuo
+    iniziale quando il chiamante segnala `pregresso_riclassificato=True` (regime esplicito dei fidi,
+    dove `breve_pregresso` e' la somma di `rata_anno_dopo` di ogni contratto). FUORI da quel regime
+    `breve_pregresso` e' quanto il bilancio gia' porta (`sp16a` dell'anno, invariato dalla lista di
+    rimborsi), quindi la ripetizione non sposta nulla: dichiarare `True` li' suggerirebbe un
+    movimento inesistente, ed e' il difetto che M1 corregge.
     """
     zero = Decimal('0')
     righe: List[Dict[str, Any]] = []
     for indice, loan in enumerate(loans or []):
         erogato, rimborso, interessi = new_financing_schedule([loan], anno)
-        _, rata_ripetuta = rata_anno_dopo(loan, anno, ultimo_anno_piano)
+        pregresso = _e_contratto_pregresso(loan)
+        if pregresso and not pregresso_riclassificato:
+            rata_ripetuta = False
+        else:
+            _, rata_ripetuta = rata_anno_dopo(loan, anno, ultimo_anno_piano)
         righe.append({
             'indice': indice,
             'anno': int(loan['year']),
@@ -413,7 +424,7 @@ def _contratti_dell_anno(loans, anno: int, quota_breve_nuovi: Decimal, residuo_n
             'interessi': interessi,
             'rata_ripetuta': rata_ripetuta,
             '_residuo': _residuo_contratto(loan, anno),
-            '_pregresso': _e_contratto_pregresso(loan),
+            '_pregresso': pregresso,
             '_loan': loan,
         })
     nuovi = [r for r in righe if not r['_pregresso']]
@@ -4673,6 +4684,11 @@ class ForecastEngine:
                 if use_detailed_existing_schedule else ZERO,
                 sp17a_pregresso if use_detailed_existing_schedule else ZERO,
                 ultimo_anno_piano,
+                # M1 (revisione finale, 2026-09-26): solo nel regime esplicito dei fidi
+                # `breve_pregresso` sopra e' la somma di `rata_anno_dopo` dei contratti
+                # (`quota_dopo_contratti`) — fuori da li' e' `breve_pregresso_fine`, cio' che
+                # `sp16a` gia' porta, e la ripetizione dell'ultima rata non lo tocca.
+                use_detailed_existing_schedule and fidi_apertura is not None,
             )
             if fidi_apertura is not None:
                 # `rimborso_sweep` a zero qui: lo scrive `_dichiara_debito_bancario`

@@ -653,15 +653,17 @@ debt do not move.
 DSO/DIO/DPO that are not set explicitly are derived from the base year on 360
 days (from *commercial* receivables and payables, not the aggregates), and working capital scales
 with projected revenue and costs, CE overrides included.
-**Closing working capital is generated + pregresso residual**, for five opening balances (trade
-receivables, trade payables, tax payables, welfare payables, other payables): an optional
+**Closing working capital is generated + pregresso residual**, for seven opening balances (trade
+receivables, tax receivables within 12 months, tax receivables beyond 12 months, trade payables,
+tax payables, welfare payables, other payables — `PREGRESSO_KEYS`): an optional
 `pregresso` runoff plan (`BudgetAssumptions.pregresso`, JSON, valid only on the first forecast
 year's row) schedules how much of the base-year opening mass is collected or paid in each plan
 year; whatever the day-count/growth formula would produce is added to the still-open short-term
 residual, and the entire long-term side becomes pregresso (`_calculate_balance_sheet` in
-`calculations/forecast_engine.py`, the `crediti_commerciali` block for receivables and the
-`debiti_fornitori`/`debiti_previdenziali`/`altri_debiti` blocks for payables, kernel in
-`calculations/projection_common.runoff_schedule`). Without a plan a
+`calculations/forecast_engine.py`, the `crediti_commerciali`/`crediti_tributari_breve`
+and `crediti_tributari_lungo` blocks for receivables and the
+`debiti_fornitori`/`debiti_previdenziali`/`altri_debiti`/`debiti_tributari` blocks for payables,
+kernel in `calculations/projection_common.runoff_schedule`). Without a plan a
 balance follows the same formula as before the lotto (`mode: "legacy"` in
 `details['pregresso']`), and the rounding cent of the debt group still lands on
 `sp16g`/`sp17g` — though its amount can differ by a cent when another row of the group moved

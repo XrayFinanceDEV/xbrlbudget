@@ -178,6 +178,38 @@ def test_altri_crediti_tributari_scheduled_by_amount_without_regeneration(monkey
         engine.dispose()
 
 
+@pytest.mark.parametrize("anno_override", [2027, 2028])
+def test_override_crediti_tributari_lunghi_con_piano_viene_rifiutato(monkeypatch, anno_override):
+    """Il calendario rigenera sp07e anche quando l'override cade dopo il primo anno."""
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    engine, sessions = memory_sessions()
+    try:
+        with sessions() as db:
+            company_id, _ = seed_base_year(db, user_id=USER)
+            fy = db.query(models.FinancialYear).filter_by(company_id=company_id).one()
+            bs = db.query(models.BalanceSheet).filter_by(financial_year_id=fy.id).one()
+            bs.sp07_crediti_lungo = D("10000")
+            bs.sp07e_crediti_tributari_lungo = D("10000")
+            bs.sp09_disponibilita_liquide = D("20000")
+            db.commit()
+
+            rows = [dict(forecast_year=y, revenue_growth_pct=0, **MANUAL_TAX)
+                    for y in (2027, 2028, 2029)]
+            rows[0]["pregresso"] = {
+                "crediti_tributari_lungo": {"opening": 10000, "amounts": [0, 4000, 6000]},
+            }
+            rows[anno_override - 2027]["sp_overrides"] = {
+                "sp07e_crediti_tributari_lungo": 7000,
+            }
+            sc, res = _run(db, company_id, rows, expect_ok=False)
+            assert res["forecast_generated"] is False
+            assert "sp07e_crediti_tributari_lungo" in res["message"]
+            assert "piano di scadenziamento" in res["message"]
+            assert read_forecast_maps(db, sc.id) == []
+    finally:
+        engine.dispose()
+
+
 def test_acconti_storici_compensano_imposte_senza_ridurre_altri_crediti(monkeypatch):
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
     engine, sessions = memory_sessions()

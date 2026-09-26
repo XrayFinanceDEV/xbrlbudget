@@ -990,6 +990,10 @@ class ForecastEngine:
         "debiti_tributari": ("sp17e_debiti_tributari_lungo",),
         "debiti_previdenziali": ("sp17f_debiti_previdenza_lungo",),
         "altri_debiti": ("sp17g_altri_debiti_lungo",),
+        # Il piano della componente tributaria lunga riscrive `sp07e` dal
+        # residuo del calendario anche quando i crediti commerciali non hanno
+        # un piano. Un override su quella riga sparirebbe l'anno dopo.
+        "crediti_tributari_lungo": ("sp07e_crediti_tributari_lungo",),
         # Il piano dei crediti commerciali scrive l'AGGREGATO `sp07` come
         # residuo lungo del runoff piu' la quota tributaria cresciuta: lo
         # stesso meccanismo degli altri quattro saldi, sullo stesso lato. Che
@@ -1029,6 +1033,9 @@ class ForecastEngine:
     # degli altri debiti deve pagare».
     _PREGRESSO_ARTICOLI: Dict[str, Tuple[str, str]] = {
         "crediti_commerciali": ("i crediti commerciali", "dei crediti commerciali"),
+        "crediti_tributari_lungo": (
+            "i crediti tributari oltre 12 mesi", "dei crediti tributari oltre 12 mesi"
+        ),
         "debiti_fornitori": ("i debiti verso fornitori", "dei debiti verso fornitori"),
         "debiti_tributari": ("i debiti tributari", "dei debiti tributari"),
         "debiti_previdenziali": ("i debiti previdenziali", "dei debiti previdenziali"),

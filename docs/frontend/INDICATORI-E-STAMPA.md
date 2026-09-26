@@ -85,7 +85,8 @@ generando il PDF, invisibile a ogni controllo sul DOM.
 
 ## Limite noto: il denominatore dei rapporti percentuali
 
-`computeIndicators` usa `revenue = ce01_ricavi_vendite` **da solo** come denominatore di
+`calcola_indicatori` (`calculations/crisi_impresa.py`) usa `revenue = ce01_ricavi_vendite`
+**da solo** come denominatore di
 `ebitda_margin`, `materials_revenue`, `services_revenue` e `ros`.
 
 Un'azienda che fattura su `ce04_altri_ricavi` porta un `ce01` prossimo a zero e produce

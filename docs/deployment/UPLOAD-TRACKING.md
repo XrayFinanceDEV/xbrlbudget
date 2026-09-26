@@ -9,7 +9,7 @@ registra l'esito in tabella; tre endpoint di amministrazione lo ritrovano e lo r
 `save_upload` (`backend/app/services/upload_tracker.py`) è chiamato **prima** che il parser
 parta, così anche un crash dell'estrattore lascia una riga. Gli endpoint che lo chiamano sono
 **quattro**, non tre: `/import/xbrl`, `/import/csv`, `/import/pdf` e `/import/pdf-ocr`
-(`backend/app/api/v1/imports.py:148, 295, 431, 576`).
+(`backend/app/api/v1/imports.py`, nelle rispettive route).
 
 Rispetto ai controlli di proprietà e di limite (`validate_company_owned_by_user`,
 `check_company_limit`) l'ordine **non è lo stesso sulle quattro route**:
@@ -17,7 +17,7 @@ Rispetto ai controlli di proprietà e di limite (`validate_company_owned_by_user
 | route | ordine | `except HTTPException` |
 |---|---|---|
 | `/import/xbrl` | `save_upload` **poi** i controlli | ri-solleva, **senza** `mark_error` (`:211`) |
-| `/import/pdf` | `save_upload` **poi** i controlli | ri-solleva, **senza** `mark_error` (`:483`) |
+| `/import/pdf` | `save_upload` **poi** i controlli | ri-solleva, **senza** `mark_error` (`imports.py`, route `pdf`) |
 | `/import/csv` | i controlli **poi** `save_upload` | ri-solleva, senza `mark_error` (`:326`) |
 | `/import/pdf-ocr` | i controlli **poi** `save_upload` | marca `error` e ri-solleva (`:671-673`) |
 
@@ -25,7 +25,7 @@ Su `xbrl` e `pdf` una richiesta respinta per proprietà o per limite aziende las
 file su disco e una riga `pending` per sempre**: uno stato `pending` vecchio non significa
 «import interrotto a metà», può essere un 403 o un 404. Su `pdf-ocr` la divergenza è
 deliberata e commentata sul posto («an unauthorized request must not create a pending upload
-row for a company the caller does not own», `imports.py:564-570`): quella route fa partire un
+row for a company the caller does not own», `imports.py`, route `pdf-ocr`): quella route fa partire un
 lavoro OCR pesante, e non lo si traccia prima di sapere che il chiamante ha diritto di farlo
 partire.
 

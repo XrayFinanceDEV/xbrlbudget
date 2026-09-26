@@ -107,7 +107,7 @@ export function degenerateDaysAvvisi(data: ForecastPreviewResponse | null): stri
 }
 
 /**
- * Le 14 voci minori dell'attivo e del passivo, con il codice SP, l'importo base
+ * Le 15 voci minori dell'attivo e del passivo, con il codice SP, l'importo base
  * e chi le governa.
  *
  * `code` e' `null` sulle voci che nessun driver puo' agganciare, e `governata`
@@ -217,7 +217,7 @@ export function spIndexingOf(
   return raw ?? {};
 }
 
-/** Le 14 voci minori: importo base, driver scelto e frase di andamento. */
+/** Le 15 voci minori: importo base, driver scelto e frase di andamento. */
 export function minorFieldsRows(
   baseBs: BalanceSheet | undefined | null,
   indexing: Record<string, SpIndexingDriver> = {},

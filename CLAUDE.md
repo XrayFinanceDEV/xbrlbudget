@@ -71,9 +71,9 @@ python -c "from database.db import drop_all, init_db; drop_all(); init_db()"
 
 ### API — INPUT → ASSUMPTIONS → OUTPUT
 
-The router exposes about 75 typed routes — a count that ages at every new route, so the live list is
-`GET /openapi.json`, not this line. The workflow above uses the ones that matter; the rest are legacy or
-per-year detail. Two things about them are worth knowing:
+The router exposes typed routes; the live list is `GET /openapi.json`. The workflow above uses
+the ones that matter; the rest are legacy or per-year detail. Two things about them are worth
+knowing:
 
 - **Import endpoints are four, not three:** `POST /api/v1/import/{xbrl|csv|pdf|pdf-ocr}`. XBRL = 6
   taxonomies; CSV = TEBE format; PDF = PyMuPDF + LLM (Anthropic by default, or gx10 for the
@@ -379,7 +379,12 @@ ciò che non si può non sapere. Ogni voce dice la regola e **cosa si rompe** a 
   voce (`receivables_long_growth_pct`, o `sp17d`/`sp17f`/`sp17g_growth_pct`) smette di applicarsi — sostituita di
   peso dal residuo lungo (`_calculate_balance_sheet` in `calculations/forecast_engine.py`, blocco
   `crediti_commerciali` per i crediti, blocchi `debiti_fornitori`/`debiti_previdenziali`/`altri_debiti`
-  per fornitori/previdenziali/altri debiti). `details['pregresso'][saldo]['mode']` vale `"runoff"`
+  per fornitori/previdenziali/altri debiti). Il piano `crediti_tributari_lungo` rigenera
+  `sp07e_crediti_tributari_lungo` dal residuo del calendario; quello
+  `crediti_tributari_breve` scadenzia la sola componente storica di `sp06e`, che può includere
+  anche credito generato dalle imposte. Un override di `sp07e` con il relativo piano attivo è
+  rifiutato, perché il calendario lo cancellerebbe nell'anno successivo.
+  `details['pregresso'][saldo]['mode']` vale `"runoff"`
   quando è così, `"legacy"` (formule di oggi, intere) quando il saldo non ha un piano.
 - **Un previsionale mostrato può essere più vecchio delle ipotesi salvate, e si dichiara.**
   `forecast_stale` in `/analysis` è `true` quando l'ultima scrittura delle ipotesi è successiva

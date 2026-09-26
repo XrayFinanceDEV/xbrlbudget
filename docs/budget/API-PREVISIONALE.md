@@ -174,7 +174,7 @@ la casella non viene personalizzata.
 
 ### 2.1 Conto economico — 32 colonne `ce*_override`
 
-`BudgetAssumptions` porta **32** colonne `ce*_override` (`database/models.py:703-736`), non 31:
+`BudgetAssumptions` porta **32** colonne `ce*_override` (`database/models.py`, modello `BudgetAssumptions`), non 31:
 `ce01`–`ce20` meno `ce17` (sostituito dalle sue due sotto-voci), più `ce03a` (incrementi di
 immobilizzazioni per lavori interni, A.4), `ce08a`–`d`, `ce09a`–`d`, `ce11b`, `ce17`, `ce17a`,
 `ce17b`. Lo stesso insieme di 32 compare in `backend/app/schemas/budget.py` (due volte),
@@ -222,7 +222,7 @@ fisso — e lo stato si legge dall'oggetto `assumptions` della risposta di `/ana
 
 ### 2.2 Stato patrimoniale — il sacco JSON `sp_overrides`
 
-`BudgetAssumptions.sp_overrides` è una colonna **JSON** (`models.py:700`), un dizionario
+`BudgetAssumptions.sp_overrides` è una colonna **JSON** (`database/models.py`), un dizionario
 `{campo_sp: valore}`. Non è un residuo: `/forecast/balance` è **editabile** e la scrive
 (`frontend/app/forecast/balance/page.tsx:153-158`), in un lotto UNICO che può toccare **più
 anni in una sola chiamata**:

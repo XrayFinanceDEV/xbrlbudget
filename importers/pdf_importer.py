@@ -1,7 +1,8 @@
 """
 PDF Balance Sheet Importer for Italian IV CEE format.
 
-Uses PyMuPDF + Claude Haiku 4.5 (~5s). Requires ANTHROPIC_API_KEY.
+Uses PyMuPDF and a configurable LLM provider for text extraction.
+Vision OCR still requires ANTHROPIC_API_KEY.
 """
 
 import os
@@ -729,7 +730,8 @@ def import_pdf_balance_sheet(
     """
     Import balance sheet from PDF file.
 
-    Uses PyMuPDF + Claude Haiku 4.5. Requires ANTHROPIC_API_KEY.
+    Uses PyMuPDF and the configured LLM provider for text extraction.
+    Vision OCR requires ANTHROPIC_API_KEY.
 
     Args:
         file_path: Path to PDF file

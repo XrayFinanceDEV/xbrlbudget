@@ -231,12 +231,16 @@ riclassifica oltre 12 mesi in Rettifiche (o nell'infrannuale) e li scadenzia qui
   si rinnovano, i finanziamenti li scadenzi nella card sotto».
 - **Altre voci oltre 12 mesi · scadenziamento a mano** (tutta larghezza): tabella *voce · al
   31/12 · un importo per anno · resta*. Righe: **crediti oltre 12 mesi** (commerciali, al netto di
-  tributari e imposte anticipate), **altri debiti oltre**, **fornitori oltre** (solo se > 0),
+  tributari e imposte anticipate), **altri crediti tributari entro 12 mesi** (al netto degli
+  acconti storici) e **oltre 12 mesi** (visibili quando la massa è positiva),
+  **altri debiti oltre**, **fornitori oltre** (solo se > 0),
   **previdenziali oltre** (solo se > 0), **debiti tributari rateizzati** — al 31/12 il rateizzato
   del piano tributario (non l'intera massa: il saldo a breve non entra in questa riga, si versa
   per intero nel primo anno di piano), un importo per anno, con la nota «Rate della
-  rateizzazione: escono di cassa nell'anno. Il saldo a breve si paga nel {anno 1}.». Sui crediti,
-  la casella **«non incassati nel piano (es. infragruppo)»**: spegne le caselle e scrive 0 su ogni
+  rateizzazione: escono di cassa nell'anno. Il saldo a breve si paga nel {anno 1}.». Gli
+  **acconti d'imposta già versati** si indicano al passo 7 «Imposte»; sono sottratti dalla massa
+  degli altri crediti tributari a breve prima dello scadenziamento. Sui crediti commerciali,
+  la casella **«non incassati nel piano (es. infragruppo)»** spegne le caselle e scrive 0 su ogni
   anno. La colonna «resta» ha tre stati neutri — «chiuso», «resta aperto», «nessun movimento nel
   piano» — e «oltre il saldo» in rosso quando la somma supera la massa (il motore lo rifiuta).
 - **Debiti verso banche** (tutta larghezza): occhiello «{totale} € nel bilancio {anno} · di cui
@@ -314,8 +318,9 @@ foglio.»
   oltre, altri debiti entro e oltre, ratei e risconti passivi), con l'importo base e, dove il
   motore può agganciarla, un selettore: **Costante (variazione %)** oppure **Cresce con i ricavi /
   gli acquisti (materie e servizi) / il costo del personale**. Nota: «il saldo del {anno base} si
-  chiude al passo 5, qui si genera quello nuovo»; crediti tributari e imposte anticipate portano
-  invece «governati dalle imposte · passo 7». **«Variazione % per anno»** (accordion): le stesse
+  chiude al passo 5, qui si genera quello nuovo». I crediti tributari mostrano «Governata dalla
+  posizione tributaria»; le imposte anticipate mostrano «Governata a mano nello SP previsionale:
+  costanti, effetto sulla cassa». **«Variazione % per anno»** (accordion): le stesse
   voci come percentuali, anno per anno. Interruttore **Debiti previdenziali scalano col costo del
   personale**.
 - **Fondo TFR**: occhiello «{sp15} € al 31/12/{anno}». Interruttore «Accantonamento annuo ·

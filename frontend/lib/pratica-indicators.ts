@@ -149,7 +149,7 @@ const DENOMINATORE_DEL_RAPPORTO: Partial<Record<keyof IndicatorSet, keyof Indica
  * MOL sono numeri **genuini**, che vanno visti: nasconderli sarebbe perdere
  * un'informazione vera per rendere più bello un asse.
  *
- * **Solo la RESA.** `computeIndicators` e `scoreIndicator` non cambiano, quindi
+ * **Solo la RESA.** Il calcolo sul server e `scoreIndicator` non cambiano, quindi
  * il pallino di riga e il rating di crisi restano quelli di prima. Correggere
  * il denominatore a monte — usare il valore della produzione invece di `ce01` —
  * sposterebbe i punteggi di OGNI azienda, ed è una decisione di prodotto.

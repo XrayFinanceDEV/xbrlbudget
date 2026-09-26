@@ -23,8 +23,8 @@ esattamente la via che lasciava un bilancio di verifica **saltare le Rettifiche*
 suoi errori in Confronto, Proiezione, Indicatori e nei due modelli di rating. `/infrannuale`, la
 vecchia rotta del wizard, è oggi un `redirect()` a `/pratica` (`app/infrannuale/page.tsx`).
 
-Altri due ingressi, entrambi in `app/page.tsx`: `startForCompany` (avvia una pratica `bilancio`
-già puntata su un'azienda esistente) e `resume` (riapre una pratica da uno scenario già creato —
+Altri due ingressi, entrambi in `app/page.tsx`: `nuovaPratica` (avvia una pratica `bilancio`
+già puntata su un'azienda esistente) e `riprendi` (riapre una pratica da uno scenario già creato —
 vedi §4 per il caso «scenario budget legacy»).
 
 Spec: `docs/superpowers/specs/2026-08-08-percorso-unico-pratica-design.md`. Piano:
@@ -369,7 +369,7 @@ degli indicatori nel complesso.
 | `frontend/contexts/PraticaActionContext.tsx` | `usePrimaryAction`, il registro a token |
 | `frontend/components/pratica/PraticaActionBar.tsx` | la barra unica di avanzamento |
 | `frontend/app/pratica/page.tsx` | il wizard: stato, auto-load, riidratazione, i sette rami `activeTab` |
-| `frontend/app/page.tsx` | le due card «Nuova pratica», `startForCompany`, `resume` |
+| `frontend/app/page.tsx` | le due card «Nuova pratica», `nuovaPratica`, `riprendi` |
 | `frontend/app/budget/page.tsx` | il doppio ingresso: dentro e fuori da una pratica |
 | `frontend/app/layout.tsx` | l'ordine dei provider (`PraticaProvider` sopra `AppProvider`) |
 
@@ -514,11 +514,11 @@ mappa campo → passo sono dati puri in `frontend/lib/budget-wizard-steps.ts`
 |---|---|---|---|
 | 1 | Scenario | Impostazione | `inflation_pct` |
 | 2 | Fatturato | Conto economico | `revenue_growth_pct`, `other_revenue_growth_pct` |
-| 3 | Costi | Conto economico | `fixed_materials_percentage`, `fixed_services_percentage`, `variable_materials_growth_pct`, `variable_services_growth_pct`, `fixed_materials_growth_pct`, `fixed_services_growth_pct`, `fixed_materials_growth_auto`, `fixed_services_growth_auto`, `personnel_growth_pct`, `rent_growth_pct`, `other_costs_growth_pct` |
+| 3 | Costi | Conto economico | `fixed_materials_percentage`, `fixed_services_percentage`, `variable_materials_growth_pct`, `variable_services_growth_pct`, `fixed_materials_growth_pct`, `fixed_services_growth_pct`, `fixed_materials_growth_auto`, `fixed_services_growth_auto`, `variable_materials_growth_auto`, `variable_services_growth_auto`, `personnel_growth_pct`, `rent_growth_pct`, `other_costs_growth_pct` |
 | 4 | Capitale circolante | Stato patrimoniale | `dso_days`, `dio_days`, `dpo_days`, `receivables_long_growth_pct` |
-| 5 | Patrimoniale pregresso | Stato patrimoniale | `bank_lines_amount`, `bank_lines_rule`, `bank_lines_rate`, `financing_loans`, `existing_debt_repayment_years`, `altri_finanz_repayment_years` |
-| 6 | Patrimoniale piano | Stato patrimoniale | tredici `sp*_growth_pct` (sp01, sp04, sp06e, sp06f, sp08, sp10, sp14, sp16f, sp16g, sp17d, sp17f, sp17g, sp18), `previdenza_scales_with_personnel`, `tfr_accrual_suspended`, `tfr_payments`, `financing_amount`, `financing_duration_years`, `financing_interest_rate`, `tangible_investments`, `intangible_investments`, `depreciation_rate`, `depreciation_rate_intangible`, `asset_disposal_nbv`, `asset_disposal_proceeds`, `cash_sweep_enabled`, `cash_sweep_min_cash`, `overdraft_allowed`, `overdraft_limit` |
-| 7 | Imposte | Stato patrimoniale | `tax_rate` (proposta dall'ultimo consuntivo depositato), `tax_advances_paid`, `sp16e_growth_pct`, `sp17e_growth_pct` |
+| 5 | Patrimoniale pregresso | Stato patrimoniale | `bank_lines_amount`, `bank_lines_rate`, `financing_loans`, `existing_debt_repayment_years`, `altri_finanz_repayment_years`, `sp06e_growth_pct` |
+| 6 | Patrimoniale piano | Stato patrimoniale | dodici `sp*_growth_pct` (sp01, sp04, sp06f, sp08, sp10, sp14, sp16f, sp16g, sp17d, sp17f, sp17g, sp18), `previdenza_scales_with_personnel`, `tfr_accrual_suspended`, `tfr_payments`, `financing_amount`, `financing_duration_years`, `financing_interest_rate`, `tangible_investments`, `intangible_investments`, `depreciation_rate`, `depreciation_rate_intangible`, `asset_disposal_nbv`, `asset_disposal_proceeds`, `cash_sweep_enabled`, `cash_sweep_min_cash`, `overdraft_allowed`, `overdraft_limit` |
+| 7 | Imposte | Stato patrimoniale | `tax_rate` (proposta dall'ultimo consuntivo depositato), `tax_advances_paid`, `tax_temporary_differences`, `sp16e_growth_pct`, `sp17e_growth_pct` |
 
 Il giro di rilievi del 15/09 ha spostato i confini fra i passi (`fixed_materials_growth_auto` e
 `other_costs_growth_pct` sono entrati nel 3; le quindici voci minori dello SP e i loro driver

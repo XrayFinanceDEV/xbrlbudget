@@ -37,16 +37,15 @@ def debito(data: BusinessPlanData, pages: dict) -> list:
             row(data, "Oneri finanziari / MOL", "of_mol", unit="percent"),
             row(data, "Oneri finanziari / ricavi", "of_ricavi", unit="percent"),
             row(data, "ROD (costo del denaro)", "rod", unit="percent")]
-    notes = []
-    if data.partial_label and data.partial_dscr is not None:
-        notes.append(f"DSCR nel progressivo rettificato {data.partial_label}: {fmt.ratio(data.partial_dscr)}.")
-    other = data.v("altri_finanziatori")
-    if any(v not in (None, 0) for v in other):
-        notes.append(f"Debiti verso altri finanziatori: € {fmt.eur(other[-1])} nel {last}, fuori dalla PFN per la "
-                     "convenzione del motore degli indici.")
+    # F4 (Importante, revisione finale lotto 2, 2026-09-26): tolte due note.
+    # - «Debiti verso altri finanziatori ... fuori dalla PFN per la convenzione del motore degli
+    #   indici» era falsa dopo C04: gli altri finanziatori sono dentro la PFN dal fix di questo
+    #   stesso lotto (`calculations/report_indicators.py::financial_debt_total`).
+    # - La nota `partial_dscr` (DSCR del progressivo rettificato infrannuale) era morta: dopo C01
+    #   il DSCR richiede un rendiconto vero, che il periodo `adjusted` non calcola mai — la
+    #   condizione non si avvera più (`tests/fixtures/business_plan/banco_ambienta.json`:
+    #   `partial_dscr: null`).
     s += [layout.fin_table(headers(data), rows, first="Indicatore", pad=3.8)]
-    if notes:
-        s += [Spacer(0, 5), layout.note(" ".join(notes))]
     return s
 
 

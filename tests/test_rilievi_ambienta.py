@@ -385,8 +385,6 @@ def test_C08_erogazioni_e_rimborsi_su_righe_separate():
     assert D(str(rimb)) >= D("53409"), (nuovo, rimb)
 
 
-@pytest.mark.xfail(strict=True, raises=AssertionError, reason="C09 confermato dal triage 2026-09-25: il testo narrativo non cita "
-                    "la percentuale oneri/MOL della colonna base — togli il marcatore quando il fix lo fa passare")
 def test_C09_oneri_su_mol_parte_dalla_colonna_base():
     """C09 · Sez. 1: «dal 24,54% al 10,71%» ma il 2026 F è 30,73%. Oracolo: il testo cita il valore della
     colonna base."""

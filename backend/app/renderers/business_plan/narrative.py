@@ -141,8 +141,13 @@ def key_points(data: BusinessPlanData) -> list:
                 "Servizio del debito non coperto.")
         (c1, d1), (cl, dl) = dscr[0], dscr[-1]
         text = f"Il DSCR (proxy) è pari a {fmt.ratio(d1)} nel {c1.year} e a {fmt.ratio(dl)} nel {cl.year}"
-        if len(of) >= 2:
-            text += (f"; gli oneri finanziari passano {fmt.prep('dal', fmt.pct(of[0][1]))} "
+        # C09 (lotto 2 fix rilievi, 2026-09-26): la frase riparte dalla colonna base, non dal
+        # primo anno di piano — coerente con «gli oneri passano da X (oggi) a Y (fine piano)». Se
+        # la base non ha of_mol, ripiega sul primo anno di piano come prima del fix.
+        base_of = data.v("of_mol")[0]
+        start_of = base_of if base_of is not None else (of[0][1] if len(of) >= 2 else None)
+        if start_of is not None and of:
+            text += (f"; gli oneri finanziari passano {fmt.prep('dal', fmt.pct(start_of))} "
                      f"{fmt.prep('al', fmt.pct(of[-1][1]))} del MOL")
         out.append((lead, text + "."))
     op = _plan_values(data, "cf_operativo")

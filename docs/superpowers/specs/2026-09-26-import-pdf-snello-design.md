@@ -181,7 +181,7 @@ Invariate, applicate all'uscita di F2/F4, riusando il codice esistente:
 
 ## 5. gx10: contesto e concorrenza
 
-- Un solo semaforo di processo per gx10, **4 richieste** (`GX10_CONCORRENZA`, default 4).
+- Un solo semaforo di processo per gx10, **6 richieste** (`GX10_CONCORRENZA`, default 6; decisione del proprietario 2026-09-26: «si può fare anche 6 richieste parallele»), ciascuna sotto `GX10_CONTESTO_MAX`.
 - Ogni chiamata dichiara il proprio tetto: token del prompt stimati + `max_tokens` ≤ **100k**
   (`GX10_CONTESTO_MAX`); un blocco che lo supererebbe si divide prima dell'invio.
 - `temperature: 0`, thinking spento, `structured_outputs` dove serve uno schema, `max_tokens`

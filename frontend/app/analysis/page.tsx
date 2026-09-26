@@ -899,7 +899,7 @@ export default function AnalysisPage() {
                     ))}
                   </tr>
                   <tr className="border-b border-border hover:bg-muted/50">
-                    <td className="py-2 px-4 sticky left-0 bg-background">INDICE SECCO DI LIQUIDITA (ACID TEST RATIO - ATR)</td>
+                    <td className="py-2 px-4 sticky left-0 bg-background">QUICK RATIO (liquidità immediata)</td>
                     <FormulaCell formula="(LI+LD+RA)/(PC+RP)" />
                     {multiYearRatios.ratios.map((r, i) => (
                       <td key={i} className="py-2 px-4 text-right font-medium">

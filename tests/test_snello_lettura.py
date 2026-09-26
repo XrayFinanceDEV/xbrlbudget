@@ -208,3 +208,53 @@ def test_trascrivi_pagine_non_confronta_oltre_la_pagina(tmp_path, monkeypatch):
 
     out = L.trascrivi_pagine(str(pdf_path), [1, 2], chiama_json=chiama_json, strisce=1, dpi=50)
     assert out.splitlines() == ["riga 1 | 1 | 1", "X | 9 | 9", "X | 9 | 9", "riga 2 | 2 | 2"]
+
+
+def test_wrapper_testo_passa_timeout_120(monkeypatch):
+    """Un gx10 impantanato non deve tenere una richiesta snella per 600-900s: i wrapper
+    sottili passano un tetto proprio, molto piu' basso dei default del provider."""
+    visti = {}
+
+    def finto_chiama_gx10_testo(system, messaggi, *, max_tokens, timeout=600.0, transport=None):
+        visti["timeout"] = timeout
+        return "ok"
+
+    monkeypatch.setattr(llm_provider, "chiama_gx10_testo", finto_chiama_gx10_testo)
+    assert L._testo("sys", "utente", 100) == "ok"
+    assert visti["timeout"] == 120.0
+
+
+def test_wrapper_json_passa_timeout_120(monkeypatch):
+    visti = {}
+
+    def finto_chiama_gx10_json(system, messaggi, schema, *, max_tokens, timeout=900.0, transport=None):
+        visti["timeout"] = timeout
+        return {}
+
+    monkeypatch.setattr(llm_provider, "chiama_gx10_json", finto_chiama_gx10_json)
+    assert L._json("sys", "utente", {}, 100) == {}
+    assert visti["timeout"] == 120.0
+
+
+def test_trascrivi_pagine_wrapper_default_passa_timeout_120(tmp_path, monkeypatch):
+    """Il wrapper di default usato da trascrivi_pagine quando non si passa chiama_json
+    (produzione) deve avere lo stesso tetto basso dei due wrapper testuali sopra."""
+    import fitz
+
+    monkeypatch.setattr(llm_provider, "GX10_CONCORRENZA", 1)
+    visti = {}
+
+    def finto_chiama_gx10_json(system, messaggi, schema, *, max_tokens, timeout=900.0, transport=None):
+        visti["timeout"] = timeout
+        return {"righe": []}
+
+    monkeypatch.setattr(llm_provider, "chiama_gx10_json", finto_chiama_gx10_json)
+
+    pdf_path = tmp_path / "una_pagina.pdf"
+    doc = fitz.open()
+    doc.new_page(width=200, height=300)
+    doc.save(str(pdf_path))
+    doc.close()
+
+    L.trascrivi_pagine(str(pdf_path), [1], strisce=1, dpi=50)
+    assert visti["timeout"] == 120.0

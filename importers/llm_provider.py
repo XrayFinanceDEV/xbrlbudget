@@ -30,7 +30,7 @@ class RispostaTroncata(LLMProviderError):
     pass
 
 
-GX10_CONCORRENZA = int(os.environ.get("GX10_CONCORRENZA", "4"))
+GX10_CONCORRENZA = int(os.environ.get("GX10_CONCORRENZA", "6"))
 GX10_CONTESTO_MAX = int(os.environ.get("GX10_CONTESTO_MAX", "100000"))
 # gx10 ha 500k token di contesto condivisi: 4 richieste sotto 100k non rallentano il prefill.
 _SEMAFORO = threading.BoundedSemaphore(GX10_CONCORRENZA)

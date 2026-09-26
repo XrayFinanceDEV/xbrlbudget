@@ -55,11 +55,13 @@ PROMPT_TRASCRIVI = ("Trascrivi TUTTE le righe di tabella visibili, in ordine (ig
 
 
 def _testo(system, user, max_tokens):
-    return llm_provider.chiama_gx10_testo(system, [{"role": "user", "content": user}], max_tokens=max_tokens)
+    return llm_provider.chiama_gx10_testo(system, [{"role": "user", "content": user}],
+                                          max_tokens=max_tokens, timeout=120.0)
 
 
 def _json(system, user, schema, max_tokens):
-    return llm_provider.chiama_gx10_json(system, [{"role": "user", "content": user}], schema, max_tokens=max_tokens)
+    return llm_provider.chiama_gx10_json(system, [{"role": "user", "content": user}], schema,
+                                         max_tokens=max_tokens, timeout=120.0)
 
 
 def _blocco_testo(righe, blocco):
@@ -137,7 +139,7 @@ def voci_di_legge(testo: str, intestazioni: list[str], *, chiama_json=None, nota
 def trascrivi_pagine(pdf: str, pagine: list[int], *, chiama_json=None, strisce: int = 3, dpi: int = 120) -> str:
     import fitz
     chiama_json = chiama_json or (lambda system, contenuto, schema, max_tokens: llm_provider.chiama_gx10_json(
-        system, [{"role": "user", "content": contenuto}], schema, max_tokens=max_tokens))
+        system, [{"role": "user", "content": contenuto}], schema, max_tokens=max_tokens, timeout=120.0))
     lavori = []
     with fitz.open(pdf) as doc:
         for numero in pagine:

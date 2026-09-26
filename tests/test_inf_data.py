@@ -1,4 +1,5 @@
 """from_intermedio sui bilanci veri: AMBIENTA (575/17) stampa le cifre del committente."""
+import os
 import shutil, tempfile
 from decimal import Decimal as D
 from pathlib import Path
@@ -6,7 +7,7 @@ import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
-SRC = Path("/home/peter/DEV/budget/financial_analysis.db")
+SRC = Path(os.environ.get("BUDGET_REAL_DB", "/home/peter/DEV/budget/financial_analysis.db"))
 
 
 @pytest.fixture(scope="module")

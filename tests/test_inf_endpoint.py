@@ -2,6 +2,7 @@
 
 Gira su una copia del DB locale (regola del proprietario: niente bilanci inventati); senza DB si salta.
 """
+import os
 import shutil
 import tempfile
 from pathlib import Path
@@ -11,7 +12,7 @@ from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
-SRC = Path("/home/peter/DEV/budget/financial_analysis.db")
+SRC = Path(os.environ.get("BUDGET_REAL_DB", "/home/peter/DEV/budget/financial_analysis.db"))
 AMBIENTA, SCENARIO = 575, 17
 
 

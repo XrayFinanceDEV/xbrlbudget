@@ -334,8 +334,11 @@ foglio.»
   gli acquisti (materie e servizi) / il costo del personale**. Nota: «il saldo del {anno base} si
   chiude al passo 5, qui si genera quello nuovo»; crediti tributari e imposte anticipate portano
   invece «governati dalle imposte · passo 7». **«Variazione % per anno»** (accordion): le stesse
-  voci come percentuali, anno per anno. Interruttore **Debiti previdenziali scalano col costo del
-  personale**.
+  voci come percentuali, anno per anno. I debiti previdenziali (entro e oltre) si agganciano al
+  costo del personale con lo stesso selettore delle altre voci minori (driver «il costo del
+  personale»): dal lotto 3 fix rilievi (A06, 2026-09-26) non c'è più un interruttore a parte —
+  prima duplicava la stessa cosa e poteva mostrare a schermo un aggancio diverso da quello che il
+  motore applicava davvero.
 - **Fondo TFR**: occhiello «{sp15} € al 31/12/{anno}». Interruttore «Accantonamento annuo ·
   retribuzioni / 13,5 — versato a fondi esterni o INPS» (`tfr_accrual_suspended`). Tabella per
   anno: **Accantonamento** (sola lettura), **Liquidazioni** (`tfr_payments`, un importo per anno:

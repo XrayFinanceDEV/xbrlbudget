@@ -29,11 +29,16 @@ LETTURE = {
             "crediti_commerciali l'incasso della massa oltre 12 mesi consuma prima sp07a (clienti), poi le altre "
             "sotto-voci in ordine, mai sotto zero (_consuma_in_ordine) — non più il riparto proporzionale che sul "
             "mix del consulente (sp07a 35.231 + sp07g 9.769) spostava sp07g a 9.551,91 invece di 8.769"),
-    "A05": ("Comportamento voluto (beb33c5)",
-            "Comportamento voluto (beb33c5) che produce il sintomo: passare a Manuale da «ricavi» congela la "
-            "crescita — decisione del proprietario"),
-    "A06": ("Non riprodotto (doppio comando confermato)",
-            "Motore non riprodotto; doppio comando confermato per ispezione"),
+    "A05": ("Risolto nel lotto 3 fix, 2026-09-26, su decisione del proprietario",
+            "Risolto nel lotto 3 fix rilievi (2026-09-26), su decisione del proprietario: passare a Manuale da "
+            "«ricavi» scrive il saldo dell'anno base, costante, invece dei valori dell'anteprima cresciuti coi "
+            "ricavi (`withSpRule`, `frontend/lib/budget-sp-manuale.ts`)"),
+    "A06": ("Risolto nel lotto 3 fix, 2026-09-26, su decisione del proprietario",
+            "Risolto nel lotto 3 fix rilievi (2026-09-26), su decisione del proprietario: la casella "
+            "previdenza/personale è sparita dal wizard e il motore non legge più "
+            "`previdenza_scales_with_personnel` — sp16f/sp17f si agganciano al personale solo dalla tendina "
+            "`sp_indexing`, come le altre voci minori; scenari salvati migrati con "
+            "`scripts/migra_previdenza_tendina.py`"),
     "B01": ("Risolto nel lotto 1 fix rilievi (2026-09-26)",
             "Risolto nel lotto 1 fix rilievi (2026-09-26): ce10_var_rimanenze_mat_prime segue lo stato "
             "patrimoniale delle sole materie (sp05a), non più i ricavi; il DIO delle materie si deduce dal "

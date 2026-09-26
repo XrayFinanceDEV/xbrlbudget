@@ -1016,9 +1016,12 @@ a vincere come sempre, e un residuo eventuale si posa sul primo campo neutro lib
 Undici voci minori dello stato patrimoniale seguono, per default, la formula di sempre —
 `prev × (1 + %)`, cioè restano **ferme** se la percentuale non è impostata. `sp_indexing`
 (`BudgetAssumptions.sp_indexing`, colonna `JSON`) le aggancia invece a un driver di volume:
-`stock dell'anno BASE × fattore del driver`, la stessa forma già usata da
-`previdenza_scales_with_personnel`. Indicizzare sulla base non accumula deriva, mentre un
-`prev × (1+%)` composto per cinque anni sì.
+`stock dell'anno BASE × fattore del driver`. Indicizzare sulla base non accumula deriva, mentre un
+`prev × (1+%)` composto per cinque anni sì. `sp16f`/`sp17f` (debiti previdenziali) sono due di
+queste undici, agganciabili al driver `personale` come le altre: fino al lotto 3 fix rilievi
+(A06, 2026-09-26) avevano anche un interruttore a parte (`previdenza_scales_with_personnel`) che
+duplicava la stessa cosa — sparito dal wizard, e il motore lo ignora (resta nel modello/schema
+solo per compatibilità con un client vecchio).
 
 ```jsonc
 { "forecast_year": 2026, "revenue_growth_pct": 5.0,
@@ -1072,16 +1075,14 @@ Altre tre esclusioni, stesso pattern (`SP_INDEXING_GOVERNED`,
 di rimborso del debito, `sp06f`/`sp07f` (imposte anticipate) dalla posizione fiscale — nessuna di
 queste sette è comunque fra gli 11 codici indicizzabili, quindi l'esclusione dà solo un motivo più
 preciso, non un divieto altrimenti assente. Indicizzarle darebbe comunque due padroni allo stesso
-numero. E l'interruttore `previdenza_scales_with_personnel`, quando acceso, vince su un
-`sp_indexing` scritto per `sp16f`/`sp17f`: è già lui l'indicizzazione di quelle due voci al costo
-del personale, col motivo `"governata dall'interruttore previdenza/personale"`.
+numero.
 
 ### `details` — due chiavi, sempre presenti (anche vuote)
 
 | Chiave | Valore |
 |---|---|
 | `indicizzazione` | dizionario `{codice: {driver, fattore, percentuale_ignorata, valore}}` per ogni voce **davvero** indicizzata quest'anno. `percentuale_ignorata` è `true` quando la riga porta anche una `{codice}_growth_pct` non nulla sulla stessa voce — il driver vince, e la percentuale scritta non ha alcun effetto. `valore` è l'importo che l'indicizzazione ha **davvero** scritto sulla voce (non sempre ricostruibile come `base × fattore`: `sp04` sottrae le svalutazioni cumulate; le differenze temporanee non entrano piu' nel calcolo dal 2026-09-18) |
-| `indicizzazione_ignorata` | lista di `{voce, driver, motivo}` per ogni chiave di `sp_indexing` che non ha avuto effetto — motivi: `"voce non indicizzabile"`, `"governata dall'interruttore previdenza/personale"`, `"piano di scadenziamento"`, `"driver degenere"`, e `"driver sconosciuto"` per un nome di driver fuori dai tre. Quest'ultimo **è ancora raggiungibile, ma non più sulla porta normale**: dal lotto 3A (Task 7a) il bulk `PUT /scenarios/{id}/assumptions` (§1.2) valida ogni riga con lo schema tipizzato e risponde 422 con `campo: "sp_indexing.<codice>"`, senza salvare nulla. Lo dichiara ancora il motore quando il driver gli arriva da una porta senza quello schema — l'anteprima `POST /preview` (§7) o una riga scritta a mano nel DB — e lo rifiutano con 422 dal `Literal` le rotte tipizzate per singola riga (`POST /assumptions`, `PUT /assumptions/{year}`) |
+| `indicizzazione_ignorata` | lista di `{voce, driver, motivo}` per ogni chiave di `sp_indexing` che non ha avuto effetto — motivi: `"voce non indicizzabile"`, `"piano di scadenziamento"`, `"driver degenere"`, e `"driver sconosciuto"` per un nome di driver fuori dai tre. Quest'ultimo **è ancora raggiungibile, ma non più sulla porta normale**: dal lotto 3A (Task 7a) il bulk `PUT /scenarios/{id}/assumptions` (§1.2) valida ogni riga con lo schema tipizzato e risponde 422 con `campo: "sp_indexing.<codice>"`, senza salvare nulla. Lo dichiara ancora il motore quando il driver gli arriva da una porta senza quello schema — l'anteprima `POST /preview` (§7) o una riga scritta a mano nel DB — e lo rifiutano con 422 dal `Literal` le rotte tipizzate per singola riga (`POST /assumptions`, `PUT /assumptions/{year}`). Fino al lotto 3 fix rilievi (2026-09-26) c'era un quinto motivo, `"governata dall'interruttore previdenza/personale"`: sparito insieme all'interruttore (§11) |
 
 ## 12. Report finale — contratto di lettura canonico
 

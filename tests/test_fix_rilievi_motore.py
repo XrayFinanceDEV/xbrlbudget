@@ -1,7 +1,7 @@
 """Test unitari e di regola dei fix del lotto 1 (spec fix rilievi AMBIENTA 2026-09-26 §3)."""
 from decimal import Decimal as D
 
-from calculations.projection_common import ammortamento_categoria
+from calculations.projection_common import ammortamento_categoria, rimanenze_materie
 from tests.rilievi_kit import BASE_CE, genera, generato, per_anno, righe
 
 
@@ -145,3 +145,42 @@ def test_E05_override_degli_straordinari_vince():
     e = generato(genera(righe(ce18_override=500, ce19_override=200)))
     ce = e.anni[2027][1]
     assert (ce["ce18_proventi_straordinari"], ce["ce19_oneri_straordinari"]) == (D("500.00"), D("200.00"))
+
+
+def test_rimanenze_materie_forma_chiusa():
+    chiusura, ce10 = rimanenze_materie(D("100"), D("260"), D("36"))
+    assert chiusura == D("360") * D("36") / D("396")
+    consumo = D("260") + D("100") - chiusura
+    assert abs(chiusura - consumo * D("36") / D("360")) < D("0.0000001")
+    assert ce10 == D("100") - chiusura
+
+
+def test_rimanenze_materie_mai_negative():
+    assert rimanenze_materie(D("0"), D("-10"), D("30")) == (D("0"), D("0"))
+
+
+def test_B01_dio_esplicito_sul_consumo_e_ce10_coerente():
+    e = generato(genera(righe(dio_days=22)))
+    sp, ce = e.anni[2027]
+    r = e.det[2027]["rimanenze_materie"]
+    assert r["derivati"] is False and D(str(r["giorni"])) == D("22")
+    assert ce["ce10_var_rimanenze_mat_prime"] == D("287312.00") - sp["sp05a_materie_prime"]
+
+
+def test_B01_giorni_degeneri_riportano_lo_stock():
+    # AMBIENTA: 287.312 di materie su un consumo di 128.090,89 = oltre 800 giorni ⇒ degenere.
+    e = generato(genera(righe()))
+    assert e.anni[2027][0]["sp05a_materie_prime"] == D("287312.00")
+    assert e.anni[2027][1]["ce10_var_rimanenze_mat_prime"] == D("0.00")
+    assert e.det[2027]["rimanenze_materie"]["degenere"] is True
+
+
+def test_B01_override_ce10_muove_lo_sp():
+    e = generato(genera(righe(ce10_override=12312)))
+    assert e.anni[2027][0]["sp05a_materie_prime"] == D("275000.00")
+
+
+def test_B01_base_senza_sotto_voci_usa_l_aggregato_come_materie():
+    e = generato(genera(righe(dio_days=22), bs={"sp05a_materie_prime": D("0")}))
+    sp, ce = e.anni[2027]
+    assert ce["ce10_var_rimanenze_mat_prime"] == D("287312.00") - sp["sp05_rimanenze"]

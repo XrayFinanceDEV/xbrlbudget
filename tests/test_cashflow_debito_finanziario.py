@@ -103,14 +103,21 @@ def test_caso_a_2027_torna_ai_valori_di_5197929():
     """Operativo 76.191,19, finanziario 75.000,29: i numeri che `5197929`
     (prima del Task 17) dava per questo scenario, misurati dalla revisione
     (I1). 2028/2029: la quota e' costante (25.000,09/anno, nessuna nuova
-    erogazione), quindi il finanziario e' -25.000,09 ogni anno successivo."""
+    erogazione), quindi il finanziario e' -25.000,09 ogni anno successivo.
+
+    # lotto 1 fix rilievi (2026-09-26): B01 — le materie prime (50.000 su questa base) non
+    # crescono piu' coi ricavi (`revenue_growth_pct: 3.33`): dividono sul consumo di base
+    # (ce05 200.000, invariato), che qui resta piatto. L'operativo del 2027 non finanzia piu'
+    # quello stock: +1.665,00 (76.191,19 -> 77.856,19). Il finanziario, ignaro delle
+    # rimanenze, resta 75.000,29.
+    """
     engine, Session_ = memory_sessions()
     db = Session_()
     rows = _righe(A3, per_anno={0: PRESTITO})
     fy_base, sc = _genera(db, "casoA", rows)
 
     cf2027, bs2027 = _cf(db, sc, 2027, fy_base.balance_sheet)
-    assert cf2027.operating_activities.total_operating_cashflow == D("76191.19")
+    assert cf2027.operating_activities.total_operating_cashflow == D("77856.19")
     assert cf2027.financing_activities.third_party_funds.net == D("75000.29")
     assert cf2027.financing_activities.total_financing_cashflow == D("75000.29")
     assert cf2027.cash_reconciliation.verification_ok is True

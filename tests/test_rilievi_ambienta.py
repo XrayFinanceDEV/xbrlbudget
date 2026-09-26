@@ -129,9 +129,6 @@ def test_A06_previdenziali_seguono_il_personale_se_la_tendina_lo_dice():
         assert abs(sp["sp16f_debiti_previdenza_breve"] - atteso) < D("1"), (y, sp["sp16f_debiti_previdenza_breve"], atteso)
 
 
-@pytest.mark.xfail(strict=True, raises=AssertionError, reason="B01 confermato dal triage 2026-09-25: nel CE la variazione "
-                    "rimanenze resta ancorata al valore 2026, mentre nello SP le rimanenze seguono il DIO"
-                    " — togli il marcatore quando il fix lo fa passare")
 def test_B01_variazione_rimanenze_del_ce_segue_lo_sp():
     """B01 · Passo 4 / CE B11: nello SP le rimanenze seguono il DIO, nel CE la variazione resta al valore
     2026. Oracolo: ce10 di ogni anno = rimanenze di fine anno − rimanenze d'inizio (convenzione del CE:

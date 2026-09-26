@@ -623,6 +623,34 @@ def soglia_giorni_magazzino(settore) -> Optional[Decimal]:
     return GIORNI_MAGAZZINO_MAX_PER_SETTORE.get(chiave, GIORNI_MAGAZZINO_MAX_DEFAULT)
 
 
+# ── Rimanenze di materie prime (sp05a) dal CONSUMO, non dai ricavi (spec B01, 2026-09-26) ──
+# Un'azienda compra e consuma materie prime, non le vende: scalare sp05a sul fatturato (come le
+# altre rimanenze, che seguono i ricavi) non ha alcun senso fisico. Il DIO delle materie misura
+# la giacenza sul CONSUMO dell'anno (`ce05 + apertura - chiusura`), e la relazione e' circolare —
+# la chiusura entra nella formula del consumo che la determina. La forma chiusa la risolve:
+#     chiusura = (acquisti + apertura) x giorni / (360 + giorni)
+# perche' consumo = acquisti + apertura - chiusura e chiusura = consumo x giorni / 360 implicano
+# chiusura x 360 = (acquisti + apertura - chiusura) x giorni, cioe' chiusura x (360 + giorni) =
+# (acquisti + apertura) x giorni.
+def rimanenze_materie(apertura: Decimal, acquisti: Decimal, giorni: Decimal) -> Tuple[Decimal, Decimal]:
+    """Rimanenze di materie prime di fine anno e variazione di CE (`ce10`), dal consumo.
+
+    `ce10` segue la convenzione OIC B11 (voce di CE "variazione delle rimanenze di materie
+    prime"): un aumento delle rimanenze RIDUCE il costo, quindi `ce10 = apertura - chiusura`.
+
+    La chiusura non scende mai sotto zero (un consumo che supererebbe l'apertura piu' gli
+    acquisti non svuota le rimanenze sotto zero). Resta a precisione piena: la quantizzazione al
+    centesimo, e la derivazione di `ce10` dalla chiusura gia' quantizzata, sono del chiamante
+    (il motore), non di questa funzione pura.
+    """
+    apertura = Decimal(str(apertura or 0))
+    acquisti = Decimal(str(acquisti or 0))
+    giorni = Decimal(str(giorni or 0))
+    chiusura = max(ZERO, (acquisti + apertura) * giorni / (Decimal('360') + giorni))
+    ce10 = apertura - chiusura
+    return chiusura, ce10
+
+
 # ── Debito bancario: le regole condivise dai due motori (lotto 3A, Task 3) ──
 
 def e_contratto_pregresso(loan) -> bool:

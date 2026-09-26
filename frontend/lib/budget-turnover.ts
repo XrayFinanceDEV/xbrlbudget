@@ -18,7 +18,14 @@ import { num } from "@/lib/budget-format";
  * Il clamp a zero è quello del motore: un aggregato incoerente non deve
  * produrre giorni negativi, cioè crediti negativi nel piano.
  *
- * DIO e DPO non hanno scorpori: il motore li applica sugli aggregati interi.
+ * DPO non ha scorpori: il motore lo applica sull'aggregato intero.
+ *
+ * Il ramo `dio` (spec B01, 2026-09-26) non guida più le rimanenze sui ricavi: il motore
+ * calcola le materie prime (`sp05a`) dal CONSUMO dell'anno (`ce05 + ce10`), perché
+ * un'azienda che compra e consuma materie non le vende. Il segnaposto scorpora allo
+ * stesso modo — numeratore le sole materie (`sp05a`, o l'aggregato meno `sp05e` quando
+ * la base non ha alcuna sotto-voce di dettaglio), denominatore il consumo dell'anno base,
+ * non il fatturato.
  */
 export function computeAutoDays(
   kind: "dso" | "dio" | "dpo",
@@ -39,7 +46,13 @@ export function computeAutoDays(
     );
     denominator = revenue;
   }
-  if (kind === "dio") { numerator = num(balance.sp05_rimanenze); denominator = revenue; }
+  if (kind === "dio") {
+    const materiePrime = num(balance.sp05a_materie_prime);
+    numerator = materiePrime > 0
+      ? materiePrime
+      : num(balance.sp05_rimanenze) - num(balance.sp05e_acconti);
+    denominator = num(income.ce05_materie_prime) + num(income.ce10_var_rimanenze_mat_prime);
+  }
   if (kind === "dpo") { numerator = num(balance.sp16d_debiti_fornitori_breve); denominator = purchases; }
   if (denominator <= 0) return null;
   return Math.round((numerator / denominator) * 360);

@@ -61,7 +61,11 @@ def test_sulla_holding_i_dividendi_incassati_stanno_nell_operativo_e_lo_scarto_e
 
 
 def test_senza_partecipazioni_nulla_cambia_e_lo_scarto_e_dichiarato_a_zero():
-    attesi = {2027: "80541.22", 2028: "150789.20"}
+    # lotto 1 fix rilievi (2026-09-26): B01 — le materie prime del kit (50.000) non crescono
+    # piu' coi ricavi (`revenue_growth_pct: 3.33`): dividono sul consumo di base (ce05
+    # 200.000, invariato), che qui resta piatto, quindi l'operativo non finanzia piu' quello
+    # stock (+1.665,00 nel 2027, +1.720,44 in piu' nel 2028, cumulato sull'anno prima).
+    attesi = {2027: "82206.22", 2028: "152509.64"}
     fuori = []
     for anno, cf in _rendiconti(holding=False).items():
         op, rec = cf.operating_activities, cf.cash_reconciliation

@@ -218,7 +218,14 @@ def test_un_cash_sweep_nel_2028_paga_il_pregresso_e_lascia_il_prestito_al_suo_pi
     """Lo sweep del 2028 ha cassa per chiudere pregresso E prestito nuovo. Fino al lotto 2 li chiudeva entrambi; dal lotto
     3A il prestito segue il suo piano (decisione 3 del proprietario): nel 2028 restano 25.000,09 a breve e 25.000,11 a
     lungo, nel 2029 la quota e i 0,02 che la catena lascia oltre, e la cassa tiene il capitale non rimborsato. Oracolo:
-    gemello senza sweep meno il pregresso (35.802,46), sullo snapshot `452112d`."""
+    gemello senza sweep meno il pregresso (35.802,46), sullo snapshot `452112d`.
+
+    # lotto 1 fix rilievi (2026-09-26): B01 — le materie prime del kit (50.000) non crescono
+    # piu' coi ricavi (`revenue_growth_pct: 3.33`): dividono sul consumo di base (ce05
+    # 200.000, invariato), che qui resta piatto. Il debito bancario (sp16a/sp17a, cio' che
+    # questo test misura) non se ne accorge: solo la cassa cresce di piu' ogni anno perche'
+    # non finanzia piu' quello stock (+3.385,44 nel 2028, +5.163,18 nel 2029, cumulato).
+    """
     engine, sessions = memory_sessions()
     try:
         with sessions() as db:
@@ -230,8 +237,8 @@ def test_un_cash_sweep_nel_2028_paga_il_pregresso_e_lascia_il_prestito_al_suo_pi
             ]
             sp = _genera(db, "sweep-oltre", rows, BREVE, LUNGO)
         assert sp[2027]["sp16a_debiti_banche_breve"] == BREVE + QUOTA_BREVE_PRESTITO[2027]
-        for anno, (breve, lungo, cassa) in {2028: ("25000.09", "25000.11", "256145.39"),
-                                             2029: ("25000.09", "0.02", "365088.67")}.items():
+        for anno, (breve, lungo, cassa) in {2028: ("25000.09", "25000.11", "259530.83"),
+                                             2029: ("25000.09", "0.02", "370251.85")}.items():
             assert sp[anno]["sp16a_debiti_banche_breve"] == D(breve), anno
             assert sp[anno]["sp17a_debiti_banche_lungo"] == D(lungo), anno
             assert sp[anno]["sp09_disponibilita_liquide"] == D(cassa), anno

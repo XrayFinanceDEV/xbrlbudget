@@ -17,7 +17,7 @@ from calculations.projection_common import (
     tfr_accrual_quota, deferred_tax_position, ammortamento_categoria,
     new_financing_schedule, PREGRESSO_KEYS, PREGRESSO_LABELS,
     pregresso_opening_masses, runoff_schedule, validate_runoff,
-    tax_settlement_saldo_acconto, soglia_giorni_magazzino,
+    tax_settlement_saldo_acconto, soglia_giorni_magazzino, rimanenze_materie,
     e_contratto_pregresso, contratti_da_riga_finanziamento,
     quota_breve_prestiti_nuovi, separa_prestiti_nuovi,
     eur_it, scarto_it,
@@ -2508,6 +2508,8 @@ class ForecastEngine:
                     fidi_apertura=fidi_apertura,
                     fidi_tasso=fidi_tasso,
                     altri_finanziatori=contratti_altri,
+                    base_bs=source.base_bs,
+                    settore=settore,
                 )
                 forecast_inc = self._normalize_income_statement_cents(
                     forecast_inc,
@@ -2889,6 +2891,8 @@ class ForecastEngine:
         fidi_apertura=None,
         fidi_tasso=Decimal('0'),
         altri_finanziatori=None,
+        base_bs=None,
+        settore=None,
     ) -> Dict:
         """
         Calculate forecasted income statement based on assumptions
@@ -2914,6 +2918,13 @@ class ForecastEngine:
         si sommano a ce15 solo nel ramo senza override, e si dichiarano sempre
         in `details['oneri_altri_finanziatori']`. `None`/`[]` = niente lista,
         nessun centesimo in piu' sul prospetto.
+
+        `base_bs` (spec B01, 2026-09-26): lo SP dell'anno base, per l'apertura
+        delle rimanenze di materie (`sp05a`) del primo anno di piano — mai
+        `previous_bs` a quel punto, perche' il primo anno DEVE leggere la base
+        anche se un chiamante futuro passasse un `previous_bs` diverso.
+        `settore` e' lo stesso passato al calcolo dello SP: comanda solo la
+        soglia dei giorni di magazzino oltre cui un DIO dedotto e' degenere.
         """
         # Growth rates apply YEAR OVER YEAR: each forecast year grows from the
         # PREVIOUS year, not from the consuntivo base year. So +5/+5/+5 compounds
@@ -3144,7 +3155,110 @@ class ForecastEngine:
         # "380.423 che sparisce / non si azzera" issue) and it had no override.
         _base_ce03a = getattr(base_inc, 'ce03a_incrementi_immobilizzazioni', None) or Decimal('0')
         ce03a = assumption.ce03a_override if getattr(assumption, 'ce03a_override', None) is not None else _base_ce03a
-        ce10 = assumption.ce10_override if assumption.ce10_override is not None else base_inc.ce10_var_rimanenze_mat_prime
+        # ── RIMANENZE DI MATERIE PRIME (sp05a) DAL CONSUMO (spec B01, 2026-09-26) ──
+        # Il calcolo sta QUI, nel CE, non nello SP: `ce10` deve essere noto prima delle
+        # imposte, e lo SP legge `details['rimanenze_materie']['chiusura']` per `sp05a` —
+        # mai il contrario. Le altre rimanenze (sp05b-e) restano guidate dai ricavi nello
+        # SP, che non le tocca: solo le materie hanno un consumo a cui ancorarsi.
+        def _base_bs_val(field):
+            if base_bs is None:
+                return Decimal('0')
+            if isinstance(base_bs, dict):
+                return base_bs.get(field, Decimal('0')) or Decimal('0')
+            return getattr(base_bs, field, Decimal('0')) or Decimal('0')
+
+        def _materie_base():
+            """Materie dell'anno base: `sp05a`, o l'aggregato meno `sp05e` quando la base
+            non ha ALCUNA sotto-voce di `sp05` (stesso ripiego di `_alloc`, primary_idx=0,
+            usato nello SP per le voci senza dettaglio)."""
+            sp05a_base = _base_bs_val('sp05a_materie_prime')
+            sotto_voci = (
+                sp05a_base + _base_bs_val('sp05b_prodotti_in_corso')
+                + _base_bs_val('sp05c_lavori_in_corso') + _base_bs_val('sp05d_prodotti_finiti')
+                + _base_bs_val('sp05e_acconti')
+            )
+            sp05_tot_base = _base_bs_val('sp05_rimanenze')
+            if sotto_voci == 0 and sp05_tot_base > 0:
+                return sp05_tot_base - _base_bs_val('sp05e_acconti')
+            return sp05a_base
+
+        # Apertura: il primo anno di piano legge la base (mai `previous_bs`, che al primo
+        # anno coincide comunque con essa, ma un chiamante futuro potrebbe cambiarlo); gli
+        # anni dopo leggono `sp05a` persistito dell'anno prima.
+        materie_base = _materie_base()
+        apertura_materie = materie_base if year_index == 0 else _prev_bs_val('sp05a_materie_prime')
+
+        base_ce05_materie = getattr(base_inc, 'ce05_materie_prime', None) or Decimal('0')
+        base_ce10_materie = getattr(base_inc, 'ce10_var_rimanenze_mat_prime', None) or Decimal('0')
+        consumo_base_materie = base_ce05_materie + base_ce10_materie
+        soglia_dio_materie = soglia_giorni_magazzino(settore)
+
+        dio_days_esplicito = getattr(assumption, 'dio_days', None)
+        degenere_materie = False
+        if dio_days_esplicito is not None:
+            derivati_materie = False
+            giorni_materie = Decimal(str(dio_days_esplicito))
+        else:
+            derivati_materie = True
+            if not materie_base:
+                # Giacenza di apertura nulla: zero giorni, e non c'e' nulla di degenere —
+                # qualunque denominatore, il saldo resta zero (stessa regola di `_derived_days`
+                # nello SP).
+                giorni_materie = Decimal('0')
+            elif consumo_base_materie <= 0:
+                degenere_materie = True
+                giorni_materie = None
+            else:
+                _giorni = materie_base / consumo_base_materie * Decimal('360')
+                if _giorni < 0 or (soglia_dio_materie is not None and _giorni > soglia_dio_materie):
+                    degenere_materie = True
+                    giorni_materie = None
+                else:
+                    giorni_materie = _giorni
+
+        ce10_override = assumption.ce10_override
+        if ce10_override is not None:
+            ce10 = ce10_override
+            chiusura_materie = max(Decimal('0'), apertura_materie - ce10_override).quantize(
+                Decimal('0.01'), rounding=ROUND_HALF_UP
+            )
+        elif degenere_materie:
+            # Nessun giorno affidabile: le rimanenze di materie si riportano, la variazione
+            # e' zero (diagnose, never fabricate — lo stesso principio del resto del motore).
+            chiusura_materie = apertura_materie
+            ce10 = Decimal('0')
+        else:
+            chiusura_raw, _ = rimanenze_materie(apertura_materie, ce05, giorni_materie)
+            # La chiusura si quantizza al centesimo PRIMA di derivarne ce10: cosi' ce10
+            # persistito e' esattamente la Δ di sp05a persistito al centesimo (la funzione
+            # pura resta a precisione piena per i suoi test).
+            chiusura_materie = chiusura_raw.quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+            ce10 = apertura_materie - chiusura_materie
+
+        consumo_materie = ce05 + apertura_materie - chiusura_materie
+        if giorni_materie is None:
+            # Degenere: il giorno DAVVERO applicato e' quello che il saldo riportato vale sul
+            # consumo dell'anno (stessa regola di `_effective_days` nello SP), mai `None` — a
+            # valle una chiave diagnostica assente vale zero, quindi tacere sarebbe dichiararsi
+            # puliti.
+            giorni_dichiarati = (
+                chiusura_materie / consumo_materie * Decimal('360') if consumo_materie > 0 else Decimal('0')
+            )
+        else:
+            giorni_dichiarati = giorni_materie
+
+        if details is not None:
+            details['rimanenze_materie'] = {
+                'apertura': apertura_materie,
+                'chiusura': chiusura_materie,
+                'giorni': giorni_dichiarati,
+                'consumo': consumo_materie,
+                'derivati': derivati_materie,
+                'degenere': degenere_materie,
+                'override': ce10_override is not None,
+            }
+            details['dio_applied'] = giorni_dichiarati
+
         ce11 = assumption.ce11_override if assumption.ce11_override is not None else base_inc.ce11_accantonamenti
         ce11b = assumption.ce11b_override if assumption.ce11b_override is not None else base_inc.ce11b_altri_accantonamenti
 
@@ -3627,24 +3741,34 @@ class ForecastEngine:
             details['dso_applied'] = dso
         sp06 = sp06_trade + sp06e + sp06f
 
-        # DIO → sp05 (inventory)
+        # DIO → sp05 (inventory). Dal B01 (2026-09-26) `sp05a` (materie prime) non segue piu'
+        # i ricavi: il CE l'ha gia' calcolata dal CONSUMO (`ce10`, prima delle imposte) e
+        # scritta in `details['rimanenze_materie']` sullo STESSO `details` di questo giro —
+        # qui si legge, non si ricalcola, e `dio_days`/`details['dio_applied']` restano di sua
+        # competenza. Le altre rimanenze (prodotti in corso, lavori in corso, prodotti finiti,
+        # acconti) restano guidate dai ricavi come prima, coi giorni dedotti dalla base SOLO
+        # sulla loro somma (`dio_days` esplicito non le tocca piu').
         soglia_dio = soglia_giorni_magazzino(settore)
-        dio = getattr(assumption, 'dio_days', None)
-        if dio is not None:
-            dio = D(str(dio))
-            sp05 = forecast_revenue * dio / DAYS
+        rim_materie = details['rimanenze_materie']
+        sp05a_dio = rim_materie['chiusura']
+        if rim_materie['degenere']:
+            degenerate_days.append('dio')
+
+        base_sp05_altre = (
+            _base('sp05b_prodotti_in_corso') + _base('sp05c_lavori_in_corso')
+            + _base('sp05d_prodotti_finiti') + _base('sp05e_acconti')
+        )
+        dio_altre = _derived_days(base_sp05_altre, base_revenue, 'dio_altre', soglia=soglia_dio)
+        if dio_altre is None:
+            # Nessun piano di scadenziamento su queste rimanenze: nulla da scorporare.
+            sp05_altre = base_sp05_altre
+            dio_altre = _effective_days(sp05_altre, forecast_revenue)
         else:
-            # Auto-derive DIO from base year: base_sp05 / base_revenue * 360
-            base_sp05 = _base('sp05_rimanenze')
-            dio = _derived_days(base_sp05, base_revenue, 'dio', soglia=soglia_dio)
-            if dio is None:
-                # Le rimanenze non hanno piano di scadenziamento: nulla da scorporare.
-                sp05 = base_sp05
-                dio = _effective_days(sp05, forecast_revenue)
-            else:
-                sp05 = forecast_revenue * dio / DAYS
+            sp05_altre = forecast_revenue * dio_altre / DAYS
         if details is not None:
-            details['dio_applied'] = dio
+            details['dio_altre_applied'] = dio_altre
+
+        sp05 = sp05a_dio + sp05_altre
 
         # Long-term receivables, other current assets
         long_growth = D('1') + assumption.receivables_long_growth_pct / D('100')
@@ -4546,9 +4670,13 @@ class ForecastEngine:
             ]
             sp07a, sp07b, sp07c, sp07d, sp07e, sp07f, sp07g = _alloc(sp07, sp07_fields)
 
-        sp05_fields = ['sp05a_materie_prime', 'sp05b_prodotti_in_corso', 'sp05c_lavori_in_corso',
-                       'sp05d_prodotti_finiti', 'sp05e_acconti']
-        sp05a, sp05b, sp05c, sp05d, sp05e = _alloc(sp05, sp05_fields)
+        # sp05a viene dal CE (spec B01): non e' una quota proporzionale dell'aggregato, e'
+        # esattamente `rim_materie['chiusura']` (gia' quantizzata al centesimo). Le altre
+        # quattro voci si ripartiscono `sp05_altre` sulle proporzioni della base, come sempre.
+        sp05a = sp05a_dio
+        sp05_altre_fields = ['sp05b_prodotti_in_corso', 'sp05c_lavori_in_corso',
+                              'sp05d_prodotti_finiti', 'sp05e_acconti']
+        sp05b, sp05c, sp05d, sp05e = _alloc(sp05_altre, sp05_altre_fields)
 
         # ── DETAILS DEL PREGRESSO: dichiarati SEMPRE, tutti e cinque i saldi ──
         # Anche senza alcun piano, e anche a zero: a valle una chiave assente vale

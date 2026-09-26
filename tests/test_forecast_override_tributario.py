@@ -42,13 +42,20 @@ CREDITO_BASE = D("20000.00")
 # crediti del consuntivo restano in `sp06e` e non pagano piu' i saldi (−10.000
 # di cassa per ciascuno dei due saldi), e il credito da acconti del 2027
 # (24.895,58) si compensa per intero nel 2028 invece di restare in `sp06e`.
+#
+# lotto 1 fix rilievi (2026-09-26): B01 — le materie prime (sp05a = 50.000 in questa base)
+# non crescono piu' coi ricavi (`revenue_growth_pct: 3.33`): dividono sul consumo di base
+# (ce05 200.000, invariato), che qui resta piatto, quindi non assorbono piu' cassa per
+# finanziare uno stock che il fatturato da solo non giustificava. Solo la cassa si sposta
+# (+1.665,00 nel 2027, +3.385,44 nel 2028, cumulato sull'anno prima): `sp06e`/`sp16e` — le
+# righe che questo file verifica — restano identiche.
 PIANO_CREDITO = {
-    2027: {"sp06e": D("44895.58"), "cassa": D("102207.22")},
-    2028: {"sp06e": D("20000.00"), "cassa": D("253684.60")},
+    2027: {"sp06e": D("44895.58"), "cassa": D("103872.22")},
+    2028: {"sp06e": D("20000.00"), "cassa": D("257070.04")},
 }
 PIANO_DEBITO = {
-    2027: {"sp16e": D("24104.42"), "cassa": D("151207.22")},
-    2028: {"sp16e": D("29864.47"), "cassa": D("277789.02")},
+    2027: {"sp16e": D("24104.42"), "cassa": D("152872.22")},
+    2028: {"sp16e": D("29864.47"), "cassa": D("281174.46")},
 }
 
 

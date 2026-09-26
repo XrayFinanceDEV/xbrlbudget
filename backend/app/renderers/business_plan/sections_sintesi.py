@@ -50,12 +50,14 @@ def _cover_name(name: str) -> tuple:
 
 def cover_lines(data: BusinessPlanData) -> layout.CoverLines:
     """I testi della fascia di copertina: gli stessi nel PDF e nel Word. Con un avviso A01-bis
-    (previsionale vecchio) la riga sotto il titolo lo dice, al posto della frase generica."""
-    seconda_riga = (" · ".join(data.avvisi) if data.avvisi
-                    else "Andamento economico, flussi di cassa, sostenibilità del debito e circolante")
+    (previsionale vecchio) ogni frase occupa una riga propria sotto la base del piano, al posto
+    della riga generica — mai unite su una sola riga: con entrambe le diagnostiche la riga unita
+    supera la larghezza utile della pagina (review lotto 2 giro 1)."""
+    righe_sotto = data.avvisi if data.avvisi else (
+        "Andamento economico, flussi di cassa, sostenibilità del debito e circolante",)
     return layout.CoverLines(f"REPORT DI BUDGET {_years(data)}" + (" · BOZZA" if data.draft else ""), data.company_name,
                       f"Piano economico-finanziario {_years(data)}",
-                      (data.base_description, seconda_riga))
+                      (data.base_description,) + righe_sotto)
 
 
 def draw_cover_band(canvas, data: BusinessPlanData) -> None:
@@ -81,8 +83,10 @@ def draw_cover_band(canvas, data: BusinessPlanData) -> None:
     canvas.drawString(LM, PAGE_H - 160, cl.title)
     canvas.setFillColor(C(theme.COVER_SUB))
     canvas.setFont(REGULAR, 11)
-    canvas.drawString(LM, PAGE_H - 200, cl.lines[0])
-    canvas.drawString(LM, PAGE_H - 220, cl.lines[1])
+    # `cl.lines` non è più fissato a due righe: con entrambi gli avvisi A01-bis ce ne sono tre,
+    # una per frase, mai unite (review lotto 2 giro 1).
+    for n, line in enumerate(cl.lines):
+        canvas.drawString(LM, PAGE_H - 200 - n * 20, line)
     canvas.setFillColor(C(theme.MUTED))
     canvas.setFont(REGULAR, 7.8)
     canvas.drawString(LM, PAGE_H - 820, "Riservato e confidenziale")

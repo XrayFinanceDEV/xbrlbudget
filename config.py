@@ -217,6 +217,7 @@ PDF_LLM_MAX_TOKENS = 8192
 # qui: GX10_API_KEY si legge al momento della chiamata (importers/llm_provider.py).
 GX10_BASE_URL = _os.environ.get("GX10_BASE_URL", "http://100.65.63.12:18300")
 GX10_MODEL = _os.environ.get("GX10_MODEL", "qwen3.8-flash-next")
+STRUTTURA_MODEL = _os.environ.get("STRUTTURA_MODEL", "claude-sonnet-5")  # mappa della struttura (vision)
 
 # Scenario Types
 SCENARIO_TYPE_BUDGET = "budget"

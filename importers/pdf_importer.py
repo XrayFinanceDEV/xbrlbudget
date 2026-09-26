@@ -898,10 +898,19 @@ def import_pdf_balance_sheet(
             else:
                 from importers import import_snello
                 try:
-                    _snello = import_snello.importa(file_path, ocr_text=ocr_text)
-                    _snello_report = _snello.report
-                    balance_sheet_data, income_data = _snello.bs, _snello.ce
-                    prior_bs_data, prior_ce_data = _snello.prior_bs, _snello.prior_ce
+                    # Tutto in locali fino in fondo: un'eccezione IN QUALUNQUE punto di
+                    # questo blocco (compreso il calcolo dei totali sotto) non deve
+                    # lasciare _snello/balance_sheet_data/... assegnati a meta': i due
+                    # cancelli piu' sotto leggono "_snello is None" per decidere se il
+                    # codice di oggi deve girare, e un _snello legato a un risultato mai
+                    # adottato per intero li terrebbe chiusi su un bilancio incompleto o
+                    # con tipi non validi (bug riprodotto in revisione: un valore non
+                    # numerico dentro bs fa fallire proprio il calcolo dei totali qui
+                    # sotto, DOPO che _snello era gia' assegnato nella versione precedente).
+                    _risultato_snello = import_snello.importa(file_path, ocr_text=ocr_text)
+                    _bs_snello, _ce_snello = _risultato_snello.bs, _risultato_snello.ce
+                    _prior_bs_snello = _risultato_snello.prior_bs
+                    _prior_ce_snello = _risultato_snello.prior_ce
                     # Il motore snello lavora sulle somme sp01..sp18 (stesse
                     # _ATTIVO_FIELDS/_PASSIVO_FIELDS di mapper.validate_balance,
                     # gia' quadrate da tappa()/misura()), ma non scrive mai
@@ -910,15 +919,22 @@ def import_pdf_balance_sheet(
                     # legge assenti (= zero) e _classify_balance_failure tratta
                     # un bilancio quadrato come un'estrazione vuota (hard_error).
                     from importers.iv_cee_hierarchy import _ATTIVO_FIELDS, _PASSIVO_FIELDS
-                    for _dati_snello in (balance_sheet_data, prior_bs_data):
+                    for _dati_snello in (_bs_snello, _prior_bs_snello):
                         if _dati_snello is not None:
                             _dati_snello["totale_attivo"] = sum(
                                 (Decimal(_dati_snello.get(k, 0)) for k in _ATTIVO_FIELDS), Decimal(0))
                             _dati_snello["totale_passivo"] = sum(
                                 (Decimal(_dati_snello.get(k, 0)) for k in _PASSIVO_FIELDS), Decimal(0))
+                    # Il blocco e' riuscito per intero: solo ora si adotta il risultato.
+                    _snello = _risultato_snello
+                    _snello_report = _snello.report
+                    balance_sheet_data, income_data = _bs_snello, _ce_snello
+                    prior_bs_data, prior_ce_data = _prior_bs_snello, _prior_ce_snello
                 except import_snello.SnelloNonRiuscito as exc:
+                    _snello = None
                     _snello_report = exc.report
                 except Exception as exc:  # il percorso snello e' un'economia: senza, l'import di oggi
+                    _snello = None
                     logger.warning("Import snello non riuscito (%s): importatore attuale", type(exc).__name__)
                     _snello_report = {"esito": "ripiego", "fase": "eccezione", "errore": type(exc).__name__}
 

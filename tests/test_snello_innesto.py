@@ -174,6 +174,41 @@ def test_eccezione_generica_diventa_ripiego_dichiarato(tmp_path, monkeypatch):
     assert persistito["import_snello"]["errore"] == "RuntimeError"
 
 
+def test_eccezione_dopo_limporta_riuscito_non_lascia_snello_agganciato(tmp_path, monkeypatch):
+    """import_snello.importa() torna un Risultato (non solleva), ma il suo bs porta un valore
+    non numerico: il calcolo di totale_attivo/totale_passivo (dentro il try, DOPO che importa()
+    e' gia' tornato) solleva InvalidOperation. _snello non deve restare agganciato al risultato
+    mai adottato per intero: i due cancelli restano aperti e l'import ripiega sull'estrattore di
+    oggi, esattamente come una SnelloNonRiuscito o una RuntimeError sollevate PRIMA."""
+    monkeypatch.setenv("IMPORT_MOTORE", "snello")
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+
+    bs_cattivo = {"sp09_disponibilita_liquide": "non-numerico",
+                 "_plug_residual": D("0"), "_unclassified_mass": D("0")}
+    report = {"esito": "ok", "modo": "legge", "struttura": {}, "misura": {"corrente": {}},
+             "tappo": {"corrente": None}, "letture": {"sp": 1, "ce": 1},
+             "diag": {"lato_irrisolti": []}, "anomalie": [], "secondi": 0.1}
+    risultato_cattivo = Risultato(bs=bs_cattivo, ce={}, prior_bs=None, prior_ce=None,
+                                  report=report, struttura=_struttura())
+    monkeypatch.setattr(import_snello, "importa", lambda *a, **k: risultato_cattivo)
+    session_factory = _db_in_memoria(monkeypatch)
+
+    result = pdf_importer.import_pdf_balance_sheet(
+        file_path=_pdf(tmp_path, RIGHE_PAREGGIO), fiscal_year=2025,
+        company_name="Eccezione dopo importa riuscito", create_company=True, sector=1,
+        user_id="snello-eccezione-dopo", period_months=12,
+    )
+    assert result["success"] is True
+    assert result["extraction_method"] != "import_snello"
+    vr = result["validation_report"]["import_snello"]
+    assert vr["esito"] == "ripiego"
+    assert vr["fase"] == "eccezione"
+    assert vr["errore"] == "InvalidOperation"
+
+    persistito = _validation_report_persistito(session_factory, result["company_id"], 2025)
+    assert persistito["import_snello"]["errore"] == "InvalidOperation"
+
+
 def test_modo_conti_disattiva_llm_dei_dettagli(tmp_path, monkeypatch):
     monkeypatch.setenv("IMPORT_MOTORE", "snello")
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)

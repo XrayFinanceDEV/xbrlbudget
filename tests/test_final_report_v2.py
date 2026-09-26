@@ -444,6 +444,56 @@ def test_forecast_year_without_engine_meta_declares_break_even_as_null_not_zero(
         assert series.unavailable_reasons == ['engine_meta_missing']
 
 
+def test_break_even_fixed_costs_tolerance_scales_with_a_thin_margin():
+    """Fix round 2 (lotto 2 fix rilievi, 2026-09-26): la lega su `fixed_costs`
+    introdotta nel giro 1 (`break_even_revenue × contribution_margin / ricavi ==
+    fixed_costs`) a tolleranza fissa di un centesimo rialzava su un'uscita
+    GENUINA del motore quando il margine è sottile — bep, margine e fissi sono
+    arrotondati al centesimo ciascuno per conto proprio, e l'errore si propaga
+    amplificato di bep/ricavi (grande proprio quando il margine è sottile).
+    Tolleranza proporzionale: `0,01 × (1 + (bep + margine) / ricavi)`.
+
+    Stessi ordini di grandezza usati dal controllore per misurare l'errore
+    peggiore: ricavi 4.109.510,00, margine 1% e 10%, fissi ≈ 1.000.000. Un solo
+    centesimo di scarto sul margine — che la formula amplifica di bep/ricavi,
+    ≈2,53× al 10% e ≈24,34× all'1% — supera già la vecchia tolleranza fissa
+    (0,024 e 0,243 > 0,01) mentre resta sotto quella nuova (0,035 e 0,253): la
+    riga (a) verifica che un report così costruito non rialzi. La riga (b)
+    manomette `fixed_costs` di 1.000 (un tampering vero, non un arrotondamento)
+    e verifica che rialzi comunque, alla stessa identità."""
+    from database.models import BalanceSheet, IncomeStatement
+    revenue = Decimal('4109510.00')
+
+    def _thin_margin_source(pid, year, margin, bep, fixed):
+        bs = {'sp09_disponibilita_liquide': Decimal('10')}
+        inc = {'ce01_ricavi_vendite': revenue}
+        pareggio_motore = {
+            'costi_variabili': str(revenue - margin), 'costi_fissi_operativi': str(fixed),
+            'fatturato_pareggio': str(bep), 'margine_sicurezza_pct': str(Decimal('100') - bep / revenue * Decimal('100')),
+        }
+        return DossierSource(StatementPeriod(id=pid, year=year, label=pid, basis='forecast', period_months=12,
+                                             source='thin-margin-fixture'), bs, inc, pareggio_motore=pareggio_motore)
+
+    # (a) genuina: accettata, pur superando la vecchia tolleranza fissa.
+    sources = [
+        _thin_margin_source('forecast:2027', 2027, Decimal('410951.01'), Decimal('10000000.00'), Decimal('1000000.00')),  # margine 10%
+        _thin_margin_source('forecast:2028', 2028, Decimal('41095.11'), Decimal('100000000.00'), Decimal('1000000.00')),  # margine 1%
+    ]
+    report = extend_dossier(v1_report('bilancio', [2027, 2028]), sources)
+    fixed_series = next(s for s in group(report, 'break_even').series if s.id == 'fixed_costs')
+    assert fixed_series.values == [Decimal('1000000.00'), Decimal('1000000.00')]
+    assert fixed_series.unavailable_reasons == [None, None]
+
+    # (b) manomessa: +1.000 su `fixed_costs` rialza comunque, sulla stessa identità.
+    raw = report.model_dump(mode='json')
+    for index in (0, 1):
+        tampered = copy.deepcopy(raw)
+        cell = _series(tampered, 'break_even', 'fixed_costs')
+        cell['values'][index] = str(Decimal(cell['values'][index]) + Decimal('1000.00'))
+        with pytest.raises(ValueError, match="break-even fixed costs must reconcile with the engine's own identity"):
+            FinalReportModelV2.model_validate(tampered, context={'skip_hash_validation': True})
+
+
 @pytest.mark.parametrize('locate, error', [
     (lambda raw: _swap(raw, 'composition_uses', 'cash'), 'must match the statement rows'),
     # lotto 2 fix rilievi (2026-09-26), fix round 1: su un anno di piano `fixed_costs`

@@ -444,9 +444,15 @@ class FinalReportModelV2(FinalReportModel):
             # cioè `costi_fissi = bep × MdC / ricavi` — usando solo campi già nella serie.
             # Saltata quando un valore manca o i ricavi non sono positivi (nessun pareggio
             # dichiarato in quel caso).
-            if (canonical_basis[index] == "forecast" and None not in (fixed, bep, margin, revenue)
-                    and revenue > 0 and abs(bep * margin / revenue - fixed) > tolerance):
-                raise ValueError(f"break-even fixed costs must reconcile with the engine's own identity at period {canonical_periods[index]}")
+            # Fix round 2: un centesimo fisso rialzava su un'uscita genuina del motore a
+            # margine sottile — bep, margine e fissi sono arrotondati al centesimo
+            # ciascuno per conto proprio, e l'errore si propaga amplificato di
+            # bep/ricavi (grande proprio quando il margine è sottile). Tolleranza
+            # proporzionale all'errore di arrotondamento propagato.
+            if canonical_basis[index] == "forecast" and None not in (fixed, bep, margin, revenue) and revenue > 0:
+                fixed_tolerance = tolerance * (1 + (bep + margin) / revenue)
+                if abs(bep * margin / revenue - fixed) > fixed_tolerance:
+                    raise ValueError(f"break-even fixed costs must reconcile with the engine's own identity at period {canonical_periods[index]}")
             if None not in (margin, revenue, variable) and abs(margin - (revenue - variable)) > tolerance:
                 raise ValueError(f"contribution margin must equal revenue minus variable costs at period {canonical_periods[index]}")
         incidence = {"materials": "practice.materials_revenue", "services": "practice.services_revenue",

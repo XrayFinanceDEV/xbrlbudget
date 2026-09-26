@@ -154,3 +154,57 @@ tutti senza marcatore `xfail`, i soli xfail residui sono del lotto 2 (A01-bis, A
   generati prima significa «non lo so», mai un motore vecchio da segnalare.
 - **Lotto 2** (report e indici: A01-bis, A02, C01-C09) resta `xfail` — fuori dal perimetro di questo lotto, dipende
   dalla firma e dal `pareggio` persistiti qui.
+
+## Lotto 2, 2026-09-26
+
+Fix su report e indici (`docs/superpowers/specs/2026-09-26-fix-rilievi-ambienta-design.md` §4, piano
+`docs/superpowers/plans/2026-09-26-fix-rilievi-lotto2-report.md`, worktree `../budget-fix-rilievi-l2`, branch
+`fix/rilievi-lotto2` da `fix/rilievi-ambienta` — lotto 1 compreso, task 1-8). `tools/triage_rilievi.py::LETTURE`
+aggiornato per A01, A02, C01-C09 — «Risolto nel lotto 2 fix rilievi (2026-09-26)»; il banco
+(`tests/test_rilievi_ambienta.py`) conferma: `../budget/backend/venv/bin/python -m pytest
+tests/test_rilievi_ambienta.py -q -p no:warnings` → **35 passed, 0 xfailed** — nessun marcatore `xfail` residuo su
+tutto il file. Suite gate completa (`BUDGET_REAL_DB=<db reale migrato>` sull'ultimo commit del lotto, `b01755c`):
+**2153 passed, 6 failed, 283 skipped, 16 xfailed** — i 6 falliti sono esattamente i preesistenti elencati nei
+vincoli globali del lotto, non collegati a questo giro.
+
+- **A01-bis** — Task 1: PDF e Word del Business plan in bozza portano ora un secondo avviso,
+  `engine_version_stale` (severità `error`, come `forecast_stale`), quando un `ForecastYear` porta un
+  `engine_version` inferiore all'attuale — mai per l'infrannuale. In intestazione solo la forma corta
+  («BOZZA · da rigenerare»: la frase intera troncherebbe il nome azienda), le frasi intere della spec una per
+  riga in copertina (`BusinessPlanData.avvisi`). `engine_meta` `NULL`, o senza `engine_version`, non avvisa.
+- **A02** — Task 2: il punto di pareggio degli anni di piano viene da `ForecastYear.engine_meta['pareggio']` (il
+  motore), non più dalla ripartizione fissa 60/40 costi fissi/variabili; `None` con `engine_meta_missing`
+  (nessun `engine_meta`) o `pareggio_non_definito` (`costi_variabili`/`costi_fissi_operativi` nulli nel motore,
+  tipicamente ce05/ce06 sotto override). La colonna base/storica non è toccata.
+- **C01** — Task 6: il DSCR è `(MOL − imposte) / (oneri finanziari + quota capitale rimborsata nell'anno)`, quota
+  capitale da `financing.third_party_funds.decreases` del rendiconto dettagliato — non più un proxy
+  (`(EBITDA - imposte) / oneri`); `None` (`cashflow_unavailable`) senza rendiconto per il periodo (prima colonna
+  storica, periodi infrannuale `observed`/`adjusted`), `None` (`rimborsi_non_determinabili`) con
+  `erogazioni_incoerenti`. Ogni occorrenza di "proxy" tolta dai renderer (PDF, Word, Typst).
+- **C02** — Task 3: DSO sui soli crediti commerciali (`sp06a+sp07a`), non gli aggregati sp06/sp07 (che includono
+  crediti tributari e diversi); DIO sul consumo di materie (`ce05+ce10`), non sul fatturato — `None` (mai zero) a
+  consumo non positivo.
+- **C03**/**C04** — Task 3: ROD e PFN condividono `financial_debt_total` (banche + altri finanziatori +
+  obbligazioni, somma incondizionata) — prima un ramo tagliava fuori gli altri finanziatori quando c'erano già
+  banche. ROD `None` (mai zero) a debito finanziario zero.
+- **C05** — Task 4: un solo current ratio, quick ratio e CCN in tutto il documento
+  (`attivo_corrente`/`passivo_corrente` in `calculations/report_indicators.py`, richiamate anche da `ratios.py`),
+  simmetrici sui ratei: sp07 escluso dall'attivo corrente, sp18 incluso nel passivo corrente. Margine di
+  tesoreria, acid test, Altman e FGPMI restano con la loro definizione di prima.
+- **C06** — Task 3: l'indice di indebitamento è debiti totali / patrimonio netto (`leverage_ratio` uguale a
+  `debt_to_equity`), non più immobilizzazioni/PN.
+- **C07** — Task 3: la copertura delle immobilizzazioni include il TFR nel numeratore (patrimonio netto + debiti
+  oltre 12 mesi + TFR).
+- **C08** — Task 5: il rendiconto separa erogazioni e rimborsi quando `ForecastYear.engine_meta['erogazioni']` è
+  noto (prestiti nuovi, altri finanziatori, tiraggio fidi, scoperto generato nell'anno); `erogazioni_incoerenti`
+  ripiega sulla riga netta di sempre quando i dati non tornano.
+- **C09** — Task 7: la frase sugli oneri finanziari sul MOL parte dalla colonna base/storica (`of_mol`) quando la
+  dichiara, non più dal primo anno di piano.
+- **Fix round della revisione (dentro il Task 3)** — ROD e DIO sono diventati `None` (mai zero) anche sulla
+  pagina Indici (`GET .../scenarios/{id}/ratios`, che legge `FinancialRatiosCalculator` direttamente e non passa
+  da `report_indicators.py`): i quattro campi (`rod`, `inventory_turnover_days`, `cash_conversion_cycle`,
+  `spread`) diventano `Optional` in `ratios.py`, `schemas/calculations.py` e `frontend/types/api.ts`;
+  `calculation_service.py` non li riscrive più a `0.0`. A schermo: «n.d.».
+- **Un solo DSO, DIO, ROD, PFN, current/quick/CCN, indebitamento e copertura**: tutti gli scenari esistenti, non
+  solo quelli generati dopo il lotto — la pagina Indici e il Business plan leggono le stesse formule di
+  `calculations/ratios.py`/`report_indicators.py` a ogni richiesta, non un valore persistito.

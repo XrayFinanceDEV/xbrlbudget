@@ -21,8 +21,16 @@ VITEST_TEMP = "lib/rilievi-ambienta.triage.test.ts"
 
 # Lettura a mano del verdetto: prevale sullo Stato meccanico, che resta nella nota («— banco: …»).
 LETTURE = {
-    "A01": ("Confermato solo come previsionale vecchio nel PDF (A01-bis)",
-            "Confermato solo come previsionale vecchio nel PDF (A01-bis); motore e wizard corretti"),
+    "A01": ("Risolto nel lotto 2 fix rilievi (2026-09-26)",
+            "Risolto nel lotto 2 fix rilievi (2026-09-26): motore e wizard erano già corretti; il "
+            "previsionale vecchio nel PDF (A01-bis) ora blocca il \"finale\" del Business plan con un secondo "
+            "avviso, `engine_version_stale` (severità error, come `forecast_stale`) — forma corta in "
+            "intestazione, frase intera in copertina"),
+    "A02": ("Risolto nel lotto 2 fix rilievi (2026-09-26)",
+            "Risolto nel lotto 2 fix rilievi (2026-09-26): il punto di pareggio degli anni di piano viene da "
+            "`ForecastYear.engine_meta['pareggio']` (il motore), non più dalla ripartizione fissa 60/40 costi "
+            "fissi/variabili; `None` con `engine_meta_missing`/`pareggio_non_definito` quando il motore stesso "
+            "non li ha definiti (colonna base/storica non toccata)"),
     "A03": ("Non riprodotto", "Motore non riprodotto; sintomo spiegato da A01-bis"),
     "A04": ("Risolto nel lotto 1 fix rilievi (2026-09-26), su decisione del proprietario",
             "Risolto nel lotto 1 fix rilievi (2026-09-26), su decisione del proprietario: con un piano "
@@ -52,6 +60,41 @@ LETTURE = {
             "mano la cui lista non copre l'anno dopo ripete a breve l'ultima rata positiva (rata_ripetuta) "
             "invece di lasciare l'intero residuo a lungo termine oltre l'orizzonte — anche per gli altri "
             "finanziatori"),
+    "C01": ("Risolto nel lotto 2 fix rilievi (2026-09-26)",
+            "Risolto nel lotto 2 fix rilievi (2026-09-26): il DSCR è (MOL − imposte) / (oneri finanziari + "
+            "quota capitale rimborsata nell'anno), quota capitale dal rendiconto dettagliato "
+            "(`financing.third_party_funds.decreases`) — non più un proxy; `None` senza rendiconto per quel "
+            "periodo o con `erogazioni_incoerenti`"),
+    "C02": ("Risolto nel lotto 2 fix rilievi (2026-09-26)",
+            "Risolto nel lotto 2 fix rilievi (2026-09-26): DSO sui soli crediti commerciali (`sp06a+sp07a`, "
+            "non gli aggregati sp06/sp07) e DIO sul consumo di materie (`ce05+ce10`), `None` (mai zero) a "
+            "consumo non positivo"),
+    "C03": ("Risolto nel lotto 2 fix rilievi (2026-09-26)",
+            "Risolto nel lotto 2 fix rilievi (2026-09-26): ROD divide per `financial_debt_total` (banche + "
+            "altri finanziatori + obbligazioni, somma incondizionata), `None` (mai zero) a debito finanziario "
+            "zero"),
+    "C04": ("Risolto nel lotto 2 fix rilievi (2026-09-26)",
+            "Risolto nel lotto 2 fix rilievi (2026-09-26): la PFN del report usa lo stesso "
+            "`financial_debt_total` di C03 — prima un ramo tagliava fuori gli altri finanziatori quando "
+            "c'erano già banche"),
+    "C05": ("Risolto nel lotto 2 fix rilievi (2026-09-26)",
+            "Risolto nel lotto 2 fix rilievi (2026-09-26): un solo current ratio, quick ratio e CCN in tutto "
+            "il documento (`attivo_corrente`/`passivo_corrente`), simmetrici sui ratei — sp07 escluso "
+            "dall'attivo corrente, sp18 incluso nel passivo corrente; margine di tesoreria, acid test, Altman "
+            "e FGPMI non toccati"),
+    "C06": ("Risolto nel lotto 2 fix rilievi (2026-09-26)",
+            "Risolto nel lotto 2 fix rilievi (2026-09-26): l'indice di indebitamento è debiti totali / "
+            "patrimonio netto (`leverage_ratio` = `debt_to_equity`), non più immobilizzazioni/PN"),
+    "C07": ("Risolto nel lotto 2 fix rilievi (2026-09-26)",
+            "Risolto nel lotto 2 fix rilievi (2026-09-26): la copertura delle immobilizzazioni include il TFR "
+            "nel numeratore (patrimonio netto + debiti oltre 12 mesi + TFR)"),
+    "C08": ("Risolto nel lotto 2 fix rilievi (2026-09-26)",
+            "Risolto nel lotto 2 fix rilievi (2026-09-26): il rendiconto separa erogazioni e rimborsi quando "
+            "`ForecastYear.engine_meta['erogazioni']` è noto; `erogazioni_incoerenti` ripiega sulla riga netta "
+            "di sempre quando i dati non tornano"),
+    "C09": ("Risolto nel lotto 2 fix rilievi (2026-09-26)",
+            "Risolto nel lotto 2 fix rilievi (2026-09-26): la frase sugli oneri finanziari sul MOL parte dalla "
+            "colonna base/storica (`of_mol`) quando la dichiara, non più dal primo anno di piano"),
     "E05": ("Risolto nel lotto 1 fix rilievi (2026-09-26), su decisione del proprietario",
             "Risolto nel lotto 1 fix rilievi (2026-09-26), su decisione del proprietario: un nuovo investimento "
             "ammortizza a metà aliquota nell'anno d'ingresso, piena dopo; proventi e oneri straordinari valgono "

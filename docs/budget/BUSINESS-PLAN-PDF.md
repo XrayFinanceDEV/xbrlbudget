@@ -11,7 +11,30 @@ testi AI mancanti del dossier (`narrative_missing`) sono solo `info` e non lo bl
 
 **Da dove vengono i numeri:** solo da `FinalReportModelV2`, via `data.from_report`. Il report somma e sottrae righe
 già presenti (costi operativi = costi della produzione − ammortamenti; debiti finanziari = PFN + liquidità) e non
-ricalcola indicatori. DSCR proxy = (EBITDA − imposte) / oneri finanziari.
+ricalcola indicatori. DSCR = (MOL − imposte) / (oneri finanziari + quota capitale rimborsata nell'anno) — non è più
+un proxy (lotto 2 fix rilievi, 2026-09-26): la quota capitale viene da `financing.third_party_funds.decreases` del
+rendiconto dettagliato (`calculations/report_indicators._dscr_capital_quota`); `None` quando il periodo non ha un
+rendiconto (prima colonna storica, periodi infrannuale `observed`/`adjusted`) o quando `erogazioni_incoerenti` è
+vero — mai una cifra ricostruita al suo posto. Il punto di pareggio (SEZIONE 4, "Costi fissi e variabili · break
+even point") sugli anni di piano viene allo stesso modo da `ForecastYear.engine_meta['pareggio']`, non da una
+ripartizione fissa 60/40 costi fissi/variabili (quella resta solo per la colonna base/storica); `None` con
+`engine_meta_missing` o `pareggio_non_definito` quando il motore stesso non li ha definiti (ce05/ce06 sotto
+override).
+
+**Rendiconto (SEZIONE 5 "Flussi di cassa", ALLEGATO C "Rendiconto finanziario completo"):** quando l'anno dichiara
+le proprie erogazioni
+(`ForecastYear.engine_meta['erogazioni']`: prestiti nuovi, altri finanziatori, tiraggio fidi e scoperto generato),
+la riga "mezzi di terzi" si separa in erogazioni e rimborsi invece di mostrare il solo netto; un flag interno,
+`erogazioni_incoerenti`, segnala quando le erogazioni note non bastano a spiegare l'aumento di debito e fa
+ripiegare sulla riga netta di sempre. Un anno senza `engine_meta` (scenari generati prima del lotto 2, o
+promossi dall'infrannuale) si comporta come prima: nessuna separazione.
+
+**Avviso di previsionale vecchio (A01-bis):** oltre a `forecast_stale` (ipotesi salvate dopo l'ultima
+generazione), il "finale" si blocca anche con `engine_version_stale` — un `ForecastYear` generato da una versione
+precedente di `calculations/forecast_engine.ENGINE_VERSION` — mai per l'infrannuale. In intestazione compare solo
+la forma corta «BOZZA · da rigenerare» (la frase intera per esteso troncherebbe il nome dell'azienda); le frasi
+intere della spec stanno in copertina, una per riga (`BusinessPlanData.avvisi`, `data.py`). `engine_meta` assente,
+o senza la chiave `engine_version`, non genera alcun avviso.
 
 **Testi:** `narrative.py`, regole deterministiche con soglie in `SOGLIE`. Nessun LLM. Per cambiare una frase si
 cambia una regola o una soglia, e il test `tests/test_bp_narrative.py` ne fissa il comportamento su AMBIENTA.

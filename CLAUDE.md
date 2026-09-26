@@ -235,6 +235,72 @@ ciò che non si può non sapere. Ogni voce dice la regola e **cosa si rompe** a 
   esiti diversi a otto minuti di distanza. Un sospetto di regressione si conferma sul percorso di
   produzione e su più esecuzioni, mai su una sola.
 
+### Indici e report
+
+Regole del lotto 2 fix rilievi (2026-09-26). `calculations/ratios.py`
+(`FinancialRatiosCalculator`, letto dalla pagina Indici via
+`GET /companies/{id}/scenarios/{scenario_id}/ratios`, direttamente — **non** passa da
+`report_indicators.py`) e `calculations/report_indicators.py` (Sezione 8/Allegato E del
+Business plan) condividono le stesse formule: un cambio qui si vede **su ogni scenario
+esistente**, storico compreso, non solo su quelli generati dopo il lotto.
+
+- **Un solo DSO, sui crediti commerciali.** `receivables_turnover_days` legge
+  `sp06a_crediti_clienti_breve + sp07a_crediti_clienti_lungo`, non gli aggregati `sp06+sp07`
+  (che includono crediti tributari e diversi): su ogni azienda con crediti non commerciali
+  dentro sp06/sp07 il DSO scende, sia in Indici sia nel report.
+- **DIO sul consumo di materie, `None` se non positivo.** Il denominatore di
+  `inventory_turnover_days` è `ce05_materie_prime + ce10_var_rimanenze_mat_prime` (convenzione
+  OIC B11), non il fatturato: comune nei servizi, senza una riga di materie prime distinta, dove
+  il DMAG (e `cash_conversion_cycle`, che lo somma) è `None`, mai zero.
+- **ROD e PFN su un solo perimetro di debito finanziario**: `financial_debt_total` (banche +
+  altri finanziatori + obbligazioni, sp16a-c/sp17a-c, somma incondizionata) — prima un ramo
+  tagliava fuori gli altri finanziatori quando c'erano già banche, sottostimando ROD e PFN su
+  ogni azienda con debito misto. `rod` è `None` (mai zero) a perimetro zero.
+- **Un solo current ratio, quick ratio e CCN, simmetrici sui ratei.** Attivo corrente =
+  sp05+sp06+sp08+sp09+sp10 (sp07 escluso: crediti commerciali a lungo non liquidabili nell'anno),
+  passivo corrente = sp16+sp18 (ratei passivi, prima assenti) — `attivo_corrente`/
+  `passivo_corrente` in `report_indicators.py`, richiamate anche da `ratios.py`. **Non toccati
+  apposta**: margine di tesoreria e acid test (passivo resta sp16 solo) e Altman/FGPMI
+  (`BalanceSheet.current_assets`/`.current_liabilities`/`.working_capital_net`, definizione
+  propria del modello di rating).
+- **Indice di indebitamento = debiti totali / patrimonio netto** (`leverage_ratio` ora uguale a
+  `debt_to_equity`, un solo calcolo): prima era immobilizzazioni/PN, una leva sugli investimenti
+  sotto l'etichetta "Indice di Indebitamento" dell'Allegato E.
+- **Copertura delle immobilizzazioni include il TFR** nel numeratore (patrimonio netto + debiti
+  oltre 12 mesi + TFR): fonte consolidata come il debito a lungo, prima ne restava fuori.
+- **ROD, DIO, spread e ciclo di conversione del denaro sono `None` a denominatore non positivo,
+  mai zero** — anche in Indici: i quattro campi diventano `Optional` in `ratios.py`,
+  `schemas/calculations.py` e `frontend/types/api.ts`, e `calculation_service.py` non li
+  riscrive più a `0.0`. A schermo: «n.d.».
+- **DSCR vero, non un proxy**: `(MOL − imposte) / (oneri finanziari + quota capitale rimborsata
+  nell'anno)`, quota capitale da `financing.third_party_funds.decreases` del rendiconto
+  dettagliato — `None` (`cashflow_unavailable`) quando il periodo non ha un rendiconto (prima
+  colonna storica, periodi infrannuale `observed`/`adjusted`), `None`
+  (`rimborsi_non_determinabili`) quando `erogazioni_incoerenti` è vero.
+- **Il rendiconto separa erogazioni e rimborsi quando l'anno le dichiara**:
+  `ForecastYear.engine_meta['erogazioni']` (prestiti nuovi, altri finanziatori, tiraggio fidi e
+  scoperto generato nell'anno, dal motore) pilota `DetailedCashFlowCalculator` a mostrare due
+  righe invece di una netta; `erogazioni_incoerenti` (in `FinancingActivities`) segnala quando le
+  erogazioni note non bastano a spiegare l'aumento di debito, e in quel caso si ripiega sulla riga
+  netta di sempre. `engine_meta` `NULL` (scenari pre-lotto, anni infrannuale) = nessuna
+  separazione, comportamento identico a prima.
+- **Il punto di pareggio degli anni di piano viene dal motore**,
+  `ForecastYear.engine_meta['pareggio']` (`costi_variabili`, `costi_fissi_operativi`,
+  `fatturato_pareggio`, `margine_sicurezza_pct`), non più dalla ripartizione fissa 60/40 costi
+  fissi/variabili — quella resta solo per la colonna base/storica, che il motore non genera.
+  `None` con `engine_meta_missing` (nessun `engine_meta`, scenari pre-lotto) o
+  `pareggio_non_definito` (`costi_variabili`/`costi_fissi_operativi` nulli, tipicamente ce05/ce06
+  sotto override) — mai un numero ricalcolato al posto di quello dichiarato.
+- **A01-bis, un secondo avviso di previsionale vecchio**: `engine_version_stale` (severità
+  `error`, come `forecast_stale`) blocca il "finale" del Business plan quando un `ForecastYear`
+  porta un `engine_version` inferiore a quello corrente — mai per l'infrannuale. In intestazione
+  solo la forma corta («BOZZA · da rigenerare»: la frase intera troncherebbe il nome azienda), le
+  frasi intere della spec una per riga in copertina. `engine_meta` `NULL` o senza
+  `engine_version` = nessun avviso («non lo so», non un verdetto negativo).
+- **C09**: la frase sugli oneri finanziari sul MOL parte dal valore della colonna base/storica
+  (`of_mol`) quando la base la dichiara, non più dal primo anno di piano; senza `of_mol` in base,
+  ripiega sul primo anno di piano come prima.
+
 ### Previsionale
 - **Un verdetto di inaffidabilità blocca il previsionale, mai il salvataggio.** Le Rettifiche
   lavorano su un `FinancialYear` già persistito: un file non salvato sarebbe incorreggibile per

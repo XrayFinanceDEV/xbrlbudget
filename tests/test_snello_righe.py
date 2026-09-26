@@ -51,3 +51,40 @@ def test_totali_prima_dei_figli_e_lati_separati():
     R.marca_totali(righe)
     assert [r.id for r in righe if r.totale] == ["1", "4"]
     assert righe[1].mastro == "mastro"
+
+
+def test_tre_gruppi_con_totali_uguali():
+    # senza confine di gruppo, l'apprendimento a coppie vota anche +1 (il "30" del gruppo
+    # accanto somma per caso al totale di questo): le due passate forzate per intero, non
+    # il solo voto a coppie, devono scegliere -1 e lasciare "tot C" fra i totali.
+    righe = [_r(1, "10"), _r(2, "20"), _r(3, "30", testo="tot A"),
+             _r(4, "12"), _r(5, "18"), _r(6, "30", testo="tot B"),
+             _r(7, "10"), _r(8, "20"), _r(9, "30", testo="tot C")]
+    R.marca_totali(righe)
+    assert {r.id for r in righe if r.totale} == {"3", "6", "9"}
+    assert sum(r.valore for r in R.foglie(righe)) == D("90")
+
+
+def test_foglie_uguali_senza_totali():
+    # due importi uguali in fila non sono il totale del terzo: senza un gruppo vero (k>=2)
+    # da nessuna parte del documento, nessuna catena (k=1) va marcata.
+    righe = [_r(1, "80"), _r(2, "80"), _r(3, "50")]
+    R.marca_totali(righe)
+    assert not any(r.totale for r in righe)
+    assert sum(r.valore for r in R.foglie(righe)) == D("210")
+
+
+def test_catena_ammessa_se_ci_sono_gruppi():
+    # un gruppo vero (k>=2) c'e': la catena (k=1) nella stessa direzione resta ammessa.
+    righe = [_r(1, "100"), _r(2, "50"), _r(3, "150", testo="mastro A"),
+             _r(4, "30"), _r(5, "30", testo="mastro B")]
+    R.marca_totali(righe)
+    assert {r.id for r in righe if r.totale} == {"3", "5"}
+    assert sum(r.valore for r in R.foglie(righe)) == D("180")
+
+
+def test_senza_valori_non_va_in_crash():
+    assert not R.marca_totali([])
+    righe = [_r(1, None), _r(2, None), _r(3, None)]
+    assert not R.marca_totali(righe)
+    assert not any(r.totale for r in righe)

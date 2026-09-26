@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import re
 from collections import Counter, defaultdict
+from copy import deepcopy
 from dataclasses import dataclass
 from decimal import Decimal
 
@@ -74,58 +75,112 @@ def saldo(riga, regola: dict) -> Decimal | None:
     return v.quantize(Decimal("0.01"))
 
 
-def _marca(righe: list[Riga], forzata: int | None) -> Counter:
-    per_lato = defaultdict(list)
+def _per_lato(righe: list[Riga]) -> dict[str, list[Riga]]:
+    per_lato: dict[str, list[Riga]] = defaultdict(list)
     for r in righe:
         r.totale, r.mastro = False, None
         if r.valore is not None:
             per_lato[r.lato].append(r)
-    direzioni: Counter = Counter()
-    for kmin in (2, 1):
-        if forzata is not None:
-            consentite = (forzata,)
-        elif kmin == 2 or not direzioni:
-            consentite = (1, -1)
-        else:
-            consentite = (direzioni.most_common(1)[0][0],)
+    return per_lato
+
+
+def _passata(per_lato: dict[str, list[Riga]], direzione: int, kmin: int) -> int:
+    """Marca, in una sola direzione, i totali di almeno kmin figli. Ritorna quanti ne marca."""
+    marcati = 0
+    for seq in per_lato.values():
         cambiato = True
         while cambiato:
             cambiato = False
-            for seq in per_lato.values():
-                vive = [r for r in seq if not r.totale]
-                for i, r in enumerate(vive):
-                    if not r.valore:
-                        continue
-                    for d in consentite:
-                        s, j, membri = Decimal(0), i + d, []
-                        while 0 <= j < len(vive) and len(membri) < 80:
-                            s += vive[j].valore
-                            membri.append(vive[j])
-                            if len(membri) >= kmin and s == r.valore:
-                                r.totale = cambiato = True
-                                if kmin == 2 and forzata is None:
-                                    direzioni[d] += 1
-                                for m in membri:
-                                    m.mastro = m.mastro or r.testo
-                                break
-                            j += d
-                        if r.totale:
+            vive = [r for r in seq if not r.totale]
+            for i, r in enumerate(vive):
+                if not r.valore:
+                    continue
+                s, j, membri = Decimal(0), i + direzione, []
+                while 0 <= j < len(vive) and len(membri) < 80:
+                    s += vive[j].valore
+                    membri.append(vive[j])
+                    if len(membri) >= kmin and s == r.valore:
+                        r.totale = cambiato = True
+                        marcati += 1
+                        for m in membri:
+                            m.mastro = m.mastro or r.testo
+                        break
+                    j += direzione
+                if cambiato:
+                    break
+            if cambiato:
+                continue
+    return marcati
+
+
+def _conta_forzata(righe: list[Riga], direzione: int) -> int:
+    """Su una copia usa e getta: quante righe marcherebbe questa sola direzione, gruppi (k>=2)
+    e catene (k=1) insieme. Serve solo a confrontare le due direzioni, mai a marcare davvero:
+    una catena a due cifre uguali puo' comparire in entrambe le direzioni per coincidenza, ma
+    conta comunque quanto un gruppo vero ai fini del confronto."""
+    per_lato = _per_lato(deepcopy(righe))
+    return _passata(per_lato, direzione, 2) + _passata(per_lato, direzione, 1)
+
+
+def _voti_apprendimento(righe: list[Riga]) -> Counter:
+    """Vota la direzione dai soli gruppi (k>=2), provando entrambe le direzioni riga per
+    riga: usato solo per spareggiare quando le due passate forzate per intero marcano lo
+    stesso numero di righe. Da solo puo' votare la direzione sbagliata quando un gruppo
+    confina con l'altro (le prime righe del gruppo vicino sommano per caso al totale di
+    questo) - per questo non decide mai da solo, se non a parita'."""
+    per_lato = _per_lato(deepcopy(righe))
+    voti: Counter = Counter()
+    for seq in per_lato.values():
+        cambiato = True
+        while cambiato:
+            cambiato = False
+            vive = [r for r in seq if not r.totale]
+            for i, r in enumerate(vive):
+                if not r.valore:
+                    continue
+                for d in (1, -1):
+                    s, j, membri = Decimal(0), i + d, []
+                    while 0 <= j < len(vive) and len(membri) < 80:
+                        s += vive[j].valore
+                        membri.append(vive[j])
+                        if len(membri) >= 2 and s == r.valore:
+                            r.totale = cambiato = True
+                            voti[d] += 1
+                            for m in membri:
+                                m.mastro = m.mastro or r.testo
                             break
-                    if cambiato:
+                        j += d
+                    if r.totale:
                         break
                 if cambiato:
                     break
-    return direzioni
+            if cambiato:
+                continue
+    return voti
 
 
 def marca_totali(righe: list[Riga]) -> Counter:
-    """Prima impara la direzione dei totali (prima o dopo i figli) dai gruppi di almeno due
-    righe, poi ricalcola tutto con quella sola direzione: una sequenza all'indietro che
-    somma per caso (un bene e il suo fondo si annullano) non marca piu' un conto vero."""
-    direzioni = _marca(righe, None)
-    if direzioni:
-        _marca(righe, direzioni.most_common(1)[0][0])
-    return direzioni
+    """Sceglie la direzione provando le due passate forzate per intero (gruppi e catene) e
+    tenendo quella che marca piu' righe: l'apprendimento a coppie da solo vota anche la
+    direzione sbagliata quando un gruppo confina con l'altro (le prime righe del gruppo
+    vicino sommano per caso al totale di questo - senza un confine di gruppo il voto a coppie
+    non lo vede). A parita' decide l'apprendimento a coppie; se anche quello e' muto, -1
+    (totale dopo i figli). Le catene di un solo figlio (k=1) contano solo se la direzione
+    scelta ha trovato almeno un totale vero (k>=2) nel documento: senza un gruppo reale, due
+    importi uguali in fila sono spesso una coincidenza, non un mastro (80,80 non e' il totale
+    di 50)."""
+    piu, meno = _conta_forzata(righe, 1), _conta_forzata(righe, -1)
+    if piu != meno:
+        direzione = 1 if piu > meno else -1
+    else:
+        voti = _voti_apprendimento(righe)
+        direzione = voti.most_common(1)[0][0] if voti else -1
+
+    per_lato = _per_lato(righe)
+    trovati = _passata(per_lato, direzione, 2)
+    if trovati:
+        _passata(per_lato, direzione, 1)
+    return Counter({direzione: trovati}) if trovati else Counter()
 
 
 def righe_da_pdf(file_path: str, pagine: set[int] | None, ruoli: list[str],

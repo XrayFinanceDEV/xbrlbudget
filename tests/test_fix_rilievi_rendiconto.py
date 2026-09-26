@@ -213,3 +213,38 @@ def test_narrativa_cita_i_rimborsi_di_ogni_anno_di_piano():
     atteso = (f"{fmt.compact_eur(D('280000'))} nel 2027, {fmt.compact_eur(D('53409'))} nel 2028"
               f" e {fmt.compact_eur(D('88409'))} nel 2029")
     assert atteso in testo, testo
+
+
+# ===========================================================================
+# F3 (Importante, revisione finale lotto 2, 2026-09-26): la pagina Rendiconto
+# (`GET /scenarios/{id}/detailed-cashflow`, `calculation_service.calculate_detailed_cashflow_
+# historical_and_forecast`) chiamava `DetailedCashFlowCalculator.calculate` senza `erogazioni=`,
+# quindi restava al netto anche dopo C08 — `analysis_service.py` (usato da `/analysis`) passava
+# `engine_meta['erogazioni']`, questo servizio no: le due pagine mostravano numeri diversi per lo
+# stesso anno di piano.
+# ===========================================================================
+
+def test_pagina_rendiconto_separa_erogazioni_e_rimborsi_come_analysis():
+    """`calculate_detailed_cashflow_historical_and_forecast` (pagina Rendiconto) deve dare lo
+    stesso incremento/decremento di mezzi di terzi di `analysis_service._calculate_cashflow`
+    (pagina Indici/analisi) sullo stesso scenario: un'erogazione nota separa le due cifre in
+    entrambe le pagine, non solo in una."""
+    from backend.app.services import calculation_service
+
+    engine, Session_ = memory_sessions()
+    db = Session_()
+    try:
+        fy_base, sc = _genera(db, "rendiconto-pagina")
+        fy2027 = _forecast(db, sc, 2027)
+        erogazioni = D(fy2027.engine_meta["erogazioni"])
+
+        risultato = calculation_service.calculate_detailed_cashflow_historical_and_forecast(
+            db, fy_base.company_id, sc.id, sc.base_year
+        )
+        cf_2027 = next(cf for cf in risultato.cashflows if cf.year == 2027)
+        financing = cf_2027.financing_activities.third_party_funds
+        assert D(str(financing.increases)) == erogazioni, financing
+        assert D(str(financing.decreases)) == (erogazioni - DELTA_2027), financing
+    finally:
+        db.close()
+        engine.dispose()

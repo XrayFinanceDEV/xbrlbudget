@@ -280,14 +280,12 @@ def _con_rimborsi():
     return rows
 
 
-@pytest.mark.xfail(strict=True, raises=AssertionError, reason="C01 confermato dal triage 2026-09-25: il DSCR del report è "
-                    "(MOL-imposte)/oneri, senza la quota capitale al denominatore"
-                    " — togli il marcatore quando il fix lo fa passare")
 def test_C01_il_dscr_del_report_comprende_la_quota_capitale():
-    """C01 · Report sez. 1, 6, All. D: «DSCR proxy» = (EBITDA − imposte) / oneri, senza quota capitale.
-    Oracolo: DSCR = (MOL − imposte) / (oneri + quota capitale); con rimborsi 53.409 è molto sotto il proxy.
-    Il numeratore (MOL − imposte) è la formula del consulente, non una scelta del banco: un fix che adottasse
-    un altro numeratore (es. flusso di cassa operativo) va confrontato con lui, non con questo test."""
+    """C01 (lotto 2 fix rilievi, 2026-09-26, fix): il DSCR del report includeva solo (EBITDA − imposte) / oneri,
+    senza la quota capitale. Oracolo: DSCR = (MOL − imposte) / (oneri + quota capitale); con rimborsi 53.409 è
+    molto sotto la vecchia formula. Il numeratore (MOL − imposte) è la formula del consulente, non una scelta
+    del banco: un fix che adottasse un altro numeratore (es. flusso di cassa operativo) va confrontato con lui,
+    non con questo test."""
     _bp()
     e = generato(genera(_con_rimborsi(), report=True))
     ce = e.anni[2027][1]

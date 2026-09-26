@@ -89,7 +89,41 @@ def financial_debt_total(field_value: Callable[[str], Decimal]) -> Decimal:
     return sum((field_value(field) for field in FINANCIAL_DEBT_FIELDS), ZERO)
 
 
-def indicator_results(bs, inc, analytical_ratios=None) -> dict[str, IndicatorResult]:
+def _dscr_capital_quota(cashflow) -> tuple[Decimal | None, str | None]:
+    """Quota capitale rimborsata nell'anno (C01, lotto 2 fix rilievi 2026-09-26): letta dal
+    rendiconto finanziario dettagliato dello stesso anno, `financing.third_party_funds.decreases`
+    (il rimborso che il Task 5/C08 porta su una riga propria, separata dalle erogazioni). Un anno
+    senza rendiconto (prima colonna storica del dossier, periodi infrannuali `observed`/
+    `adjusted`, che non ne calcolano uno proprio) rende il DSCR indefinito: mai un fallback
+    silenzioso alla vecchia formula (EBITDA - imposte)/oneri, senza la quota capitale. Quando le
+    erogazioni note dell'anno
+    (motore di previsione) non bastano a spiegare l'aumento del debito rilevato
+    (`erogazioni_incoerenti`), la quota capitale non è determinabile allo stesso modo — il
+    rendiconto in quel caso è tornato al solo netto storico, che non è la quota capitale.
+    Senza erogazioni note (colonna storica/base, o un anno di piano il cui `engine_meta` non le
+    dichiara) `decreases` è comunque la diminuzione netta del debito finanziario dell'anno: si usa
+    come quota capitale, dichiarandolo nella formula dell'indicatore.
+    """
+    if not cashflow:
+        return None, 'cashflow_unavailable'
+    financing = cashflow.get('financing') or {}
+    if financing.get('erogazioni_incoerenti'):
+        return None, 'rimborsi_non_determinabili'
+    quota = (financing.get('third_party_funds') or {}).get('decreases')
+    if quota is None:
+        return None, 'cashflow_unavailable'
+    return quota, None
+
+
+DSCR_FORMULA = ('(MOL - imposte) / (oneri finanziari + quota capitale rimborsata nell\'anno): la quota viene dal '
+                'rendiconto finanziario dettagliato dello stesso anno (financing.third_party_funds.decreases) — il '
+                'rimborso vero quando le erogazioni dell\'anno sono note, la diminuzione netta del debito '
+                'finanziario altrimenti. Indefinito senza un rendiconto per l\'anno, o con erogazioni note ma '
+                'incoerenti col debito rilevato: mai la vecchia formula senza quota capitale '
+                '((EBITDA - imposte) / oneri finanziari).')
+
+
+def indicator_results(bs, inc, analytical_ratios=None, cashflow=None) -> dict[str, IndicatorResult]:
     """No annualization: flows retain the duration identified by their period."""
     if bs is None or inc is None:
         return {}
@@ -116,7 +150,11 @@ def indicator_results(bs, inc, analytical_ratios=None) -> dict[str, IndicatorRes
         result['practice.' + key] = IndicatorResult(value, reason, formula, practice_convention)
     def amount(key, value, formula):
         result['practice.' + key] = IndicatorResult(value, None, formula, practice_convention)
-    ratio('dscr', ce.ebitda - ce.taxes, interest, '(EBITDA - imposte) / oneri finanziari: proxy della pratica, non servizio completo del debito.', positive=True)
+    quota_capitale, dscr_reason = _dscr_capital_quota(cashflow)
+    if dscr_reason:
+        result['practice.dscr'] = IndicatorResult(None, dscr_reason, DSCR_FORMULA, practice_convention)
+    else:
+        ratio('dscr', ce.ebitda - ce.taxes, interest + quota_capitale, DSCR_FORMULA, positive=True)
     ratio('ebitda_margin', ce.ebitda, revenue, 'EBITDA / ricavi × 100', percentage=True)
     amount('mt', current - v('sp05_rimanenze') - short, 'Attivo corrente pratica - rimanenze - debiti entro 12 mesi')
     # C05 (lotto 2 fix rilievi, 2026-09-26): CCN, current ratio e quick ratio sul passivo corrente

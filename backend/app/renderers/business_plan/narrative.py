@@ -140,7 +140,7 @@ def key_points(data: BusinessPlanData) -> list:
                 "Servizio del debito al limite." if mn_d >= SOGLIE["dscr_limite"] else
                 "Servizio del debito non coperto.")
         (c1, d1), (cl, dl) = dscr[0], dscr[-1]
-        text = f"Il DSCR (proxy) è pari a {fmt.ratio(d1)} nel {c1.year} e a {fmt.ratio(dl)} nel {cl.year}"
+        text = f"Il DSCR è pari a {fmt.ratio(d1)} nel {c1.year} e a {fmt.ratio(dl)} nel {cl.year}"
         # C09 (lotto 2 fix rilievi, 2026-09-26): la frase riparte dalla colonna base, non dal
         # primo anno di piano — coerente con «gli oneri passano da X (oggi) a Y (fine piano)». Se
         # la base non ha of_mol, ripiega sul primo anno di piano come prima del fix.
@@ -218,14 +218,14 @@ def strengths_weaknesses(data: BusinessPlanData) -> tuple:
         if fn < f0 and pen < pe0:
             txt = f"PFN da € {fmt.eur(f0)} a € {fmt.eur(fn)} e PFN/EBITDA da {fmt.ratio(pe0)} a {fmt.ratio(pen)}."
             if dscr_plan:
-                txt += f" DSCR (proxy) mai inferiore a {fmt.floor_ratio(min(dscr_plan), 1)}."
+                txt += f" DSCR mai inferiore a {fmt.floor_ratio(min(dscr_plan), 1)}."
             forza.append(Finding("deleveraging", "Rapido deleveraging", txt))
         if pen > SOGLIE["pfn_ebitda_alto"]:
             debolezza.append(Finding("indebitamento", "Indebitamento elevato",
                                      f"PFN/EBITDA pari a {fmt.ratio(pen)} nel {data.last.year}."))
     if dscr_plan and min(dscr_plan) < SOGLIE["dscr_limite"]:
         debolezza.append(Finding("dscr_basso", "Servizio del debito non coperto",
-                                 f"DSCR (proxy) minimo pari a {fmt.ratio(min(dscr_plan))}."))
+                                 f"DSCR minimo pari a {fmt.ratio(min(dscr_plan))}."))
     d0, dn = _ends(data, "dso")
     k0, kn = _ends(data, "ciclo")
     if _all(d0, dn):

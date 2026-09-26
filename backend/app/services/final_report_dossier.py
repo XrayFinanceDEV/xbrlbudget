@@ -113,7 +113,7 @@ def build_detailed_statements(sources: list[DossierSource]) -> list[DetailedStat
 
 
 def build_indicator_catalog(sources: list[DossierSource]) -> list[IndicatorDefinition]:
-    results = [indicator_results(s.balance_sheet, s.income_statement, (s.calculations or {}).get('ratios')) for s in sources]
+    results = [indicator_results(s.balance_sheet, s.income_statement, (s.calculations or {}).get('ratios'), s.cashflow) for s in sources]
     definitions = [('practice.' + row['key'], row, 'pratica') for row in CATALOG['practice_indicators']]
     definitions += [('practice.' + key, {'label': label, 'format': 'pct'}, 'incidenze') for key, label in (('materials_revenue', 'Materie prime / Ricavi'), ('services_revenue', 'Servizi / Ricavi'), ('personnel_revenue', 'Personale / Ricavi'))]
     # M2-02E: quattro indicatori canonici mancanti (pagine 7, 8, 12 del dossier v4). Come
@@ -141,8 +141,7 @@ def build_indicator_catalog(sources: list[DossierSource]) -> list[IndicatorDefin
                 value *= Decimal('100')
             values.append(value)
             reasons.append(reason)
-        label = 'DSCR — proxy della pratica' if identifier == 'practice.dscr' else row['label']
-        indicators.append(IndicatorDefinition(id=identifier, label=label, family=family, unit=unit,
+        indicators.append(IndicatorDefinition(id=identifier, label=row['label'], family=family, unit=unit,
             methodology=prototype.methodology if prototype else 'Fonte di calcolo non disponibile; nessuna formula applicata dal renderer.',
             convention=prototype.convention if prototype else 'Periodo e unità dichiarati; valori indisponibili distinti dallo zero.',
             periods=[s.period for s in sources], values=values, unavailable_reasons=reasons,
@@ -363,7 +362,7 @@ DOSSIER_CHARTS = (
     ('practice_asset_coverage', 'Autonomia e copertura immobilizzazioni', ('practice.indipendenza', 'practice.copertura_immob')),
     ('practice_net_debt', 'Posizione finanziaria netta della pratica', ('practice.pfn',)),
     ('practice_net_debt_ebitda', 'PFN / EBITDA della pratica', ('practice.pfn_ebitda',)),
-    ('practice_dscr_proxy', 'Copertura degli oneri finanziari — proxy DSCR', ('practice.dscr',)),
+    ('practice_dscr', 'Copertura degli oneri finanziari — DSCR', ('practice.dscr',)),
     ('economic_incidence', 'Incidenze economiche sui ricavi', ('practice.ebitda_margin', 'practice.materials_revenue', 'practice.services_revenue')),
     ('financial_charges', 'Incidenza degli oneri finanziari', ('practice.of_revenue', 'practice.of_mol')),
     ('analytical_liquidity', 'Liquidità — convenzione analitica', ('analytical.liquidity.current_ratio', 'analytical.liquidity.quick_ratio', 'analytical.liquidity.acid_test')),

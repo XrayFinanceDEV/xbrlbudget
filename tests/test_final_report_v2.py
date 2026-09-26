@@ -129,13 +129,20 @@ def test_live_api_negotiation_preserves_v1_and_exact_v2_source_values(client):
             assert row.values[cf_column] == expected
 
 
-def test_null_zero_negative_and_proxy_dscr_availability():
+def test_null_zero_negative_and_dscr_availability():
     bs = {'sp09_disponibilita_liquide': Decimal('100'), 'sp11_capitale': Decimal('100')}
     inc = {'ce01_ricavi_vendite': Decimal('100'), 'ce05_materie_prime': Decimal('100')}
     values = indicator_results(bs, inc)
     assert values['practice.ebitda_margin'].value == Decimal('0')
+    # C01 (lotto 2 fix rilievi, 2026-09-26): senza un rendiconto finanziario per l'anno il DSCR è
+    # indefinito per mancanza della quota capitale, non più "zero_denominator" sui soli oneri
+    # finanziari nulli — mai il vecchio (EBITDA - imposte) / oneri finanziari.
     assert values['practice.dscr'].value is None
-    assert values['practice.dscr'].reason == 'zero_denominator'
+    assert values['practice.dscr'].reason == 'cashflow_unavailable'
+    cashflow = {'financing': {'third_party_funds': {'decreases': Decimal('0')}}}
+    con_rendiconto = indicator_results(bs, inc, cashflow=cashflow)
+    assert con_rendiconto['practice.dscr'].value is None
+    assert con_rendiconto['practice.dscr'].reason == 'zero_denominator'
     assert values['practice.pfn'].value == Decimal('-100')
     assert values['practice.pfn_ebitda'].value is None
     # M2-02G fase 2 (pag. 14): EBITDA negativa ⇒ rapporto non significativo,

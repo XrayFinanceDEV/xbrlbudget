@@ -133,9 +133,7 @@ def _indicator_table(table_id: str, title: str, report: FinalReportModelV2, peri
                      rows_spec: list[tuple[str, str | None]]) -> dict[str, Any] | None:
     """Una riga per indicatore del catalogo; un identificatore assente si
     omette (mai «n.d.»). `display_label=None` tiene l'etichetta del catalogo
-    così com'è — necessario per `practice.dscr`, che porta il suffisso
-    "— proxy della pratica" (v. `build_indicator_catalog`), non riscrivibile a
-    mano senza perdere quell'avvertenza."""
+    così com'è, per non doverla riscrivere a mano riga per riga qui."""
     columns = ["Indicatore", *[s.period_label_short(period) for period in periods]]
     rows = []
     for identifier, display_label in rows_spec:
@@ -302,8 +300,7 @@ def _solidita(report: FinalReportModelV2) -> dict[str, Any]:
     if table is not None:
         items.append(table)
     return {"form": "rail+main", "id": "solidita", "title": "Solidità e copertura del debito", "family": FAMILY,
-            "subtitle": "Il DSCR segue la convenzione della pratica: non è un calcolo completo sul servizio "
-                        "del debito.",
+            "subtitle": "DSCR = (MOL − imposte) / (oneri finanziari + quota capitale rimborsata nell'anno).",
             "kpis": [] if block is not None else kpis, "items": items}
 
 

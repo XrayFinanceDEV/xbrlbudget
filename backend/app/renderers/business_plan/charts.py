@@ -281,7 +281,7 @@ def _panel_title(ax, text: str) -> None:
 def dscr_pfn(labels, dscr: Values, pfn_ebitda: Values) -> bytes:
     fig, (a1, a2) = _fig("dscr_pfn", ncols=2)
     fig.subplots_adjust(left=0.06, right=0.99, top=0.88, bottom=0.12, wspace=0.12)
-    for ax, vals, color, title in ((a1, _f(dscr), theme.NAVY, "DSCR (proxy)"),
+    for ax, vals, color, title in ((a1, _f(dscr), theme.NAVY, "DSCR"),
                                    (a2, _f(pfn_ebitda), theme.TEAL, "PFN / EBITDA")):
         x = list(range(len(labels)))
         ax.bar(x, vals, 0.55, color=color, zorder=2)

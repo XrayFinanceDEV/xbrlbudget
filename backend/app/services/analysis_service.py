@@ -171,7 +171,10 @@ def _get_complete_analysis(
                 historical_data_list.append({
                     "year": fy.year,
                     "balance_sheet": fy.balance_sheet,
-                    "income_statement": fy.income_statement
+                    "income_statement": fy.income_statement,
+                    # C08 (lotto 2 fix rilievi, 2026-09-26): un anno storico non ha un
+                    # `engine_meta` del motore — il rendiconto resta al netto di sempre.
+                    "engine_meta": None,
                 })
 
     # 3. Get forecast years
@@ -199,7 +202,11 @@ def _get_complete_analysis(
                 forecast_data_list.append({
                     "year": forecast_year.year,
                     "balance_sheet": forecast_year.balance_sheet,
-                    "income_statement": forecast_year.income_statement
+                    "income_statement": forecast_year.income_statement,
+                    # C08: le erogazioni dell'anno vivono in `engine_meta['erogazioni']`,
+                    # scritto dal motore (`calculations.forecast_engine.engine_meta`). `None`
+                    # su un anno di piano generato prima di questo lotto.
+                    "engine_meta": forecast_year.engine_meta,
                 })
 
     # 4. Calculate all financial metrics for each year
@@ -226,12 +233,19 @@ def _get_complete_analysis(
             current_year_data = all_years_data[i]
 
             try:
+                # C08: le erogazioni note dell'anno CORRENTE, non quello base — e' l'anno di cui
+                # si sta calcolando il rendiconto. `None` su un anno storico o su un anno di
+                # piano senza `engine_meta['erogazioni']` (comportamento di prima).
+                engine_meta = current_year_data.get("engine_meta") or {}
+                erogazioni_raw = engine_meta.get("erogazioni")
+                erogazioni = Decimal(str(erogazioni_raw)) if erogazioni_raw is not None else None
                 cf_result = _calculate_cashflow(
                     base_year_data["balance_sheet"],
                     base_year_data["income_statement"],
                     current_year_data["balance_sheet"],
                     current_year_data["income_statement"],
-                    current_year_data["year"]
+                    current_year_data["year"],
+                    erogazioni
                 )
                 cf_result["base_year"] = base_year_data["year"]
                 cashflow_years.append(cf_result)
@@ -355,10 +369,15 @@ def _calculate_cashflow(
     base_inc: models.IncomeStatement,
     current_bs: models.BalanceSheet,
     current_inc: models.IncomeStatement,
-    year: int
+    year: int,
+    erogazioni: Optional[Decimal] = None
 ) -> Dict[str, Any]:
     """
     Calculate detailed cashflow for one year.
+
+    Args:
+        erogazioni: le erogazioni note dell'anno corrente (C08, `engine_meta['erogazioni']`),
+            `None` su un anno storico o senza `engine_meta`.
 
     Returns:
         Dictionary with operating, investing, financing cashflows and ratios
@@ -368,7 +387,8 @@ def _calculate_cashflow(
         bs_current=current_bs,
         bs_previous=base_bs,
         inc_current=current_inc,
-        year=year
+        year=year,
+        erogazioni=erogazioni
     )
 
     return {

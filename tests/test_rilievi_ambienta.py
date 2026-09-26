@@ -371,9 +371,6 @@ def test_C07_copertura_immobilizzazioni_con_il_tfr():
     assert abs(D(str(base(e.data, "copertura_immob"))) - atteso) < D("0.1"), (base(e.data, "copertura_immob"), atteso)
 
 
-@pytest.mark.xfail(strict=True, raises=AssertionError, reason="C08 confermato dal triage 2026-09-25: erogazione e rimborsi "
-                    "escono compensati sulla stessa riga del rendiconto, non su righe separate"
-                    " — togli il marcatore quando il fix lo fa passare")
 def test_C08_erogazioni_e_rimborsi_su_righe_separate():
     """C08 · Sez. 1, 5, All. C: nel 2027 erogazione 280.000 e rimborsi 88.409 compensati (191.591).
     Oracolo: il rendiconto 2027 porta nuovo debito = 280.000 e rimborsi ≥ 53.409, non il netto."""

@@ -96,6 +96,14 @@ def _growth_phrase(data: BusinessPlanData) -> Optional[str]:
     return _join(parts)
 
 
+def _eur_per_anno(data: BusinessPlanData, vals: list) -> str:
+    """C08 (lotto 2 fix rilievi, 2026-09-26): un importo per ogni anno di piano, come
+    `_growth_phrase` — la sintesi cita i rimborsi anno per anno, non il cumulato, perché ora
+    erogazioni e rimborsi escono su righe separate del rendiconto invece che nette."""
+    parts = [f"{fmt.compact_eur(v)} nel {y}" for v, y in zip(vals, data.plan_years)]
+    return _join(parts)
+
+
 def _span(data: BusinessPlanData) -> str:
     y = data.plan_years
     return f"{y[0]}–{y[-1]}" if len(y) > 1 else str(y[0])
@@ -143,11 +151,14 @@ def key_points(data: BusinessPlanData) -> list:
     f0, fn = _ends(data, "pfn")
     pe0, pen = _ends(data, "pfn_ebitda")
     if op and _all(*op, *inv, *rimb, f0, fn, pe0, pen):
-        s_op, s_inv, s_r = sum(op, D(0)), sum(inv, D(0)), sum(rimb, D(0))
+        s_op, s_inv = sum(op, D(0)), sum(inv, D(0))
         lead = ("Generazione di cassa e deleveraging." if s_op > 0 and fn < f0 else
                 "Generazione di cassa." if s_op > 0 else "Assorbimento di cassa.")
+        # C08: i rimborsi si citano anno per anno, non il cumulato — dal lotto 2 escono su una
+        # riga separata dalle erogazioni nel rendiconto, e la sintesi segue lo stesso taglio.
+        rimb_testo = _eur_per_anno(data, rimb)
         out.append((lead, f"I flussi operativi cumulati {_span(data)} sono pari a {fmt.compact_eur(s_op)}, a fronte "
-                          f"di investimenti per {fmt.compact_eur(abs(s_inv))} e rimborsi per {fmt.compact_eur(s_r)}. "
+                          f"di investimenti per {fmt.compact_eur(abs(s_inv))} e rimborsi per {rimb_testo}. "
                           f"La PFN passa da € {fmt.eur(f0)} a € {fmt.eur(fn)} e il rapporto PFN/EBITDA da "
                           f"{fmt.ratio(pe0)} a {fmt.ratio(pen)}."))
     ms0, msn = _ends(data, "margine_sicurezza")

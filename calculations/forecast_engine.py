@@ -29,13 +29,43 @@ from calculations.ce_result import calculate_ce_result
 ENGINE_VERSION = "2"
 
 
+def _erogazioni_anno(details: Dict[str, Any]) -> str:
+    """Le erogazioni dell'anno (C08, lotto 2 fix rilievi 2026-09-26): la somma di quanto l'anno ha
+    davvero incassato da terzi, per il rendiconto — separata dai rimborsi invece di uscire netta
+    sulla stessa riga (`cashflow_detailed.DetailedCashFlowCalculator`). Somma, al centesimo:
+    - `erogato` di ogni contratto in `details['debito_bancario']['contratti']`;
+    - `erogato` di ogni contratto in `details['altri_finanziatori']['contratti']` (prima scartato
+      qui, ora dichiarato — vedi il commento sul blocco che lo produce);
+    - il tiraggio dei fidi dell'anno (`details['debito_bancario']['fidi']['tiraggio']`, regime
+      esplicito §5.2-bis);
+    - lo scoperto generato nell'anno (`details['scoperto_generato']`).
+    Una chiave diagnostica assente vale zero: senza debito, senza fidi e senza scoperto la somma è
+    "0.00", non `None` — è una vera assenza di erogazioni, non un dato mancante.
+    """
+    zero = Decimal('0')
+    debito = details.get('debito_bancario') or {}
+    totale = sum(
+        (Decimal(str(c.get('erogato') or 0)) for c in (debito.get('contratti') or [])),
+        zero,
+    )
+    altri = details.get('altri_finanziatori') or {}
+    totale += sum(
+        (Decimal(str(c.get('erogato') or 0)) for c in (altri.get('contratti') or [])),
+        zero,
+    )
+    fidi = debito.get('fidi') or {}
+    totale += Decimal(str(fidi.get('tiraggio') or 0))
+    totale += Decimal(str(details.get('scoperto_generato') or 0))
+    return str(totale.quantize(Decimal('0.01'), rounding=ROUND_HALF_UP))
+
+
 def engine_meta(details: Dict[str, Any]) -> Dict[str, Any]:
     """La firma persistita su `ForecastYear.engine_meta`: JSON puro, importi come stringhe al centesimo."""
     pareggio = details.get('pareggio')
     if pareggio is not None:
         pareggio = {k: (None if v is None else str(Decimal(str(v)).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)))
                     for k, v in pareggio.items()}
-    return {'engine_version': ENGINE_VERSION, 'pareggio': pareggio}
+    return {'engine_version': ENGINE_VERSION, 'pareggio': pareggio, 'erogazioni': _erogazioni_anno(details)}
 
 
 def _importo_it(value) -> str:
@@ -4490,7 +4520,7 @@ class ForecastEngine:
             anno = assumption.forecast_year
             righe, tot_res, tot_breve, tot_rimb, tot_int = [], ZERO, ZERO, ZERO, ZERO
             for c in altri_finanziatori:
-                _, rimborso, interessi = new_financing_schedule([c], anno)
+                erogato, rimborso, interessi = new_financing_schedule([c], anno)
                 residuo = _residuo_contratto(c, anno)
                 # B05: la rata dell'anno dopo passa da `rata_anno_dopo`, non da una lettura
                 # diretta del kernel — nell'ultimo anno di piano un contratto scadenziato a
@@ -4501,7 +4531,11 @@ class ForecastEngine:
                 righe.append({
                     'indice': c['indice'], 'nome': c['nome'],
                     'residuo_iniziale': _q2(c['opening_residual']),
-                    'rimborso': _q2(rimborso), 'interessi': _q2(interessi),
+                    # C08 (lotto 2 fix rilievi, 2026-09-26): l'erogazione del contratto, prima
+                    # scartata qui (`_, rimborso, interessi = ...`), ora si dichiara — il
+                    # rendiconto la somma in `engine_meta['erogazioni']` per separarla dai
+                    # rimborsi invece di uscire netta sulla stessa riga.
+                    'erogato': _q2(erogato), 'rimborso': _q2(rimborso), 'interessi': _q2(interessi),
                     'residuo': _q2(residuo), 'breve': _q2(breve),
                     'lungo': _q2(residuo - breve),
                     # B05, esteso agli altri finanziatori (ruling del controller, Task 6):

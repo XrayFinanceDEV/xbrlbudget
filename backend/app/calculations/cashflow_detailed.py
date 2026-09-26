@@ -60,7 +60,8 @@ class DetailedCashFlowCalculator:
         bs_current: BalanceSheet,
         bs_previous: BalanceSheet,
         inc_current: IncomeStatement,
-        year: int
+        year: int,
+        erogazioni: Optional[Decimal] = None,
     ) -> DetailedCashFlowStatement:
         """
         Calculate detailed cash flow statement for a year
@@ -70,6 +71,9 @@ class DetailedCashFlowCalculator:
             bs_previous: Previous year balance sheet (required for cashflow)
             inc_current: Current year income statement
             year: The year for this cashflow statement
+            erogazioni: le erogazioni note dell'anno (C08, lotto 2 fix rilievi 2026-09-26), da
+                `ForecastYear.engine_meta['erogazioni']` — `None` su un anno storico o su un anno
+                di piano senza `engine_meta` (comportamento di prima: mezzi di terzi netti).
 
         Returns:
             DetailedCashFlowStatement with all components
@@ -439,8 +443,26 @@ class DetailedCashFlowCalculator:
         # Required third-party financing to make cash balance
         debt_net = actual_cash_change_calc - total_operating_cashflow - total_investing_cashflow - equity_net
 
-        debt_increases = debt_net if debt_net > Decimal("0") else Decimal("0")
-        debt_decreases = -debt_net if debt_net < Decimal("0") else Decimal("0")
+        # C08 (lotto 2 fix rilievi, 2026-09-26): con le erogazioni note dell'anno (dal motore,
+        # via `ForecastYear.engine_meta['erogazioni']`) il rendiconto separa erogazioni e
+        # rimborsi invece di uscire netto sulla stessa riga — `increases = erogazioni`,
+        # `decreases = erogazioni - Δ debito finanziario` (Δ = `debt_net`, il netto di sempre,
+        # che NON cambia: `net` resta `debt_net`). Senza `erogazioni` (anno storico, o
+        # `engine_meta` senza quella chiave), comportamento di prima. Se le erogazioni note non
+        # bastassero a spiegare l'aumento del debito (`decreases` negativo, dato incoerente): non
+        # si inventa nulla, si torna al netto di sempre e si dichiara
+        # (`erogazioni_incoerenti`, sotto).
+        erogazioni_incoerenti = False
+        if erogazioni is not None:
+            debt_increases = erogazioni
+            debt_decreases = erogazioni - debt_net
+            if debt_decreases < Decimal("0"):
+                erogazioni_incoerenti = True
+                debt_increases = debt_net if debt_net > Decimal("0") else Decimal("0")
+                debt_decreases = -debt_net if debt_net < Decimal("0") else Decimal("0")
+        else:
+            debt_increases = debt_net if debt_net > Decimal("0") else Decimal("0")
+            debt_decreases = -debt_net if debt_net < Decimal("0") else Decimal("0")
 
         third_party_funds = FinancingSource(
             increases=R(debt_increases),
@@ -454,7 +476,8 @@ class DetailedCashFlowCalculator:
         financing_activities = FinancingActivities(
             third_party_funds=third_party_funds,
             own_funds=own_funds,
-            total_financing_cashflow=R(total_financing_cashflow)
+            total_financing_cashflow=R(total_financing_cashflow),
+            erogazioni_incoerenti=erogazioni_incoerenti,
         )
 
         # ===== CASH RECONCILIATION =====

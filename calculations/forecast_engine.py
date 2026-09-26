@@ -24,6 +24,19 @@ from calculations.projection_common import (
 )
 from calculations.ce_result import calculate_ce_result
 
+# Si incrementa a ogni cambiamento dei numeri che il motore produce a parità di ipotesi: un
+# ForecastYear con una versione più vecchia è un previsionale da rigenerare (lotto 2, A01-bis).
+ENGINE_VERSION = "2"
+
+
+def engine_meta(details: Dict[str, Any]) -> Dict[str, Any]:
+    """La firma persistita su `ForecastYear.engine_meta`: JSON puro, importi come stringhe al centesimo."""
+    pareggio = details.get('pareggio')
+    if pareggio is not None:
+        pareggio = {k: (None if v is None else str(Decimal(str(v)).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)))
+                    for k, v in pareggio.items()}
+    return {'engine_version': ENGINE_VERSION, 'pareggio': pareggio}
+
 
 def _importo_it(value) -> str:
     """Importo al centesimo in formato italiano per i messaggi all'utente: 1.333,34.
@@ -2771,6 +2784,8 @@ class ForecastEngine:
                 # generazione, e ogni rigenerazione riuscita successiva si
                 # dichiarerebbe stantia pur essendo allineata.
                 fy.updated_at = datetime.utcnow()
+
+            fy.engine_meta = engine_meta(result.details)
 
             # Save or update forecast balance sheet
             existing_bs = self.db.query(ForecastBalanceSheet).filter(

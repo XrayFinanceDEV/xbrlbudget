@@ -6,7 +6,9 @@ from pathlib import Path
 
 import pytest
 
-from database.models import BalanceSheet, BudgetScenario, Company, FinancialYear, IncomeStatement
+from database.models import (
+    BalanceSheet, BudgetScenario, Company, FinancialYear, ForecastYear, IncomeStatement,
+)
 from backend.app.services import assumptions_service, forecast_preview_service
 from tests.e2e_kit import memory_sessions, read_forecast_maps
 
@@ -41,6 +43,7 @@ class Esito:
     det: dict
     data: object
     rep: object
+    meta: dict
 
 
 def genera(rows, *, bs=None, ce=None, report=False, prima=None) -> Esito:
@@ -68,6 +71,8 @@ def genera(rows, *, bs=None, ce=None, report=False, prima=None) -> Esito:
             res = assumptions_service.bulk_upsert_assumptions(db, sc.id, [dict(r) for r in rows],
                                                               auto_generate=True)
             anni = {y: (sp, c) for y, sp, c in read_forecast_maps(db, sc.id)}
+            meta = {fy.year: fy.engine_meta for fy in
+                    db.query(ForecastYear).filter(ForecastYear.scenario_id == sc.id)}
             prev = forecast_preview_service.preview_forecast(db, sc.id, [dict(r) for r in rows])
             det = {y["year"]: y["details"] for y in prev.get("forecast_years") or []}
             data = rep = None
@@ -76,7 +81,7 @@ def genera(rows, *, bs=None, ce=None, report=False, prima=None) -> Esito:
                 from backend.app.renderers.business_plan.data import from_report
                 rep = assemble_final_report(db, company.id, sc.id, schema_version=2)
                 data = from_report(rep, draft=True)
-            return Esito(res, anni, det, data, rep)
+            return Esito(res, anni, det, data, rep, meta)
     finally:
         engine.dispose()
 

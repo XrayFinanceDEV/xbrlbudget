@@ -792,6 +792,11 @@ class ForecastYear(Base):
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
+    # Firma della generazione (spec fix rilievi 2026-09-26): versione del motore che ha prodotto
+    # questi numeri e il punto di pareggio dichiarato. NULL = generato prima della firma, cioè
+    # «non lo so» — mai un verdetto negativo.
+    engine_meta = Column(JSON, nullable=True)
+
     # Relationships
     scenario = relationship("BudgetScenario", back_populates="forecast_years")
     balance_sheet = relationship("ForecastBalanceSheet", back_populates="forecast_year", uselist=False, cascade="all, delete-orphan")

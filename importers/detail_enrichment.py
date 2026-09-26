@@ -826,9 +826,13 @@ def enrich_pdf_details(file_path: str, current: dict, prior: dict | None = None,
     Failure preserves the original extraction and is exposed in validation
     metadata. The environment switch makes rollout/replay independently testable.
     `pagine` restricts the source rows to those pages (1-based, SourceRow.page);
-    an empty set restricts nothing, exactly like `None`. `usa_llm=False` skips
-    the LLM reader entirely (the deterministic maturity reclassification and
-    local details still run) and declares "llm_disattivato".
+    an empty set restricts nothing, exactly like `None`. A page set matching
+    none of the rows (e.g. an OCR/text-only source, whose rows carry page=0)
+    also restricts nothing rather than collapsing to zero rows: it keeps every
+    row and declares `report["pagine_ignorate"]` instead of `report["pagine"]`.
+    `usa_llm=False` skips the LLM reader entirely (the deterministic maturity
+    reclassification and local details still run) and declares
+    "llm_disattivato".
     """
     from importers.detail_search import search_details, finish_search_report, active_families
     balances = {'current': current, 'prior': prior}
@@ -843,8 +847,14 @@ def enrich_pdf_details(file_path: str, current: dict, prior: dict | None = None,
     try:
         rows = collect_source_rows(file_path, ocr_text=ocr_text)
         if pagine:
-            rows = [r for r in rows if r.page in pagine]
-            report['pagine'] = sorted(pagine)
+            filtered = [r for r in rows if r.page in pagine]
+            if filtered:
+                rows = filtered
+                report['pagine'] = sorted(pagine)
+            else:
+                # A page set matching none of the rows (e.g. OCR/text-only
+                # sources carry page=0) never restricts to zero rows.
+                report['pagine_ignorate'] = sorted(pagine)
         report['source_rows_total'] = len(rows)
         if not any(row.amounts for row in rows):
             report["reason"] = "no_source_cells"

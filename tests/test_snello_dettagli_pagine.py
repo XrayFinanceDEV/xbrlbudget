@@ -37,6 +37,22 @@ def test_pagine_none_keeps_default_behaviour(monkeypatch):
     assert "pagine" not in report
 
 
+def test_pagine_matching_nothing_keeps_all_rows_and_declares_ignored(monkeypatch):
+    """OCR/text-only rows carry page=0; a page filter that matches none of them
+    must not collapse a real source down to zero rows (the project rule that a
+    page set never restricts to zero rows)."""
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "test")
+    rows = [row("ocr1", 0, "100"), row("ocr2", 0, "999")]
+    monkeypatch.setattr(de, "collect_source_rows", lambda *a, **kw: rows)
+    monkeypatch.setattr(de, "read_details", lambda *a: de.DetailReading())
+    current, prior, report = de.enrich_pdf_details(
+        "unused", {INV: D("100")}, pagine={2},
+    )
+    assert report["source_rows_total"] == 2
+    assert report["pagine_ignorate"] == [2]
+    assert "pagine" not in report
+
+
 def test_pagine_empty_set_restricts_nothing(monkeypatch):
     """Un insieme vuoto di pagine non e' un filtro: restringe zero pagine, non le righe a zero."""
     monkeypatch.setenv("ANTHROPIC_API_KEY", "test")

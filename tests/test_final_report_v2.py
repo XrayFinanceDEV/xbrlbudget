@@ -463,6 +463,33 @@ def test_forecast_year_without_engine_meta_declares_break_even_as_null_not_zero(
         assert series.unavailable_reasons == ['engine_meta_missing']
 
 
+def test_pareggio_motore_from_distinguishes_missing_engine_meta_from_missing_pareggio_key():
+    """Minore (revisione finale lotto 2, 2026-09-26): un `engine_meta` presente ma senza la
+    chiave `pareggio` (motore più vecchio del blocco pareggio) non è la stessa cosa di un anno
+    senza `engine_meta` affatto — la prima ragione a valle dev'essere `pareggio_non_definito`
+    (il motore che ha girato per quell'anno non ha mai calcolato la scomposizione), non
+    `engine_meta_missing` (nessun motore ha mai girato)."""
+    from app.services.final_report_dossier import pareggio_motore_from
+
+    assert pareggio_motore_from(None) is None
+    assert pareggio_motore_from({'engine_version': '1', 'erogazioni': '0.00'}) == {}
+    pareggio = {'costi_variabili': '100.00', 'costi_fissi_operativi': '50.00'}
+    assert pareggio_motore_from({'engine_version': '2', 'pareggio': pareggio, 'erogazioni': '0.00'}) == pareggio
+
+
+def test_forecast_year_with_engine_meta_but_no_pareggio_key_declares_pareggio_non_definito():
+    """Stesso minore, end-to-end: un `ForecastYear.engine_meta` presente ma senza `pareggio`
+    (motore più vecchio) dichiara `pareggio_non_definito`, non `engine_meta_missing` — il report
+    distingue «il motore non l'ha calcolato» da «nessun motore ha mai girato per quest'anno»."""
+    report = extend_dossier(v1_report(), [DossierSource(
+        StatementPeriod(id='forecast:2027', year=2027, label='2027', basis='forecast', period_months=12, source='old-engine'),
+        {'sp09_disponibilita_liquide': Decimal('10')}, {'ce01_ricavi_vendite': Decimal('100')},
+        pareggio_motore={})])
+    for series in group(report, 'break_even').series:
+        assert series.values == [None]
+        assert series.unavailable_reasons == ['pareggio_non_definito']
+
+
 def test_break_even_fixed_costs_tolerance_scales_with_a_thin_margin():
     """Fix round 2 (lotto 2 fix rilievi, 2026-09-26): la lega su `fixed_costs`
     introdotta nel giro 1 (`break_even_revenue × contribution_margin / ricavi ==

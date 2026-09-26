@@ -528,7 +528,7 @@ def assemble_final_report(db: Session, company_id: int, scenario_id: int, *, sch
             return report
 
         from app.schemas.final_report_v2 import StatementPeriod
-        from app.services.final_report_dossier import DossierSource, extend_dossier
+        from app.services.final_report_dossier import DossierSource, extend_dossier, pareggio_motore_from
         sources = []
         calculations = analysis.get('calculations', {}).get('by_year', {})
         cashflows = {entry['year']: entry for entry in cashflow_years if isinstance(entry, dict) and 'year' in entry}
@@ -584,7 +584,11 @@ def assemble_final_report(db: Session, company_id: int, scenario_id: int, *, sch
             # la chiusura infrannuale promossa (`basis='closing'`, sopra), che non è
             # un anno di piano rigenerato da questo motore.
             forecast_row = by_forecast_year.get(year)
+            # Minore (revisione finale lotto 2, 2026-09-26): `pareggio_motore_from` distingue
+            # "nessun engine_meta persistito" (`engine_meta_missing`) da "engine_meta c'è ma non
+            # ha mai calcolato il pareggio" (`pareggio_non_definito`) — un `.get('pareggio')`
+            # diretto le confondeva entrambe in `None`.
             add_source(f'forecast:{year}', year, 'forecast', forecast_row, f'{year} previsionale',
-                pareggio_motore=(getattr(forecast_row, 'engine_meta', None) or {}).get('pareggio'))
+                pareggio_motore=pareggio_motore_from(getattr(forecast_row, 'engine_meta', None)))
         from app.services.editorial_notes_service import project_editorial_report
         return project_editorial_report(db, extend_dossier(report, sources), scenario.id)

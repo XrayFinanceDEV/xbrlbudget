@@ -50,6 +50,21 @@ class DossierSource:
     pareggio_motore: dict[str, str | None] | None = None
 
 
+def pareggio_motore_from(engine_meta: dict | None) -> dict | None:
+    """`engine_meta['pareggio']` di un anno di piano, differenziando le due cause di assenza
+    (minore, revisione finale lotto 2, 2026-09-26): `None` solo quando l'anno non ha affatto un
+    `engine_meta` persistito (nessun motore ha mai girato per quell'anno — reason a valle
+    `engine_meta_missing`); un dizionario vuoto quando `engine_meta` c'è ma non porta la chiave
+    `pareggio` (un motore più vecchio del blocco pareggio) — reason a valle `pareggio_non_definito`,
+    perché il motore che ha girato per quell'anno non ha mai calcolato la scomposizione. Prima di
+    questa distinzione le due cause collassavano sullo stesso `None` e sulla stessa reason
+    `engine_meta_missing`, anche quando un `engine_meta` esisteva davvero.
+    """
+    if engine_meta is None:
+        return None
+    return engine_meta.get('pareggio') or {}
+
+
 def _path(data, key):
     for part in key.split('.'):
         if not isinstance(data, dict) or part not in data:

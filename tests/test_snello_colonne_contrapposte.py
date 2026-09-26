@@ -6,13 +6,26 @@ contrapposte" — (1) l'header fisico Attività/Passività in Title case su una
 pagina ruotata 90°, (2) un importo spezzato su più parole PDF che inquina il
 riconoscimento dei codici conto e manda fuori strada il gutter-finder.
 Tutti i PDF qui sono sintetici (fitz), mai i file reali del corpus.
+
+Fix round 1 (revisione): quattro scoperture reali trovate in review e
+riprodotte con PDF sintetici — didascalie corte a due lettere rifiutate dalla
+guardia anti-colonna-unica, una colonna comparativa (anno precedente) che
+_be_collect_side_facts non sa tenere separata dalla corrente, un codice
+gerarchico puntato che perde i punti nella normalizzazione, e una frase di
+nota integrativa che il gate case-insensitive dell'header trattava come
+un'intestazione fisica.
 """
+import importlib.util
+import subprocess
 from decimal import Decimal as D
+from pathlib import Path
 
 import fitz
 import pytest
 
 from importers.detail_enrichment import collect_source_rows
+
+REPO_ROOT = Path(__file__).resolve().parents[1]
 
 
 def _put_row(page, inv, dx0, dy, tokens, step=45, fontsize=10):
@@ -246,3 +259,238 @@ def test_ordinary_unrotated_two_column_page_is_unaffected(tmp_path):
     assert cassa_row.side == "L" and cassa_row.amounts == (D("1500.00"),)
     fornitori_row = _by_code(rows, "201")
     assert fornitori_row.side == "R" and fornitori_row.amounts == (D("5400.00"),)
+
+
+def _load_old_collect_source_rows():
+    """The pre-Task-12 collect_source_rows, loaded straight from ffa724f.
+
+    Only importers/detail_enrichment.py's own source at that commit is
+    replaced; its internal ``from importers.situazione_contabile_parser
+    import (...)`` resolves normally, against the CURRENT (untouched by
+    Task 12) module on sys.path.
+    """
+    source = subprocess.run(
+        ["git", "show", "ffa724f:importers/detail_enrichment.py"],
+        cwd=REPO_ROOT, capture_output=True, text=True, check=True,
+    ).stdout
+    spec = importlib.util.spec_from_loader("detail_enrichment_ffa724f", loader=None)
+    module = importlib.util.module_from_spec(spec)
+    exec(compile(source, "detail_enrichment_ffa724f.py", "exec"), module.__dict__)
+    return module.collect_source_rows
+
+
+def _build_short_alnum_captions(path):
+    """Same shape as _build_fragmented_amounts, but 2-letter+digit captions
+    ("CC1", "FN1"...): only a 2-letter run, never a 3-letter one."""
+    doc = fitz.open()
+    page = doc.new_page(width=595, height=842)
+    page.insert_text((50, 30), "BILANCIO DI VERIFICA AL 31/12/2025", fontsize=10)
+
+    left_rows = [
+        ("101", "CC1", "2.280", "30"),
+        ("102", "BC2", "1.100", "45"),
+        ("103", "CR1", "9.500", "00"),
+        ("104", "MG1", "3.000", "00"),
+    ]
+    y = 80
+    for code, desc, whole, cents in left_rows:
+        page.insert_text((50, y), code, fontsize=10)
+        page.insert_text((90, y), desc, fontsize=10)
+        end_x = 230 + 5.02 * len(whole)
+        page.insert_text((230, y), whole, fontsize=10)
+        page.insert_text((end_x + 9, y), ",", fontsize=10)
+        page.insert_text((end_x + 17, y), cents, fontsize=10)
+        y += 25
+
+    right_rows = [
+        ("201", "FN1", "5.400,00"),
+        ("202", "BN1", "12.000,00"),
+        ("203", "DT1", "900,75"),
+        ("204", "PN1", "17.250,00"),
+    ]
+    y = 80
+    for code, desc, amt in right_rows:
+        page.insert_text((400, y), code, fontsize=10)
+        page.insert_text((440, y), desc, fontsize=10)
+        page.insert_text((550, y), amt, fontsize=10)
+        y += 25
+
+    doc.save(path)
+    doc.close()
+
+
+def _build_comparative_column(path):
+    """A left account with a fragmented CURRENT amount and a clean, complete
+    PRIOR-year amount further along the same physical row, still on the same
+    (future) left side — the shape _be_collect_side_facts cannot represent
+    (one amount per row)."""
+    doc = fitz.open()
+    page = doc.new_page(width=595, height=842)
+    page.insert_text((50, 30), "BILANCIO DI VERIFICA AL 31/12/2025", fontsize=10)
+
+    left_rows = [
+        ("101", "CASSA", "2.280", "30", "1.900,00"),
+        ("102", "BANCA C/C", "1.100", "45", "1.050,00"),
+        ("103", "CREDITI CLIENTI", "9.500", "00", "8.000,00"),
+        ("104", "MAGAZZINO", "3.000", "00", "2.500,00"),
+    ]
+    y = 80
+    for code, desc, whole, cents, prior in left_rows:
+        page.insert_text((50, y), code, fontsize=10)
+        page.insert_text((90, y), desc, fontsize=10)
+        end_x = 230 + 5.02 * len(whole)
+        page.insert_text((230, y), whole, fontsize=10)
+        page.insert_text((end_x + 9, y), ",", fontsize=10)
+        page.insert_text((end_x + 17, y), cents, fontsize=10)
+        page.insert_text((end_x + 60, y), prior, fontsize=10)
+        y += 25
+
+    right_rows = [
+        ("201", "FORNITORI", "5.400,00"),
+        ("202", "BANCHE C/C", "12.000,00"),
+        ("203", "DEBITI TRIBUTARI", "900,75"),
+        ("204", "PATRIMONIO NETTO", "17.250,00"),
+    ]
+    y = 80
+    for code, desc, amt in right_rows:
+        page.insert_text((450, y), code, fontsize=10)
+        page.insert_text((490, y), desc, fontsize=10)
+        page.insert_text((560, y), amt, fontsize=10)
+        y += 25
+
+    doc.save(path)
+    doc.close()
+
+
+def _build_dotted_codes(path):
+    """A repair-eligible two-column page (>=3 isolated ',' fragments) whose
+    left accounts print a dotted hierarchy code ("01.01", "01.01.001")."""
+    doc = fitz.open()
+    page = doc.new_page(width=750, height=842)
+    page.insert_text((50, 30), "BILANCIO DI VERIFICA AL 31/12/2025", fontsize=10)
+
+    left_rows = [
+        ("01.01", "COSTI IMPIANTO", "2.280", "30"),
+        ("01.01.001", "COSTI IMPIANTO SPECIFICI", "1.100", "45"),
+        ("01.02", "AVVIAMENTO", "9.500", "00"),
+        ("01.03", "MAGAZZINO", "3.000", "00"),
+    ]
+    y = 80
+    for code, desc, whole, cents in left_rows:
+        page.insert_text((50, y), code, fontsize=10)
+        page.insert_text((160, y), desc, fontsize=10)
+        end_x = 330 + 5.02 * len(whole)
+        page.insert_text((330, y), whole, fontsize=10)
+        page.insert_text((end_x + 9, y), ",", fontsize=10)
+        page.insert_text((end_x + 17, y), cents, fontsize=10)
+        y += 25
+
+    right_rows = [
+        ("201", "FORNITORI", "5.400,00"),
+        ("202", "BANCHE C/C", "12.000,00"),
+        ("203", "DEBITI TRIBUTARI", "900,75"),
+        ("204", "PATRIMONIO NETTO", "17.250,00"),
+    ]
+    y = 80
+    for code, desc, amt in right_rows:
+        page.insert_text((600, y), code, fontsize=10)
+        page.insert_text((640, y), desc, fontsize=10)
+        page.insert_text((710, y), amt, fontsize=10)
+        y += 25
+
+    doc.save(path)
+    doc.close()
+
+
+def _build_note_prose_sentence(path):
+    """A note-integrativa sentence mentioning both words in one long line,
+    in the header's own top band, plus ordinary single-column content."""
+    doc = fitz.open()
+    page = doc.new_page(width=595, height=842)
+    page.insert_text(
+        (50, 100),
+        "I criteri di valutazione adottati per la redazione delle Attività"
+        " e delle Passività sono conformi ai principi contabili nazionali",
+        fontsize=9,
+    )
+    rows = [
+        ("101", "CASSA", "1.500,00"),
+        ("102", "BANCA C/C", "22.300,50"),
+        ("103", "CREDITI CLIENTI", "8.750,25"),
+    ]
+    y = 300
+    for code, desc, amt in rows:
+        page.insert_text((50, y), code, fontsize=10)
+        page.insert_text((90, y), desc, fontsize=10)
+        page.insert_text((230, y), amt, fontsize=10)
+        y += 25
+    doc.save(path)
+    doc.close()
+
+
+def test_short_two_letter_captions_still_split_correctly(tmp_path):
+    path = tmp_path / "short_captions.pdf"
+    _build_short_alnum_captions(str(path))
+
+    rows = collect_source_rows(str(path))
+
+    sides = {r.side for r in rows}
+    assert sides == {"L", "R"}
+    cassa_row = _by_code(rows, "101")
+    assert cassa_row.side == "L"
+    assert cassa_row.amounts == (D("2280.30"),)
+    assert "FN1" not in cassa_row.text
+    fornitori_row = _by_code(rows, "201")
+    assert fornitori_row.side == "R"
+    assert fornitori_row.amounts == (D("5400.00"),)
+    assert "CC1" not in fornitori_row.text
+
+
+def test_comparative_column_falls_back_to_pre_task12_behaviour(tmp_path):
+    path = tmp_path / "comparative_column.pdf"
+    _build_comparative_column(str(path))
+
+    new_rows = collect_source_rows(str(path))
+    old_collect_source_rows = _load_old_collect_source_rows()
+    old_rows = old_collect_source_rows(str(path))
+
+    def _shape(rows):
+        return [(r.side, r.code, r.text, r.amounts) for r in rows]
+
+    assert _shape(new_rows) == _shape(old_rows)
+    # The specific fabrication this ruling forbids: the coordinate-repair
+    # reconstruction turning a leaked "1.900,00" into a fake account code
+    # "190000". Falling back to the base behaviour must not reintroduce it
+    # under a different disguise either.
+    assert "190000" not in {r.code for r in new_rows}
+
+
+def test_dotted_hierarchy_codes_are_kept_as_printed(tmp_path):
+    path = tmp_path / "dotted_codes.pdf"
+    _build_dotted_codes(str(path))
+
+    rows = collect_source_rows(str(path))
+
+    parent = _by_code(rows, "01.01")
+    child = _by_code(rows, "01.01.001")
+    assert parent.code == "01.01" and child.code == "01.01.001"
+    assert parent.amounts == (D("2280.30"),)
+    assert child.amounts == (D("1100.45"),)
+    fornitori_row = _by_code(rows, "201")
+    assert fornitori_row.side == "R" and fornitori_row.amounts == (D("5400.00"),)
+
+
+def test_long_note_sentence_does_not_set_two_sides(tmp_path):
+    path = tmp_path / "note_prose.pdf"
+    _build_note_prose_sentence(str(path))
+
+    rows = collect_source_rows(str(path))
+
+    sides = {r.side for r in rows}
+    assert sides == {"T"}
+    # No row is tagged with the two-sided ledger kinds ("ledger_final"/
+    # "income"): every row's kinds stay whatever a two_sides=False page
+    # already produced before this fix.
+    assert all(k not in ("ledger_final", "income") for r in rows for k in r.kinds)
+    cassa_row = next(r for r in rows if "CASSA" in r.text)
+    assert cassa_row.amounts == (D("101"), D("1500.00"))

@@ -35,8 +35,10 @@ _AMOUNT = re.compile(r"^(?:-?\d+(?:\.\d{3})*(?:,\d{1,2})?-?|\(\d+(?:\.\d{3})*(?:
 # A genuine account description has a run of letters; a residual made only of
 # digits/punctuation (e.g. leftover numeric-column fragments once the trailing
 # amount is stripped) still passes _be_collect_side_facts's length>=3 check
-# and would otherwise look like a valid "description-bearing" row.
-_ALPHA_RUN = re.compile(r"[^\W\d_]{3,}", re.UNICODE)
+# and would otherwise look like a valid "description-bearing" row. Two letters
+# is enough — a short caption ("CC1", "FN1") is still a real label, and
+# requiring three rejected a correct gutter on exactly that pattern.
+_ALPHA_RUN = re.compile(r"[^\W\d_]{2,}", re.UNICODE)
 _ACCOUNT = re.compile(r"^\d{1,3}(?:[./][\d*]+)+$")
 
 
@@ -98,8 +100,41 @@ def collect_source_rows(file_path: str, ocr_text: str | None = None) -> list[Sou
     from importers.situazione_contabile_parser import (
         _be_cluster_physical_rows, _be_split, _be_split_codeless,
         _be_page_needs_coordinate_repair, _be_collect_side_facts, _be_repair_parent_codes,
+        _be_is_numeric_fragment, _be_parse_amount_fragments,
         is_contrapposte_file, classify_page_section,
     )
+
+    def _row_amount_groups(row_words, limit=2):
+        """Count genuine, comma-bearing amount columns on a physical row.
+
+        Mirrors _be_collect_side_facts's own backward walk (same
+        _be_is_numeric_fragment test and 16pt join-gap) to find the row's
+        trailing amount, then repeats leftward: a second comma-bearing run
+        beyond a real gap is a genuine comparative column, not a fragment of
+        the first. A bare numeric account code ("104", no comma) never counts
+        — only a run that actually looks like a printed euro amount does.
+        Stops early at `limit`: the caller only needs to know "1" vs "2+".
+        """
+        tokens = [str(w[4]).strip() for w in row_words]
+        groups, end = 0, len(tokens)
+        while end > 0:
+            start = end
+            while start > 0 and _be_is_numeric_fragment(tokens[start - 1]):
+                if start < end:
+                    gap = row_words[start][0] - row_words[start - 1][2]
+                    if gap > 16.0:
+                        break
+                start -= 1
+            if start == end:
+                end -= 1
+                continue
+            joined = ''.join(tokens[start:end])
+            if ',' in joined and _be_parse_amount_fragments(tokens[start:end]) is not None:
+                groups += 1
+                if groups >= limit:
+                    return groups
+            end = start
+        return groups
 
     rows = []
     two_sides = is_contrapposte_file(file_path)
@@ -128,15 +163,23 @@ def collect_source_rows(file_path: str, ocr_text: str | None = None) -> list[Sou
             # case rather than "ATTIVITA'". Words here are already in the
             # displayed (rotated) frame, so this also recognises a rotated page's
             # headers without a separate rotation fix in this per-page check.
-            atts = [w for w in words if w[4].upper().startswith('ATTIV') and w[1] < page.rect.height * .35]
-            pasv = [w for w in words if w[4].upper().startswith('PASSIV') and w[1] < page.rect.height * .35]
+            # Only a SHORT physical line (a column header, not a sentence) may
+            # count: "I criteri ... delle Attività e delle Passività" also
+            # contains both words, and without this a note-integrativa sentence
+            # would set two_sides on a page that has no second column at all.
+            top_words = [w for w in words if w[1] < page.rect.height * .35]
+            header_lines = [line for line in _be_cluster_physical_rows(top_words, -1e9, 1e9)
+                            if len(line) <= 6]
+            atts = [w for line in header_lines for w in line if w[4].upper().startswith('ATTIV')]
+            pasv = [w for line in header_lines for w in line if w[4].upper().startswith('PASSIV')]
             physical_pair = any(abs(a[1] - p[1]) < 15 and abs(a[0] - p[0]) > 40
                                 for a in atts for p in pasv)
             two_sides = two_sides or physical_pair
             section = classify_page_section(page.get_text()) if two_sides else None
             needs_repair = _be_page_needs_coordinate_repair(words)
+            full_rows = list(_be_cluster_physical_rows(words, -1e9, 1e9))
             boundaries = []
-            for line in _be_cluster_physical_rows(words, -1e9, 1e9):
+            for line in full_rows:
                 caption = ' '.join(str(w[4]) for w in line).upper()
                 compact = re.sub(r'\s+', '', caption)
                 if any(s in compact for s in ('STATOPATRIMONIALE', 'SITUAZIONEPATRIMONIALE')):
@@ -152,40 +195,59 @@ def collect_source_rows(file_path: str, ocr_text: str | None = None) -> list[Sou
             boundaries.sort()
             page_statement = ('bs' if section == (True, False) else
                               'ce' if section == (False, True) else last_statement)
+            # A damaged text layer (amounts split across several PDF words,
+            # e.g. "2.280" / "," / "30") inflates the code-like-token count
+            # that _be_split's gutter search relies on: a fragment such as
+            # "30" reads as a plausible account code, and on a genuine
+            # two-column page this can make _be_split settle on a gutter
+            # that falsely validates (each side still shows description-
+            # bearing rows) while actually splitting a row's own trailing
+            # digits from its neighbour's real code. _be_split_codeless
+            # does not cluster by code-like tokens at all: it scans
+            # candidate gutters across the page and validates each one
+            # through _be_collect_side, which already reconstructs rows
+            # from coordinates on a repair-needed page — reuse that
+            # existing, already-validated fallback instead of trusting
+            # _be_split's contaminated candidate list.
+            #
+            # _be_split_codeless validates a candidate on ROW COUNT alone
+            # (_be_collect_side's len()>=2 with a non-empty "description"),
+            # which a genuinely single-column ledger's own numeric columns
+            # can satisfy by accident: once the trailing amount is peeled
+            # off, a leftover run of digits from another numeric column is
+            # still a non-empty string of length>=2. Require an actual run
+            # of letters on BOTH sides before trusting the split, or a
+            # single-column page (several numeric columns, one account per
+            # row) gets its account cut in half between two of its own
+            # numeric columns.
+            repair_candidate = None
             if two_sides and needs_repair:
-                # A damaged text layer (amounts split across several PDF words,
-                # e.g. "2.280" / "," / "30") inflates the code-like-token count
-                # that _be_split's gutter search relies on: a fragment such as
-                # "30" reads as a plausible account code, and on a genuine
-                # two-column page this can make _be_split settle on a gutter
-                # that falsely validates (each side still shows description-
-                # bearing rows) while actually splitting a row's own trailing
-                # digits from its neighbour's real code. _be_split_codeless
-                # does not cluster by code-like tokens at all: it scans
-                # candidate gutters across the page and validates each one
-                # through _be_collect_side, which already reconstructs rows
-                # from coordinates on a repair-needed page — reuse that
-                # existing, already-validated fallback instead of trusting
-                # _be_split's contaminated candidate list.
-                #
-                # _be_split_codeless validates a candidate on ROW COUNT alone
-                # (_be_collect_side's len()>=2 with a non-empty "description"),
-                # which a genuinely single-column ledger's own numeric columns
-                # can satisfy by accident: once the trailing amount is peeled
-                # off, a leftover run of digits from another numeric column is
-                # still a non-empty string of length>=3. Require an actual run
-                # of letters on BOTH sides before trusting the split, or a
-                # single-column page (several numeric columns, one account per
-                # row) gets its account cut in half between two of its own
-                # numeric columns.
-                candidate = _be_split_codeless(words)
-                if candidate is not None:
+                repair_candidate = _be_split_codeless(words)
+                if repair_candidate is not None:
                     def _has_description(lo, hi):
                         facts = _be_collect_side_facts(words, lo, hi, codeless=True, page=page.number + 1)
                         return sum(1 for f in facts if _ALPHA_RUN.search(f.description)) >= 2
-                    if not (_has_description(-1e9, candidate) and _has_description(candidate, 1e9)):
-                        candidate = None
-                split = candidate
+                    if not (_has_description(-1e9, repair_candidate) and _has_description(repair_candidate, 1e9)):
+                        repair_candidate = None
+            # A comparative (prior-year) column defeats the coordinate
+            # reconstruction below: it keeps exactly one amount per row, so a
+            # SECOND, genuine amount column on the same physical row (not a
+            # fragment of the first) is misread — the description swallows it,
+            # or, when its x position falls on the far side of the gutter just
+            # chosen above, it lands on a DIFFERENT row entirely and reads as
+            # that row's account code ("1.900,00 201 FORNITORI" -> code
+            # "190000"). Checked PER SIDE of the split just chosen (never on
+            # the whole unsplit page: a genuine two-column page pairs one
+            # attivo row with one passivo row on the SAME y, and the whole-page
+            # row already carries two unrelated amount groups by design — that
+            # is not this defect). When this is true, the whole page keeps the
+            # pre-Task-12 behaviour: this reconstruction is not attempted.
+            repair_bands = ((-1e9, repair_candidate), (repair_candidate, 1e9)) if repair_candidate else ((-1e9, 1e9),)
+            repair_eligible = needs_repair and not any(
+                _row_amount_groups(row) >= 2
+                for lo, hi in repair_bands for row in _be_cluster_physical_rows(words, lo, hi))
+            if two_sides and repair_eligible:
+                split = repair_candidate
             else:
                 split = _be_split(words) if two_sides else None
             layout = (round(page.rect.width), round(page.rect.height))
@@ -194,7 +256,7 @@ def collect_source_rows(file_path: str, ocr_text: str | None = None) -> list[Sou
             elif split is None:
                 split = physical_splits.get(layout)
             bands = (("L", -1e9, split), ("R", split, 1e9)) if split else (("T", -1e9, 1e9),)
-            if needs_repair:
+            if repair_eligible:
                 # A damaged text layer breaks the token-join loop below: it joins
                 # a physical row's tokens in reading order, and a fragmented
                 # amount ("2.280," + "30") is invisible to _amount() as two
@@ -220,10 +282,20 @@ def collect_source_rows(file_path: str, ocr_text: str | None = None) -> list[Sou
                         # would also assign to a one-value two-sided row.
                         kinds = (("ledger_final" if statement == 'bs' else "income"),) if (
                             two_sides and fact.code) else ("",)
+                        # Keep the code as PRINTED (dots/slashes and all): the
+                        # hierarchy checks elsewhere in this module (_overlap,
+                        # _credit_context, ledger_details) match a parent/child
+                        # pair by a literal "." prefix on SourceRow.code, exactly
+                        # like the manual path below preserves it. fact.code is
+                        # digit-only (_be_normalize_code strips separators for
+                        # ITS OWN, unrelated hierarchy repair) and would defeat
+                        # that prefix match. Fall back to it only when no raw
+                        # token survives to print from.
+                        printed_code = re.sub(r'\s+', '', fact.raw_code) if fact.raw_code else fact.code
                         text = " ".join(t for t in (fact.raw_code, fact.raw_description, fact.raw_amount) if t)
                         rows.append(SourceRow(
                             f"p{page.number + 1}{side}r{len(rows) + 1}", page.number + 1,
-                            side, text, (fact.amount,), fact.code, (), kinds, statement,
+                            side, text, (fact.amount,), printed_code, (), kinds, statement,
                         ))
                 if boundaries:
                     last_statement = boundaries[-1][1]

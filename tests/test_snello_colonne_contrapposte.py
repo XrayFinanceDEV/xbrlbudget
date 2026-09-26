@@ -14,6 +14,13 @@ _be_collect_side_facts non sa tenere separata dalla corrente, un codice
 gerarchico puntato che perde i punti nella normalizzazione, e una frase di
 nota integrativa che il gate case-insensitive dell'header trattava come
 un'intestazione fisica.
+
+Fix round 2 (revisione del controller): la guardia del round 1 sulla colonna
+comparativa era tarata su UNA riga, non su una colonna — un'unica riga con un
+secondo importo (una svista, un totale di controllo duplicato) bastava a far
+tornare l'intera pagina al comportamento pre-Task-12. Ora conta il RAPPORTO
+per lato: solo quando almeno il 30% delle righe di un lato porta 2+ gruppi
+importo quella colonna è davvero comparativa.
 """
 import importlib.util
 import subprocess
@@ -494,3 +501,94 @@ def test_long_note_sentence_does_not_set_two_sides(tmp_path):
     assert all(k not in ("ledger_final", "income") for r in rows for k in r.kinds)
     cassa_row = next(r for r in rows if "CASSA" in r.text)
     assert cassa_row.amounts == (D("101"), D("1500.00"))
+
+
+def _build_isolated_second_amount(path):
+    """Ten accounts per side, repair-eligible (>=3 isolated ',' fragments);
+    only ONE left row (CASSA) also carries a clean second (comparative)
+    amount further along the same row, still within the left side's own
+    x-range. 1/10 rows with a second amount is far below the 30% ratio: the
+    repair must still apply to the whole page.
+    """
+    doc = fitz.open()
+    page = doc.new_page(width=950, height=842)
+    page.insert_text((50, 30), "BILANCIO DI VERIFICA AL 31/12/2025", fontsize=10)
+
+    left_rows = [
+        ("101", "CASSA", "2.280", "30", "1.900,00"),
+        ("102", "BANCA C/C", "1.100", "45", None),
+        ("103", "CREDITI CLIENTI", "9.500", "00", None),
+        ("104", "MAGAZZINO", "3.000", "00", None),
+        ("105", "CREDITI DIVERSI", "1.200", "00", None),
+        ("106", "RATEI ATTIVI", "800", "00", None),
+        ("107", "RISCONTI ATTIVI", "600", "00", None),
+        ("108", "ALTRI CREDITI", "400", "00", None),
+        ("109", "TITOLI", "2.000", "00", None),
+        ("110", "PARTECIPAZIONI", "5.000", "00", None),
+    ]
+    y = 80
+    for code, desc, whole, cents, prior in left_rows:
+        page.insert_text((50, y), code, fontsize=10)
+        page.insert_text((90, y), desc, fontsize=10)
+        end_x = 260 + 5.02 * len(whole)
+        page.insert_text((260, y), whole, fontsize=10)
+        page.insert_text((end_x + 9, y), ",", fontsize=10)
+        page.insert_text((end_x + 17, y), cents, fontsize=10)
+        if prior:
+            page.insert_text((end_x + 60, y), prior, fontsize=10)
+        y += 20
+
+    right_rows = [
+        ("201", "FORNITORI", "5.400,00"),
+        ("202", "BANCHE C/C", "12.000,00"),
+        ("203", "DEBITI TRIBUTARI", "900,75"),
+        ("204", "PATRIMONIO NETTO", "17.250,00"),
+        ("205", "FONDO TFR", "3.100,00"),
+        ("206", "DEBITI PREVIDENZIALI", "700,00"),
+        ("207", "ALTRI DEBITI", "1.400,00"),
+        ("208", "RATEI PASSIVI", "300,00"),
+        ("209", "RISCONTI PASSIVI", "250,00"),
+        ("210", "RISERVE", "6.000,00"),
+    ]
+    y = 80
+    for code, desc, amt in right_rows:
+        page.insert_text((600, y), code, fontsize=10)
+        page.insert_text((640, y), desc, fontsize=10)
+        page.insert_text((800, y), amt, fontsize=10)
+        y += 20
+
+    doc.save(path)
+    doc.close()
+
+
+def test_isolated_second_amount_does_not_block_repair(tmp_path):
+    path = tmp_path / "isolated_second_amount.pdf"
+    _build_isolated_second_amount(str(path))
+
+    rows = collect_source_rows(str(path))
+
+    sides = {r.side for r in rows}
+    assert sides == {"L", "R"}
+    # No row fuses text from two DIFFERENT accounts (the original Task-12
+    # defect): every row mentions at most one of the declared descriptions.
+    labels = ["CASSA", "BANCA C/C", "CREDITI CLIENTI", "MAGAZZINO", "CREDITI DIVERSI",
+              "RATEI ATTIVI", "RISCONTI ATTIVI", "ALTRI CREDITI", "TITOLI", "PARTECIPAZIONI",
+              "FORNITORI", "DEBITI TRIBUTARI", "PATRIMONIO NETTO", "FONDO TFR",
+              "DEBITI PREVIDENZIALI", "ALTRI DEBITI", "RATEI PASSIVI", "RISCONTI PASSIVI",
+              "RISERVE"]
+    for r in rows:
+        hits = [label for label in labels if label in r.text]
+        assert len(hits) <= 1, (r.text, hits)
+    # The nine untouched rows on each side repair correctly.
+    assert _by_code(rows, "102").amounts == (D("1100.45"),)
+    assert _by_code(rows, "103").amounts == (D("9500.00"),)
+    assert _by_code(rows, "110").amounts == (D("5000.00"),)
+    assert _by_code(rows, "201").amounts == (D("5400.00"),)
+    assert _by_code(rows, "206").amounts == (D("700.00"),)
+    assert _by_code(rows, "210").amounts == (D("6000.00"),)
+    # The one row with a genuine second amount still keeps its own identity
+    # (code "101", only "CASSA" in its text) — the reconstruction cannot
+    # represent two amounts per row, so which of the two it keeps is not
+    # asserted here, only that it does not corrupt any other row.
+    cassa_row = _by_code(rows, "101")
+    assert cassa_row.side == "L" and "CASSA" in cassa_row.text

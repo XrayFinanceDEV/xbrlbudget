@@ -136,6 +136,20 @@ def collect_source_rows(file_path: str, ocr_text: str | None = None) -> list[Sou
             end = start
         return groups
 
+    def _side_has_comparative_column(rows_in_side):
+        """A comparative (prior-year) column is a COLUMN: most of a side's
+        rows carry it, not one row out of many. A single row with an
+        incidental second amount (a stray rate, a duplicated control total)
+        must not throw the whole page back to the pre-Task-12 behaviour — only
+        a side where 2+ amount groups are the NORM, not the exception, is a
+        genuine second column the one-amount-per-row reconstruction cannot
+        represent.
+        """
+        counts = [_row_amount_groups(row) for row in rows_in_side]
+        with_amount = sum(1 for c in counts if c >= 1)
+        multi = sum(1 for c in counts if c >= 2)
+        return with_amount > 0 and multi / with_amount >= 0.30
+
     rows = []
     two_sides = is_contrapposte_file(file_path)
     physical_splits = {}
@@ -240,12 +254,16 @@ def collect_source_rows(file_path: str, ocr_text: str | None = None) -> list[Sou
             # the whole unsplit page: a genuine two-column page pairs one
             # attivo row with one passivo row on the SAME y, and the whole-page
             # row already carries two unrelated amount groups by design — that
-            # is not this defect). When this is true, the whole page keeps the
+            # is not this defect) — and by RATIO, not by a single row: a
+            # comparative column is a column, so it shows up on most of a
+            # side's rows, not on the one row that happens to carry an
+            # incidental second number (a stray rate, a duplicated control
+            # total). When a side crosses that ratio, the whole page keeps the
             # pre-Task-12 behaviour: this reconstruction is not attempted.
             repair_bands = ((-1e9, repair_candidate), (repair_candidate, 1e9)) if repair_candidate else ((-1e9, 1e9),)
             repair_eligible = needs_repair and not any(
-                _row_amount_groups(row) >= 2
-                for lo, hi in repair_bands for row in _be_cluster_physical_rows(words, lo, hi))
+                _side_has_comparative_column(_be_cluster_physical_rows(words, lo, hi))
+                for lo, hi in repair_bands)
             if two_sides and repair_eligible:
                 split = repair_candidate
             else:

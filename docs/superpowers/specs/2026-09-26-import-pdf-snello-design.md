@@ -143,9 +143,9 @@ Controlli, tutti nel codice:
   (servizi). `validation_report["import_snello"]["tappo"]` = importo, campo, motivo, per esercizio.
 - **Oltre soglia:** una rilettura mirata della sola sezione che non torna, con lo scarto misurato
   nel messaggio. Se torna entro soglia si procede come sopra.
-- **Ancora oltre:** ripiego sull'importatore attuale (decisione del proprietario). Dei due risultati
-  si tiene quello con lo scarto minore; se entrambi sono oltre soglia si importa squadrato, dichiarato,
-  come oggi (le Rettifiche esistono per questo).
+- **Ancora oltre:** ripiego sull'importatore attuale (decisione del proprietario), che decide da sé
+  come oggi, compreso l'import squadrato e dichiarato. In questa prima versione il risultato snello
+  scartato non si confronta con quello del ripiego: resta nel report per il banco.
 
 Il tappo è un plug entro soglia per decisione del proprietario: CLAUDE.md va aggiornato (§8).
 
@@ -157,12 +157,13 @@ Solo le ripartizioni che il motore del previsionale usa:
 - rimanenze di materie (`sp05a`);
 - personale e ammortamenti (CE).
 
-In F2-C i dettagli escono già dalle foglie: F4 non gira. In F2-L legge le pagine di dettaglio della
-struttura (sottoconti, tabelle di nota integrativa), una chiamata per famiglia in parallelo (tetto
-4), e restituisce `{campo: importo}` dentro la famiglia. Il codice chiude sulla macro-voce già
-verificata in F3 (`reconcile_source_detail`) e il residuo va nel secchio «altri» della famiglia
-(`residual_bucket`), mai su un campo `TIER0`. Senza pagine di dettaglio F4 non gira e le macro-voci
-restano sui secchi di oggi.
+In F2-C i dettagli escono già dalle foglie: la seconda lettura LLM non gira (resta la riclassificazione
+deterministica delle scadenze). In F2-L, prima versione: si riusa la seconda lettura di oggi
+(`enrich_pdf_details`, su gx10) **ristretta alle pagine SP e di dettaglio della struttura**; la
+riconciliazione sulla macro-voce e il residuo nel secchio «altri» restano quelli di oggi
+(`finalize_pdf_residuals`, `residual_bucket`), mai su un campo `TIER0`. Un lettore nuovo, a coppie
+`[percorso, importo]` per famiglia, si scrive solo se il banco mostra che quello di oggi è lento o
+sbaglia.
 
 ### Regole contabili applicate dal codice
 

@@ -62,3 +62,30 @@ def test_bep_del_piano_riporta_i_valori_dichiarati_dal_motore():
         assert series_be["variable_costs"].values[idx] == D(par["costi_variabili"]), year
         assert series_be["fixed_costs"].values[idx] == D(par["costi_fissi_operativi"]), year
         assert series_be["break_even_revenue"].values[idx] == D(par["fatturato_pareggio"]), year
+
+
+def test_f5_colonna_base_stessa_regola_del_motore_niente_finto_risanamento():
+    """F5 (decisione del proprietario, 2026-09-26): a crescita zero la colonna base del pareggio
+    usa la STESSA regola del motore (`calculations.projection_common.punto_di_pareggio`), con le
+    quote fisso/variabile del PRIMO anno di piano — mai più il 40% spalmato sulle cinque voci
+    operative canoniche (`calculate_break_even_analysis`), che su AMBIENTA (righe() a crescita
+    zero) dava un margine di sicurezza NEGATIVO in base (-4,31%, misurato con la vecchia formula:
+    costi 4.178.596 × 40%/60%, MdC 38,99%, bep 4.286.693) contro un piano positivo (4,81%): un
+    finto risanamento che il testo raccontava come «negativo nel 2026 ... positivo dal 2027».
+    Oracolo: i costi variabili di base coincidono ESATTAMENTE con quelli del primo anno di piano
+    (ogni ipotesi di crescita è a zero, ce05/ce06 non cambiano), e il margine di sicurezza di base
+    è ora positivo come il piano — niente più «diventa positivo dal»."""
+    _bp()
+    from backend.app.renderers.business_plan import narrative
+    e = generato(genera(righe(), report=True))
+    group_be = next(g for g in e.rep.structure_series if g.id == "break_even")
+    series_be = {s.id: s for s in group_be.series}
+    base_idx = next(i for i, p in enumerate(group_be.periods) if p.basis == "historical")
+    piano_idx = next(i for i, p in enumerate(group_be.periods) if p.year == 2027)
+    assert series_be["variable_costs"].values[base_idx] == series_be["variable_costs"].values[piano_idx]
+    ms_base = e.data.v("margine_sicurezza")[0]
+    ms_piano = e.data.v("margine_sicurezza")[e.data.plan_idx[0]]
+    assert ms_base > 0, ms_base
+    assert ms_piano > 0, ms_piano
+    testo = " ".join(t for _, t in narrative.key_points(e.data))
+    assert "diventa positivo dal" not in testo, testo

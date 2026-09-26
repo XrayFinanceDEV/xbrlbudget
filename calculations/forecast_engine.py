@@ -20,7 +20,7 @@ from calculations.projection_common import (
     tax_settlement_saldo_acconto, soglia_giorni_magazzino, rimanenze_materie,
     e_contratto_pregresso, contratti_da_riga_finanziamento,
     quota_breve_prestiti_nuovi, separa_prestiti_nuovi,
-    eur_it, scarto_it,
+    eur_it, scarto_it, punto_di_pareggio,
 )
 from calculations.ce_result import calculate_ce_result
 
@@ -3418,54 +3418,24 @@ class ForecastEngine:
         ce11 = assumption.ce11_override if assumption.ce11_override is not None else base_inc.ce11_accantonamenti
         ce11b = assumption.ce11b_override if assumption.ce11b_override is not None else base_inc.ce11b_altri_accantonamenti
 
-        # ── PUNTO DI PAREGGIO SUL MOL (spec 2026-09-15 §4.3, §5.5) ──
-        # Dichiarato, mai calcolato dal client: costi_variabili/costi_fissi
-        # leggono la scomposizione fisso/variabile appena scritta in `details`
-        # (None su entrambe le quote quando ce05/ce06 sono sotto override, nel
-        # qual caso l'intero blocco resta None — la scomposizione non esiste
-        # piu'). costi_fissi_operativi porta dentro TUTTO cio' che separa ricavi,
-        # variabili e fissi dal MOL canonico (`ceAggregates`/`calculate_ce_result`):
-        # meno altri ricavi (ce04, gia' comprensivo dell'eventuale plusvalenza da
-        # dismissione), variazioni di rimanenze di prodotti (ce02) e lavori interni
-        # (ce03, ce03a); piu' variazioni di rimanenze di materie (ce10) e
-        # accantonamenti (ce11, ce11b). Per questo il blocco sta DOPO quelle righe:
-        # prima calcolava sui soli ce04 e un'azienda con 150.000 di lavori interni
-        # aveva pareggio e margine di sicurezza coerenti con un MOL di 150.000 piu'
-        # basso di quello del CE (collaudo di fine lotto, R1). Per costruzione
-        # (ce01 - fatturato_pareggio) x margine = MOL. Il margine di
-        # contribuzione e il margine di sicurezza restano None con ricavi o
-        # margine non positivi, mai zero.
+        # ── PUNTO DI PAREGGIO SUL MOL (spec 2026-09-15 §4.3, §5.5; F5, decisione del
+        # proprietario 2026-09-26) ── Dichiarato, mai calcolato dal client: la formula vive
+        # UNA SOLA VOLTA in `calculations.projection_common.punto_di_pareggio`, usata sia qui
+        # sia dalla colonna base/storica del report finale, cosi' le due colonne sono
+        # confrontabili per costruzione. costi_variabili/costi_fissi leggono la scomposizione
+        # fisso/variabile appena scritta in `details` (None su entrambe le quote quando ce05/ce06
+        # sono sotto override, nel qual caso l'intero blocco resta None — la scomposizione non
+        # esiste piu'). Il blocco sta DOPO quelle righe: prima calcolava sui soli ce04 e
+        # un'azienda con 150.000 di lavori interni aveva pareggio e margine di sicurezza coerenti
+        # con un MOL di 150.000 piu' basso di quello del CE (collaudo di fine lotto, R1).
         if details is not None:
-            fissi_def = all(
-                details.get(k) is not None
-                for k in ('ce05_fixed', 'ce05_variable', 'ce06_fixed', 'ce06_variable')
+            pareggio = punto_di_pareggio(
+                ce01=ce01, ce02=ce02, ce03=ce03, ce03a=ce03a, ce04=ce04,
+                ce05_fixed=details.get('ce05_fixed'), ce05_variable=details.get('ce05_variable'),
+                ce06_fixed=details.get('ce06_fixed'), ce06_variable=details.get('ce06_variable'),
+                ce07=ce07, ce08=ce08, ce10=ce10, ce11=ce11, ce11b=ce11b, ce12=ce12,
             )
-            pareggio = {k: None for k in (
-                'costi_variabili', 'costi_fissi', 'costi_fissi_operativi',
-                'margine_contribuzione_pct', 'fatturato_pareggio',
-                'margine_sicurezza', 'margine_sicurezza_pct',
-            )}
-            if fissi_def:
-                cv = details['ce05_variable'] + details['ce06_variable']
-                cf = details['ce05_fixed'] + details['ce06_fixed'] + ce07 + ce08 + ce12
-                _z = lambda v: v if v is not None else Decimal('0')
-                cf_op = (cf + _z(ce10) + _z(ce11) + _z(ce11b)
-                         - ce04 - _z(ce02) - _z(ce03) - _z(ce03a))
-                pareggio.update({
-                    'costi_variabili': _q2(cv),
-                    'costi_fissi': _q2(cf),
-                    'costi_fissi_operativi': _q2(cf_op),
-                })
-                if ce01 > Decimal('0') and ce01 - cv > Decimal('0'):
-                    mdc = (ce01 - cv) / ce01
-                    bep = cf_op / mdc
-                    pareggio.update({
-                        'margine_contribuzione_pct': _q2(mdc * Decimal('100')),
-                        'fatturato_pareggio': _q2(bep),
-                        'margine_sicurezza': _q2(ce01 - bep),
-                        'margine_sicurezza_pct': _q2((ce01 - bep) / ce01 * Decimal('100')),
-                    })
-            details['pareggio'] = pareggio
+            details['pareggio'] = {k: (None if v is None else _q2(v)) for k, v in pareggio.items()}
         ce13 = assumption.ce13_override if assumption.ce13_override is not None else base_inc.ce13_proventi_partecipazioni
         ce16 = assumption.ce16_override if assumption.ce16_override is not None else base_inc.ce16_utili_perdite_cambi
         ce17a = assumption.ce17a_override if assumption.ce17a_override is not None else (getattr(base_inc, 'ce17a_rivalutazioni', None) or Decimal('0'))

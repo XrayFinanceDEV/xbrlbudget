@@ -532,6 +532,17 @@ def assemble_final_report(db: Session, company_id: int, scenario_id: int, *, sch
         sources = []
         calculations = analysis.get('calculations', {}).get('by_year', {})
         cashflows = {entry['year']: entry for entry in cashflow_years if isinstance(entry, dict) and 'year' in entry}
+        # F5 (decisione del proprietario, 2026-09-26): la colonna base del pareggio (`historical`
+        # semplice, o `closing` sull'infrannuale promossa) usa le quote fisso/variabile del PRIMO
+        # anno di piano — non più `source_assumption` (l'ipotesi dell'anno di chiusura stesso, un
+        # concetto diverso) — così base e piano applicano la stessa aritmetica alla stessa
+        # ripartizione. `None` senza alcuna ipotesi di piano salvata: il report dichiara il 60/40
+        # di default (`DEFAULT_FIXED_SHARE`).
+        first_plan_assumption = (
+            next((item for item in scenario.assumptions if item.forecast_year == wanted[0]), None)
+            if wanted else None
+        )
+        base_fixed_split = _fixed_split(first_plan_assumption)
 
         def add_source(identifier, year, basis, record, label, months=12, snapshot=None, calculation_available=True, fixed_split=None, pareggio_motore=None, rimborsi_piano=None):
             bs = _statement_map(getattr(record, 'balance_sheet', None)) if record and record.balance_sheet else None
@@ -574,16 +585,16 @@ def assemble_final_report(db: Session, company_id: int, scenario_id: int, *, sch
             )
             add_source(f'closing:{scenario.base_year}', scenario.base_year, 'closing', closing_record,
                 f'{scenario.base_year} chiusura stimata', calculation_available=closing_metrics_match,
-                fixed_split=_fixed_split(source_assumption))
+                fixed_split=base_fixed_split)
         elif scenario.base_year not in historical_years:
             add_source(f'historical:{scenario.base_year}', scenario.base_year, 'historical', financial_year,
-                f'{scenario.base_year} base')
+                f'{scenario.base_year} base', fixed_split=base_fixed_split)
         for year in wanted:
             # A02 (lotto 2 fix rilievi, 2026-09-26): il BEP di un anno di piano vero
             # viene dal motore (`ForecastYear.engine_meta['pareggio']`), mai più dalla
-            # quota fissa per categoria delle ipotesi — `fixed_split` resta solo per
-            # la chiusura infrannuale promossa (`basis='closing'`, sopra), che non è
-            # un anno di piano rigenerato da questo motore.
+            # quota fissa per categoria delle ipotesi — `fixed_split` resta solo per la
+            # colonna base/storica (sopra, `historical`/`closing`), che non è un anno di
+            # piano rigenerato da questo motore.
             forecast_row = by_forecast_year.get(year)
             # Minore (revisione finale lotto 2, 2026-09-26): `pareggio_motore_from` distingue
             # "nessun engine_meta persistito" (`engine_meta_missing`) da "engine_meta c'è ma non

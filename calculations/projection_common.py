@@ -863,3 +863,66 @@ def separa_prestiti_nuovi(sp17a_apertura: Decimal, prestiti_nuovi, anno: int) ->
     """
     nuovo = min(sp17a_apertura, residuo_prestiti_nuovi(prestiti_nuovi, anno - 1))
     return sp17a_apertura - nuovo, nuovo
+
+
+PAREGGIO_CAMPI = (
+    'costi_variabili', 'costi_fissi', 'costi_fissi_operativi',
+    'margine_contribuzione_pct', 'fatturato_pareggio',
+    'margine_sicurezza', 'margine_sicurezza_pct',
+)
+
+
+def punto_di_pareggio(*, ce01: Decimal, ce02: Optional[Decimal], ce03: Optional[Decimal],
+                      ce03a: Optional[Decimal], ce04: Decimal,
+                      ce05_fixed: Optional[Decimal], ce05_variable: Optional[Decimal],
+                      ce06_fixed: Optional[Decimal], ce06_variable: Optional[Decimal],
+                      ce07: Decimal, ce08: Decimal, ce10: Optional[Decimal],
+                      ce11: Optional[Decimal], ce11b: Optional[Decimal],
+                      ce12: Decimal) -> Dict[str, Optional[Decimal]]:
+    """Il blocco pareggio SUL MOL (spec 2026-09-15 §4.3, §5.5; F5, decisione del proprietario
+    2026-09-26): UNA sola implementazione, usata sia da ogni anno di piano del motore budget
+    (`calculations/forecast_engine.py`) sia dalla colonna base/storica del report finale
+    (`backend/app/services/final_report_dossier.py`), cosi' le due colonne sono confrontabili per
+    costruzione — mai una seconda copia della formula che puo' divergere.
+
+    Costi variabili = quota variabile di ce05 (materie) + ce06 (servizi). Costi fissi = quota
+    fissa di ce05/ce06 + ce07 (godimento beni) + ce08 (personale) + ce12 (oneri diversi).
+    `costi_fissi_operativi` porta dentro TUTTO cio' che separa ricavi, variabili e fissi dal MOL
+    canonico: meno altri ricavi (ce04, gia' comprensivo dell'eventuale plusvalenza da
+    dismissione), variazioni di rimanenze di prodotti (ce02) e lavori interni (ce03, ce03a), piu'
+    variazioni di rimanenze di materie (ce10) e accantonamenti (ce11, ce11b). Per costruzione
+    (ce01 - fatturato_pareggio) x margine = MOL.
+
+    `None` su ogni chiave quando la quota fisso/variabile di ce05 o ce06 manca (riga sotto
+    override: la scomposizione non esiste piu'). Margine di contribuzione e margine di sicurezza
+    restano `None` con ricavi o margine di contribuzione non positivi, mai zero — variabili/fissi
+    restano dichiarati anche in quel caso.
+
+    Ogni parametro resta a precisione piena (nessun arrotondamento qui): il chiamante quantizza
+    come gli serve (il motore al centesimo per `engine_meta`, il report allo stesso modo per
+    restare confrontabile con gli anni di piano).
+    """
+    risultato: Dict[str, Optional[Decimal]] = {campo: None for campo in PAREGGIO_CAMPI}
+    if ce05_fixed is None or ce05_variable is None or ce06_fixed is None or ce06_variable is None:
+        return risultato
+    zero = Decimal('0')
+    _z = lambda v: v if v is not None else zero
+    costi_variabili = ce05_variable + ce06_variable
+    costi_fissi = ce05_fixed + ce06_fixed + ce07 + ce08 + ce12
+    costi_fissi_operativi = (costi_fissi + _z(ce10) + _z(ce11) + _z(ce11b)
+                             - ce04 - _z(ce02) - _z(ce03) - _z(ce03a))
+    risultato.update({
+        'costi_variabili': costi_variabili,
+        'costi_fissi': costi_fissi,
+        'costi_fissi_operativi': costi_fissi_operativi,
+    })
+    if ce01 > zero and ce01 - costi_variabili > zero:
+        margine_pct = (ce01 - costi_variabili) / ce01
+        fatturato_pareggio = costi_fissi_operativi / margine_pct
+        risultato.update({
+            'margine_contribuzione_pct': margine_pct * Decimal('100'),
+            'fatturato_pareggio': fatturato_pareggio,
+            'margine_sicurezza': ce01 - fatturato_pareggio,
+            'margine_sicurezza_pct': (ce01 - fatturato_pareggio) / ce01 * Decimal('100'),
+        })
+    return risultato

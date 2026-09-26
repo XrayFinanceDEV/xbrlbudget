@@ -24,10 +24,17 @@ netta del debito finanziario dell'anno, da `financing.third_party_funds.decrease
 `None` quando il periodo non ha un rendiconto (prima colonna storica, periodi infrannuale `observed`/`adjusted`) o
 quando `erogazioni_incoerenti` è vero — mai una cifra ricostruita al suo posto.
 
-Il punto di pareggio (SEZIONE 4, "Costi fissi e variabili · break even point") sugli anni di piano viene allo
-stesso modo da `ForecastYear.engine_meta['pareggio']`, non da una ripartizione fissa 60/40 costi fissi/variabili
-(quella resta solo per la colonna base/storica); `None` con `engine_meta_missing` o `pareggio_non_definito` quando
-il motore stesso non li ha definiti (ce05/ce06 sotto override).
+Il punto di pareggio (SEZIONE 4, "Costi fissi e variabili · break even point") sugli anni di piano viene da
+`ForecastYear.engine_meta['pareggio']`, non da una ripartizione fissa 60/40 costi fissi/variabili; `None` con
+`engine_meta_missing` o `pareggio_non_definito` quando il motore stesso non li ha definiti (ce05/ce06 sotto
+override). Decisione del proprietario 2026-09-26 (F5): la colonna base/storica applica ORA la STESSA regola del
+motore (`calculations.projection_common.punto_di_pareggio`, un'unica implementazione condivisa) al CE di base, con
+le quote fisso/variabile di ce05/ce06 del PRIMO anno di piano — così le due colonne sono confrontabili con la
+stessa aritmetica, senza il finto risanamento che il testo raccontava come «negativo nell'anno base ... positivo
+dal primo anno di piano» quando la vecchia ripartizione 60/40 blended sulle cinque voci operative canoniche
+divergeva dalla regola vera del motore. Senza ipotesi di piano salvate: resta il 60/40 di default, dichiarato,
+applicato però solo a ce05/ce06 (mai più spalmato anche su ce07/ce08/ce12, che il motore tratta come interamente
+fissi).
 
 **Rendiconto (SEZIONE 5 "Flussi di cassa", ALLEGATO C "Rendiconto finanziario completo"):** quando l'anno dichiara
 le proprie erogazioni

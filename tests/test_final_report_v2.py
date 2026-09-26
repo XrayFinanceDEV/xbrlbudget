@@ -37,8 +37,12 @@ def _synthetic_pareggio_motore(inc: dict) -> dict:
 
     from calculations.ce_result import calculate_ce_result
     from calculations.ratios import FinancialRatiosCalculator
-    from app.services.final_report_dossier import BREAK_EVEN_COST_FIELDS
 
+    # lotto 2 fix rilievi (2026-09-26): F5 rimuove `BREAK_EVEN_COST_FIELDS` da
+    # `final_report_dossier` (la colonna base/storica non usa più `calculate_break_even_analysis`)
+    # — questo fixture sintetico resta autonomo, i cinque campi non sono cambiati.
+    BREAK_EVEN_COST_FIELDS = ('ce05_materie_prime', 'ce06_servizi', 'ce07_godimento_beni',
+                              'ce08_costi_personale', 'ce12_oneri_diversi')
     costs = [inc.get(key, Decimal('0')) for key in BREAK_EVEN_COST_FIELDS]
     revenue = inc.get('ce01_ricavi_vendite', Decimal('0'))
     view = SimpleNamespace(revenue=revenue, ebit=calculate_ce_result(inc).ebit,
@@ -410,8 +414,14 @@ def test_composition_sources_methodology_describes_the_unconditional_pfn_convent
 def test_break_even_uses_the_engine_declared_figures_on_plan_years():
     """A02 (lotto 2 fix rilievi, 2026-09-26): un anno di piano non ricalcola più
     fissi/variabili con la quota delle ipotesi (60/40 di default); riporta
-    integralmente `engine_meta['pareggio']` del motore. La colonna base/storica
-    resta invariata: `calculate_break_even_analysis` con `DEFAULT_FIXED_SHARE`."""
+    integralmente `engine_meta['pareggio']` del motore.
+
+    lotto 2 fix rilievi (2026-09-26): F5, la colonna base/storica applica ora la STESSA regola
+    del motore (`punto_di_pareggio`), non più `calculate_break_even_analysis` — qui senza
+    `fixed_split` (nessuna ipotesi di piano passata a questa `DossierSource`), quindi il 60/40 di
+    default si applica SOLO a ce05/ce06 (non più all'intero totale dei cinque campi): fissi =
+    ce05_fisso(400) + ce06_fisso(200) + ce07(100) + ce08(200) + ce12(200) = 1100, variabili =
+    ce05_variabile(600) + ce06_variabile(300) = 900."""
     from database.models import BalanceSheet, IncomeStatement
     from app.schemas.final_report_v2 import StatementPeriod
     bs = {column.name: Decimal('0') for column in BalanceSheet.__table__.columns if column.name.startswith('sp')}
@@ -434,13 +444,14 @@ def test_break_even_uses_the_engine_declared_figures_on_plan_years():
                       bs, inc, fixed_split=(Decimal('60'), Decimal('30')), pareggio_motore=pareggio_motore),
     ])
     series = {s.id: (s.values[0], s.values[1]) for s in group(report, 'break_even').series}
-    # Colonna base/storica: invariata rispetto a prima del lotto (misurata col
-    # 40% di default, l'unico che questa colonna abbia mai usato).
-    assert series['fixed_costs'][0] == Decimal('800.00')
-    assert series['variable_costs'][0] == Decimal('1200.00')
-    assert series['contribution_margin'][0] == Decimal('2800.00')
-    assert series['break_even_revenue'][0] == Decimal('1142.86')
-    assert series['safety_margin_pct'][0] == Decimal('71.4300')
+    # Colonna base/storica: F5, stessa regola del motore (`punto_di_pareggio`) col 60/40 di
+    # default applicato solo a ce05/ce06 — mai più `calculate_break_even_analysis`, che spalmava
+    # la stessa quota anche su ce07/ce08/ce12 (che il motore tratta come interamente fissi).
+    assert series['fixed_costs'][0] == Decimal('1100.00')
+    assert series['variable_costs'][0] == Decimal('900.00')
+    assert series['contribution_margin'][0] == Decimal('3100.00')
+    assert series['break_even_revenue'][0] == Decimal('1419.35')
+    assert series['safety_margin_pct'][0] == Decimal('64.52')
     # Anno di piano: i valori del motore, mai la ripartizione 60/30 delle ipotesi
     # (che qui è deliberatamente diversa, per dimostrare che non viene più letta).
     assert series['fixed_costs'][1] == Decimal('950.00')
@@ -545,12 +556,18 @@ def test_break_even_fixed_costs_tolerance_scales_with_a_thin_margin():
     # lotto 2 fix rilievi (2026-09-26), fix round 1: su un anno di piano `fixed_costs`
     # viene da `engine_meta['pareggio']` del motore (costi_fissi_operativi,
     # riconciliato sul MOL), non più da una ripartizione dei cinque costi operativi
-    # canonici — quella lega non si controlla più sugli anni di piano. Al suo posto,
-    # `fixed_costs` resta agganciato all'identità di pareggio del motore stesso
-    # (`bep × MdC / ricavi == costi_fissi`, v. schemas/final_report_v2.py): un valore
-    # manomesso continua a farla scattare. Il margine di contribuzione resta
-    # agganciato a ricavi meno variabili su ogni colonna, piano compreso.
-    (lambda raw: _bump(raw, 'break_even', 'fixed_costs'), "break-even fixed costs must reconcile with the engine's own identity"),
+    # canonici.
+    # F5 (decisione del proprietario, 2026-09-26): la lega "must split the operating
+    # costs" torna a valere anche sugli anni di piano (e su ogni colonna), perché ora
+    # confronta `fixed + variable` con la somma CORRETTA delle rettifiche (ce02/03/03a/
+    # 04/10/11/11b incluse), che vale per costruzione qualunque sia la quota fisso/
+    # variabile: su questa manomissione (solo `fixed_costs` alterato) è lei a scattare
+    # per prima, prima che il ciclo arrivi alla lega sull'identità di pareggio del
+    # motore (`bep × MdC / ricavi == costi_fissi`) — la seconda resta comunque attiva e
+    # coperta dal caso "manomessa" di `test_break_even_fixed_costs_tolerance_scales_
+    # with_a_thin_margin` qui sotto, dove il totale dei cinque costi non basta a
+    # isolarla (`fixed_split` non è nella fixture sintetica lì usata).
+    (lambda raw: _bump(raw, 'break_even', 'fixed_costs'), "break-even costs must split the operating costs"),
     (lambda raw: _bump(raw, 'break_even', 'contribution_margin'), 'contribution margin must equal revenue minus variable costs'),
     (lambda raw: _bump(raw, 'cost_incidence', 'services'), 'must match indicator'),
     (lambda raw: _reorder_periods(raw, 'composition_sources'), 'canonical statement periods'),

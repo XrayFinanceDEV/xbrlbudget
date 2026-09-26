@@ -1,5 +1,7 @@
 from decimal import Decimal as D
 
+import pytest
+
 from importers.import_snello.verifica import misura, normalizza_forma, soglia, tappa
 
 
@@ -55,3 +57,35 @@ def test_oltre_soglia_non_tocca_nulla():
     bs = _bs(sp09_disponibilita_liquide="900")
     bs2, ce2, tappo, esito = tappa(bs, CE, misura(bs, CE), D("100"))
     assert esito == "oltre_soglia" and tappo is None and bs2 == bs
+
+
+def test_estrazione_vuota_non_e_ok():
+    bs, ce = {}, {}
+    m = misura(bs, ce)
+    bs2, ce2, tappo, esito = tappa(bs, ce, m, D("100"))
+    assert esito == "vuoto" and tappo is None and bs2 == bs and ce2 == ce
+
+
+def test_forma_esplicita_non_maschera_lo_scarto_reale():
+    # sp13 = 0 e utile CE = 100 con una vera eccedenza di attivo di 100 (sp13 azzerato,
+    # non 100 come nella fixture base): con forma="bilancio" lo scarto si vede;
+    # con forma=None l'euristica (somma degli scarti assoluti piu' piccola: 0 contro 200)
+    # preferisce "verifica" e lo maschera. E' l'ambiguita' nota fra le due forme quando
+    # utile CE e l'eccedenza di attivo coincidono: documentata qui, non risolta.
+    bs = _bs(sp13_utile_perdita="0")
+    m_bilancio = misura(bs, CE, forma="bilancio")
+    assert m_bilancio["forma"] == "bilancio" and m_bilancio["scarto_sp"] == D("100.00")
+    m_auto = misura(bs, CE)
+    assert m_auto["forma"] == "verifica" and m_auto["scarto_sp"] == D("0.00")
+
+
+def test_tappo_ce_negativo_si_rifiuta():
+    ce = {"ce01_ricavi_vendite": D("50"), "ce06_servizi": D("5")}   # utile CE 45 contro sp13 100 (scarto -55)
+    m = misura(_bs(), ce, forma="bilancio")
+    bs2, ce2, tappo, esito = tappa(_bs(), ce, m, D("100"))
+    assert esito == "oltre_soglia" and tappo is None and ce2["ce06_servizi"] == D("5")
+
+
+def test_forma_invalida_solleva():
+    with pytest.raises(ValueError):
+        misura(_bs(), CE, forma="xyz")

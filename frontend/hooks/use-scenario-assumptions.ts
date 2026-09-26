@@ -60,7 +60,7 @@ export interface ScenarioAssumptionsState {
   updateAll: (field: string, value: number | boolean | null) => void; // tutti i forecastYears
   updateFinancingLoans: (year: number, loans: FinancingLoanInput[]) => void;
   updateTemporaryDifferences: (year: number, lines: TemporaryDifferenceInput[]) => void;
-  updateSpRule: (code: string, field: string, growthField: string, driver: SpIndexingDriver | null, projected: Record<number, number | null>) => void;
+  updateSpRule: (code: string, field: string, growthField: string, driver: SpIndexingDriver | null, baseAmount: number | null) => void;
   updateManualSpAmount: (year: number, code: string, field: string, growthField: string, amount: number, projected: Record<number, number | null>) => void;
   /** Il setter tipizzato del piano di pregresso (conflitto B della revisione
    *  del task 7): scrive SEMPRE nel primo anno di piano (`withPregresso`,
@@ -369,9 +369,9 @@ export function useScenarioAssumptions({
 
   const updateSpRule = useCallback((
     code: string, field: string, growthField: string, driver: SpIndexingDriver | null,
-    projected: Record<number, number | null>,
+    baseAmount: number | null,
   ) => {
-    setAssumptions((prev) => withSpRule(prev, forecastYears, code, field, growthField, driver, projected));
+    setAssumptions((prev) => withSpRule(prev, forecastYears, code, field, growthField, driver, baseAmount));
   }, [forecastYears]);
 
   const updateManualSpAmount = useCallback((

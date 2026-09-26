@@ -343,8 +343,13 @@ foglio.»
   chiude al passo 5, qui si genera quello nuovo». I crediti tributari mostrano «Governata dalla
   posizione tributaria»; le imposte anticipate mostrano «Governata a mano nello SP previsionale:
   costanti, effetto sulla cassa». **«Variazione % per anno»** (accordion): le stesse
-  voci come percentuali, anno per anno. Interruttore **Debiti previdenziali scalano col costo del
-  personale**.
+  voci come percentuali, anno per anno. I debiti previdenziali (entro e oltre) si agganciano al
+  costo del personale con lo stesso selettore delle altre voci minori (driver «il costo del
+  personale»): dal lotto 3 fix rilievi (A06, 2026-09-26) non c'è più un interruttore a parte —
+  prima duplicava la stessa cosa e poteva mostrare a schermo un aggancio diverso da quello che il
+  motore applicava davvero. Tornare a **Manuale** da un driver scrive il saldo dell'anno base,
+  costante in ogni anno di piano — non più i valori dell'anteprima già cresciuti col driver
+  (decisione del proprietario, lotto 3 fix rilievi, 2026-09-26, A05).
 - **Fondo TFR**: occhiello «{sp15} € al 31/12/{anno}». Interruttore «Accantonamento annuo ·
   retribuzioni / 13,5 — versato a fondi esterni o INPS» (`tfr_accrual_suspended`). Tabella per
   anno: **Accantonamento** (sola lettura), **Liquidazioni** (`tfr_payments`, un importo per anno:

@@ -285,12 +285,16 @@ const REGOLA_DRIVER: Record<SpIndexingDriver, string> = {
  *  `rowsAltriCreditiDebiti`) e — quando esiste — il campo `sp*_growth_pct`.
  *  `sp06g` (crediti diversi, sotto-riga del DSO) e `sp06e` (crediti
  *  tributari, governati dalla posizione fiscale) non hanno un driver in
- *  `sp_indexing`: un piano di volume su di loro non esiste nel motore. */
-const VOCI_MINORI_PIANO: readonly { code?: string; baseField: string; growthField?: string; previdenza?: boolean }[] = [
+ *  `sp_indexing`: un piano di volume su di loro non esiste nel motore.
+ *
+ *  A06 (lotto 3 fix rilievi, 2026-09-26): `sp16f` non ha piu' un doppio
+ *  comando — la casella previdenza/personale e' sparita e la tendina e'
+ *  l'unico modo di agganciarla, `personale` compreso. */
+const VOCI_MINORI_PIANO: readonly { code?: string; baseField: string; growthField?: string }[] = [
   { baseField: "sp06g_crediti_altri_breve" },
   { code: "sp10", baseField: "sp10_ratei_risconti_attivi", growthField: "sp10_growth_pct" },
   { baseField: "sp06e_crediti_tributari_breve", growthField: "sp06e_growth_pct" },
-  { code: "sp16f", baseField: "sp16f_debiti_previdenza_breve", growthField: "sp16f_growth_pct", previdenza: true },
+  { code: "sp16f", baseField: "sp16f_debiti_previdenza_breve", growthField: "sp16f_growth_pct" },
   { code: "sp16g", baseField: "sp16g_altri_debiti_breve", growthField: "sp16g_growth_pct" },
   { code: "sp14", baseField: "sp14_fondi_rischi", growthField: "sp14_growth_pct" },
   { code: "sp18", baseField: "sp18_ratei_risconti_passivi", growthField: "sp18_growth_pct" },
@@ -305,12 +309,9 @@ export function regoleVociMinori(assumptions: AssumptionsMap, years: number[]): 
   const firstYear = years[0];
   const indexing = spIndexingOf(assumptions, years);
   const riga = assumptions[firstYear] as Record<string, unknown> | undefined;
-  const previdenzaSuPersonale = Boolean(riga?.previdenza_scales_with_personnel);
   const out: Record<string, string> = {};
   for (const v of VOCI_MINORI_PIANO) {
-    const driver: SpIndexingDriver | null = v.previdenza && previdenzaSuPersonale
-      ? "personale"
-      : v.code ? indexing[v.code] ?? null : null;
+    const driver: SpIndexingDriver | null = v.code ? indexing[v.code] ?? null : null;
     const crescita = v.growthField ? num(riga?.[v.growthField]) : 0;
     const haImportoManuale = years.some((year) => assumptions[year]?.sp_overrides?.[v.baseField] != null);
     out[v.baseField] = driver

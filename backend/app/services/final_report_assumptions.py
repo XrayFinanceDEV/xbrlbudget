@@ -157,7 +157,6 @@ FIELD_LABELS: Mapping[str, str] = {
     "sp17f_growth_pct": "Crescita debiti previdenziali (lungo) %",
     "sp17g_growth_pct": "Crescita altri debiti (lungo) %",
     "sp18_growth_pct": "Crescita ratei e risconti passivi %",
-    "previdenza_scales_with_personnel": "Previdenza scala con personale",
     "tfr_accrual_suspended": "Accantonamento TFR sospeso",
     "sp_indexing": "Indicizzazione SP",
     "sp_overrides": "Override SP",

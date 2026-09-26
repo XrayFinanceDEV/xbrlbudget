@@ -46,7 +46,7 @@ export const STEP_FIELDS: Record<WizardStepKey, readonly string[]> = {
     "sp01_growth_pct", "sp04_growth_pct",
     "sp08_growth_pct", "sp10_growth_pct", "sp14_growth_pct", "sp16f_growth_pct",
     "sp16g_growth_pct", "sp17d_growth_pct", "sp17f_growth_pct", "sp17g_growth_pct",
-    "sp18_growth_pct", "previdenza_scales_with_personnel", "tfr_accrual_suspended", "tfr_payments",
+    "sp18_growth_pct", "tfr_accrual_suspended", "tfr_payments",
     "financing_amount", "financing_duration_years", "financing_interest_rate",
     "tangible_investments", "intangible_investments", "depreciation_rate", "depreciation_rate_intangible",
     "asset_disposal_nbv", "asset_disposal_proceeds", "cash_sweep_enabled", "cash_sweep_min_cash",
@@ -70,6 +70,9 @@ export const DEAD_FIELDS = [
   // Scelta dell'INFRANNUALE (quali giorni di circolante proiettare), non del
   // percorso budget: nessun passo del wizard la scrive.
   "working_capital_mode",
+  // A06 (lotto 3 fix rilievi, 2026-09-26): la casella e' sparita dal passo 6 e il motore
+  // non legge piu' il flag — sp16f/sp17f si agganciano al personale solo da `sp_indexing`.
+  "previdenza_scales_with_personnel",
 ] as const;
 
 export interface WizardStepGroup { group: WizardStep["group"]; steps: WizardStep[] }

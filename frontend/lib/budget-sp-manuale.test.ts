@@ -42,18 +42,32 @@ describe("valori manuali delle voci patrimoniali", () => {
     const rows: AssumptionsMap = { 2027: {
       sp_overrides: { [field]: 60000, sp08_attivita_finanziarie: 9 }, sp04_growth_pct: 4,
     }, 2028: { sp_overrides: { [field]: 62000 } } };
-    const next = withSpRule(rows, years, "sp04", field, growth, "ricavi", {});
+    const next = withSpRule(rows, years, "sp04", field, growth, "ricavi", null);
     expect(next[2027].sp_overrides).toEqual({ sp08_attivita_finanziarie: 9 });
     expect(next[2028].sp_overrides).toBeNull();
     expect(next[2027].sp_indexing).toEqual({ sp04: "ricavi" });
     expect(next[2027].sp04_growth_pct).toBeNull();
   });
 
-  it("scegliere Manuale congela i valori dell'anteprima per anno", () => {
+  // lotto 3 fix rilievi (2026-09-26): «Manuale» parte dal saldo dell'anno base, costante (decisione del proprietario, A05).
+  it("scegliere Manuale scrive il saldo dell'anno base in ogni anno", () => {
     const rows: AssumptionsMap = { 2027: { sp_indexing: { sp04: "ricavi" } }, 2028: { sp_indexing: { sp04: "ricavi" } } };
-    const next = withSpRule(rows, years, "sp04", field, growth, null, { 2027: 55000, 2028: 58000 });
+    const next = withSpRule(rows, years, "sp04", field, growth, null, 52550);
     expect(next[2027].sp_indexing).toBeNull();
-    expect(next[2027].sp_overrides?.[field]).toBe(55000);
-    expect(next[2028].sp_overrides?.[field]).toBe(58000);
+    expect(next[2027].sp_overrides?.[field]).toBe(52550);
+    expect(next[2028].sp_overrides?.[field]).toBe(52550);
+  });
+
+  it("Manuale su una voce senza saldo di base scrive zero", () => {
+    const next = withSpRule({ 2027: {}, 2028: {} }, years, "sp04", field, growth, null, null);
+    expect(next[2027].sp_overrides?.[field]).toBe(0);
+    expect(next[2028].sp_overrides?.[field]).toBe(0);
+  });
+
+  it("Manuale dopo un driver riparte dal saldo di base, non dai valori di prima", () => {
+    const rows: AssumptionsMap = { 2027: { sp_overrides: { [field]: 60000 } }, 2028: { sp_overrides: { [field]: 61000 } } };
+    const conDriver = withSpRule(rows, years, "sp04", field, growth, "ricavi", null);
+    const next = withSpRule(conDriver, years, "sp04", field, growth, null, 52550);
+    expect([next[2027].sp_overrides?.[field], next[2028].sp_overrides?.[field]]).toEqual([52550, 52550]);
   });
 });

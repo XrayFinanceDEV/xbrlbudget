@@ -222,39 +222,39 @@ export function spIndexingOf(
   return raw ?? {};
 }
 
-/** Le 15 voci minori: importo base, driver scelto e frase di andamento. */
+/** Le 15 voci minori: importo base, driver scelto e frase di andamento.
+ *
+ * A06 (lotto 3 fix rilievi, 2026-09-26, decisione del proprietario): la
+ * casella «Debiti previdenziali scalano col costo del personale» e' sparita
+ * dal wizard — sp16f/sp17f sono voci agganciabili come le altre voci minori, col
+ * driver `personale` gia' fra i tre di `sp_indexing`. Non c'e' piu' un doppio
+ * comando da arbitrare qui.
+ */
 export function minorFieldsRows(
   baseBs: BalanceSheet | undefined | null,
   indexing: Record<string, SpIndexingDriver> = {},
-  previdenzaSuPersonale = false,
   pianiPregresso: readonly string[] = [],
 ): MinorFieldRow[] {
   const b = (k: string) => euro(baseBs ? numOrNull((baseBs as unknown as Record<string, unknown>)[k]) : null);
   return MINOR_FIELDS.map((v) => {
-    // L'interruttore E' gia' l'indicizzazione di sp16f/sp17f al costo del
-    // personale: con quello acceso il motore ignora una chiave su quelle due
-    // voci, quindi l'interfaccia mostra l'aggancio che vale davvero.
-    const switchOwned = previdenzaSuPersonale && (v.code === "sp16f" || v.code === "sp17f");
     // Ruling 17: con un piano la voce si estingue, e nessun driver la governa.
     const conPiano = Boolean(v.code && pianiPregresso.includes(PIANO_DI[v.code] ?? ""));
-    const driver = v.code && !switchOwned && !conPiano ? indexing[v.code] ?? null : null;
+    const driver = v.code && !conPiano ? indexing[v.code] ?? null : null;
     const andamento = conPiano
       ? "Governata dal piano di scadenziamento"
       : v.governata
         ? `Governata ${v.governata}`
-        : switchOwned
-          ? `Cresce con ${DRIVER_LABELS.personale}`
-          : driver
-            ? `Cresce con ${DRIVER_LABELS[driver]}`
-            : "Costante per tutto il piano, salvo variazione %";
+        : driver
+          ? `Cresce con ${DRIVER_LABELS[driver]}`
+          : "Costante per tutto il piano, salvo variazione %";
     // Con un piano il motore scrive `base − massa` (che vale zero) o il residuo
     // del runoff: la percentuale e' inerte tanto quanto il driver.
-    const inerte = Boolean(driver) || switchOwned || conPiano || v.inerte === true;
+    const inerte = Boolean(driver) || conPiano || v.inerte === true;
     return {
       field: v.field, label: v.label, baseLabel: b(v.baseField), balanceField: v.baseField,
       baseAmount: baseBs ? numOrNull((baseBs as unknown as Record<string, unknown>)[v.baseField]) : null,
-      code: switchOwned || conPiano ? null : v.code, driver, andamento,
-      agganciata: Boolean(driver) || switchOwned,
+      code: conPiano ? null : v.code, driver, andamento,
+      agganciata: Boolean(driver),
       sub: andamento,
       // Un driver (o un piano) vince sulla percentuale: la casella resterebbe
       // viva senza alcun effetto, ed e' esattamente il difetto da cui nasce

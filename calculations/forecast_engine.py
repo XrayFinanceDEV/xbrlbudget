@@ -125,9 +125,12 @@ def _importo_it(value) -> str:
 # lasciata in pace resta ferma per tutto il piano.
 #
 # La forma dell'aggancio NON e' nuova: e' quella gia' cablata sui debiti
-# previdenziali (`previdenza_scales_with_personnel`), cioe' `stock dell'ANNO
+# previdenziali via `sp_indexing` (driver "personale"), cioe' `stock dell'ANNO
 # BASE × fattore del driver`. Indicizzare sulla base non accumula deriva, mentre
-# un `prev × (1+%)` composto per cinque anni si'.
+# un `prev × (1+%)` composto per cinque anni si'. (`previdenza_scales_with_personnel`
+# era l'interruttore dedicato che faceva la stessa cosa: dal lotto 3 fix rilievi,
+# 2026-09-26, A06, il motore non lo legge piu' — resta nel modello/schema solo
+# per compatibilita' con un client vecchio.)
 
 # ── GIORNI MEDI DERIVATI: la soglia oltre cui non descrivono piu' l'azienda ──
 #
@@ -1655,7 +1658,6 @@ class ForecastEngine:
         if not isinstance(raw, dict) or not raw:
             return applied, ignored
         factors = cls._sp_indexing_factors(base_inc, forecast_inc)
-        previdenza_switch = bool(getattr(assumption, "previdenza_scales_with_personnel", False))
         # Ordine per codice: i `details` sono una dichiarazione, e una
         # dichiarazione che cambia ordine a ogni esecuzione non e' confrontabile.
         for code in sorted(raw):
@@ -1670,11 +1672,6 @@ class ForecastEngine:
                 _skip(SP_INDEXING_GOVERNED[code])
             elif code not in SP_INDEXABLE_FIELDS:
                 _skip("voce non indicizzabile")
-            elif previdenza_switch and code in ("sp16f", "sp17f"):
-                # L'interruttore E' gia' l'indicizzazione di queste due voci al
-                # costo del personale: vince lui, cosi' gli scenari che lo usano
-                # non cambiano di un centesimo.
-                _skip("governata dall'interruttore previdenza/personale")
             elif (pregresso or {}).get(SP_INDEXING_PLAN_KEY.get(code, "")):
                 _skip("piano di scadenziamento")
             elif factors.get(driver) is None:
@@ -4379,29 +4376,29 @@ class ForecastEngine:
         sp17g_anchor, sp17g_factor = _sp_scale('sp17g', 'sp17g_growth_pct')
         sp17g = _declare_indexed('sp17g', sp17g_anchor('sp17g_altri_debiti_lungo') * sp17g_factor)
 
-        # Previdenza (sp16f/sp17f): opt-in scaling with the personnel cost (P5).
-        # When enabled, social-security payables move in proportion to ce08 vs the BASE
-        # year (e.g. personnel 100k→200k ⇒ previdenza 20k→40k), anchored on the base-year
-        # amount so multi-year chains stay consistent. Default OFF → carry forward with
-        # the manual sp16f/sp17f_growth_pct, exactly as before (zero regression).
-        if getattr(assumption, 'previdenza_scales_with_personnel', False):
-            base_ce08 = (getattr(base_inc, 'ce08_costi_personale', ZERO) or ZERO)
-            fc_ce08 = (forecast_inc.get('ce08_costi_personale', ZERO) or ZERO)
-            pers_factor = (fc_ce08 / base_ce08) if base_ce08 > 0 else D('1')
-            sp16f = _net_of_pregresso(
-                _base('sp16f_debiti_previdenza_breve'), 'debiti_previdenziali',
-                'sp16f_debiti_previdenza_breve', from_base=True,
-            ) * pers_factor
-            sp17f = _base('sp17f_debiti_previdenza_lungo') * pers_factor
-        else:
-            sp16f_anchor, sp16f_factor = _sp_scale('sp16f', 'sp16f_growth_pct')
-            sp16f = _declare_indexed('sp16f', _net_of_pregresso(
-                sp16f_anchor('sp16f_debiti_previdenza_breve'), 'debiti_previdenziali',
-                'sp16f_debiti_previdenza_breve',
-            ) * sp16f_factor)
-            sp17f_anchor, sp17f_factor = _sp_scale('sp17f', 'sp17f_growth_pct')
-            sp17f = _declare_indexed(
-                'sp17f', sp17f_anchor('sp17f_debiti_previdenza_lungo') * sp17f_factor)
+        # Previdenza (sp16f/sp17f): A06 (lotto 3 fix rilievi, 2026-09-26, decisione del
+        # proprietario). Fino a questo lotto un interruttore dedicato
+        # (`previdenza_scales_with_personnel`) duplicava cio' che `sp_indexing`
+        # sa gia' fare col driver "personale": un doppio comando sugli stessi
+        # due campi, e lo schermo poteva dire una cosa mentre il motore ne
+        # faceva un'altra. Il motore non legge piu' l'interruttore — resta nel
+        # modello/schema per compatibilita', ma un client vecchio che lo manda
+        # `true` non cambia piu' nulla — e sp16f/sp17f seguono la stessa forma
+        # delle altre voci minori indicizzabili: `sp_indexing: {"sp16f":
+        # "personale"}` da' esattamente i numeri che l'interruttore dava prima
+        # (misurato: identico con e senza un piano pregresso su
+        # `debiti_previdenziali`, perche' `validate_pregresso` impone che quel
+        # piano copra l'intero saldo base, e allora il generato e' zero in
+        # entrambe le forme). Gli scenari salvati col solo interruttore vanno
+        # migrati una volta (`scripts/migra_previdenza_tendina.py`).
+        sp16f_anchor, sp16f_factor = _sp_scale('sp16f', 'sp16f_growth_pct')
+        sp16f = _declare_indexed('sp16f', _net_of_pregresso(
+            sp16f_anchor('sp16f_debiti_previdenza_breve'), 'debiti_previdenziali',
+            'sp16f_debiti_previdenza_breve',
+        ) * sp16f_factor)
+        sp17f_anchor, sp17f_factor = _sp_scale('sp17f', 'sp17f_growth_pct')
+        sp17f = _declare_indexed(
+            'sp17f', sp17f_anchor('sp17f_debiti_previdenza_lungo') * sp17f_factor)
 
         # ── PREGRESSO: gli altri tre saldi, stessa regola dei crediti ──
         # Il lato breve e' generato + dovuto l'anno dopo, il lato oltre e' tutto

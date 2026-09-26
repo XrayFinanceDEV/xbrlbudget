@@ -27,8 +27,8 @@ export interface StepProps {
   updateAll: (field: string, value: number | boolean | null) => void;
   updateFinancingLoans: (year: number, loans: FinancingLoanInput[]) => void;
   updateTemporaryDifferences: (year: number, lines: TemporaryDifferenceInput[]) => void;
-  /** Sceglie un driver oppure valori manuali in euro per una voce SP. */
-  updateSpRule: (code: string, field: string, growthField: string, driver: SpIndexingDriver | null, projected: Record<number, number | null>) => void;
+  /** Sceglie un driver oppure Manuale (il saldo dell'anno base, costante — A05) per una voce SP. */
+  updateSpRule: (code: string, field: string, growthField: string, driver: SpIndexingDriver | null, baseAmount: number | null) => void;
   updateManualSpAmount: (year: number, code: string, field: string, growthField: string, amount: number, projected: Record<number, number | null>) => void;
   /** Il setter tipizzato del piano di scadenziamento del pregresso: scrive
    *  SEMPRE nella riga del PRIMO anno di piano (spec §3.5) — non e' ne' un

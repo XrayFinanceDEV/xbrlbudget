@@ -378,7 +378,16 @@ def test_the_scorporo_also_applies_to_previdenza_scaled_on_personnel(monkeypatch
     """L'aggancio al costo del personale e' pur sempre uno STOCK riportato, solo
     ancorato all'anno base invece che all'anno prima: se quello stock e' dichiarato
     a pregresso, moltiplicarlo per il fattore del personale lo rimetterebbe dentro
-    ogni anno. Anche li' il generato parte dalla base scorporata."""
+    ogni anno. Anche li' il generato parte dalla base scorporata.
+
+    Lotto 3 fix rilievi (2026-09-26, A06): la casella `previdenza_scales_with_personnel`
+    e' sparita e il motore non la legge piu' — l'aggancio al personale si scrive con
+    `sp_indexing: {"sp16f": "personale", "sp17f": "personale"}`, la stessa forma delle
+    altre voci minori. I numeri restano IDENTICI a quelli di prima del lotto (misurato):
+    senza piano perche' la formula e' la stessa (`_base × fattore del personale`), con un
+    piano perche' `validate_pregresso` impone che la massa dichiarata copra l'intero saldo
+    base — il generato scorporato e' zero in entrambe le forme, quindi il fattore del
+    personale moltiplica zero allo stesso modo."""
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
     engine, sessions = memory_sessions()
     try:
@@ -386,7 +395,7 @@ def test_the_scorporo_also_applies_to_previdenza_scaled_on_personnel(monkeypatch
             company_id, _ = seed_base_year(db, user_id=USER)
             _split_base_payables(db, company_id)
             rows = [dict(forecast_year=y, personnel_growth_pct=20,
-                         previdenza_scales_with_personnel=True, **MANUAL_TAX)
+                         sp_indexing={"sp16f": "personale", "sp17f": "personale"}, **MANUAL_TAX)
                     for y in (2027, 2028)]
             without = _run(db, company_id, [dict(r) for r in rows])[0]
             (_, bs_no_plan, _), _ = read_forecast_maps(db, without.id)

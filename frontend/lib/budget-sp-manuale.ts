@@ -31,7 +31,14 @@ function withoutKey<T>(bag: Record<string, T> | null | undefined, key: string): 
   return Object.keys(rest).length > 0 ? rest : null;
 }
 
-/** A mode switch keeps the chosen rule and the absolute balances mutually exclusive. */
+/**
+ * A mode switch keeps the chosen rule and the absolute balances mutually exclusive.
+ *
+ * Manuale = il saldo dell'anno base, costante per tutto il piano (decisione del
+ * proprietario 2026-09-26, A05): passare da un driver a Manuale non congela più i
+ * valori dell'anteprima già cresciuti (il sintomo del consulente), ma riparte dal
+ * saldo dichiarato nell'anno base — `baseAmount ?? 0` in ogni anno.
+ */
 export function withSpRule(
   assumptions: AssumptionsMap,
   years: number[],
@@ -39,21 +46,20 @@ export function withSpRule(
   field: string,
   growthField: string,
   driver: SpIndexingDriver | null,
-  projected: Record<number, number | null>,
+  baseAmount: number | null,
 ): AssumptionsMap {
   const next = { ...assumptions };
   for (const year of years) {
     const row = next[year] ?? {};
     const indexing = withoutKey(row.sp_indexing, code);
     const overrides = withoutKey(row.sp_overrides, field);
-    const projectedValue = projected[year];
     next[year] = {
       ...row,
       [growthField]: null,
       sp_indexing: driver ? { ...indexing, [code]: driver } : indexing,
-      sp_overrides: driver || projectedValue == null
+      sp_overrides: driver
         ? overrides
-        : { ...overrides, [field]: projectedValue },
+        : { ...overrides, [field]: baseAmount ?? 0 },
     };
   }
   return next;

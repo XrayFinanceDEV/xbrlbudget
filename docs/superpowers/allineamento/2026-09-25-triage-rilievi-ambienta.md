@@ -208,3 +208,32 @@ vincoli globali del lotto, non collegati a questo giro.
 - **Un solo DSO, DIO, ROD, PFN, current/quick/CCN, indebitamento e copertura**: tutti gli scenari esistenti, non
   solo quelli generati dopo il lotto — la pagina Indici e il Business plan leggono le stesse formule di
   `calculations/ratios.py`/`report_indicators.py` a ogni richiesta, non un valore persistito.
+
+## Lotto 3, 2026-09-26
+
+Fix sul wizard (`docs/superpowers/specs/2026-09-26-fix-rilievi-ambienta-design.md` §3, branch
+`fix/rilievi-lotto3` da `fix/rilievi-ambienta`). `tools/triage_rilievi.py::LETTURE` aggiornato per A05 e A06 —
+«Risolto nel lotto 3 fix, 2026-09-26, su decisione del proprietario»; il banco (`tests/test_rilievi_ambienta.py`)
+conferma entrambi verdi senza marcatore `xfail`.
+
+- **A05** — Task 1. Passare a «Manuale» da una regola («ricavi», «acquisti», «personale») scrive il saldo
+  dell'anno base, costante, in ogni anno di piano — non più i valori dell'anteprima già cresciuti col driver
+  (il sintomo del consulente: 52.550 → 55.178 / 58.488 / 62.582 diventava la crescita "congelata" invece del
+  saldo fermo). Funzione pura `withSpRule` (`frontend/lib/budget-sp-manuale.ts`), chiamata da
+  `StepPatrimonialePiano.tsx` sul cambio di regola.
+- **A06** — Task 2. Il doppio comando sui debiti previdenziali (casella `previdenza_scales_with_personnel` +
+  tendina `sp_indexing`) è sparito: restava un solo comando davvero attivo (vinceva sempre la casella, con
+  `"governata dall'interruttore previdenza/personale"` nei `details`), ma lo schermo poteva mostrare
+  un'indicizzazione diversa da quella che il motore applicava — è quello il sintomo del consulente. Rimossi: la
+  `Checkbox` e la riga della vista avanzata nel wizard, il ramo `if getattr(assumption,
+  'previdenza_scales_with_personnel', ...)` nel blocco previdenza e il salto «governata dall'interruttore» in
+  `_resolve_sp_indexing` (`calculations/forecast_engine.py`); il campo resta nel modello/schema per
+  compatibilità (un client vecchio che lo manda `true` non cambia più nulla). `sp16f`/`sp17f` si agganciano ora
+  al personale con `sp_indexing: {"sp16f": "personale", "sp17f": "personale"}`, esattamente come le altre undici
+  voci minori indicizzabili. **Misurato** (non solo per costruzione): la tendina "personale" dà gli stessi
+  numeri, al centesimo, che dava la casella — sia senza un piano pregresso su `debiti_previdenziali`, sia con un
+  piano che copre l'intero saldo base (`validate_pregresso` lo impone), dove il generato scorporato è zero in
+  entrambe le forme. Migrazione una tantum `scripts/migra_previdenza_tendina.py` (stesso stile di
+  `scripts/migra_imposte_commercialista.py`): per ogni riga col flag acceso scrive `sp_indexing.sp16f =
+  sp_indexing.sp17f = "personale"` (dichiarando l'eventuale driver precedente sostituito) e spegne il flag;
+  idempotente, prova per default.

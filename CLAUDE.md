@@ -440,6 +440,16 @@ esistente**, storico compreso, non solo su quelli generati dopo il lotto.
   la cambia; uno scenario nuovo nasce con la proposta, gli anni aggiunti ereditano quella del
   piano. Gli scenari salvati prima vanno migrati una volta (`scripts/migra_imposte_commercialista.py`,
   prova per default, `--apply` per scrivere): senza, applicano il 27,9 salvato invece dell'effettiva.
+- **La casella «Debiti previdenziali scalano col costo del personale» non esiste più** (A06, lotto 3
+  fix rilievi, 2026-09-26, decisione del proprietario). Il doppio comando che duplicava
+  `sp_indexing` è sparito dal wizard, e il motore **ignora** `previdenza_scales_with_personnel`
+  (resta nel modello/schema per compatibilità, ma un client vecchio che lo manda `true` non cambia
+  più nulla): l'unico modo di agganciare `sp16f`/`sp17f` al personale è la tendina, driver
+  `personale`, esattamente come le altre undici voci minori indicizzabili. Gli scenari salvati col
+  solo flag acceso vanno migrati una volta (`python -m scripts.migra_previdenza_tendina [db]
+  --apply`, prova per default): senza, uno scenario che aveva la casella accesa perde l'aggancio al
+  personale — `sp16f`/`sp17f` tornano a restare fermi (o a seguire la propria `sp*_growth_pct`),
+  invece di scalare col costo del personale come facevano prima.
 - **Le imposte anticipate non passano dal conto economico** (commercialista, 2026-09-18).
   `sp06f`/`sp07f` restano quelle del consuntivo per tutto il piano: la griglia delle differenze
   temporanee e `sp06f_growth_pct` non esistono più a schermo e il motore li ignora. Si cambiano

@@ -80,15 +80,23 @@ def _blocco_testo(righe, blocco):
 def percorsi_dei_conti(righe, foglie, *, chiama=None) -> dict:
     chiama = chiama or _testo
     per_numero = {n: r for n, r in enumerate(righe)}
+    posizione_di = {id(r): n for n, r in enumerate(righe)}
     esito = {"chiamate": 0, "saltate_prima": 0, "senza_percorso": 0}
 
     def uno(blocco):
         out = chiama(PROMPT_CONTI, _blocco_testo(righe, blocco), 40 + 14 * len(blocco))
+        # Un id nella risposta che non appartiene a QUESTO blocco (l'id di un altro blocco
+        # dello stesso giro, allucinato o letto per contesto) va scartato qui: senza questo
+        # filtro il blocco 1 potrebbe assegnare una riga di proprieta' del blocco 2, o
+        # sovrascrivere piu' avanti la risposta corretta del blocco che la possiede davvero.
+        ammessi = {posizione_di[id(f)] for f in blocco}
         trovati = {}
         for linea in out.splitlines():
             parti = linea.split()
             if len(parti) == 2 and parti[0].isdigit():
-                trovati[int(parti[0])] = parti[1]
+                n = int(parti[0])
+                if n in ammessi:
+                    trovati[n] = parti[1]
         return trovati
 
     def giro(da_fare):
@@ -150,10 +158,19 @@ def trascrivi_pagine(pdf: str, pagine: list[int], *, chiama_json=None, strisce: 
 
     with ThreadPoolExecutor(llm_provider.GX10_CONCORRENZA) as ex:
         risultati = list(ex.map(uno, lavori))
-    linee, ultima = [], None
-    for riga in (r for blocco in risultati for r in blocco):
-        if riga == ultima:  # la sovrapposizione fra strisce ripete la riga di bordo
-            continue
-        ultima = riga
-        linee.append(" | ".join("" if x is None else str(x) for x in riga))
+
+    linee: list[str] = []
+    pagina_corrente, ultima_riga = None, None
+    for (numero, k, _), righe_striscia in zip(lavori, risultati):
+        if numero != pagina_corrente:
+            # nuova pagina: mai confrontare la riga di bordo oltre il confine di pagina
+            pagina_corrente, ultima_riga = numero, None
+        for i, riga in enumerate(righe_striscia):
+            # la sovrapposizione fra strisce ripete la riga di bordo, ma solo alla giuntura
+            # strip k>0 / k-1 (mai dentro la stessa striscia: due righe identiche vere restano)
+            if i == 0 and k > 0 and ultima_riga is not None and riga == ultima_riga:
+                continue
+            linee.append(" | ".join("" if x is None else str(x) for x in riga))
+        if righe_striscia:
+            ultima_riga = righe_striscia[-1]
     return "\n".join(linee)

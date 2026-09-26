@@ -118,3 +118,93 @@ def test_trascrivi_pagine_transcribe_righe_dedup_bordo(tmp_path, monkeypatch):
     out = L.trascrivi_pagine(str(pdf_path), [1], chiama_json=chiama_json, strisce=3, dpi=50)
     assert out.splitlines() == ["riga 1 | 1 | 1", "bordo | 9 | 9", "riga 2 | 2 | 2", "riga 3 | 3 | 3"]
     assert len(chiamate) == 3
+
+
+# --- Fix round 1 --------------------------------------------------------------------------
+
+
+def test_indice_di_un_altro_blocco_dello_stesso_giro_non_assegnato():
+    """Un id allucinato nella risposta del blocco 1 che appartiene al blocco 2 (stesso giro,
+    quindi presente in `da_fare`) non deve ricevere un percorso: solo la risposta del blocco
+    che possiede davvero quella riga puo' assegnargliela. Qui il blocco 2 non risponde affatto
+    per la propria riga 65 (nemmeno al ripasso sulle saltate), quindi resta senza percorso."""
+    righe = [_riga(i, f"c{i}") for i in range(70)]
+    foglie = righe  # BLOCCO=60 -> blocco 1: righe 0..59, blocco 2: righe 60..69
+
+    def chiama(system, user, max_tokens):
+        if "0|c0" in user:  # blocco 1
+            risposte = [f"{i} X" for i in range(60)]
+            risposte.append("65 X")  # allucina un indice del blocco 2
+            return "\n".join(risposte)
+        # blocco 2 (primo giro e ripasso): risponde per le proprie righe tranne la 65
+        return "\n".join(f"{i} X" for i in range(60, 70) if i != 65)
+
+    esito = L.percorsi_dei_conti(righe, foglie, chiama=chiama)
+    assert righe[65].percorso is None
+    assert esito["senza_percorso"] == 1
+
+
+def test_blocco_non_sovrascrive_una_riga_assegnata_da_un_altro_blocco():
+    """Il blocco 1 risponde correttamente per la riga 5 (di sua proprieta'); il blocco 2
+    allucina anche lui un percorso per la riga 5 (che non gli appartiene): la riga 5 deve
+    tenere il percorso del blocco 1, mai quello, sbagliato, del blocco 2."""
+    righe = [_riga(i, f"c{i}") for i in range(70)]
+    foglie = righe
+
+    def chiama(system, user, max_tokens):
+        if "0|c0" in user:  # blocco 1: risposta corretta, riga 5 compresa
+            return "\n".join(f"{i} corretto" for i in range(60))
+        # blocco 2: risponde per le proprie righe, e allucina anche l'indice 5 (blocco 1)
+        risposte = [f"{i} sbagliato" for i in range(60, 70)]
+        risposte.append("5 sbagliato")
+        return "\n".join(risposte)
+
+    L.percorsi_dei_conti(righe, foglie, chiama=chiama)
+    assert righe[5].percorso == "corretto"
+
+
+def test_trascrivi_pagine_non_deduplica_dentro_la_stessa_striscia(tmp_path, monkeypatch):
+    import fitz
+
+    monkeypatch.setattr(llm_provider, "GX10_CONCORRENZA", 1)
+    pdf_path = tmp_path / "una_pagina.pdf"
+    doc = fitz.open()
+    doc.new_page(width=200, height=300)
+    doc.save(str(pdf_path))
+    doc.close()
+
+    risposte = [
+        {"righe": [["dup", 5, 5], ["dup", 5, 5]]},  # striscia 0: due righe identiche adiacenti
+        {"righe": [["altra", 3, 3]]},               # striscia 1
+    ]
+    chiamate = []
+    def chiama_json(system, contenuto, schema, max_tokens):
+        chiamate.append(1)
+        return risposte[len(chiamate) - 1]
+
+    out = L.trascrivi_pagine(str(pdf_path), [1], chiama_json=chiama_json, strisce=2, dpi=50)
+    assert out.splitlines() == ["dup | 5 | 5", "dup | 5 | 5", "altra | 3 | 3"]
+
+
+def test_trascrivi_pagine_non_confronta_oltre_la_pagina(tmp_path, monkeypatch):
+    import fitz
+
+    monkeypatch.setattr(llm_provider, "GX10_CONCORRENZA", 1)
+    pdf_path = tmp_path / "due_pagine.pdf"
+    doc = fitz.open()
+    doc.new_page(width=200, height=300)
+    doc.new_page(width=200, height=300)
+    doc.save(str(pdf_path))
+    doc.close()
+
+    risposte = [
+        {"righe": [["riga 1", 1, 1], ["X", 9, 9]]},   # pagina 1, unica striscia
+        {"righe": [["X", 9, 9], ["riga 2", 2, 2]]},   # pagina 2, unica striscia
+    ]
+    chiamate = []
+    def chiama_json(system, contenuto, schema, max_tokens):
+        chiamate.append(1)
+        return risposte[len(chiamate) - 1]
+
+    out = L.trascrivi_pagine(str(pdf_path), [1, 2], chiama_json=chiama_json, strisce=1, dpi=50)
+    assert out.splitlines() == ["riga 1 | 1 | 1", "X | 9 | 9", "X | 9 | 9", "riga 2 | 2 | 2"]

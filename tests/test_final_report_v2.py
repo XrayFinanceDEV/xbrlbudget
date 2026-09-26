@@ -27,6 +27,37 @@ def v1_report(name='bilancio', years=None):
     return FinalReportModel.model_validate(raw, context={'skip_hash_validation': True})
 
 
+def _synthetic_pareggio_motore(inc: dict) -> dict:
+    """Un `engine_meta['pareggio']` sintetico per i fixture di test (lotto 2 fix
+    rilievi, A02, 2026-09-26): riproduce la stessa quota fissa 40% di default che
+    prima veniva applicata sul lato report (`DEFAULT_FIXED_SHARE`), così i fixture
+    esistenti restano numericamente invariati pur passando dal motore invece che da
+    una ripartizione delle ipotesi."""
+    from types import SimpleNamespace
+
+    from calculations.ce_result import calculate_ce_result
+    from calculations.ratios import FinancialRatiosCalculator
+
+    # lotto 2 fix rilievi (2026-09-26): F5 rimuove `BREAK_EVEN_COST_FIELDS` da
+    # `final_report_dossier` (la colonna base/storica non usa più `calculate_break_even_analysis`)
+    # — questo fixture sintetico resta autonomo, i cinque campi non sono cambiati.
+    BREAK_EVEN_COST_FIELDS = ('ce05_materie_prime', 'ce06_servizi', 'ce07_godimento_beni',
+                              'ce08_costi_personale', 'ce12_oneri_diversi')
+    costs = [inc.get(key, Decimal('0')) for key in BREAK_EVEN_COST_FIELDS]
+    revenue = inc.get('ce01_ricavi_vendite', Decimal('0'))
+    view = SimpleNamespace(revenue=revenue, ebit=calculate_ce_result(inc).ebit,
+                           **{key: cost for key, cost in zip(BREAK_EVEN_COST_FIELDS, costs)})
+    analysis = FinancialRatiosCalculator(None, view).calculate_break_even_analysis(fixed_cost_percentage=Decimal('0.40'))
+    return {
+        'costi_variabili': str(analysis.variable_costs), 'costi_fissi': str(analysis.fixed_costs),
+        'costi_fissi_operativi': str(analysis.fixed_costs),
+        'margine_contribuzione_pct': str(analysis.contribution_margin_percentage * 100),
+        'fatturato_pareggio': str(analysis.break_even_revenue),
+        'margine_sicurezza': str(revenue - analysis.break_even_revenue),
+        'margine_sicurezza_pct': str(analysis.safety_margin * 100),
+    }
+
+
 def fixture_report(name='bilancio', years=None):
     report = v1_report(name, years)
     from database.models import BalanceSheet, IncomeStatement
@@ -39,7 +70,7 @@ def fixture_report(name='bilancio', years=None):
         bs.update({('sp09_disponibilita_liquide' if l.code == 'cash' else l.code): l.value for l in year.balance_sheet})
         inc.update({('ce01_ricavi_vendite' if l.code == 'revenue' else l.code): l.value for l in year.income_statement})
         sources.append(DossierSource(StatementPeriod(id=f'forecast:{year.year}', year=year.year, label=str(year.year), basis='forecast', period_months=12, source='synthetic_fixture'), bs, inc,
-            fixed_split=(Decimal('40'), Decimal('40'))))
+            fixed_split=(Decimal('40'), Decimal('40')), pareggio_motore=_synthetic_pareggio_motore(inc)))
     return extend_dossier(report, sources)
 
 
@@ -102,13 +133,20 @@ def test_live_api_negotiation_preserves_v1_and_exact_v2_source_values(client):
             assert row.values[cf_column] == expected
 
 
-def test_null_zero_negative_and_proxy_dscr_availability():
+def test_null_zero_negative_and_dscr_availability():
     bs = {'sp09_disponibilita_liquide': Decimal('100'), 'sp11_capitale': Decimal('100')}
     inc = {'ce01_ricavi_vendite': Decimal('100'), 'ce05_materie_prime': Decimal('100')}
     values = indicator_results(bs, inc)
     assert values['practice.ebitda_margin'].value == Decimal('0')
+    # C01 (lotto 2 fix rilievi, 2026-09-26): senza un rendiconto finanziario per l'anno il DSCR è
+    # indefinito per mancanza della quota capitale, non più "zero_denominator" sui soli oneri
+    # finanziari nulli — mai il vecchio (EBITDA - imposte) / oneri finanziari.
     assert values['practice.dscr'].value is None
-    assert values['practice.dscr'].reason == 'zero_denominator'
+    assert values['practice.dscr'].reason == 'cashflow_unavailable'
+    cashflow = {'financing': {'third_party_funds': {'decreases': Decimal('0')}}}
+    con_rendiconto = indicator_results(bs, inc, cashflow=cashflow)
+    assert con_rendiconto['practice.dscr'].value is None
+    assert con_rendiconto['practice.dscr'].reason == 'zero_denominator'
     assert values['practice.pfn'].value == Decimal('-100')
     assert values['practice.pfn_ebitda'].value is None
     # M2-02G fase 2 (pag. 14): EBITDA negativa ⇒ rapporto non significativo,
@@ -361,7 +399,29 @@ def test_composition_values_tie_to_the_statement_and_shares_declare_their_denomi
                 assert share == value / total * Decimal('100')
 
 
-def test_break_even_reuses_the_analyst_formula_with_the_assumption_fixed_splits():
+def test_composition_sources_methodology_describes_the_unconditional_pfn_convention():
+    """Minore (revisione finale lotto 2, 2026-09-26): la metodologia della «Composizione delle
+    fonti» descriveva ancora la vecchia convenzione della PFN («banche e obbligazioni se
+    positive, altrimenti debito meno i dettagli non bancari noti, altrimenti il debito totale»),
+    superata da C03/C04 — `financial_debt_total` è ormai una somma incondizionata di banche,
+    altri finanziatori e obbligazioni, sempre."""
+    report = fixture_report('bilancio')
+    sources = group(report, 'composition_sources')
+    assert 'se positive' not in sources.methodology, sources.methodology
+    assert 'altri finanziatori' in sources.methodology, sources.methodology
+
+
+def test_break_even_uses_the_engine_declared_figures_on_plan_years():
+    """A02 (lotto 2 fix rilievi, 2026-09-26): un anno di piano non ricalcola più
+    fissi/variabili con la quota delle ipotesi (60/40 di default); riporta
+    integralmente `engine_meta['pareggio']` del motore.
+
+    lotto 2 fix rilievi (2026-09-26): F5, la colonna base/storica applica ora la STESSA regola
+    del motore (`punto_di_pareggio`), non più `calculate_break_even_analysis` — qui senza
+    `fixed_split` (nessuna ipotesi di piano passata a questa `DossierSource`), quindi il 60/40 di
+    default si applica SOLO a ce05/ce06 (non più all'intero totale dei cinque campi): fissi =
+    ce05_fisso(400) + ce06_fisso(200) + ce07(100) + ce08(200) + ce12(200) = 1100, variabili =
+    ce05_variabile(600) + ce06_variabile(300) = 900."""
     from database.models import BalanceSheet, IncomeStatement
     from app.schemas.final_report_v2 import StatementPeriod
     bs = {column.name: Decimal('0') for column in BalanceSheet.__table__.columns if column.name.startswith('sp')}
@@ -369,33 +429,146 @@ def test_break_even_reuses_the_analyst_formula_with_the_assumption_fixed_splits(
     inc = {column.name: Decimal('0') for column in IncomeStatement.__table__.columns if column.name.startswith('ce')}
     inc.update({'ce01_ricavi_vendite': Decimal('4000'), 'ce05_materie_prime': Decimal('1000'), 'ce06_servizi': Decimal('500'),
                 'ce07_godimento_beni': Decimal('100'), 'ce08_costi_personale': Decimal('200'), 'ce12_oneri_diversi': Decimal('200')})
+    # Gli stessi numeri della vecchia ripartizione 60/30 manuale, ora dichiarati
+    # dal motore invece che ricalcolati dal report: fissi operativi 950, variabili
+    # 1050, MdC 4000 − 1050 = 2950, pareggio 1288,14, sicurezza 67,80%.
+    pareggio_motore = {
+        'costi_variabili': '1050.00', 'costi_fissi': '950.00', 'costi_fissi_operativi': '950.00',
+        'margine_contribuzione_pct': '73.75', 'fatturato_pareggio': '1288.14',
+        'margine_sicurezza': '2711.86', 'margine_sicurezza_pct': '67.80',
+    }
     report = extend_dossier(v1_report('bilancio', [2027]), [
+        DossierSource(StatementPeriod(id='historical:2026', year=2026, label='2026', basis='historical', period_months=12, source='manual-check-base'),
+                      bs, inc),
         DossierSource(StatementPeriod(id='forecast:2027', year=2027, label='2027', basis='forecast', period_months=12, source='manual-check'),
-                      bs, inc, fixed_split=(Decimal('60'), Decimal('30')))])
-    series = {s.id: s.values[0] for s in group(report, 'break_even').series}
-    # Calcolo a mano: fissi = 1000×0,60 + 500×0,30 + 500×0,40 = 950; variabili = 1050;
-    # MdC = 4000 − 1050 = 2950; %MdC = 0,7375; pareggio = 950/0,7375 = 1288,14;
-    # sicurezza = (1 − 1288,14/4000) arrotondato a 4 ⇒ 0,6780 ⇒ 67,8%.
-    assert series['fixed_costs'] == Decimal('950.00')
-    assert series['variable_costs'] == Decimal('1050.00')
-    assert series['contribution_margin'] == Decimal('2950.00')
-    assert series['break_even_revenue'] == Decimal('1288.14')
-    assert series['safety_margin_pct'] == Decimal('67.8000')
+                      bs, inc, fixed_split=(Decimal('60'), Decimal('30')), pareggio_motore=pareggio_motore),
+    ])
+    series = {s.id: (s.values[0], s.values[1]) for s in group(report, 'break_even').series}
+    # Colonna base/storica: F5, stessa regola del motore (`punto_di_pareggio`) col 60/40 di
+    # default applicato solo a ce05/ce06 — mai più `calculate_break_even_analysis`, che spalmava
+    # la stessa quota anche su ce07/ce08/ce12 (che il motore tratta come interamente fissi).
+    assert series['fixed_costs'][0] == Decimal('1100.00')
+    assert series['variable_costs'][0] == Decimal('900.00')
+    assert series['contribution_margin'][0] == Decimal('3100.00')
+    assert series['break_even_revenue'][0] == Decimal('1419.35')
+    assert series['safety_margin_pct'][0] == Decimal('64.52')
+    # Anno di piano: i valori del motore, mai la ripartizione 60/30 delle ipotesi
+    # (che qui è deliberatamente diversa, per dimostrare che non viene più letta).
+    assert series['fixed_costs'][1] == Decimal('950.00')
+    assert series['variable_costs'][1] == Decimal('1050.00')
+    assert series['contribution_margin'][1] == Decimal('2950.00')
+    assert series['break_even_revenue'][1] == Decimal('1288.14')
+    assert series['safety_margin_pct'][1] == Decimal('67.80')
     assert all((v is None) == (r is not None) for s in group(report, 'break_even').series for v, r in zip(s.values, s.unavailable_reasons))
 
 
-def test_forecast_year_without_assumptions_declares_break_even_as_null_not_zero():
+def test_forecast_year_without_engine_meta_declares_break_even_as_null_not_zero():
+    """A02 (lotto 2 fix rilievi, 2026-09-26): senza `pareggio_motore` (nessun
+    `engine_meta['pareggio']` persistito) un anno di piano è `None` con
+    `engine_meta_missing`, mai la vecchia `assumptions_missing` della quota 60/40."""
     report = extend_dossier(v1_report(), [DossierSource(
         StatementPeriod(id='forecast:2027', year=2027, label='2027', basis='forecast', period_months=12, source='no-assumptions'),
         {'sp09_disponibilita_liquide': Decimal('10')}, {'ce01_ricavi_vendite': Decimal('100')})])
     for series in group(report, 'break_even').series:
         assert series.values == [None]
-        assert series.unavailable_reasons == ['assumptions_missing']
+        assert series.unavailable_reasons == ['engine_meta_missing']
+
+
+def test_pareggio_motore_from_distinguishes_missing_engine_meta_from_missing_pareggio_key():
+    """Minore (revisione finale lotto 2, 2026-09-26): un `engine_meta` presente ma senza la
+    chiave `pareggio` (motore più vecchio del blocco pareggio) non è la stessa cosa di un anno
+    senza `engine_meta` affatto — la prima ragione a valle dev'essere `pareggio_non_definito`
+    (il motore che ha girato per quell'anno non ha mai calcolato la scomposizione), non
+    `engine_meta_missing` (nessun motore ha mai girato)."""
+    from app.services.final_report_dossier import pareggio_motore_from
+
+    assert pareggio_motore_from(None) is None
+    assert pareggio_motore_from({'engine_version': '1', 'erogazioni': '0.00'}) == {}
+    pareggio = {'costi_variabili': '100.00', 'costi_fissi_operativi': '50.00'}
+    assert pareggio_motore_from({'engine_version': '2', 'pareggio': pareggio, 'erogazioni': '0.00'}) == pareggio
+
+
+def test_forecast_year_with_engine_meta_but_no_pareggio_key_declares_pareggio_non_definito():
+    """Stesso minore, end-to-end: un `ForecastYear.engine_meta` presente ma senza `pareggio`
+    (motore più vecchio) dichiara `pareggio_non_definito`, non `engine_meta_missing` — il report
+    distingue «il motore non l'ha calcolato» da «nessun motore ha mai girato per quest'anno»."""
+    report = extend_dossier(v1_report(), [DossierSource(
+        StatementPeriod(id='forecast:2027', year=2027, label='2027', basis='forecast', period_months=12, source='old-engine'),
+        {'sp09_disponibilita_liquide': Decimal('10')}, {'ce01_ricavi_vendite': Decimal('100')},
+        pareggio_motore={})])
+    for series in group(report, 'break_even').series:
+        assert series.values == [None]
+        assert series.unavailable_reasons == ['pareggio_non_definito']
+
+
+def test_break_even_fixed_costs_tolerance_scales_with_a_thin_margin():
+    """Fix round 2 (lotto 2 fix rilievi, 2026-09-26): la lega su `fixed_costs`
+    introdotta nel giro 1 (`break_even_revenue × contribution_margin / ricavi ==
+    fixed_costs`) a tolleranza fissa di un centesimo rialzava su un'uscita
+    GENUINA del motore quando il margine è sottile — bep, margine e fissi sono
+    arrotondati al centesimo ciascuno per conto proprio, e l'errore si propaga
+    amplificato di bep/ricavi (grande proprio quando il margine è sottile).
+    Tolleranza proporzionale: `0,01 × (1 + (bep + margine) / ricavi)`.
+
+    Stessi ordini di grandezza usati dal controllore per misurare l'errore
+    peggiore: ricavi 4.109.510,00, margine 1% e 10%, fissi ≈ 1.000.000. Un solo
+    centesimo di scarto sul margine — che la formula amplifica di bep/ricavi,
+    ≈2,53× al 10% e ≈24,34× all'1% — supera già la vecchia tolleranza fissa
+    (0,024 e 0,243 > 0,01) mentre resta sotto quella nuova (0,035 e 0,253): la
+    riga (a) verifica che un report così costruito non rialzi. La riga (b)
+    manomette `fixed_costs` di 1.000 (un tampering vero, non un arrotondamento)
+    e verifica che rialzi comunque, alla stessa identità."""
+    from database.models import BalanceSheet, IncomeStatement
+    revenue = Decimal('4109510.00')
+
+    def _thin_margin_source(pid, year, margin, bep, fixed):
+        bs = {'sp09_disponibilita_liquide': Decimal('10')}
+        inc = {'ce01_ricavi_vendite': revenue}
+        pareggio_motore = {
+            'costi_variabili': str(revenue - margin), 'costi_fissi_operativi': str(fixed),
+            'fatturato_pareggio': str(bep), 'margine_sicurezza_pct': str(Decimal('100') - bep / revenue * Decimal('100')),
+        }
+        return DossierSource(StatementPeriod(id=pid, year=year, label=pid, basis='forecast', period_months=12,
+                                             source='thin-margin-fixture'), bs, inc, pareggio_motore=pareggio_motore)
+
+    # (a) genuina: accettata, pur superando la vecchia tolleranza fissa.
+    sources = [
+        _thin_margin_source('forecast:2027', 2027, Decimal('410951.01'), Decimal('10000000.00'), Decimal('1000000.00')),  # margine 10%
+        _thin_margin_source('forecast:2028', 2028, Decimal('41095.11'), Decimal('100000000.00'), Decimal('1000000.00')),  # margine 1%
+    ]
+    report = extend_dossier(v1_report('bilancio', [2027, 2028]), sources)
+    fixed_series = next(s for s in group(report, 'break_even').series if s.id == 'fixed_costs')
+    assert fixed_series.values == [Decimal('1000000.00'), Decimal('1000000.00')]
+    assert fixed_series.unavailable_reasons == [None, None]
+
+    # (b) manomessa: +1.000 su `fixed_costs` rialza comunque, sulla stessa identità.
+    raw = report.model_dump(mode='json')
+    for index in (0, 1):
+        tampered = copy.deepcopy(raw)
+        cell = _series(tampered, 'break_even', 'fixed_costs')
+        cell['values'][index] = str(Decimal(cell['values'][index]) + Decimal('1000.00'))
+        with pytest.raises(ValueError, match="break-even fixed costs must reconcile with the engine's own identity"):
+            FinalReportModelV2.model_validate(tampered, context={'skip_hash_validation': True})
 
 
 @pytest.mark.parametrize('locate, error', [
     (lambda raw: _swap(raw, 'composition_uses', 'cash'), 'must match the statement rows'),
-    (lambda raw: _bump(raw, 'break_even', 'fixed_costs'), 'must split the operating costs'),
+    # lotto 2 fix rilievi (2026-09-26), fix round 1: su un anno di piano `fixed_costs`
+    # viene da `engine_meta['pareggio']` del motore (costi_fissi_operativi,
+    # riconciliato sul MOL), non più da una ripartizione dei cinque costi operativi
+    # canonici.
+    # F5 (decisione del proprietario, 2026-09-26): la lega "must split the operating
+    # costs" torna a valere anche sugli anni di piano (e su ogni colonna), perché ora
+    # confronta `fixed + variable` con la somma CORRETTA delle rettifiche (ce02/03/03a/
+    # 04/10/11/11b incluse), che vale per costruzione qualunque sia la quota fisso/
+    # variabile: su questa manomissione (solo `fixed_costs` alterato) è lei a scattare
+    # per prima, prima che il ciclo arrivi alla lega sull'identità di pareggio del
+    # motore (`bep × MdC / ricavi == costi_fissi`) — la seconda resta comunque attiva e
+    # coperta dal caso "manomessa" di `test_break_even_fixed_costs_tolerance_scales_
+    # with_a_thin_margin` qui sotto, dove il totale dei cinque costi non basta a
+    # isolarla (`fixed_split` non è nella fixture sintetica lì usata).
+    (lambda raw: _bump(raw, 'break_even', 'fixed_costs'), "break-even costs must split the operating costs"),
+    (lambda raw: _bump(raw, 'break_even', 'contribution_margin'), 'contribution margin must equal revenue minus variable costs'),
     (lambda raw: _bump(raw, 'cost_incidence', 'services'), 'must match indicator'),
     (lambda raw: _reorder_periods(raw, 'composition_sources'), 'canonical statement periods'),
 ])
@@ -446,13 +619,19 @@ def _window_source(pid, year, basis, revenue):
     inc = {c.name: Decimal('0') for c in IncomeStatement.__table__.columns if c.name.startswith('ce')}
     bs.update({'sp02_immob_immateriali': Decimal('80'), 'sp05_rimanenze': Decimal('20'),
                'sp06_crediti_breve': revenue, 'sp09_disponibilita_liquide': Decimal('10'),
-               'sp11_capitale': revenue, 'sp16_debiti_breve': Decimal('100')})
+               'sp11_capitale': revenue, 'sp16_debiti_breve': Decimal('100'),
+               # F1 (lotto 2 fix rilievi, 2026-09-26): il debito a breve va dettagliato come
+               # banche, altrimenti sp16a/b/c tutte a zero con sp16 positivo dichiara la PFN
+               # indefinita (`financial_debt_detail_unavailable`) — questa fixture vuole un
+               # PFN vero su ogni periodo, per testare la meccanica del grafico, non la nuova
+               # diagnostica.
+               'sp16a_debiti_banche_breve': Decimal('100')})
     # Costi non proporzionali ai ricavi: i margini cambiano fra periodo,
     # quindi uno scambio di colonne nei test di mutazione è davvero rilevabile.
     inc.update({'ce01_ricavi_vendite': revenue, 'ce05_materie_prime': revenue * Decimal('0.6') + (year - 2024)})
     return DossierSource(StatementPeriod(id=pid, year=year, label=pid, basis=basis, period_months=12,
                                          source='window-fixture'), bs, inc,
-                         fixed_split=(Decimal('40'), Decimal('40')))
+                         fixed_split=(Decimal('40'), Decimal('40')), pareggio_motore=_synthetic_pareggio_motore(inc))
 
 
 def window_report():

@@ -133,6 +133,15 @@ def _prima(fuori, dove, sp, ce, attesi):
             fuori.append(f"{dove} {etichetta}: {valore}, su 5197929 era {atteso}")
 
 
+# lotto 1 fix rilievi (2026-09-26): B01 — le materie prime del kit (50.000) non crescono piu'
+# coi ricavi (`revenue_growth_pct: 3.33`, comune a ogni riga qui sotto): dividono sul consumo di
+# base (ce05 200.000, invariato), che qui resta piatto. Debito bancario, risultato, oneri
+# finanziari e imposte — cio' che questo file misura — non se ne accorgono: solo la cassa cresce
+# di piu' ogni anno perche' non finanzia piu' quello stock, di un importo CUMULATO indipendente
+# dallo scenario (stessa base, stessa crescita): +1.665,00 nel 2027, +3.385,44 nel 2028,
+# +5.163,18 nel 2029, +7.000,11 nel 2030 (misurato sul motore nuovo). Il caso "scoperto" fa
+# eccezione: meno cassa assorbita dalle materie e' meno fabbisogno, quindi anche lo scoperto
+# generato e cio' che ne discende (debito, risultato, oneri, imposte) si rimisurano da zero.
 CASI = [
     dict(
         nome="rata al mezzo centesimo, e l'orizzonte taglia l'ultima rata",
@@ -147,9 +156,9 @@ CASI = [
         # perche' la rata del 2030 sta nel contratto anche se non nel piano.
         quota={2027: "25000.09", 2028: "25000.09", 2029: "25000.09"},
         prima={
-            2027: ("110802.75", "166993.94", "61739.21", "9350.02", "23890.77"),
-            2028: ("85802.66", "291947.85", "77408.59", "8262.51", "29954.23"),
-            2029: ("60802.57", "400891.13", "93573.64", "7175.01", "36209.50"),
+            2027: ("110802.75", "168658.94", "61739.21", "9350.02", "23890.77"),
+            2028: ("85802.66", "295333.29", "77408.59", "8262.51", "29954.23"),
+            2029: ("60802.57", "406054.31", "93573.64", "7175.01", "36209.50"),
         },
     ),
     dict(
@@ -166,10 +175,10 @@ CASI = [
         # Fine 2030: nessuna rata nel 2031.
         quota={2027: "0", 2028: "30000.00", 2029: "30000.00", 2030: "0"},
         prima={
-            2027: ("95802.47", "154363.69", "63448.00", "6980.00", "24552.00"),
-            2028: ("95802.47", "304277.73", "78333.28", "6980.00", "30312.05"),
-            2029: ("65802.47", "408361.71", "93714.25", "6980.00", "36263.90"),
-            2030: ("35802.47", "529133.96", "110321.19", "5990.00", "42690.17"),
+            2027: ("95802.47", "156028.69", "63448.00", "6980.00", "24552.00"),
+            2028: ("95802.47", "307663.17", "78333.28", "6980.00", "30312.05"),
+            2029: ("65802.47", "413524.89", "93714.25", "6980.00", "36263.90"),
+            2030: ("35802.47", "536134.07", "110321.19", "5990.00", "42690.17"),
         },
     ),
     dict(
@@ -186,9 +195,9 @@ CASI = [
         # 2029, e con lei tutto il residuo: 48.000,01 a breve, zero oltre.
         quota={2027: "16000.01", 2028: "48000.01", 2029: "0"},
         prima={
-            2027: ("81901.25", "138442.47", "61991.58", "9000.00", "23988.42"),
-            2028: ("48000.01", "254362.43", "77453.66", "8200.00", "29971.67"),
-            2029: ("0", "340143.58", "93411.43", "7400.00", "36146.72"),
+            2027: ("81901.25", "140107.47", "61991.58", "9000.00", "23988.42"),
+            2028: ("48000.01", "257747.87", "77453.66", "8200.00", "29971.67"),
+            2029: ("0", "345306.76", "93411.43", "7400.00", "36146.72"),
         },
     ),
     dict(
@@ -208,9 +217,9 @@ CASI = [
         # 87.037,23 − 43.518,62 = 43.518,61. Fine 2029: 43.518,62 − 0,01 = 43.518,61.
         quota={2027: "25000.09", 2028: "43518.61", 2029: "43518.61"},
         prima={
-            2027: ("110802.75", "166993.94", "61739.21", "9350.02", "23890.77"),
-            2028: ("122839.69", "327262.66", "76166.87", "9984.73", "29473.73"),
-            2029: ("79321.08", "417500.27", "92745.83", "8323.16", "35889.16"),
+            2027: ("110802.75", "168658.94", "61739.21", "9350.02", "23890.77"),
+            2028: ("122839.69", "330648.10", "76166.87", "9984.73", "29473.73"),
+            2029: ("79321.08", "422663.45", "92745.83", "8323.16", "35889.16"),
         },
     ),
     dict(
@@ -222,11 +231,14 @@ CASI = [
         catena={2027: "75000.29", 2028: "50000.20", 2029: "25000.11"},
         quota={2027: "25000.09", 2028: "25000.09", 2029: "25000.09"},
         esercita_scoperto=True,
-        # Il debito bancario qui comprende lo scoperto in essere (184.786,42 nel 2027).
+        # Il debito bancario qui comprende lo scoperto in essere. lotto 1 fix rilievi
+        # (2026-09-26): B01 riduce il fabbisogno che genera lo scoperto (le materie prime non
+        # assorbono piu' cassa senza motivo), quindi debito, risultato, oneri finanziari e
+        # imposte del 2027-2029 si rimisurano tutti sul motore nuovo, non sulla formula.
         prima={
-            2027: ("295589.17", "0", "9985.79", "11130.02", "3864.12"),
-            2028: ("118244.30", "0", "17808.94", "20924.93", "6891.39"),
-            2029: ("60802.57", "99722.00", "41028.07", "10053.68", "15876.33"),
+            2027: ("293924.17", "0", "35220.81", "11130.02", "13629.13"),
+            2028: ("134286.81", "0", "17882.53", "20822.86", "6919.87"),
+            2029: ("60802.57", "94181.87", "40319.03", "11037.09", "15601.96"),
         },
     ),
 ]
@@ -286,14 +298,21 @@ def test_la_rata_dell_anno_dopo_sta_a_breve_e_nient_altro_si_muove(caso):
 # 23.456,79 invece di 13.456,26 (misurato dalla revisione).
 MINIMO_SWEEP = D("144647.72")
 CATENA_SWEEP = {2027: "75000.29", 2028: "50000.20", 2029: "25000.11", 2030: "0.02", 2031: "0.02"}
-PREGRESSO_DOPO_SWEEP = D("13456.24")
+# lotto 1 fix rilievi (2026-09-26): B01 — le materie prime del kit (50.000) non crescono piu'
+# coi ricavi: nel 2027 questo libera 1.665,00 di cassa in piu', che lo sweep (allo stesso
+# minimo di sempre) cattura per intero e usa per rimborsare 1.665,00 di pregresso in piu':
+# 13.456,24 -> 11.791,24. Da li' in poi il pregresso resta quello, quindi il debito totale
+# (`PRIMA_SWEEP`) e' -1.665,00 ogni anno; la cassa continua a crescere di piu' (nessun altro
+# sweep negli anni successivi la riassorbe) — risultato, oneri finanziari e imposte, ignari
+# delle rimanenze, restano identici a prima.
+PREGRESSO_DOPO_SWEEP = D("11791.24")
 QUOTA_SWEEP = {2027: "25000.09", 2028: "25000.09", 2029: "25000.09", 2030: "0", 2031: "0"}
 PRIMA_SWEEP = {
-    2027: ("88456.53", "144647.72", "61739.21", "9350.02", "23890.77"),
-    2028: ("63456.44", "269601.63", "77408.59", "8262.51", "29954.23"),
-    2029: ("38456.35", "378544.91", "93573.64", "7175.01", "36209.50"),
-    2030: ("13456.26", "503970.57", "110250.90", "6087.50", "42662.96"),
-    2031: ("13456.26", "671401.41", "156297.38", "5000.00", "60481.23"),
+    2027: ("86791.53", "144647.72", "61739.21", "9350.02", "23890.77"),
+    2028: ("61791.44", "271322.07", "77408.59", "8262.51", "29954.23"),
+    2029: ("36791.35", "382043.09", "93573.64", "7175.01", "36209.50"),
+    2030: ("11791.26", "509305.68", "110250.90", "6087.50", "42662.96"),
+    2031: ("11791.26", "678634.63", "156297.38", "5000.00", "60481.23"),
 }
 
 
@@ -339,9 +358,13 @@ def test_lo_sweep_rimborsa_solo_il_pregresso_senza_piano():
 # pregresso (35.802,46). Dal lotto 3A (decisione 3 del proprietario) il prestito segue il suo piano, lo sweep si ferma al
 # pregresso e la cassa resta: i due minimi danno gli stessi numeri. Oracolo: gemello senza sweep meno il pregresso,
 # sullo snapshot `452112d`.
+# lotto 1 fix rilievi (2026-09-26): B01 — le materie prime del kit non crescono piu' coi
+# ricavi (vedi il commento su `PREGRESSO_DOPO_SWEEP` sopra): qui lo sweep non arriva mai al
+# pregresso (l'eccedenza resta sotto, per costruzione del minimo scelto), quindi debito, quota
+# e oltre restano quelli di sempre — solo la cassa cresce di piu' ogni anno.
 OLTRE_IL_PREGRESSO = dict(
     totale=("75000.29", "50000.20", "25000.11", "0.02", "0.02"),
-    cassa=("131191.48", "256145.39", "365088.67", "490514.33", "657945.17"),
+    cassa=("132856.48", "259530.83", "370251.85", "497514.44", "666843.39"),
     quota=("25000.09", "25000.09", "25000.09", "0", "0"),
     oltre=("50000.20", "25000.11", "0.02", "0.02", "0.02"),
 )

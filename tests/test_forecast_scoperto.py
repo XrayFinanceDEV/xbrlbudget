@@ -278,19 +278,29 @@ def test_senza_concessione_lo_stesso_piano_si_ferma_come_sempre():
 # muoverebbe a valle (`sp13`, `ce20`, il totale attivo). Una riga di costo non
 # puo' muoversi per questa correzione, e congelarla direbbe di piu' di quanto
 # questo test sa.
+# lotto 1 fix rilievi (2026-09-26): B02+E05 sostituiscono la catena `prev_ce09 + nuovo` con masse
+# separate a meta' aliquota nell'anno d'ingresso. `RIGHE_PARITA` investe (tangibili e intangibili)
+# ogni anno: il risultato e le imposte si spostano di conseguenza (meno ammortamento nell'anno
+# d'ingresso, piu' utile ante imposte); il debito bancario e gli oneri finanziari restano quelli di
+# prima, perche' nessuno scoperto si accende in questo scenario. Rimisurato sul motore nuovo.
+#
+# lotto 1 fix rilievi (2026-09-26): B01 — le materie prime del kit (50.000) non crescono piu' coi
+# ricavi: dividono sul consumo di base (ce05 200.000, invariato), che qui resta piatto. Solo
+# `sp09` si sposta (+1.665,00 / +3.385,44 / +5.163,18, cumulato sull'anno prima): il totale attivo
+# resta lo stesso perche' la cassa in piu' e' esattamente lo stock di rimanenze in meno.
 PARITA = {
-    2027: {"sp09_disponibilita_liquide": "94586.93", "sp16a_debiti_banche_breve": "0.00",
+    2027: {"sp09_disponibilita_liquide": "96251.96", "sp16a_debiti_banche_breve": "0.00",
            "sp16_debiti_breve": "140000.00", "sp17a_debiti_banche_lungo": "50000.00",
-           "sp13_utile_perdita": "61796.71", "ce15_oneri_finanziari": "5000.00",
-           "ce20_imposte": "23913.02", "_total_assets": "468088.00"},
-    2028: {"sp09_disponibilita_liquide": "230527.70", "sp16a_debiti_banche_breve": "0.00",
+           "sp13_utile_perdita": "62855.97", "ce15_oneri_finanziari": "5000.00",
+           "ce20_imposte": "24322.90", "_total_assets": "469147.26"},
+    2028: {"sp09_disponibilita_liquide": "233093.41", "sp16a_debiti_banche_breve": "0.00",
            "sp16_debiti_breve": "144564.52", "sp17a_debiti_banche_lungo": "50000.00",
-           "sp13_utile_perdita": "73592.47", "ce15_oneri_finanziari": "5000.00",
-           "ce20_imposte": "28477.54", "_total_assets": "552606.11"},
-    2029: {"sp09_disponibilita_liquide": "351099.36", "sp16a_debiti_banche_breve": "0.00",
+           "sp13_utile_perdita": "74651.72", "ce15_oneri_finanziari": "5000.00",
+           "ce20_imposte": "28887.42", "_total_assets": "554724.62"},
+    2029: {"sp09_disponibilita_liquide": "355032.94", "sp16a_debiti_banche_breve": "0.00",
            "sp16_debiti_breve": "144752.16", "sp17a_debiti_banche_lungo": "50000.00",
-           "sp13_utile_perdita": "85873.15", "ce15_oneri_finanziari": "5000.00",
-           "ce20_imposte": "33229.69", "_total_assets": "645098.63"},
+           "sp13_utile_perdita": "86932.38", "ce15_oneri_finanziari": "5000.00",
+           "ce20_imposte": "33639.58", "_total_assets": "648276.37"},
 }
 
 RIGHE_PARITA = [
@@ -515,7 +525,10 @@ def test_i2_un_override_dopo_il_plug_non_lascia_cassa_e_scoperto_insieme():
 
             liberati = sp_b["sp06a_crediti_clienti_breve"] - D("1000.55")
             atteso = D(str(det_b[2027]["scoperto_residuo"])) - liberati
-            assert atteso == D("116463.70")
+            # lotto 1 fix rilievi (2026-09-26): B01 — le materie prime del kit non crescono
+            # piu' coi ricavi: 1.665,00 di cassa in piu' abbassano il fabbisogno di altrettanto
+            # (116.463,70 -> 114.798,70).
+            assert atteso == D("114798.70")
             assert sp["sp09_disponibilita_liquide"] == D("0.00")
             assert sp["sp16a_debiti_banche_breve"] == atteso
             assert D(str(det[2027]["scoperto_residuo"])) == atteso
@@ -528,16 +541,21 @@ def test_i2_un_override_dopo_il_plug_non_lascia_cassa_e_scoperto_insieme():
 
 def test_i3_il_tetto_si_misura_sullo_scoperto_in_essere_a_fine_anno():
     """Il piano di I2 sta sotto un tetto di 120.000: genera. Su 2641305 no, perche'
-    il plug aveva gia' contato 239.459,15 prima dell'override."""
+    il plug aveva gia' contato 239.459,15 prima dell'override.
+
+    # lotto 1 fix rilievi (2026-09-26): B01 — le materie prime del kit non crescono piu' coi
+    # ricavi: il fabbisogno scende di 1.665,00 (116.463,70 -> 114.798,70, vedi I2), e con lui
+    # il tetto scelto appena sotto.
+    """
     engine, sessions = memory_sessions()
     try:
         with sessions() as db:
             ov = {"sp06a_crediti_clienti_breve": 1000.55}
             _sid, res = _genera(db, "i3-sotto", [_stress(2027, sp_overrides=ov, overdraft_limit=120000)])
             assert res["forecast_generated"] is True, res["message"]
-            _sid2, res2 = _genera(db, "i3-sopra", [_stress(2027, sp_overrides=ov, overdraft_limit=116463.69)])
+            _sid2, res2 = _genera(db, "i3-sopra", [_stress(2027, sp_overrides=ov, overdraft_limit=114798.69)])
         assert res2["forecast_generated"] is False
-        assert "servono 116.463,70, il tetto concesso e' 116.463,69" in res2["message"], res2["message"]
+        assert "servono 114.798,70, il tetto concesso e' 114.798,69" in res2["message"], res2["message"]
     finally:
         engine.dispose()
 
@@ -551,6 +569,10 @@ def test_i4_override_di_sp16a_il_totale_forzato_vince_o_la_combinazione_si_rifiu
     nessuna ripartizione di X la rende non negativa: l'unica via sarebbe superare X,
     cioe' smentire l'override. Su 2641305 lo stesso caso generava con
     `scoperto_generato` 466.572,63 contro uno scoperto in essere di 239.459,15.
+
+    # lotto 1 fix rilievi (2026-09-26): B01 — le materie prime del kit non crescono piu' coi
+    # ricavi: 1.665,00 di cassa in piu' abbassano ogni fabbisogno qui sotto di altrettanto
+    # (227.113,48 -> 225.448,48; 239.459,15 -> 237.794,15).
     """
     engine, sessions = memory_sessions()
     try:
@@ -559,7 +581,7 @@ def test_i4_override_di_sp16a_il_totale_forzato_vince_o_la_combinazione_si_rifiu
                 db, "i4-poco", [_stress(2027, sp_overrides={"sp16a_debiti_banche_breve": 12345.67})])
             assert rifiuto["forecast_generated"] is False
             assert "incompatibile con sp16a_debiti_banche_breve forzato" in rifiuto["message"], rifiuto["message"]
-            assert "servono 227.113,48 di scoperto" in rifiuto["message"], rifiuto["message"]
+            assert "servono 225.448,48 di scoperto" in rifiuto["message"], rifiuto["message"]
 
             rows = [_stress(2027, sp_overrides={"sp16a_debiti_banche_breve": 400000.55}, overdraft_limit=300000)]
             sid, res = _genera(db, "i4-abbastanza", rows)
@@ -567,8 +589,8 @@ def test_i4_override_di_sp16a_il_totale_forzato_vince_o_la_combinazione_si_rifiu
             _, sp, _ = read_forecast_maps(db, sid)[0]
             det, _ = _dettagli(db, sid, rows)
             assert sp["sp16a_debiti_banche_breve"] == D("400000.55")
-            # Senza override il fabbisogno era 239.459,15: il totale forzato lo copre e avanza.
-            assert sp["sp09_disponibilita_liquide"] == D("400000.55") - D("239459.15")
+            # Senza override il fabbisogno era 237.794,15: il totale forzato lo copre e avanza.
+            assert sp["sp09_disponibilita_liquide"] == D("400000.55") - D("237794.15")
             assert _eur(det[2027]["scoperto_residuo"]) == 0.0
             assert _eur(det[2027]["scoperto_generato"]) == 0.0
     finally:
@@ -612,6 +634,17 @@ def test_ruling_38_lo_scoperto_si_rimborsa_per_primo_anche_sotto_la_cassa_minima
     Cash sweep con cassa minima 20.000,55 nel 2028 e nel 2029: nel 2028 la cassa
     chiude a zero con lo scoperto ancora aperto, e `cassa_sotto_minimo` lo dice;
     nel 2029 lo scoperto e' chiuso (e, dal 2026-09-18, anche il pregresso: vedi sotto).
+
+    lotto 1 fix rilievi (2026-09-26): B02+E05 dimezzano l'ammortamento del 2027
+    (investimento di `_stress`) rispetto alla vecchia catena `prev_ce09 + nuovo`,
+    quindi l'utile ante imposte 2027 e' piu' alto e lo scoperto che ne segue anche:
+    64.288,76 -> 83.818,78 nel 2028, e la cassa 2029 assorbe la differenza cumulata
+    (45.002,71 -> 34.040,51). Rimisurato sul motore nuovo.
+
+    lotto 1 fix rilievi (2026-09-26): B01 — le materie prime del kit non crescono piu' coi
+    ricavi: meno cassa assorbita significa meno fabbisogno e quindi meno scoperto generato,
+    83.818,78 -> 80.331,27 nel 2028; la cassa 2029, che chiude scoperto e pregresso, assorbe
+    la differenza cumulata (34.040,51 -> 39.462,59). Rimisurato sul motore nuovo.
     """
     engine, sessions = memory_sessions()
     try:
@@ -624,12 +657,12 @@ def test_ruling_38_lo_scoperto_si_rimborsa_per_primo_anche_sotto_la_cassa_minima
             det, _ = _dettagli(db, sid, rows)
         assert _eur(det[2027]["cassa_sotto_minimo"]) == 0.0       # sweep spento: nessun minimo
         assert mappe[2028]["sp09_disponibilita_liquide"] == D("0.00")
-        assert D(str(det[2028]["scoperto_residuo"])) == D("64288.76")
+        assert D(str(det[2028]["scoperto_residuo"])) == D("80331.27")
         assert D(str(det[2028]["cassa_sotto_minimo"])) == D("20000.55")
         # Dal 2026-09-18 il 2028 compensa 44.425,60 di credito da acconti: nel 2029
         # lo sweep chiude scoperto E debito bancario pregresso, e la cassa resta
         # sopra il minimo (prima si fermava al minimo con parte del lungo aperto).
-        assert mappe[2029]["sp09_disponibilita_liquide"] == D("45002.71")
+        assert mappe[2029]["sp09_disponibilita_liquide"] == D("39462.59")
         assert mappe[2029]["sp17a_debiti_banche_lungo"] == D("0")
         assert _eur(det[2029]["scoperto_residuo"]) == 0.0
         assert _eur(det[2029]["cassa_sotto_minimo"]) == 0.0

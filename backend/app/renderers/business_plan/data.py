@@ -19,6 +19,18 @@ Workflow = Literal["infrannuale", "bilancio", "startup"]
 DIFF_ROW = ("balance_sheet:total_assets+sp11_capitale+sp12_riserve+sp13_utile_perdita+sp16_debiti_breve"
             "+sp17_debiti_lungo+sp14_fondi_rischi+sp15_tfr+sp18_ratei_risconti_passivi")
 
+# A01-bis: una frase per diagnostica, nell'ordine in cui la spec le elenca. `report.diagnostics`
+# non è filtrato per severità: le due diagnostiche sono sempre `error` (final_report_service).
+_AVVISI_PER_CODICE = (
+    ("forecast_stale", "Previsionale precedente alle ipotesi salvate: da rigenerare"),
+    ("engine_version_stale", "Previsionale generato da una versione precedente del motore: da rigenerare"),
+)
+
+
+def _avvisi(report) -> tuple:
+    codici = {d.code for d in report.diagnostics}
+    return tuple(frase for codice, frase in _AVVISI_PER_CODICE if codice in codici)
+
 
 @dataclass(frozen=True)
 class Column:
@@ -92,6 +104,7 @@ class BusinessPlanData:
     indicators_practice: tuple = ()
     indicators_analytical: tuple = ()
     draft: bool = False
+    avvisi: tuple = ()  # A01-bis: frasi «da rigenerare» per forecast_stale/engine_version_stale, nell'ordine
 
     def v(self, key: str) -> tuple:
         return self.values.get(key) or (None,) * len(self.columns)
@@ -582,6 +595,7 @@ def from_report(report, *, draft: bool) -> BusinessPlanData:
                      if i.id.startswith("analytical.") and i.id not in _DUPLICATI_E],
             [c.period_id for c in cols]),
         draft=draft,
+        avvisi=_avvisi(report),
     )
 
 

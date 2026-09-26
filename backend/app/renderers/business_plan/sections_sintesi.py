@@ -49,10 +49,15 @@ def _cover_name(name: str) -> tuple:
 
 
 def cover_lines(data: BusinessPlanData) -> layout.CoverLines:
-    """I testi della fascia di copertina: gli stessi nel PDF e nel Word."""
+    """I testi della fascia di copertina: gli stessi nel PDF e nel Word. Con un avviso A01-bis
+    (previsionale vecchio) ogni frase occupa una riga propria sotto la base del piano, al posto
+    della riga generica — mai unite su una sola riga: con entrambe le diagnostiche la riga unita
+    supera la larghezza utile della pagina (review lotto 2 giro 1)."""
+    righe_sotto = data.avvisi if data.avvisi else (
+        "Andamento economico, flussi di cassa, sostenibilità del debito e circolante",)
     return layout.CoverLines(f"REPORT DI BUDGET {_years(data)}" + (" · BOZZA" if data.draft else ""), data.company_name,
                       f"Piano economico-finanziario {_years(data)}",
-                      (data.base_description, "Andamento economico, flussi di cassa, sostenibilità del debito e circolante"))
+                      (data.base_description,) + righe_sotto)
 
 
 def draw_cover_band(canvas, data: BusinessPlanData) -> None:
@@ -78,8 +83,10 @@ def draw_cover_band(canvas, data: BusinessPlanData) -> None:
     canvas.drawString(LM, PAGE_H - 160, cl.title)
     canvas.setFillColor(C(theme.COVER_SUB))
     canvas.setFont(REGULAR, 11)
-    canvas.drawString(LM, PAGE_H - 200, cl.lines[0])
-    canvas.drawString(LM, PAGE_H - 220, cl.lines[1])
+    # `cl.lines` non è più fissato a due righe: con entrambi gli avvisi A01-bis ce ne sono tre,
+    # una per frase, mai unite (review lotto 2 giro 1).
+    for n, line in enumerate(cl.lines):
+        canvas.drawString(LM, PAGE_H - 200 - n * 20, line)
     canvas.setFillColor(C(theme.MUTED))
     canvas.setFont(REGULAR, 7.8)
     canvas.drawString(LM, PAGE_H - 820, "Riservato e confidenziale")
@@ -127,7 +134,7 @@ def _cover_kpis(data: BusinessPlanData) -> list:
                                                      if data.growth.get("revenue_growth_pct") else "crescita da ipotesi di piano")),
         (span, f"{fmt.pct(data.v('ebitda_margin')[0])} → {fmt.pct(data.v('ebitda_margin')[-1])}", "EBITDA margin",
          f"EBITDA {fmt.compact_eur(e0)} → {fmt.compact_eur(en)}"),
-        (span, f"{fmt.ratio(data.v('dscr')[0])} → {fmt.ratio(data.v('dscr')[-1])}", "DSCR (proxy)",
+        (span, f"{fmt.ratio(data.v('dscr')[0])} → {fmt.ratio(data.v('dscr')[-1])}", "DSCR",
          f"mai inferiore a {fmt.floor_ratio(min(dscr_plan), 1)}" if dscr_plan else "n.d."),
         (f"{data.plan_columns[0].label} – {last}", fmt.compact_eur(op), "Flussi di cassa operativi",
          f"cumulati {periodo} di piano"),
@@ -171,7 +178,7 @@ def _cruscotto(data: BusinessPlanData) -> Table:
             g("Cassa e debito"), row(data, "Flusso di cassa operativo", "cf_operativo"),
             row(data, "Disponibilità liquide a fine anno", "cassa_fine"),
             row(data, "Posizione finanziaria netta (PFN)", "pfn"),
-            row(data, "PFN / EBITDA", "pfn_ebitda", unit="ratio"), row(data, "DSCR — proxy", "dscr", "hl", "ratio"),
+            row(data, "PFN / EBITDA", "pfn_ebitda", unit="ratio"), row(data, "DSCR", "dscr", "hl", "ratio"),
             g("Break-even e circolante"), row(data, "Break even point", "bep"),
             row(data, "Margine di sicurezza", "margine_sicurezza", "hl", "percent"),
             row(data, "Capitale circolante commerciale ¹", "cc_comm", "hl"),

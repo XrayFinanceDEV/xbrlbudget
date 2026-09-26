@@ -24,7 +24,13 @@ from decimal import Decimal
 
 
 def _convert_namedtuple_to_dict(nt):
-    """Convert NamedTuple to dictionary with appropriate types"""
+    """Convert NamedTuple to dictionary with appropriate types.
+
+    A field that is genuinely `None` (ROD with no financial debt, DIO with a non-positive
+    materials consumption — fix round 1, review lotto 2, 2026-09-26) stays `None`: it used to be
+    silently rewritten to `0.0`, which is exactly the "diagnose, never fabricate" trap — a missing
+    indicator is "I don't know", never a measured zero.
+    """
     if nt is None:
         return None
     result = {}
@@ -39,7 +45,7 @@ def _convert_namedtuple_to_dict(nt):
             except (ValueError, TypeError):
                 result[key] = value  # Keep original if conversion fails
         else:
-            result[key] = 0.0
+            result[key] = None
     return result
 
 
@@ -425,11 +431,20 @@ def calculate_detailed_cashflow_historical_and_forecast(
         if not forecast_year.balance_sheet or not forecast_year.income_statement:
             continue
 
+        # F3 (Importante, revisione finale lotto 2, 2026-09-26): la pagina Rendiconto restava al
+        # netto perché non passava `erogazioni=`, a differenza di `analysis_service.py` — stesso
+        # `engine_meta['erogazioni']` del motore (C08), `None` su un anno generato prima di questo
+        # lotto (comportamento invariato in quel caso).
+        engine_meta = forecast_year.engine_meta or {}
+        erogazioni_raw = engine_meta.get("erogazioni")
+        erogazioni = Decimal(str(erogazioni_raw)) if erogazioni_raw is not None else None
+
         forecast_cf = DetailedCashFlowCalculator.calculate(
             bs_current=forecast_year.balance_sheet,
             bs_previous=previous_bs,
             inc_current=forecast_year.income_statement,
-            year=forecast_year.year
+            year=forecast_year.year,
+            erogazioni=erogazioni
         )
         cashflows.append(forecast_cf)
 

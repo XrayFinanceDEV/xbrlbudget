@@ -174,18 +174,24 @@ def test_redditivita_affianca_i_due_pannelli_della_v4():
 
 
 def test_solidita_table_row_spec_leaves_the_dscr_label_to_the_catalog():
-    """`build_indicator_catalog` rinomina `practice.dscr` in "DSCR — proxy
-    della pratica" (la sola eccezione all'etichetta del catalogo, per
-    l'avvertenza che la v4 richiama esplicitamente): la riga della tabella
-    "solidita" passa `display_label=None` apposta, per non riscrivere quel
-    testo a mano e perdere l'avvertenza. Il DSCR è `None` su tutte e tre le
-    fixture sintetiche (oneri finanziari a zero -> denominatore nullo), quindi
-    qui si controlla l'ordine `rows_spec`, non la riga effettivamente resa."""
+    """C01 (lotto 2 fix rilievi, 2026-09-26, fix): `build_indicator_catalog` non rinomina più
+    `practice.dscr` in "DSCR — proxy della pratica" — l'etichetta del catalogo è ora "DSCR" e basta.
+    La riga della tabella "solidita" continua a passare `display_label=None`, ma solo per non
+    riscrivere a mano un'etichetta che il catalogo già dà giusta, non per preservare
+    un'avvertenza che non esiste più. Il DSCR è `None` su tutte e tre le fixture sintetiche,
+    quindi qui si controlla l'ordine `rows_spec`, non la riga effettivamente resa.
+
+    lotto 2 fix rilievi (2026-09-26): F2, un anno di piano (`fixture_report` costruisce
+    `basis='forecast'`) legge `engine_meta['rimborsi_piano']`, mai il rendiconto: senza quella
+    chiave (`fixture_report` non la passa) la ragione è `rimborsi_piano_non_disponibile`, non più
+    `cashflow_unavailable` (quella resta per la sola colonna base/storica senza rendiconto).
+    """
     report = fixture_report("bilancio", [2027, 2028, 2029])
     page = next(p for p in indicatori.build(report) if p["id"] == "solidita")
     dscr_indicator = next(i for i in report.indicator_catalog if i.id == "practice.dscr")
-    assert "proxy della pratica" in dscr_indicator.label
+    assert dscr_indicator.label == "DSCR"
     assert dscr_indicator.values == [None, None, None]
+    assert dscr_indicator.unavailable_reasons == ["rimborsi_piano_non_disponibile"] * 3
     table = _tables([page])[0]
     assert all("DSCR" not in row["cells"][0] for row in table["rows"])
 

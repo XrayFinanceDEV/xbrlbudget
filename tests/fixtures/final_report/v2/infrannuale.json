@@ -1,8 +1,8 @@
 {
   "schema_version": 2,
   "generated_at": "2026-09-14T10:00:00Z",
-  "model_hash": "f61a903774776965917f38282e0a63ee65a158e0fba6375aa67be80058dfe4e6",
-  "source_hash": "10bb4fd727d4d862c99f91e2eebd52fdf13f45c764fca2423e78afd312b5e638",
+  "model_hash": "26718e1033658a1518f2cc37df7f067f3437612b11654b50de44b7d513edf504",
+  "source_hash": "64e988d69f495d1900c738dcb4a92ef13ea6891e7658704dbace9ef4d11b8c0d",
   "company": {
     "id": 1,
     "name": "Officina Aurora Srl",
@@ -860,8 +860,8 @@
       "methodology": "Valori del catalogo canonico; unità e convenzioni disponibili per ciascun indicatore."
     },
     {
-      "id": "practice_dscr_proxy",
-      "title": "Copertura degli oneri finanziari — proxy DSCR",
+      "id": "practice_dscr",
+      "title": "Copertura degli oneri finanziari — DSCR",
       "unit": "ratio",
       "categories": [
         2027,
@@ -871,7 +871,7 @@
       "series": [
         {
           "key": "practice.dscr",
-          "label": "DSCR — proxy della pratica",
+          "label": "DSCR",
           "values": [
             null,
             null,
@@ -4333,6 +4333,26 @@
           "source": "DetailedCashFlowCalculator"
         },
         {
+          "id": "cashflow:operating.working_capital_changes.delta_tax",
+          "code": "operating.working_capital_changes.delta_tax",
+          "label": "Incremento/(decremento) dei debiti tributari netti",
+          "parent_id": "cashflow:variazioni_del_capitale_circolante_netto",
+          "level": 2,
+          "kind": "detail",
+          "applicable": true,
+          "values": [
+            null,
+            null,
+            null
+          ],
+          "unavailable_reasons": [
+            "source_period_unavailable",
+            "source_period_unavailable",
+            "source_period_unavailable"
+          ],
+          "source": "DetailedCashFlowCalculator"
+        },
+        {
           "id": "cashflow:operating.working_capital_changes.delta_accruals_deferrals_active",
           "code": "operating.working_capital_changes.delta_accruals_deferrals_active",
           "label": "Decremento/(incremento) ratei e risconti attivi",
@@ -4938,10 +4958,10 @@
   "indicator_catalog": [
     {
       "id": "practice.dscr",
-      "label": "DSCR — proxy della pratica",
+      "label": "DSCR",
       "family": "pratica",
       "unit": "ratio",
-      "methodology": "(EBITDA - imposte) / oneri finanziari: proxy della pratica, non servizio completo del debito.",
+      "methodology": "(MOL - imposte) / (oneri finanziari + quota capitale rimborsata nell'anno): la quota viene dal rendiconto finanziario dettagliato dello stesso anno (financing.third_party_funds.decreases) — il rimborso vero quando le erogazioni dell'anno sono note, la diminuzione netta del debito finanziario altrimenti. Indefinito senza un rendiconto per l'anno, o con erogazioni note ma incoerenti col debito rilevato: mai la vecchia formula senza quota capitale ((EBITDA - imposte) / oneri finanziari).",
       "convention": "pratica-v1: attivo corrente senza crediti oltre 12 mesi, con ratei attivi; CE canonico; flussi del periodo non annualizzati; nessun punteggio implicito.",
       "periods": [
         {
@@ -4978,9 +4998,9 @@
         null
       ],
       "unavailable_reasons": [
-        "zero_denominator",
-        "zero_denominator",
-        "zero_denominator"
+        "cashflow_unavailable",
+        "cashflow_unavailable",
+        "cashflow_unavailable"
       ],
       "source": "calculations.report_indicators",
       "thresholds": []
@@ -5039,7 +5059,7 @@
       "label": "Margine di Tesoreria",
       "family": "pratica",
       "unit": "eur",
-      "methodology": "Attivo corrente pratica - rimanenze - debiti entro 12 mesi",
+      "methodology": "Attivo corrente pratica - rimanenze - passivo corrente (debiti entro 12 mesi + ratei passivi)",
       "convention": "pratica-v1: attivo corrente senza crediti oltre 12 mesi, con ratei attivi; CE canonico; flussi del periodo non annualizzati; nessun punteggio implicito.",
       "periods": [
         {
@@ -5088,7 +5108,7 @@
       "label": "CCN",
       "family": "pratica",
       "unit": "eur",
-      "methodology": "Attivo corrente pratica - debiti entro 12 mesi",
+      "methodology": "Attivo corrente pratica - passivo corrente (debiti entro 12 mesi + ratei passivi)",
       "convention": "pratica-v1: attivo corrente senza crediti oltre 12 mesi, con ratei attivi; CE canonico; flussi del periodo non annualizzati; nessun punteggio implicito.",
       "periods": [
         {
@@ -5137,7 +5157,7 @@
       "label": "Liquidità Corrente",
       "family": "pratica",
       "unit": "ratio",
-      "methodology": "Attivo corrente pratica / debiti entro 12 mesi",
+      "methodology": "Attivo corrente pratica / passivo corrente (debiti entro 12 mesi + ratei passivi)",
       "convention": "pratica-v1: attivo corrente senza crediti oltre 12 mesi, con ratei attivi; CE canonico; flussi del periodo non annualizzati; nessun punteggio implicito.",
       "periods": [
         {
@@ -5235,7 +5255,7 @@
       "label": "Copertura Immobilizzazioni",
       "family": "pratica",
       "unit": "percent",
-      "methodology": "(Patrimonio netto + debiti oltre 12 mesi) / immobilizzazioni × 100",
+      "methodology": "(Patrimonio netto + debiti oltre 12 mesi + TFR) / immobilizzazioni × 100",
       "convention": "pratica-v1: attivo corrente senza crediti oltre 12 mesi, con ratei attivi; CE canonico; flussi del periodo non annualizzati; nessun punteggio implicito.",
       "periods": [
         {
@@ -5333,7 +5353,7 @@
       "label": "PFN",
       "family": "pratica",
       "unit": "eur",
-      "methodology": "Banche e obbligazioni se dettaglio positivo; altrimenti debito al netto dei dettagli non bancari noti; altrimenti debito totale; meno cassa e attività finanziarie.",
+      "methodology": "Banche, altri finanziatori e obbligazioni (breve e lungo) meno cassa e attività finanziarie.",
       "convention": "pratica-v1: attivo corrente senza crediti oltre 12 mesi, con ratei attivi; CE canonico; flussi del periodo non annualizzati; nessun punteggio implicito.",
       "periods": [
         {
@@ -5970,7 +5990,7 @@
       "label": "Liquidità Immediata",
       "family": "liquidità",
       "unit": "ratio",
-      "methodology": "Attivo corrente pratica - rimanenze / debiti entro 12 mesi",
+      "methodology": "Attivo corrente pratica - rimanenze / passivo corrente (debiti entro 12 mesi + ratei passivi)",
       "convention": "pratica-v1: attivo corrente senza crediti oltre 12 mesi, con ratei attivi; CE canonico; flussi del periodo non annualizzati; nessun punteggio implicito.",
       "periods": [
         {
@@ -6019,7 +6039,7 @@
       "label": "Current Ratio (ILC)",
       "family": "liquidity",
       "unit": "ratio",
-      "methodology": "Attivo corrente del modello / debiti entro 12 mesi",
+      "methodology": "(Rimanenze + crediti a breve + attività finanziarie a breve + liquidità + ratei attivi) / (debiti entro 12 mesi + ratei passivi) — stessa formula della sezione 8",
       "convention": "Motore FinancialRatiosCalculator: stock finali, anno commerciale 360 giorni, rapporti arrotondati a 4 decimali, giorni interi. Percentuali convertite in punti percentuali dal backend; flussi non annualizzati.",
       "periods": [
         {
@@ -6068,7 +6088,7 @@
       "label": "Quick Ratio (ISL)",
       "family": "liquidity",
       "unit": "ratio",
-      "methodology": "(Crediti entro e oltre 12 mesi + cassa) / debiti entro 12 mesi",
+      "methodology": "(Crediti a breve + attività finanziarie a breve + liquidità + ratei attivi) / (debiti entro 12 mesi + ratei passivi)",
       "convention": "Motore FinancialRatiosCalculator: stock finali, anno commerciale 360 giorni, rapporti arrotondati a 4 decimali, giorni interi. Percentuali convertite in punti percentuali dal backend; flussi non annualizzati.",
       "periods": [
         {
@@ -6215,7 +6235,7 @@
       "label": "Indice di Indebitamento",
       "family": "solvency",
       "unit": "ratio",
-      "methodology": "Immobilizzazioni / patrimonio netto",
+      "methodology": "Debiti totali / patrimonio netto",
       "convention": "Motore FinancialRatiosCalculator: stock finali, anno commerciale 360 giorni, rapporti arrotondati a 4 decimali, giorni interi. Percentuali convertite in punti percentuali dal backend; flussi non annualizzati.",
       "periods": [
         {
@@ -6509,7 +6529,7 @@
       "label": "ROD (Costo Denaro)",
       "family": "profitability",
       "unit": "percent",
-      "methodology": "Oneri finanziari / debiti totali",
+      "methodology": "Oneri finanziari / debito finanziario (banche, altri finanziatori, obbligazioni)",
       "convention": "Motore FinancialRatiosCalculator: stock finali, anno commerciale 360 giorni, rapporti arrotondati a 4 decimali, giorni interi. Percentuali convertite in punti percentuali dal backend; flussi non annualizzati.",
       "periods": [
         {
@@ -6607,7 +6627,7 @@
       "label": "(CN+PF)/AF",
       "family": "coverage",
       "unit": "ratio",
-      "methodology": "(Patrimonio netto + debiti oltre 12 mesi) / immobilizzazioni",
+      "methodology": "(Patrimonio netto + debiti oltre 12 mesi + TFR) / immobilizzazioni",
       "convention": "Motore FinancialRatiosCalculator: stock finali, anno commerciale 360 giorni, rapporti arrotondati a 4 decimali, giorni interi. Percentuali convertite in punti percentuali dal backend; flussi non annualizzati.",
       "periods": [
         {
@@ -6754,7 +6774,7 @@
       "label": "Giorni Magazzino (DMAG)",
       "family": "activity",
       "unit": "days",
-      "methodology": "360 × rimanenze / ricavi",
+      "methodology": "360 × rimanenze / (materie prime + variazione rimanenze materie prime); indefinito con consumo non positivo",
       "convention": "Motore FinancialRatiosCalculator: stock finali, anno commerciale 360 giorni, rapporti arrotondati a 4 decimali, giorni interi. Percentuali convertite in punti percentuali dal backend; flussi non annualizzati.",
       "periods": [
         {
@@ -6803,7 +6823,7 @@
       "label": "Giorni Credito (DCRED)",
       "family": "activity",
       "unit": "days",
-      "methodology": "360 × crediti entro e oltre 12 mesi / ricavi",
+      "methodology": "360 × crediti verso clienti entro e oltre 12 mesi / ricavi",
       "convention": "Motore FinancialRatiosCalculator: stock finali, anno commerciale 360 giorni, rapporti arrotondati a 4 decimali, giorni interi. Percentuali convertite in punti percentuali dal backend; flussi non annualizzati.",
       "periods": [
         {
@@ -7542,7 +7562,7 @@
         }
       ],
       "source": "persisted_statement; balance_aggregates; financial_debt_total",
-      "methodology": "Patrimonio netto dagli aggregati; debiti finanziari con la convenzione della PFN (banche e obbligazioni se positive, altrimenti debito meno i dettagli non bancari noti, altrimenti il debito totale); altre passività come residuo sul totale del passivo."
+      "methodology": "Patrimonio netto dagli aggregati; debiti finanziari con la convenzione della PFN (somma incondizionata di banche, altri finanziatori e obbligazioni, breve e lungo termine); altre passività come residuo sul totale del passivo."
     },
     {
       "id": "cost_incidence",
@@ -7709,7 +7729,7 @@
           "label": "Margine di contribuzione",
           "unit": "eur",
           "values": [
-            "1261.50",
+            "1261.500",
             "1311.96",
             "1357.88"
           ],
@@ -7750,8 +7770,8 @@
           ]
         }
       ],
-      "source": "FinancialRatiosCalculator.calculate_break_even_analysis; BudgetAssumptions",
-      "methodology": "calculate_break_even_analysis chiamato con la quota fissa desunta dalle ipotesi per categoria (materie e servizi) e con il 40% di default sugli altri costi operativi; i periodi non di piano usano il default. Ricavi di pareggio e margine di sicurezza solo con ricavi e margine di contribuzione positivi."
+      "source": "calculations.forecast_engine (anni di piano); FinancialRatiosCalculator.calculate_break_even_analysis (colonna base/storica)",
+      "methodology": "Gli anni di piano riportano `engine_meta['pareggio']` del motore (A02, lotto 2 fix rilievi 2026-09-26): costi variabili e fissi operativi dichiarati dal motore, mai più una quota 60/40 o quella delle ipotesi. La colonna base/storica resta calculate_break_even_analysis con il 40% di default sugli altri costi operativi. Ricavi di pareggio e margine di sicurezza assenti quando il motore non li dichiara (piano) o quando ricavi e margine di contribuzione non sono positivi (base)."
     }
   ],
   "editorial_plan": null,

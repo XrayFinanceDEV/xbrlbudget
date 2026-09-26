@@ -15,10 +15,10 @@ def _others(data: BusinessPlanData, key: str) -> str:
 
 def debito(data: BusinessPlanData, pages: dict) -> list:
     s = layout.section_head("SEZIONE 6", "Sostenibilità del debito · DSCR e PFN",
-                            "PFN = debiti finanziari meno disponibilità liquide. Il DSCR è calcolato come proxy: "
-                            "(EBITDA − imposte) / oneri finanziari, senza la quota capitale.")
+                            "PFN = debiti finanziari meno disponibilità liquide. DSCR = (MOL − imposte) / (oneri "
+                            "finanziari + quota capitale rimborsata nell'anno).")
     last = data.last.year
-    s += [layout.tiles([(fmt.ratio(data.v("dscr")[-1]), f"DSCR {last} (proxy)", _others(data, "dscr")),
+    s += [layout.tiles([(fmt.ratio(data.v("dscr")[-1]), f"DSCR {last}", _others(data, "dscr")),
                         tile_from(data, "pfn_ebitda", "PFN / EBITDA", fmt.ratio),
                         tile_from(data, "pfn", "PFN", fmt.compact_eur),
                         tile_from(data, "of_mol", "Oneri finanziari / MOL", fmt.pct)]), Spacer(0, 2)]
@@ -33,20 +33,19 @@ def debito(data: BusinessPlanData, pages: dict) -> list:
             row(data, "di cui oltre 12 mesi", "banche_lungo"),
             row(data, "Debiti finanziari (convenzione PFN)", "debiti_finanziari", "bold"),
             row(data, "Disponibilità liquide", "liquidita"), row(data, "Posizione finanziaria netta (PFN)", "pfn", "hl"),
-            row(data, "PFN / EBITDA", "pfn_ebitda", unit="ratio"), row(data, "DSCR — proxy", "dscr", "hl", "ratio"),
+            row(data, "PFN / EBITDA", "pfn_ebitda", unit="ratio"), row(data, "DSCR", "dscr", "hl", "ratio"),
             row(data, "Oneri finanziari / MOL", "of_mol", unit="percent"),
             row(data, "Oneri finanziari / ricavi", "of_ricavi", unit="percent"),
             row(data, "ROD (costo del denaro)", "rod", unit="percent")]
-    notes = []
-    if data.partial_label and data.partial_dscr is not None:
-        notes.append(f"DSCR proxy nel progressivo rettificato {data.partial_label}: {fmt.ratio(data.partial_dscr)}.")
-    other = data.v("altri_finanziatori")
-    if any(v not in (None, 0) for v in other):
-        notes.append(f"Debiti verso altri finanziatori: € {fmt.eur(other[-1])} nel {last}, fuori dalla PFN per la "
-                     "convenzione del motore degli indici.")
+    # F4 (Importante, revisione finale lotto 2, 2026-09-26): tolte due note.
+    # - «Debiti verso altri finanziatori ... fuori dalla PFN per la convenzione del motore degli
+    #   indici» era falsa dopo C04: gli altri finanziatori sono dentro la PFN dal fix di questo
+    #   stesso lotto (`calculations/report_indicators.py::financial_debt_total`).
+    # - La nota `partial_dscr` (DSCR del progressivo rettificato infrannuale) era morta: dopo C01
+    #   il DSCR richiede un rendiconto vero, che il periodo `adjusted` non calcola mai — la
+    #   condizione non si avvera più (`tests/fixtures/business_plan/banco_ambienta.json`:
+    #   `partial_dscr: null`).
     s += [layout.fin_table(headers(data), rows, first="Indicatore", pad=3.8)]
-    if notes:
-        s += [Spacer(0, 5), layout.note(" ".join(notes))]
     return s
 
 

@@ -219,7 +219,8 @@ export interface ProfitabilityRatios {
   roe: number;
   roi: number;
   ros: number;
-  rod: number;
+  /** `null` senza debito finanziario (banche, altri finanziatori, obbligazioni): "n.d.", non 0%. */
+  rod: number | null;
   ebitda_margin: number;
   ebit_margin: number;
   net_margin: number;
@@ -227,11 +228,14 @@ export interface ProfitabilityRatios {
 
 export interface ActivityRatios {
   asset_turnover: number;
-  inventory_turnover_days: number;
-  receivables_turnover_days: number;
+  /** `null` con consumo di materie prime non positivo (es. nessuna riga distinta, servizi): "n.d.". */
+  inventory_turnover_days: number | null;
+  /** `null` con crediti commerciali non dettagliati (F1, lotto 2 fix rilievi 2026-09-26): "n.d.". */
+  receivables_turnover_days: number | null;
   payables_turnover_days: number;
   working_capital_days: number;
-  cash_conversion_cycle: number;
+  /** `null` quando `inventory_turnover_days` o `receivables_turnover_days` lo è. */
+  cash_conversion_cycle: number | null;
 }
 
 export interface CoverageRatios {
@@ -249,7 +253,8 @@ export interface TurnoverRatios {
 }
 
 export interface ExtendedProfitabilityRatios {
-  spread: number;
+  /** `null` se `rod` lo è (nessun debito finanziario). */
+  spread: number | null;
   financial_leverage_effect: number;
   ebitda_on_sales: number;
   financial_charges_on_revenue: number;

@@ -241,7 +241,9 @@ describe("degenerateDaysAvvisi", () => {
     expect(avvisi).toHaveLength(2);
     const dpo = avvisi.find((a) => a.includes("(DPO)"))!;
     expect(dpo).toContain("2025, 2026");
-    expect(avvisi.find((a) => a.includes("(DIO)"))).toContain("2026");
+    // lotto 1 fix rilievi (2026-09-26, rilievo I2 della revisione finale): l'etichetta "dio" non
+    // dice piu' "(DIO)" — dal B01 e' i giorni delle sole materie prime sul consumo.
+    expect(avvisi.find((a) => a.includes("materie prime"))).toContain("2026");
   });
 
   it("circolantePreview porta gli avvisi al passo, invece di lasciarli nei details", () => {

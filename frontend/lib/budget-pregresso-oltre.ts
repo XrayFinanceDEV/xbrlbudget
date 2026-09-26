@@ -240,7 +240,8 @@ export function pianoBase(baseBs: BalanceSheet | undefined | null, years: number
  *  piano e questa e' una costante per saldo. */
 export const OLTRE_NOTA: Record<OltreKey, string> = {
   crediti_commerciali:
-    "Il lato a breve si rigenera dai giorni medi; la parte oltre no: cio' che scadenzi qui va a zero e ci resta.",
+    "Il lato a breve si rigenera dai giorni medi; la parte oltre no: cio' che scadenzi qui va a zero e ci resta. " +
+    "L'incasso si toglie prima dai crediti verso clienti oltre 12 mesi, poi dalle altre voci.",
   crediti_tributari_breve:
     "Scadenza iniziale nel primo anno: modifica gli importi se prevedi un incasso diverso. Il credito incassato va a zero e ci resta.",
   crediti_tributari_lungo:

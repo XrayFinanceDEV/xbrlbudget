@@ -2,7 +2,7 @@
 Pydantic schemas for calculation results
 """
 from pydantic import BaseModel, ConfigDict
-from typing import Dict, Literal
+from typing import Dict, Literal, Optional
 from decimal import Decimal
 
 
@@ -44,7 +44,7 @@ class ProfitabilityRatios(BaseModel):
     roe: float    # Return on Equity
     roi: float    # Return on Investment
     ros: float    # Return on Sales
-    rod: float    # Costo del Denaro (Return on Debt)
+    rod: Optional[float] = None    # Costo del Denaro (Return on Debt); None senza debito finanziario
     ebitda_margin: float  # EBITDA / Revenue
     ebit_margin: float    # EBIT / Revenue
     net_margin: float     # Net Profit / Revenue
@@ -55,11 +55,11 @@ class ActivityRatios(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     asset_turnover: float         # Fatturato / Totale Attivo
-    inventory_turnover_days: float  # DMAG - Giorni di Magazzino
-    receivables_turnover_days: float  # DCRED - Giorni di Credito
+    inventory_turnover_days: Optional[float] = None  # DMAG - Giorni di Magazzino; None con consumo non positivo
+    receivables_turnover_days: Optional[float] = None  # DCRED - Giorni di Credito; None con crediti commerciali non dettagliati (F1)
     payables_turnover_days: float  # DDEB - Giorni di Debito
     working_capital_days: float    # DCCN - Giorni CCN
-    cash_conversion_cycle: float   # Ciclo di conversione del denaro
+    cash_conversion_cycle: Optional[float] = None   # Ciclo di conversione del denaro; None se il DMAG o il DSO lo è
 
 
 class CoverageRatios(BaseModel):
@@ -86,7 +86,7 @@ class ExtendedProfitabilityRatios(BaseModel):
     """Extended profitability indices"""
     model_config = ConfigDict(from_attributes=True)
 
-    spread: float                      # ROI - ROD
+    spread: Optional[float] = None     # ROI - ROD; None se il ROD è None (nessun debito finanziario)
     financial_leverage_effect: float   # (PC+PF)/CN
     ebitda_on_sales: float            # MOL/RIC
     financial_charges_on_revenue: float  # OF/RIC

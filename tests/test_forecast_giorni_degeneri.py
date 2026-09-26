@@ -129,11 +129,14 @@ def test_a_tiny_ce01_carries_both_receivables_and_inventory(monkeypatch):
     """Il caso reale: 10.000 di `ce01` contro 590.000 su `ce04`.
 
     Qui il denominatore ESISTE — `_safe_divide` non avrebbe nulla da proteggere —
-    ed e' solo trascurabile: 4.320 giorni di credito e 1.800 di magazzino. Il
-    rapporto e' ancora un moltiplicatore, e applicato al `ce01` proiettato porta
-    crediti e rimanenze dove il fatturato vero non li giustifica. Entrambi i
-    giorni cadono, entrambi i saldi vengono riportati, ed entrambi i nomi sono
-    nella lista — nell'ordine in cui il motore li deduce.
+    ed e' solo trascurabile per il DSO: 4.320 giorni di credito. Il rapporto e'
+    ancora un moltiplicatore, e applicato al `ce01` proiettato porta i crediti
+    dove il fatturato vero non li giustifica.
+
+    # lotto 1 fix rilievi (2026-09-26): B01 — il DIO non divide piu' per `ce01`, quindi il
+    # fatturato minuscolo di questo test non lo tocca piu': le materie prime si dividono sul
+    # CONSUMO dell'anno base (`ce05 + ce10` = 200.000, invariato dal patch su `ce01`/`ce04`),
+    # che resta 90 giorni, dentro scala — solo il DSO cade.
     """
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
     engine, sessions = memory_sessions()
@@ -144,18 +147,21 @@ def test_a_tiny_ce01_carries_both_receivables_and_inventory(monkeypatch):
                         ce={"ce01_ricavi_vendite": 10000, "ce04_altri_ricavi": 590000})
             rows = [dict(forecast_year=2027, revenue_growth_pct=5, **MANUAL_TAX)]
             sc, details = _run(db, company_id, rows)
-            assert details[0]["degenerate_turnover_ratio"] == ["dso", "dio"]
+            assert details[0]["degenerate_turnover_ratio"] == ["dso"]
             _, bs, _ = read_forecast_maps(db, sc.id)[0]
-            # Senza la guardia: 10.500 × 4.320/360 = 126.000 di crediti e
-            # 10.500 × 1.800/360 = 52.500 di rimanenze.
+            # Senza la guardia: 10.500 × 4.320/360 = 126.000 di crediti.
             assert bs["sp06_crediti_breve"] == D("120000.00")
+            # Le materie non sono degeneri: consumo 200.000 invariato, quindi la
+            # chiusura resta uguale all'apertura (50.000 su acquisti flat).
             assert bs["sp05_rimanenze"] == D("50000.00")
             # `dpo` non cade: 140.000 su 350.000 di acquisti sono 144 giorni.
             assert details[0]["dpo_applied"] == D("144")
-            # I giorni DICHIARATI sono quelli che i saldi riportati valgono sul
+            # Il giorno DICHIARATO del DSO e' quello che il saldo riportato vale sul
             # `ce01` proiettato: l'identita' `saldo = flusso × giorni / 360` regge.
             assert details[0]["dso_applied"] == pytest.approx(120000 / 10500 * 360)
-            assert details[0]["dio_applied"] == pytest.approx(50000 / 10500 * 360)
+            # Il DIO delle materie e' dedotto dalla base (90 giorni), mai dal `ce01`
+            # proiettato di quest'anno.
+            assert details[0]["dio_applied"] == D("90")
     finally:
         engine.dispose()
 
@@ -198,6 +204,12 @@ def test_a_dpo_beyond_one_year_carries_the_base_payables(monkeypatch):
     Il denominatore e' positivo — `_safe_divide` non protegge da un denominatore
     TRASCURABILE — e moltiplicare gli acquisti proiettati per 5.040/360 gonfia i
     debiti del 10% della crescita dei costi su una massa che non e' un flusso.
+
+    # lotto 1 fix rilievi (2026-09-26): B01 — azzerare `ce05` per isolare il DPO ha un
+    # effetto collaterale sulle materie: il loro consumo di base (`ce05 + ce10`) e'
+    # ORA zero, quindi il DIO delle materie cade anche lui (giacenza 50.000 riportata,
+    # `ce10` zero) — non e' il rilievo di questo test, ma e' la conseguenza diretta
+    # della stessa guardia applicata al consumo invece che ai ricavi.
     """
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
     engine, sessions = memory_sessions()
@@ -213,9 +225,12 @@ def test_a_dpo_beyond_one_year_carries_the_base_payables(monkeypatch):
             rows = [dict(forecast_year=2027, revenue_growth_pct=0, ce06_override=20000,
                          **MANUAL_TAX)]
             sc, details = _run(db, company_id, rows)
-            assert details[0]["degenerate_turnover_ratio"] == ["dpo"]
+            assert details[0]["degenerate_turnover_ratio"] == ["dio", "dpo"]
             _, bs, _ = read_forecast_maps(db, sc.id)[0]
             assert bs["sp16d_debiti_fornitori_breve"] == D("140000.00")
+            # Le materie si riportano (consumo di base zero): stock invariato, ce10 zero.
+            assert bs["sp05_rimanenze"] == D("50000.00")
+            assert details[0]["dio_applied"] == D("0")
             # Il giorno dichiarato e' quello che il saldo riportato vale DAVVERO
             # sugli acquisti proiettati (20.000): 140.000 / 20.000 × 360 = 2.520.
             # Senza la guardia sarebbero 5.040 giorni e 280.000 di debiti.
@@ -243,7 +258,10 @@ def test_the_normal_base_year_declares_an_empty_list_and_todays_days(monkeypatch
             for det in details:
                 assert det["degenerate_turnover_ratio"] == []
                 assert det["dso_applied"] == D("72")
-                assert det["dio_applied"] == D("30")
+                # lotto 1 fix rilievi (2026-09-26): B01 — il DIO delle materie non divide
+                # piu' sui ricavi (600.000) ma sul consumo di base `ce05 + ce10` (200.000):
+                # 50.000 / 200.000 x 360 = 90, non piu' 50.000 / 600.000 x 360 = 30.
+                assert det["dio_applied"] == D("90")
                 assert det["dpo_applied"] == D("144")
     finally:
         engine.dispose()
@@ -276,7 +294,12 @@ def test_the_guard_and_a_runoff_plan_do_not_count_the_same_mass_twice(monkeypatc
                 "debiti_fornitori": {"opening": 140000, "amounts": [100000, 40000]}
             }
             sc, details = _run(db, company_id, rows)
-            assert details[0]["degenerate_turnover_ratio"] == ["dpo"]
+            # lotto 1 fix rilievi (2026-09-26): B01 — stesso effetto collaterale del test
+            # DPO sopra: `ce05` azzerato per isolare il DPO azzera anche il consumo di base
+            # delle materie, che quindi cadono anche loro (ogni anno: la deduzione legge
+            # sempre la base, mai l'anno prima).
+            assert details[0]["degenerate_turnover_ratio"] == ["dio", "dpo"]
+            assert details[1]["degenerate_turnover_ratio"] == ["dio", "dpo"]
             rows_out = read_forecast_maps(db, sc.id)
             # Anno 1: pagati 100.000, i 40.000 dovuti l'anno DOPO restano a breve,
             # nulla oltre. Anno 2: il piano si chiude e il saldo con lui — nessun

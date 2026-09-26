@@ -427,10 +427,46 @@ class FinalReportModelV2(FinalReportModel):
             costs = [ce_column(r)[index] for r in ("income_statement:ce05_materie_prime", "income_statement:ce06_servizi",
                                                    "income_statement:ce07_godimento_beni", "income_statement:ce08_costi_personale",
                                                    "income_statement:ce12_oneri_diversi")]
-            if None not in (fixed, variable, *costs) and abs(fixed + variable - sum(costs, zero)) > tolerance:
-                raise ValueError(f"break-even costs must split the operating costs at period {canonical_periods[index]}")
+            # F5 (decisione del proprietario, 2026-09-26): da questo lotto `fixed_costs` è SEMPRE
+            # `costi_fissi_operativi` — riconciliato sul MOL (comprende ce02/ce03/ce03a/ce04/
+            # ce10/ce11/ce11b) — su OGNI colonna, non solo sugli anni di piano (prima di F5 solo
+            # quella colonna usava questa definizione; la base/storica usava la ripartizione
+            # 60/40 delle cinque voci operative canoniche, ed è per questo che la vecchia lega
+            # qui sotto era ristretta a `canonical_basis[index] != "forecast"`). La somma non
+            # chiude più su `costs` da solo: chiude sulla stessa somma corretta delle rettifiche
+            # (`fixed + variable == costs + ce10 + ce11 + ce11b - ce04 - ce02 - ce03 - ce03a`), che
+            # vale per costruzione qualunque sia la quota fisso/variabile — un'identità che si
+            # controlla su ogni colonna, mai solo su quelle non di piano.
+            aggiustamenti = [ce_column(r)[index] for r in ("income_statement:ce10_var_rimanenze_mat_prime",
+                                                           "income_statement:ce11_accantonamenti",
+                                                           "income_statement:ce11b_altri_accantonamenti")]
+            sottrazioni = [ce_column(r)[index] for r in ("income_statement:ce04_altri_ricavi",
+                                                         "income_statement:ce02_variazioni_rimanenze",
+                                                         "income_statement:ce03_lavori_interni",
+                                                         "income_statement:ce03a_incrementi_immobilizzazioni")]
+            if None not in (fixed, variable, *costs, *aggiustamenti, *sottrazioni):
+                attesa = sum(costs, zero) + sum(aggiustamenti, zero) - sum(sottrazioni, zero)
+                if abs(fixed + variable - attesa) > tolerance:
+                    raise ValueError(f"break-even costs must split the operating costs at period {canonical_periods[index]}")
             margin = series["break_even"]["contribution_margin"].values[index]
             revenue = ce_column("income_statement:ce01_ricavi_vendite")[index]
+            bep = series["break_even"]["break_even_revenue"].values[index]
+            # lotto 2 fix rilievi (2026-09-26), fix round 1: `fixed_costs` resta agganciato anche
+            # all'identità di pareggio del motore stesso — `bep = costi_fissi / %MdC`, cioè
+            # `costi_fissi = bep × MdC / ricavi` — usando solo campi già nella serie. Saltata
+            # quando un valore manca o i ricavi non sono positivi (nessun pareggio dichiarato in
+            # quel caso).
+            # Fix round 2: un centesimo fisso rialzava su un'uscita genuina del motore a
+            # margine sottile — bep, margine e fissi sono arrotondati al centesimo
+            # ciascuno per conto proprio, e l'errore si propaga amplificato di
+            # bep/ricavi (grande proprio quando il margine è sottile). Tolleranza
+            # proporzionale all'errore di arrotondamento propagato.
+            # F5: questa identità vale allo stesso modo sulla colonna base/storica
+            # (`punto_di_pareggio` è la stessa funzione), quindi non è più ristretta al piano.
+            if None not in (fixed, bep, margin, revenue) and revenue > 0:
+                fixed_tolerance = tolerance * (1 + (bep + margin) / revenue)
+                if abs(bep * margin / revenue - fixed) > fixed_tolerance:
+                    raise ValueError(f"break-even fixed costs must reconcile with the engine's own identity at period {canonical_periods[index]}")
             if None not in (margin, revenue, variable) and abs(margin - (revenue - variable)) > tolerance:
                 raise ValueError(f"contribution margin must equal revenue minus variable costs at period {canonical_periods[index]}")
         incidence = {"materials": "practice.materials_revenue", "services": "practice.services_revenue",

@@ -79,7 +79,12 @@ def test_ce09d_override_sopravvive():
     arrotondamento genuino (due dettagli con ammortamento frazionario, che
     quantizzati singolarmente non sommano all'aggregato quantizzato), non una
     grande differenza come per ce08 — ma un override pulito non deve riceverne
-    comunque nemmeno uno: il residuo va sull'ultimo dettaglio libero (ce09c)."""
+    comunque nemmeno uno: il residuo va sull'ultimo dettaglio libero (ce09c).
+
+    lotto 1 fix rilievi (2026-09-26): B02+E05 dimezzano la quota del cespite
+    nell'anno d'ingresso. L'investimento raddoppia a 200,06 (invece di 100,03)
+    cosi' la quota effettiva (200,06 × 11% / 2 = 11,0033) resta esattamente
+    quella di prima e il residuo di arrotondamento continua a esistere."""
     engine, sessions = memory_sessions()
     try:
         with sessions() as db:
@@ -87,8 +92,8 @@ def test_ce09d_override_sopravvive():
             riga = _riga(
                 source.scenario.id, 2027,
                 ce09d_override=D("5000.00"),
-                tangible_investments=D("100.03"),
-                intangible_investments=D("100.03"),
+                tangible_investments=D("200.06"),
+                intangible_investments=D("200.06"),
                 depreciation_rate=D("11"),
                 depreciation_rate_intangible=D("11"),
             )

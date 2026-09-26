@@ -10,7 +10,7 @@ import {
   usePreferredBudgetScenarioId,
 } from "@/hooks/use-queries";
 
-import { formatCurrency, formatPercentage } from "@/lib/formatters";
+import { formatCurrency, formatNumberOrNA, formatPercentage, formatPercentageOrNA } from "@/lib/formatters";
 import type {
   FinancialAnalysis,
   AllRatios,
@@ -91,11 +91,11 @@ const formulaTooltips: Record<string, string> = {
   "CN-AF": "CN = Capitale Netto (Patrimonio Netto), AF = Attivo Fisso (Immobilizzazioni)",
   "[LI+LD+RD]-PC": "LI = Liquidita Immediata, LD = Liquidita Differita, RD = Rimanenze, PC = Passivo Corrente",
   "[LI+LD]-PC": "LI = Liquidita Immediata, LD = Liquidita Differita, PC = Passivo Corrente",
-  "(CN+PF)/AF": "CN = Capitale Netto, PF = Passivo Fisso (Debiti M/L termine), AF = Attivo Fisso",
+  "(CN+PF+TFR)/AF": "CN = Capitale Netto, PF = Passivo Fisso (Debiti M/L termine), TFR = Trattamento Fine Rapporto, AF = Attivo Fisso",
   "CN/AF": "CN = Capitale Netto (Patrimonio Netto), AF = Attivo Fisso (Immobilizzazioni)",
   "CN/(PC+PF)": "CN = Capitale Netto, PC = Passivo Corrente, PF = Passivo Fisso",
-  "(LI+LD+RD)/PC": "LI = Liquidita Immediata, LD = Liquidita Differita, RD = Rimanenze, PC = Passivo Corrente",
-  "(LI+LD)/PC": "LI = Liquidita Immediata, LD = Liquidita Differita, PC = Passivo Corrente",
+  "(LI+LD+RD+RA)/(PC+RP)": "LI = Liquidita Immediata, LD = Liquidita Differita, RD = Rimanenze, RA = Ratei e Risconti Attivi, PC = Passivo Corrente (debiti entro 12 mesi), RP = Ratei e Risconti Passivi",
+  "(LI+LD+RA)/(PC+RP)": "LI = Liquidita Immediata, LD = Liquidita Differita, RA = Ratei e Risconti Attivi, PC = Passivo Corrente (debiti entro 12 mesi), RP = Ratei e Risconti Passivi",
   "CO/RD": "CO = Costi Operativi (Materie Prime), RD = Rimanenze",
   "RIC/LD": "RIC = Ricavi delle Vendite, LD = Liquidita Differita (Crediti)",
   "(CO+AC+ODG)/PC": "CO = Costi Operativi, AC = Acquisti, ODG = Oneri Diversi di Gestione, PC = Passivo Corrente",
@@ -109,7 +109,7 @@ const formulaTooltips: Record<string, string> = {
   "RN/CN": "RN = Risultato Netto (Utile/Perdita), CN = Capitale Netto (Patrimonio Netto)",
   "MON/TA": "MON = Margine Operativo Netto (EBIT), TA = Totale Attivo",
   "MON/RIC": "MON = Margine Operativo Netto (EBIT), RIC = Ricavi delle Vendite",
-  "OF/(PC+PF)": "OF = Oneri Finanziari, PC = Passivo Corrente, PF = Passivo Fisso",
+  "OF/DF": "OF = Oneri Finanziari, DF = Debiti Finanziari (banche, altri finanziatori, obbligazioni)",
   "(ROI-ROD)": "Differenza tra rendimento del capitale investito e costo del debito",
   "(PC+PF)/CN": "PC = Passivo Corrente, PF = Passivo Fisso, CN = Capitale Netto",
   "MOL/RIC": "MOL = Margine Operativo Lordo (EBITDA), RIC = Ricavi delle Vendite",
@@ -716,7 +716,7 @@ export default function AnalysisPage() {
                 <div className="flex justify-between">
                   <span className="text-sm text-muted-foreground">Giorni Credito:</span>
                   <span className="text-sm font-medium text-foreground">
-                    {analysis.ratios.activity.receivables_turnover_days.toFixed(0)}
+                    {formatNumberOrNA(analysis.ratios.activity.receivables_turnover_days, 0)}
                   </span>
                 </div>
                 <div className="flex justify-between">
@@ -728,7 +728,7 @@ export default function AnalysisPage() {
                 <div className="flex justify-between">
                   <span className="text-sm text-muted-foreground">Ciclo Cassa:</span>
                   <span className="text-sm font-medium text-foreground">
-                    {analysis.ratios.activity.cash_conversion_cycle.toFixed(0)}
+                    {formatNumberOrNA(analysis.ratios.activity.cash_conversion_cycle, 0)}
                   </span>
                 </div>
               </div>
@@ -776,7 +776,7 @@ export default function AnalysisPage() {
             <div>CCLN = Capitale Circolante Lordo Netto (Attivo Corrente)</div>
             <div>CCN = Capitale Circolante Netto (Attivo Corrente - Passivo Corrente)</div>
             <div>MS = Margine di Struttura (Patrimonio Netto - Immobilizzazioni)</div>
-            <div>MT = Margine di Tesoreria (Liquidita + Crediti - Passivo Corrente)</div>
+            <div>MT = Margine di Tesoreria (Attivo Corrente - Rimanenze - Passivo Corrente)</div>
           </div>
         </CardContent>
       </Card>
@@ -857,7 +857,7 @@ export default function AnalysisPage() {
                   </tr>
                   <tr className="border-b border-border hover:bg-muted/50">
                     <td className="py-2 px-4 sticky left-0 bg-background">INDICE DI COPERTURA DELLE IMMOB. CON FONTI DUREVOLI</td>
-                    <FormulaCell formula="(CN+PF)/AF" />
+                    <FormulaCell formula="(CN+PF+TFR)/AF" />
                     {multiYearRatios.ratios.map((r, i) => (
                       <td key={i} className="py-2 px-4 text-right font-medium">
                         {formatPercentage(r.coverage.fixed_assets_coverage_with_equity_and_ltdebt)}
@@ -891,7 +891,7 @@ export default function AnalysisPage() {
                   </tr>
                   <tr className="border-b border-border hover:bg-muted/50">
                     <td className="py-2 px-4 sticky left-0 bg-background">INDICE DI LIQUIDITA CORRENTE O DI DISPONIBILITA</td>
-                    <FormulaCell formula="(LI+LD+RD)/PC" />
+                    <FormulaCell formula="(LI+LD+RD+RA)/(PC+RP)" />
                     {multiYearRatios.ratios.map((r, i) => (
                       <td key={i} className="py-2 px-4 text-right font-medium">
                         {formatPercentage(r.liquidity.current_ratio)}
@@ -899,8 +899,8 @@ export default function AnalysisPage() {
                     ))}
                   </tr>
                   <tr className="border-b border-border hover:bg-muted/50">
-                    <td className="py-2 px-4 sticky left-0 bg-background">INDICE SECCO DI LIQUIDITA (ACID TEST RATIO - ATR)</td>
-                    <FormulaCell formula="(LI+LD)/PC" />
+                    <td className="py-2 px-4 sticky left-0 bg-background">QUICK RATIO (liquidità immediata)</td>
+                    <FormulaCell formula="(LI+LD+RA)/(PC+RP)" />
                     {multiYearRatios.ratios.map((r, i) => (
                       <td key={i} className="py-2 px-4 text-right font-medium">
                         {formatPercentage(r.liquidity.quick_ratio)}
@@ -964,7 +964,9 @@ export default function AnalysisPage() {
                     <FormulaCell formula="360/TdM" />
                     {multiYearRatios.ratios.map((r, i) => (
                       <td key={i} className="py-2 px-4 text-right font-medium">
-                        {r.activity.inventory_turnover_days.toFixed(0)} gg
+                        {r.activity.inventory_turnover_days === null
+                          ? "n.d."
+                          : `${r.activity.inventory_turnover_days.toFixed(0)} gg`}
                       </td>
                     ))}
                   </tr>
@@ -973,7 +975,9 @@ export default function AnalysisPage() {
                     <FormulaCell formula="360/TdC" />
                     {multiYearRatios.ratios.map((r, i) => (
                       <td key={i} className="py-2 px-4 text-right font-medium">
-                        {r.activity.receivables_turnover_days.toFixed(0)} gg
+                        {r.activity.receivables_turnover_days === null
+                          ? "n.d."
+                          : `${r.activity.receivables_turnover_days.toFixed(0)} gg`}
                       </td>
                     ))}
                   </tr>
@@ -1040,10 +1044,10 @@ export default function AnalysisPage() {
                   </tr>
                   <tr className="border-b border-border hover:bg-muted/50">
                     <td className="py-2 px-4 sticky left-0 bg-background">COSTO DEL DENARO A PRESTITO (ROD)</td>
-                    <FormulaCell formula="OF/(PC+PF)" />
+                    <FormulaCell formula="OF/DF" />
                     {multiYearRatios.ratios.map((r, i) => (
                       <td key={i} className="py-2 px-4 text-right font-medium">
-                        {formatPercentage(r.profitability.rod)}
+                        {formatPercentageOrNA(r.profitability.rod)}
                       </td>
                     ))}
                   </tr>
@@ -1052,7 +1056,7 @@ export default function AnalysisPage() {
                     <FormulaCell formula="(ROI-ROD)" />
                     {multiYearRatios.ratios.map((r, i) => (
                       <td key={i} className="py-2 px-4 text-right font-medium">
-                        {r.extended_profitability.spread.toFixed(2)}
+                        {formatNumberOrNA(r.extended_profitability.spread, 2)}
                       </td>
                     ))}
                   </tr>

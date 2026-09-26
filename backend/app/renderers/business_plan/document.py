@@ -35,8 +35,18 @@ def header_title(data: BusinessPlanData) -> str:
 
 
 def page_texts(data: BusinessPlanData) -> tuple:
-    """Intestazione sinistra, destra e piè di pagina: gli stessi nel PDF e nel Word."""
-    return (data.company_name, header_title(data) + (" · BOZZA" if data.draft else ""),
+    """Intestazione sinistra, destra e piè di pagina: gli stessi nel PDF e nel Word. L'avviso A01-bis
+    (previsionale vecchio) sta accanto a «BOZZA», nella stessa riga di destra — ma solo nella forma
+    corta «BOZZA · da rigenerare»: le frasi intere della spec stanno solo in copertina. Review lotto
+    2 giro 1: la frase intera qui rubava spazio al nome azienda in `_body_page` (`fit()` lo
+    troncava fino a «…» o «AMBIEN…»)."""
+    if data.avvisi:
+        suffix = " · BOZZA · da rigenerare"
+    elif data.draft:
+        suffix = " · BOZZA"
+    else:
+        suffix = ""
+    return (data.company_name, header_title(data) + suffix,
             f"Riservato e confidenziale · {legend(data)}")
 
 

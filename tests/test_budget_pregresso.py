@@ -427,15 +427,19 @@ def test_writeoff_survives_the_ce09_rounding_residual(monkeypatch):
     arrotondamento dell'aggregato gli finisce sopra e l'importo scadenziato
     risulta di un centesimo diverso da quello chiesto — senza alcun errore.
 
-    Gli investimenti da 0,02 con ammortamento al 20% producono due quote da
-    0,004: i dettagli arrotondano in giu' (0,00) e l'aggregato in su (0,01),
-    cioe' esattamente un centesimo di residuo da posare."""
+    Gli investimenti da 0,04 con ammortamento al 20% (meta' aliquota nell'anno d'ingresso,
+    E05) producono due quote da 0,004: i dettagli arrotondano in giu' (0,00) e l'aggregato
+    in su (0,01), cioe' esattamente un centesimo di residuo da posare.
+
+    lotto 1 fix rilievi (2026-09-26): l'investimento raddoppia da 0,02 a 0,04 rispetto a
+    prima B02/E05, cosi' la quota effettiva del primo anno (0,04 × 20% / 2 = 0,004) resta
+    esattamente quella di prima e il residuo di arrotondamento continua a esistere."""
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
     engine, sessions = memory_sessions()
     try:
         with sessions() as db:
             company_id, _ = seed_base_year(db, user_id=USER)
-            rows = [dict(forecast_year=y, intangible_investments=0.02, tangible_investments=0.02,
+            rows = [dict(forecast_year=y, intangible_investments=0.04, tangible_investments=0.04,
                          depreciation_rate=20, depreciation_rate_intangible=20, **MANUAL_TAX)
                     for y in (2027, 2028)]
             rows[0]["pregresso"] = {"crediti_commerciali": {"opening": 120000, "amounts": [60000], "writeoff": [5000]}}

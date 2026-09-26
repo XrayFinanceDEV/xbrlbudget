@@ -6,6 +6,7 @@ from decimal import Decimal
 from typing import Dict, Optional, NamedTuple
 from database.models import BalanceSheet, IncomeStatement
 from calculations.base import BaseCalculator
+from calculations.report_indicators import attivo_corrente, passivo_corrente
 
 
 class WorkingCapitalMetrics(NamedTuple):
@@ -26,7 +27,7 @@ class LiquidityRatios(NamedTuple):
 class SolvencyRatios(NamedTuple):
     """Solvency/Leverage ratios"""
     autonomy_index: Decimal           # Indice di Autonomia Finanziaria
-    leverage_ratio: Decimal           # Indice di Indebitamento
+    leverage_ratio: Decimal           # Indice di Indebitamento = Debiti Totali/Patrimonio Netto (C06)
     debt_to_equity: Decimal           # Rapporto Debiti/Patrimonio Netto
     debt_to_production: Decimal       # Debiti/Valore della Produzione
 
@@ -36,7 +37,7 @@ class ProfitabilityRatios(NamedTuple):
     roe: Decimal    # Return on Equity
     roi: Decimal    # Return on Investment
     ros: Decimal    # Return on Sales
-    rod: Decimal    # Costo del Denaro (Return on Debt)
+    rod: Optional[Decimal]    # Costo del Denaro (Return on Debt); None senza debito finanziario
     ebitda_margin: Decimal  # EBITDA / Revenue
     ebit_margin: Decimal    # EBIT / Revenue
     net_margin: Decimal     # Net Profit / Revenue
@@ -45,16 +46,16 @@ class ProfitabilityRatios(NamedTuple):
 class ActivityRatios(NamedTuple):
     """Activity/Efficiency ratios"""
     asset_turnover: Decimal         # Fatturato / Totale Attivo
-    inventory_turnover_days: Decimal  # DMAG - Giorni di Magazzino
-    receivables_turnover_days: Decimal  # DCRED - Giorni di Credito
+    inventory_turnover_days: Optional[Decimal]  # DMAG - Giorni di Magazzino; None con consumo non positivo
+    receivables_turnover_days: Optional[Decimal]  # DCRED - Giorni di Credito; None con crediti commerciali non dettagliati
     payables_turnover_days: Decimal  # DDEB - Giorni di Debito
     working_capital_days: Decimal    # DCCN - Giorni CCN
-    cash_conversion_cycle: Decimal   # Ciclo di conversione del denaro
+    cash_conversion_cycle: Optional[Decimal]   # Ciclo di conversione del denaro; None se il DMAG lo è
 
 
 class CoverageRatios(NamedTuple):
     """Coverage/Solidity ratios (Indici di Solidità)"""
-    fixed_assets_coverage_with_equity_and_ltdebt: Decimal  # (CN+PF)/AF
+    fixed_assets_coverage_with_equity_and_ltdebt: Decimal  # (CN+PF+TFR)/AF (C07)
     fixed_assets_coverage_with_equity: Decimal              # CN/AF
     independence_from_third_parties: Decimal                # CN/(PC+PF)
 
@@ -70,7 +71,7 @@ class TurnoverRatios(NamedTuple):
 
 class ExtendedProfitabilityRatios(NamedTuple):
     """Extended profitability indices"""
-    spread: Decimal                      # ROI - ROD
+    spread: Optional[Decimal]            # ROI - ROD; None se il ROD è None (nessun debito finanziario)
     financial_leverage_effect: Decimal   # (PC+PF)/CN
     ebitda_on_sales: Decimal            # MOL/RIC
     financial_charges_on_revenue: Decimal  # OF/RIC
@@ -123,20 +124,22 @@ class FinancialRatiosCalculator(BaseCalculator):
         # CCLN = Capital Circolante Lordo Netto = Attivo Corrente
         ccln = self.bs.current_assets
 
-        # CCN = Capitale Circolante Netto = Attivo Corrente - Passivo Corrente
-        ccn = self.bs.working_capital_net
+        # CCN = Capitale Circolante Netto = Attivo corrente - Passivo corrente, simmetrico sui
+        # ratei (C05, lotto 2 fix rilievi 2026-09-26): stessa formula di `report_indicators.py`,
+        # non `BalanceSheet.working_capital_net` (quello resta per Altman/FGPMI, che non si toccano
+        # in questo lotto).
+        field_value = lambda field: getattr(self.bs, field)
+        ccn = attivo_corrente(field_value) - passivo_corrente(field_value)
 
         # MS = Margine di Struttura = Patrimonio Netto - Immobilizzazioni
         ms = self.bs.total_equity - self.bs.fixed_assets
 
-        # MT = Margine di Tesoreria = (Liquidità + Crediti) - Passivo Corrente
-        # MT = Attivo Corrente - Rimanenze - Passivo Corrente
-        mt = (
-            self.bs.sp06_crediti_breve +
-            self.bs.sp07_crediti_lungo +
-            self.bs.sp09_disponibilita_liquide -
-            self.bs.current_liabilities
-        )
+        # MT = Margine di Tesoreria = Attivo corrente - rimanenze - passivo corrente, simmetrico
+        # sui ratei (F6, lotto 2 fix rilievi 2026-09-26): stessa `attivo_corrente`/`passivo_corrente`
+        # di CCN/current ratio/quick ratio (C05) — non più una terza formula (sp06+sp07+sp09, coi
+        # crediti oltre 12 mesi dentro, meno i soli debiti a breve) che dava un numero diverso da
+        # quello della sezione 8 dello stesso report sullo stesso bilancio.
+        mt = attivo_corrente(field_value) - self.bs.sp05_rimanenze - passivo_corrente(field_value)
 
         return WorkingCapitalMetrics(
             ccln=self.round_decimal(ccln),
@@ -154,21 +157,23 @@ class FinancialRatiosCalculator(BaseCalculator):
         Returns:
             LiquidityRatios with Current Ratio, Quick Ratio, Acid Test
         """
-        # ILC = Current Ratio = Attivo Corrente / Passivo Corrente
+        # ILC = Current Ratio = Attivo corrente / Passivo corrente, simmetrico sui ratei (C05,
+        # lotto 2 fix rilievi 2026-09-26): stessa formula della sezione 8 del report
+        # (`report_indicators.attivo_corrente`/`passivo_corrente`) — un solo current ratio nel
+        # documento, non `BalanceSheet.current_assets`/`current_liabilities` (quelle restano per
+        # Altman/FGPMI).
+        field_value = lambda field: getattr(self.bs, field)
+        passivo = passivo_corrente(field_value)
         current_ratio = self.safe_divide(
-            self.bs.current_assets,
-            self.bs.current_liabilities
+            attivo_corrente(field_value),
+            passivo
         )
 
-        # Quick Ratio = (Liquidità + Crediti) / Passivo Corrente
-        liquid_assets = (
-            self.bs.sp06_crediti_breve +
-            self.bs.sp07_crediti_lungo +
-            self.bs.sp09_disponibilita_liquide
-        )
+        # Quick Ratio = (Attivo corrente - rimanenze) / Passivo corrente
+        liquid_assets = attivo_corrente(field_value) - self.bs.sp05_rimanenze
         quick_ratio = self.safe_divide(
             liquid_assets,
-            self.bs.current_liabilities
+            passivo
         )
 
         # Acid Test = (Liquidità + Crediti + Attività Finanziarie) / Passivo Corrente
@@ -204,17 +209,18 @@ class FinancialRatiosCalculator(BaseCalculator):
             self.bs.total_assets
         )
 
-        # Indice di Indebitamento = Immobilizzazioni / Patrimonio Netto
-        leverage_ratio = self.safe_divide(
-            self.bs.fixed_assets,
-            self.bs.total_equity
-        )
-
         # Debt to Equity = Debiti Totali / Patrimonio Netto
         debt_to_equity = self.safe_divide(
             self.bs.total_debt,
             self.bs.total_equity
         )
+
+        # Indice di Indebitamento = Debiti Totali / Patrimonio Netto (C06, lotto 2 fix rilievi
+        # 2026-09-26: era Immobilizzazioni/PN — una leva sugli investimenti, non un indice di
+        # indebitamento; l'Allegato E lo etichetta "Indice di Indebitamento" e il consulente si
+        # aspetta debiti/PN). Stessa definizione di Debt to Equity: un solo calcolo, due nomi
+        # storici nello stesso risultato.
+        leverage_ratio = debt_to_equity
 
         # Debt to Production Value = Debiti Totali / Valore della Produzione
         debt_to_production = self.safe_divide(
@@ -256,11 +262,15 @@ class FinancialRatiosCalculator(BaseCalculator):
             self.inc.revenue
         )
 
-        # ROD = Costo del Denaro = Oneri Finanziari / Debiti Totali
-        rod = self.safe_divide(
-            self.inc.ce15_oneri_finanziari,
-            self.bs.total_debt
-        )
+        # ROD = Costo del Denaro = Oneri Finanziari / Debito Finanziario (banche, altri
+        # finanziatori, obbligazioni) — non Debiti Totali, che comprendono i fornitori (C03,
+        # lotto 2 fix rilievi 2026-09-26). Stessa definizione di `BalanceSheet.financial_debt_total`.
+        # Senza debito finanziario il ROD è indefinito, non zero (fix round 1, review lotto 2):
+        # un'azienda senza banche/altri finanziatori/obbligazioni non ha "un costo del denaro pari
+        # a zero", non ha un costo del denaro da misurare — `safe_divide` con default 0 lo
+        # dichiarerebbe silenziosamente pulito.
+        financial_debt = self.bs.financial_debt_total
+        rod = self.safe_divide(self.inc.ce15_oneri_finanziari, financial_debt) if financial_debt > 0 else None
 
         # EBITDA Margin = EBITDA / Fatturato
         ebitda_margin = self.safe_divide(
@@ -284,7 +294,7 @@ class FinancialRatiosCalculator(BaseCalculator):
             roe=self.round_decimal(roe, 4),
             roi=self.round_decimal(roi, 4),
             ros=self.round_decimal(ros, 4),
-            rod=self.round_decimal(rod, 4),
+            rod=self.round_decimal(rod, 4) if rod is not None else None,
             ebitda_margin=self.round_decimal(ebitda_margin, 4),
             ebit_margin=self.round_decimal(ebit_margin, 4),
             net_margin=self.round_decimal(net_margin, 4)
@@ -308,17 +318,35 @@ class FinancialRatiosCalculator(BaseCalculator):
             self.bs.total_assets
         )
 
-        # DMAG = Giorni di Magazzino = 360 * Rimanenze / Fatturato
-        inventory_turnover_days = self.safe_divide(
-            Decimal(days_in_year) * self.bs.sp05_rimanenze,
-            self.inc.revenue
+        # DMAG = Giorni di Magazzino = 360 * Rimanenze / Consumo di materie prime (C02, lotto 2 fix
+        # rilievi 2026-09-26: era / Fatturato, che non ha alcun legame col magazzino di materie).
+        # Consumo = ce05 + ce10 (variazione rimanenze materie prime, convenzione OIC B11), stessa
+        # convenzione di `calculations/forecast_engine.py::consumo_base_materie`. Un consumo non
+        # positivo (frequente: nessuna riga di materie prime distinta, es. servizi) rende il DMAG
+        # indefinito, non zero (fix round 1, review lotto 2): `safe_divide` con default 0
+        # dichiarerebbe un magazzino istantaneo che non è mai stato misurato.
+        consumo_materie = (self.inc.ce05_materie_prime or Decimal('0')) + (self.inc.ce10_var_rimanenze_mat_prime or Decimal('0'))
+        inventory_turnover_days = (
+            self.safe_divide(Decimal(days_in_year) * self.bs.sp05_rimanenze, consumo_materie)
+            if consumo_materie > 0 else None
         )
 
-        # DCRED = Giorni di Credito = 360 * Crediti / Fatturato
-        total_receivables = self.bs.sp06_crediti_breve + self.bs.sp07_crediti_lungo
-        receivables_turnover_days = self.safe_divide(
-            Decimal(days_in_year) * total_receivables,
-            self.inc.revenue
+        # DCRED = Giorni di Credito = 360 * Crediti verso clienti / Fatturato (C02, lotto 2 fix
+        # rilievi 2026-09-26: erano gli aggregati sp06+sp07, che comprendono crediti tributari e
+        # diversi — non commerciali).
+        trade_receivables = (
+            (self.bs.sp06a_crediti_clienti_breve or Decimal('0')) +
+            (self.bs.sp07a_crediti_clienti_lungo or Decimal('0'))
+        )
+        # F1 (Critico, revisione finale lotto 2, 2026-09-26): sp06a+sp07a a zero mentre
+        # l'aggregato sp06+sp07 resta positivo non è "zero crediti commerciali" — è un
+        # import che non ha classificato i crediti come clienti (finiscono nei secchi di
+        # ripiego sp06g/sp07g). Un DSO di 0 in quel caso sarebbe inventato: None, come
+        # ROD e DIO (fix round 1).
+        receivables_total = self.bs.sp06_crediti_breve + self.bs.sp07_crediti_lungo
+        receivables_turnover_days = (
+            None if trade_receivables == 0 and receivables_total > 0
+            else self.safe_divide(Decimal(days_in_year) * trade_receivables, self.inc.revenue)
         )
 
         # DDEB = Giorni di Debito (dilazione fornitori) = 360 * Debiti v/fornitori / Acquisti.
@@ -336,26 +364,33 @@ class FinancialRatiosCalculator(BaseCalculator):
             purchases if purchases > 0 else self.inc.revenue
         )
 
-        # DCCN = Giorni CCN = 360 * CCN / Fatturato
+        # DCCN = Giorni CCN = 360 * CCN / Fatturato — CCN di C05 (attivo corrente - passivo
+        # corrente, simmetrico sui ratei), non `working_capital_net` (F7, lotto 2 fix rilievi
+        # 2026-09-26): stesso CCN di TdCCN, e lo stesso della sezione 8/Allegato E (CCN, current
+        # ratio, quick ratio).
+        field_value = lambda field: getattr(self.bs, field)
+        ccn_giorni = attivo_corrente(field_value) - passivo_corrente(field_value)
         working_capital_days = self.safe_divide(
-            Decimal(days_in_year) * self.bs.working_capital_net,
+            Decimal(days_in_year) * ccn_giorni,
             self.inc.revenue
         )
 
-        # Cash Conversion Cycle = DMAG + DCRED - DDEB
+        # Cash Conversion Cycle = DMAG + DCRED - DDEB. Un DMAG o un DSO indefinito rende
+        # indefinito anche il ciclo (fix round 1 per il DMAG, F1 per il DSO — review lotto 2):
+        # sommare None non è possibile, e sommare uno zero al suo posto dichiarerebbe un
+        # magazzino o un credito sereno che nessuno ha misurato.
         cash_conversion_cycle = (
-            inventory_turnover_days +
-            receivables_turnover_days -
-            payables_turnover_days
+            inventory_turnover_days + receivables_turnover_days - payables_turnover_days
+            if inventory_turnover_days is not None and receivables_turnover_days is not None else None
         )
 
         return ActivityRatios(
             asset_turnover=self.round_decimal(asset_turnover, 4),
-            inventory_turnover_days=self.round_decimal(inventory_turnover_days, 0),
-            receivables_turnover_days=self.round_decimal(receivables_turnover_days, 0),
+            inventory_turnover_days=self.round_decimal(inventory_turnover_days, 0) if inventory_turnover_days is not None else None,
+            receivables_turnover_days=self.round_decimal(receivables_turnover_days, 0) if receivables_turnover_days is not None else None,
             payables_turnover_days=self.round_decimal(payables_turnover_days, 0),
             working_capital_days=self.round_decimal(working_capital_days, 0),
-            cash_conversion_cycle=self.round_decimal(cash_conversion_cycle, 0)
+            cash_conversion_cycle=self.round_decimal(cash_conversion_cycle, 0) if cash_conversion_cycle is not None else None
         )
 
     # ============= COVERAGE RATIOS =============
@@ -367,8 +402,9 @@ class FinancialRatiosCalculator(BaseCalculator):
         Returns:
             CoverageRatios with fixed assets coverage indices
         """
-        # (CN+PF)/AF - Coverage of Fixed Assets with Equity and LT Debt
-        equity_plus_ltdebt = self.bs.total_equity + self.bs.sp17_debiti_lungo
+        # (CN+PF+TFR)/AF - Coverage of Fixed Assets with Equity, LT Debt and TFR (C07, lotto 2 fix
+        # rilievi 2026-09-26: il TFR è una fonte consolidata come il debito a lungo, non era incluso).
+        equity_plus_ltdebt = self.bs.total_equity + self.bs.sp17_debiti_lungo + self.bs.sp15_tfr
         fixed_assets_coverage_with_equity_and_ltdebt = self.safe_divide(
             equity_plus_ltdebt,
             self.bs.fixed_assets
@@ -408,11 +444,17 @@ class FinancialRatiosCalculator(BaseCalculator):
             self.bs.sp05_rimanenze
         )
 
-        # TdC = RIC/LD (Revenue / Receivables)
-        total_receivables = self.bs.sp06_crediti_breve + self.bs.sp07_crediti_lungo
+        # TdC = RIC/LD (Revenue / Receivables) — sui soli crediti commerciali (F7, lotto 2 fix
+        # rilievi 2026-09-26: erano gli aggregati sp06+sp07, che comprendono crediti tributari e
+        # diversi). Stessa perimetrazione del DSO (`receivables_turnover_days`, C02): «360/TdC» in
+        # etichetta dev'essere lo stesso numeratore/denominatore del DSO che gli sta accanto.
+        trade_receivables = (
+            (self.bs.sp06a_crediti_clienti_breve or Decimal('0')) +
+            (self.bs.sp07a_crediti_clienti_lungo or Decimal('0'))
+        )
         receivables_turnover = self.safe_divide(
             self.inc.revenue,
-            total_receivables
+            trade_receivables
         )
 
         # TdD = (CO+AC+ODG)/PC (Operating Costs / Current Liabilities)
@@ -426,10 +468,14 @@ class FinancialRatiosCalculator(BaseCalculator):
             self.bs.current_liabilities
         )
 
-        # TdCCN = RIC/CCN (Revenue / Working Capital)
+        # TdCCN = RIC/CCN (Revenue / Working Capital) — CCN di C05 (attivo corrente - passivo
+        # corrente, simmetrico sui ratei), non `working_capital_net` (F7, lotto 2 fix rilievi
+        # 2026-09-26): altrimenti «360/TdCCN» (giorni CCN) e TdCCN userebbero due CCN diversi.
+        field_value = lambda field: getattr(self.bs, field)
+        ccn = attivo_corrente(field_value) - passivo_corrente(field_value)
         working_capital_turnover = self.safe_divide(
             self.inc.revenue,
-            self.bs.working_capital_net
+            ccn
         )
 
         # TdAT = RIC/TA (Revenue / Total Assets)
@@ -458,8 +504,10 @@ class FinancialRatiosCalculator(BaseCalculator):
         # Calculate base ratios first
         profitability = self.calculate_profitability_ratios()
 
-        # Spread = ROI - ROD
-        spread = profitability.roi - profitability.rod
+        # Spread = ROI - ROD. Un ROD indefinito (nessun debito finanziario) rende indefinito anche
+        # lo spread (fix round 1, review lotto 2): sottrarre None non è possibile, e sostituirlo con
+        # zero dichiarerebbe un costo del denaro che non è mai stato misurato.
+        spread = profitability.roi - profitability.rod if profitability.rod is not None else None
 
         # Financial Leverage Effect = (PC+PF)/CN
         total_liabilities = self.bs.current_liabilities + self.bs.sp17_debiti_lungo
@@ -481,7 +529,7 @@ class FinancialRatiosCalculator(BaseCalculator):
         )
 
         return ExtendedProfitabilityRatios(
-            spread=self.round_decimal(spread, 4),
+            spread=self.round_decimal(spread, 4) if spread is not None else None,
             financial_leverage_effect=self.round_decimal(financial_leverage_effect, 4),
             ebitda_on_sales=self.round_decimal(ebitda_on_sales, 4),
             financial_charges_on_revenue=self.round_decimal(financial_charges_on_revenue, 4)

@@ -276,6 +276,13 @@ riclassifica oltre 12 mesi in Rettifiche (o nell'infrannuale) e li scadenzia qui
   si chiude, il nuovo nasce dai giorni medi); per previdenziali e altri debiti **solo se c'è massa
   oltre 12 mesi**, perché con un piano il motore li estingue e non li rigenera — senza massa oltre
   restano governati dalle regole del passo 6.
+- **Crediti oltre 12 mesi, con un piano: l'incasso consuma prima i clienti.** Quando lo
+  scadenziamento che hai scritto in questa card incassa parte della massa oltre 12 mesi, la
+  riduzione si toglie prima da **crediti verso clienti**, poi dalle altre sotto-voci (verso
+  collegate, controllanti, altri crediti) nello stesso ordine, mai sotto zero — non un po' di ogni
+  voce. Se la massa invece cresce, o non hai scritto un piano, il riparto resta proporzionale come
+  prima. I crediti tributari e le imposte anticipate oltre 12 mesi non sono toccati da questa
+  regola: restano calcolati come sempre.
 - **Debiti tributari rateizzati**: il piano nasce solo se il debito oltre 12 mesi dell'anno base
   (`sp17e`) è positivo — apertura = debito tributario totale, saldo = la parte a breve (si versa
   per intero nel primo anno), rateizzato = la parte oltre. Solo il **rateizzato** entra nello

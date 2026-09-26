@@ -3,7 +3,7 @@ from decimal import Decimal as D
 
 from calculations.forecast_engine import _consuma_in_ordine
 from calculations.projection_common import ammortamento_categoria, rata_anno_dopo, rimanenze_materie
-from tests.rilievi_kit import BASE_BS, BASE_CE, genera, generato, per_anno, righe
+from tests.rilievi_kit import BASE_BS, genera, generato, righe
 from tests.test_forecast_altri_finanziatori import _genera as _genera_altri_finanziatori
 from tests.test_forecast_altri_finanziatori import _rows as _rows_altri_finanziatori
 from tests.test_rilievi_ambienta import _banche

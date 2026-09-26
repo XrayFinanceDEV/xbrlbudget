@@ -24,9 +24,11 @@ LETTURE = {
     "A01": ("Confermato solo come previsionale vecchio nel PDF (A01-bis)",
             "Confermato solo come previsionale vecchio nel PDF (A01-bis); motore e wizard corretti"),
     "A03": ("Non riprodotto", "Motore non riprodotto; sintomo spiegato da A01-bis"),
-    "A04": ("Confermato sulla riga del consulente (sp07g)",
-            "Confermato sul mix del consulente (sp07a 35.231 + sp07g 9.769): l'incasso di 1.000 si ripartisce per "
-            "proporzione, sp07g 2027 = 9.551,91 invece di 8.769; tutto su sp07g risolto il 2026-09-24; sp07a verde"),
+    "A04": ("Risolto nel lotto 1 fix rilievi (2026-09-26), su decisione del proprietario",
+            "Risolto nel lotto 1 fix rilievi (2026-09-26), su decisione del proprietario: con un piano "
+            "crediti_commerciali l'incasso della massa oltre 12 mesi consuma prima sp07a (clienti), poi le altre "
+            "sotto-voci in ordine, mai sotto zero (_consuma_in_ordine) — non più il riparto proporzionale che sul "
+            "mix del consulente (sp07a 35.231 + sp07g 9.769) spostava sp07g a 9.551,91 invece di 8.769"),
     "A05": ("Comportamento voluto (beb33c5)",
             "Comportamento voluto (beb33c5) che produce il sintomo: passare a Manuale da «ricavi» congela la "
             "crescita — decisione del proprietario"),

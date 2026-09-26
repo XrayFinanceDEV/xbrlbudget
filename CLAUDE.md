@@ -403,7 +403,7 @@ ciò che non si può non sapere. Ogni voce dice la regola e **cosa si rompe** a 
   `campo_dichiarato: true`.
 - **Una liquidazione TFR oltre il fondo disponibile si rifiuta** (`tfr_payments`,
   `details['tfr']`): clamparla lascerebbe in cassa un'uscita mai avvenuta.
-- **Lotto 1 fix rilievi (2026-09-26): sei regole del motore cambiano numeri su scenari esistenti,
+- **Lotto 1 fix rilievi (2026-09-26): sette regole del motore cambiano numeri su scenari esistenti,
   e ognuna dichiara la propria diagnostica — una chiave assente non va letta come «tutto regolare».**
   TFR (`ce08a`) è sempre `ce08b/13,5`, non più capato al residuo del personale: se supera il totale,
   questo si ricompone come somma e `ce08d` va a zero (`details['personale_ricomposto']`, `None`
@@ -418,8 +418,11 @@ ciò che non si può non sapere. Ogni voce dice la regola e **cosa si rompe** a 
   ripetono più dall'anno base. Un contratto scadenziato a mano (`repayments`) che nell'ultimo anno
   di piano non copre l'anno dopo ripete l'ultima rata a breve invece di lasciare l'intero residuo a
   lungo termine oltre l'orizzonte (`rata_ripetuta` in `details['debito_bancario']['contratti']` e in
-  `details['altri_finanziatori']['contratti']`). → sezione «Forecasting Engine (Budget)» sopra per i
-  dettagli di ciascuna regola.
+  `details['altri_finanziatori']['contratti']`). Con un piano `crediti_commerciali`, l'incasso della
+  massa oltre 12 mesi consuma prima `sp07a` (clienti), poi le altre sotto-voci in ordine, mai sotto
+  zero — non più un riparto proporzionale che spostava la riga sbagliata quando clienti e altri
+  crediti oltre 12 mesi convivono (`_consuma_in_ordine`). → sezione «Forecasting Engine (Budget)»
+  sopra per i dettagli di ciascuna regola.
 - **`ForecastYear.engine_meta` è `NULL` su ogni previsionale generato prima di questo lotto: è
   «non lo so», non un motore vecchio da segnalare.** Solo un confronto fra due firme lette (non fra
   una firma e la sua assenza) può dire che un previsionale è stato generato da una versione
@@ -741,6 +744,17 @@ defaults to 100% of the prior year's tax unless an explicit `tax_advances_paid` 
 zero** overrides it (`tax_settlement_saldo_acconto`, `calculations/projection_common.py`).
 Before this lotto tax debt never left the balance sheet and projected cash was inflated by one
 year's unpaid tax — a defect that balanced, so no check ever saw it.
+**A04 (lotto 1 fix rilievi, 2026-09-26): with a `crediti_commerciali` runoff plan, collecting the
+long side consumes the trade sub-lines in order, not proportionally.** When the schedule set at
+step 5 of the wizard collects part of the balance beyond 12 months, the reduction is taken first
+from `sp07a` (clienti), then `sp07b`/`sp07c`/`sp07d`/`sp07g` in that order, never below zero
+(`_consuma_in_ordine`, `calculations/forecast_engine.py`) — instead of a proportional split, which
+used to move the wrong row whenever clienti and the other over-12-months receivables coexist.
+Without a plan, or when the mass grows instead of shrinking, the split stays proportional as
+before (falls back to `_alloc`'s behaviour). `sp07e` (crediti tributari) and `sp07f` (imposte
+anticipate) are untouched — computed exactly as before, outside `_consuma_in_ordine`.
+`frontend/lib/budget-pregresso-oltre.ts` (`OLTRE_NOTA.crediti_commerciali`) tells the wizard user
+the order.
 Every CE line (32 `ce*_override` columns, from `/forecast/income`) and every BS line (the
 `sp_overrides` JSON bag, from `/forecast/balance`) can be forced to an absolute value that beats the
 growth percentage — except the rows the plan calendar regenerates: the long side of a balance with
@@ -751,7 +765,9 @@ free operating row. Those are refused with an Italian `ValueError` (`_rifiuto_ov
 `_normalize_balance_sheet_cents`) instead of being saved and silently overwritten. →
 [docs/budget/API-PREVISIONALE.md](docs/budget/API-PREVISIONALE.md)
 **`ForecastYear.engine_meta`** (JSON column, `migrate_db.py`) records `{"engine_version":
-ENGINE_VERSION, "pareggio": details['pareggio']}` on every generation. `ENGINE_VERSION`
+ENGINE_VERSION, "pareggio": details['pareggio']}` on every generation. The local DB needs that
+migration run once (`python migrate_db.py financial_analysis.db`) — without it the column does not
+exist and every forecast read answers 500, not just a missing signature. `ENGINE_VERSION`
 (`calculations/forecast_engine.py`) is a string constant bumped whenever a lotto changes the
 engine's numbers — this lotto brings it to `"2"`. Existing `ForecastYear` rows have `engine_meta =
 NULL`: that means **«I don't know», never «stale»** — there is no earlier signature to compare

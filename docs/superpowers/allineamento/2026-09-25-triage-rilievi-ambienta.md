@@ -121,8 +121,10 @@ Le letture a mano (`LETTURE` in `tools/triage_rilievi.py`) prevalgono sullo Stat
 
 Fix sul motore (`docs/superpowers/specs/2026-09-26-fix-rilievi-ambienta-design.md` §3, branch
 `fix/rilievi-ambienta`, task 1-8 del piano). `tools/triage_rilievi.py::LETTURE` aggiornato per B01, B02, B03, B05,
-E05 — «Risolto nel lotto 1 fix rilievi (2026-09-26)» (E05 con «su decisione del proprietario»); il banco
-(`tests/test_rilievi_ambienta.py`) conferma: i cinque test passano senza marcatore `xfail`.
+A04, E05 — «Risolto nel lotto 1 fix rilievi (2026-09-26)» (A04 ed E05 con «su decisione del proprietario»); il
+banco (`tests/test_rilievi_ambienta.py`) conferma: `../budget/backend/venv/bin/python -m pytest
+tests/test_rilievi_ambienta.py -q -p no:warnings` → **16 passed, 11 xfailed** — i sei rilievi del lotto passano
+tutti senza marcatore `xfail`, i soli xfail residui sono del lotto 2 (A01-bis, A02, C01-C09), come atteso.
 
 - **B01** — `ce10_var_rimanenze_mat_prime` segue ora lo stato patrimoniale delle sole materie (sp05a), non più i
   ricavi; il DIO delle materie si deduce dal consumo (ce05 + ce10), non dal fatturato
@@ -139,9 +141,14 @@ E05 — «Risolto nel lotto 1 fix rilievi (2026-09-26)» (E05 con «su decisione
   d'ingresso, piena dopo; proventi e oneri straordinari valgono zero in ogni anno di piano, salvo override
   esplicito. Il comportamento criticato dal consulente è quello che i due test caratterizzavano prima del lotto —
   ora asseriscono la regola scelta.
-- **A04** — **in corso, Task 7** (worktree separato `../budget-fix-rilievi-t7`, branch `fix/rilievi-t7` da
-  `c1f621b`, poi cherry-pick su `fix/rilievi-ambienta`): non ancora nel banco di questo lotto. `LETTURE['A04']`
-  resta quella del 2026-09-25 finché il cherry-pick non atterra; il verdetto si aggiorna nel prossimo giro.
+- **A04** — **Risolto nel lotto 1 fix, 2026-09-26, su decisione del proprietario** (Task 7, worktree separato
+  `../budget-fix-rilievi-t7`, branch `fix/rilievi-t7` da `c1f621b`, cherry-pick `3eda49d` su
+  `fix/rilievi-ambienta`): con un piano `crediti_commerciali` l'incasso della massa oltre 12 mesi consuma prima
+  `sp07a` (clienti), poi `sp07b/c/d/g` in ordine, mai sotto zero (`_consuma_in_ordine`,
+  `calculations/forecast_engine.py`) — non più il riparto proporzionale che sul mix del consulente (sp07a 35.231 +
+  sp07g 9.769) spostava sp07g a 9.551,91 invece di 8.769. Senza piano, o quando la massa cresce, il riparto resta
+  proporzionale come prima; `sp07e`/`sp07f` non toccati. Nota nel wizard
+  (`frontend/lib/budget-pregresso-oltre.ts::OLTRE_NOTA.crediti_commerciali`).
 - **Firma del motore** — `ForecastYear.engine_meta` (`{"engine_version", "pareggio"}`) e `ENGINE_VERSION = "2"`
   (`calculations/forecast_engine.py`), scritti a ogni generazione dal Task 1 in poi; `NULL` sui previsionali
   generati prima significa «non lo so», mai un motore vecchio da segnalare.

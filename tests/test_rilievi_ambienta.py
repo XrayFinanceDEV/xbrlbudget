@@ -65,9 +65,11 @@ PREGRESSO_A04 = {
 
 
 def test_A04_incasso_scadenziato_sui_crediti_oltre_12_mesi_arriva_allo_sp():
-    """A04 · Passo 5: incasso di 1.000 nel 2027 sui crediti oltre 12 mesi; l'interfaccia dice «resta 8.769»,
-    lo SP tiene il saldo intero. Qui sulla base com'è (oltre tutto su sp07a, clienti): 45.000 → 44.000 nel 2027.
-    La riga del consulente è però sp07g: vedi test_A04_incasso_scadenziato_arriva_agli_altri_crediti_oltre_12_mesi."""
+    """A04 · Passo 5, fix confermato (M6, revisione finale lotto 1, 2026-09-26 — docstring corretta:
+    descriveva ancora il difetto al presente): incasso di 1.000 nel 2027 sui crediti oltre 12 mesi;
+    l'interfaccia dice «resta 8.769» e lo SP lo riflette davvero. Qui sulla base com'è (oltre tutto su
+    sp07a, clienti): 45.000 → 44.000 nel 2027. La riga del consulente è però sp07g: vedi
+    test_A04_incasso_scadenziato_arriva_agli_altri_crediti_oltre_12_mesi."""
     rows = righe()
     rows[0]["pregresso"] = PREGRESSO_A04
     e = generato(genera(rows))

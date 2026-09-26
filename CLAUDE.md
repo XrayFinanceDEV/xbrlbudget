@@ -411,8 +411,10 @@ ciò che non si può non sapere. Ogni voce dice la regola e **cosa si rompe** a 
   `tfr_limitato: true`). Gli ammortamenti tengono separati il residuo dei cespiti esistenti e quello
   di ogni nuovo investimento (`details['ammortamenti']`), e un nuovo investimento entra a metà
   aliquota il primo anno: un anno con investimenti mostra quindi meno ammortamento e più utile
-  imponibile di prima. `ce10_var_rimanenze_mat_prime` si deriva dallo stato patrimoniale delle sole
-  materie (`sp05a`), non più dai ricavi (`details['rimanenze_materie']`); un `ce10_override` oltre
+  imponibile di prima. `ce10_var_rimanenze_mat_prime` si deriva ora dallo stato patrimoniale delle
+  sole materie (`sp05a`, `details['rimanenze_materie']`) — corretto dal rilievo M7 della revisione
+  finale, 2026-09-26: **prima `ce10` restava costante al valore dell'anno base**, ed erano invece le
+  rimanenze (`sp05`) a seguire i ricavi, non il contrario. Un `ce10_override` oltre
   la giacenza in apertura si rifiuta con un errore italiano, non clampa a zero. I proventi/oneri
   straordinari (`ce18`, `ce19`) valgono zero in ogni anno di piano salvo override esplicito: non si
   ripetono più dall'anno base. Un contratto scadenziato a mano (`repayments`) che nell'ultimo anno

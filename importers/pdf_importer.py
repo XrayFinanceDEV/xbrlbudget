@@ -1428,11 +1428,9 @@ def import_pdf_balance_sheet(
                         # prove that every other unclassified row has been recovered.
                 except Exception as _cn_err:
                     logger.warning(f"Route C: contra-netting saltato: {_cn_err}")
-                # Anchor sp13 to the document's DECLARED result for the CHOSEN candidate,
-                # whatever extractor produced it (the deterministic parser may leave sp13=0
-                # or unanchored — budget_342/367). Idempotent on the CoGe result (already
-                # reconciled inside the extractor). This makes sp13 = declared before the
-                # CE↔SP identity step aligns the CE to it.
+                # Compare the chosen candidate with the declared result. Only an
+                # omitted sp13 independently confirmed by the printed result, CE
+                # and SP gap can be recovered; CE↔SP remains diagnostic.
                 # A parser that already produced an exact, self-balanced sheet (e.g. the
                 # by-sign verifica parser) flags itself authoritative: skip the declared
                 # reconcile, which would mis-anchor sp13 to a prior-year result account.
@@ -1592,18 +1590,9 @@ def import_pdf_balance_sheet(
         )
         sc_quadratura_warnings.extend(_detail_report.get('warnings', []))
 
-        # GENERAL rule for ALL routes: enforce the accounting identity utile_CE == sp13.
-        # The result of the year is one number that must appear identically on the CE
-        # (bottom line) and the SP (sp13). SP and CE are extracted independently and drift,
-        # so the "Verifica CE ↔ SP" fails on almost every file. sp13 is the authoritative
-        # anchor (pinned by the balance identity, and set to the declared result on route C);
-        # we align the CE to it by plugging the gap into a CE line. Applied to A/B and C alike.
-        # CE↔SP: default to trusting sp13 (balance-anchored, usually correct; = declared
-        # result on route C) and aligning the CE to it. The DECLARED current Utile/Perdita is
-        # the arbiter: it flips the decision to "trust the CE and fix sp13" (moving the
-        # PRIOR-year result into reserves) ONLY when the declared value confirms the CE. This
-        # catches the prior-year-utile case WITHOUT corrupting a correct sp13 when the CE is
-        # garbage (sign/parse bug) and no declared anchor exists (budget_413).
+        # Diagnose the CE/SP result gap for PDF routes. The helper records
+        # differences, including comparisons with a declared result when present,
+        # without changing accounting fields or creating a balancing entry.
         try:
             from importers.iv_cee_hierarchy import enforce_ce_sp_identity
             from importers.pdf_extractor_llm import _declared_control_totals

@@ -117,20 +117,24 @@ fermato a metà, le colonne in cima sono solo gli anni che ha davvero prodotto.
 
 - Due slider, **Materie prime** e **Servizi**, con la casella **«% fissa»** accanto: «Al variare
   del fatturato, quale parte resta costante?». Sotto ciascuno, la barra *Fissa · …* / *Variabile ·
-  …* sull'importo dell'anno base. La legenda: la parte variabile segue il fatturato in proporzione
-  — nessuna ipotesi da inserire —, la parte fissa parte dall'inflazione, correggibile qui sotto.
+  …* sull'importo dell'anno base. La legenda: la parte variabile segue il fatturato quando lo
+  scostamento della tabella è zero; la parte fissa parte dall'inflazione, correggibile qui sotto.
   Se gli anni hanno quote diverse, la schermata avvisa che muovendo lo slider — o digitando nella
   casella — li allinei tutti a quello che imposti.
-- La tabella **«Come si muovono i costi»**, in due gruppi:
+- La tabella **«Come si muovono i costi»** comprende:
   - **Parte fissa** (*Materie prime · fissa*, *Servizi · fissa*): precompilata con l'inflazione
     del passo 1. Una casella **azzurra** segue l'inflazione: cambia se la cambi al passo 1. Una
     casella che hai scritto tu resta tua; svuotarla la riporta automatica. Il pulsante **«Riallinea
     all'inflazione»** rimette tutte le caselle in automatico.
+  - **Parte variabile** (*Materie prime · variabile*, *Servizi · variabile*): lo scostamento in
+    punti rispetto alla crescita dei ricavi. Zero o casella vuota mantiene l'incidenza sui
+    ricavi; un valore negativo la riduce, uno positivo la aumenta. Il client scrive nel driver
+    del motore `revenue_growth_pct + scostamento` e conserva i marker
+    `variable_materials_growth_auto` / `variable_services_growth_auto` per lo stato della casella.
   - **Ipotesi manuali** (*Personale*, *Godimento beni di terzi*, *Oneri diversi di gestione*):
     partono da 0, variazione % sull'anno precedente.
-  - La parte variabile non ha più una riga: segue i ricavi del passo 2 per costruzione, senza
-    alcuna ipotesi da scrivere. Sono sparite anche la vecchia riga «quota fissa anno per anno» (lo
-    slider resta l'unico modo di differenziarla per anno) e le due righe della parte variabile.
+  La vecchia riga «quota fissa anno per anno» è stata sostituita dagli slider, che restano il
+  modo di differenziarla per anno.
 - Card **«Calcolate in altri passi»** (automatico): **Ammortamenti** (quote esistenti più i nuovi
   investimenti → passo 6), **Oneri finanziari** (mutui esistenti, nuovi finanziamenti, scoperto →
   passi 5 e 6), **Imposte** (aliquota proposta dall'ultimo consuntivo depositato, o scelta → passo 7); un valore forzato a mano in
@@ -237,8 +241,8 @@ riclassifica oltre 12 mesi in Rettifiche (o nell'infrannuale) e li scadenzia qui
   piano» — e «oltre il saldo» in rosso quando la somma supera la massa (il motore lo rifiuta).
 - **Debiti verso banche** (tutta larghezza): occhiello «{totale} € nel bilancio {anno} · di cui
   {sp16a} € a breve».
-  1. *Dividi i debiti a breve*: **Fidi e anticipi su fatture** (importo, con la regola
-     **Costanti** / **Seguono i ricavi** e un tasso) e, calcolata, la **quota dei mutui entro 12
+  1. *Dividi i debiti a breve*: **Fidi e anticipi su fatture** (importo e tasso; il saldo
+     segue la regola costante) e, calcolata, la **quota dei mutui entro 12
      mesi** = debiti bancari a breve dell'anno base − fidi. Fidi oltre quel totale: «da
      correggere», il motore rifiuta. Una nota: «Se la cassa va in negativo il piano riutilizza i
      fidi; oltre questo importo compare un avviso.»
@@ -424,10 +428,12 @@ l'acconto di N è di default il **100%** dell'imposta N−1 — o l'importo che 
 vuol dire «zero acconti», vuol dire «non dichiarato», e il motore ricade sulla percentuale. Le
 rate del piano, scadenziate al passo 5, muovono il solo rateizzato, mai il saldo.
 
-La **via manuale** è un'alternativa, non un complemento: valorizzare una percentuale su
-*Debiti tributari entro* (o su *Crediti tributari* al passo 4) fa muovere i debiti tributari per
-crescita e **ignora il piano** di saldo, rate e acconti scadenziato al passo 5. Quando succede, il
-motore lo dichiara e la schermata lo dice.
+La **via manuale del budget** si attiva valorizzando *Debiti tributari entro %*
+(`sp16e_growth_pct`) al passo 7: i debiti tributari si muovono per crescita e il motore
+**ignora il piano** di saldo, rate e acconti scadenziato al passo 5, dichiarandolo nei dettagli.
+*Crediti tributari %* (`sp06e_growth_pct`) è al passo 5 e non attiva la via manuale: scala la
+quota storica dei crediti dentro il calcolo automatico. Il motore infrannuale mantiene una regola
+diversa: lì entrambe le percentuali attivano la via manuale.
 
 Sull'aliquota, **quello che scrivi è quello che gira** (commercialista, 2026-09-18): il motore
 applica `tax_rate` così com'è (`ForecastEngine._tax_components`). L'effettiva dell'anno base non

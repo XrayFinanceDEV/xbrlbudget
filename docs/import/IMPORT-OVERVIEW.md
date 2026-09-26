@@ -7,9 +7,8 @@
 > [REGOLE-IMPORT-00-INDICE.md](REGOLE-IMPORT-00-INDICE.md), il cui §5 elenca i disallineamenti
 > uno per uno. Questo testo resta utile come contesto architetturale e storico.
 
-> Documento **autosufficiente**: spiega dall'inizio alla fine **come un bilancio viene
-> importato e analizzato**, con **tutte le regole di ogni route**, **perché** sono fatte così,
-> i parametri configurabili e i file coinvolti. Non è un indice: incorpora il contenuto dei
+> Documento **storico**: raccoglie l'architettura e le motivazioni delle sessioni 2026-06-15/17.
+> Per le regole operative correnti vale la serie `REGOLE-IMPORT-*`. Non è un indice: incorpora il contenuto dei
 > documenti di lavoro (`IMPORT-ROUTING-TAXONOMY.md`, `IMPORT-BALANCING-SCHEME.md`,
 > `IMPORT-QUADRATURA-ENGINE.md`) e della sezione *PDF Import* di `CLAUDE.md`.
 >
@@ -60,7 +59,7 @@ Due principi guidano l'intero sistema:
 
 ```
 PDF ─▶ [L0 ROUTER] ─▶ rotta (A/B · C · OTHER) ─▶ ESTRATTORE della rotta ─▶
-       [L1→L5 quadratura della rotta] ─▶ [enforce_ce_sp_identity: CE↔SP] ─▶
+       [L1→L5 controlli della rotta] ─▶ [enforce_ce_sp_identity: diagnosi CE↔SP] ─▶
        [MOTORE IV-CEE: leveling + check_quadratura + anti-masking] ─▶
        BalanceSheet + IncomeStatement nel DB ─▶ (analisi / previsionale)
 ```
@@ -81,8 +80,9 @@ PDF ─▶ [L0 ROUTER] ─▶ rotta (A/B · C · OTHER) ─▶ ESTRATTORE della 
    - `ROUTE_TRIAL` (area C) → **LLM CoGe** prima (`extract_trial_balance_with_llm`),
      **deterministico** in fallback (`extract_situazione_contabile`).
 4. **Quadratura della rotta** (L1→L5, §6) sull'estrazione scelta.
-5. **`enforce_ce_sp_identity`** — forza `utile_CE == sp13` su **ogni** route, PRIMA di
-   `validate_balance` (L2-bis, §6).
+5. **`enforce_ce_sp_identity`** — sul percorso PDF misura lo scarto `utile_CE − sp13`
+   senza cambiare CE o SP, prima di `validate_balance` (L2-bis, §6). L'XBRL nativo
+   usa il proprio `check_quadratura`.
 6. **`validate_balance`** (`pdf_mapper`) — gate `Attivo = Passivo + PN`, e fallisce anche se
    `totale_attivo == 0` o se i sub-totali non ricostruiscono i totali dichiarati.
 7. **Normalizzazione `period_months`**: `>= 12 ⇒ None` (anno intero). Vedi §10.
@@ -347,9 +347,10 @@ byte-identici 343/348, uno completo, uno corto). Mitigazioni:
 3. Prompt SP: regole esplicite di *completezza* e *mastro+figli*.
 
 ### Nota costo
-L'unico passo che usa l'API Anthropic (`ANTHROPIC_API_KEY` in `backend/.env`, **non**
-l'abbonamento) è l'**estrazione LLM**, **una volta per file**. Tutto ciò che viene dopo (ratios,
-rating, previsionale) è **puro calcolo locale**: gratuito e ripetibile.
+L'estrazione LLM usa Anthropic per default; i pass testuali CoGe, IV-CEE e dettagli possono
+usare gx10 con `PDF_LLM_PROVIDER_COGE`, `PDF_LLM_PROVIDER_IVCEE` e
+`PDF_LLM_PROVIDER_DETTAGLI`. La vision resta su Anthropic. Ratios, rating e previsionale
+sono calcoli locali.
 
 ---
 
@@ -361,7 +362,7 @@ Schema unico per ogni bilancio, applicato risalendo i livelli. Il livello-chiave
 | **L0 — Rotta** | macro-area (§3), decisa prima di estrarre | leggere il file con le regole giuste fin dall'inizio |
 | **L1 — Pareggio** | `Attivo = Passivo + PN`; il risultato `sp13` è il *gap* quando non è stampato (`_balance_trial_via_result`) | identità contabile di base |
 | **L2 — Riconciliazione ai totali DICHIARATI** ★ | confronta i sub-totali estratti con i **totali di controllo** stampati (`TOTALE A PAREGGIO`, `TOTALE ATTIVITA'`, `UTILE D'ESERCIZIO`) | è qui che si distingue "quadra" da "corretto" |
-| **L2-bis — Quadratura CE↔SP** ★ | `enforce_ce_sp_identity` forza `utile_CE == sp13` su OGNI route | il risultato è un solo numero, in SP (sp13) e in CE (ultima riga) |
+| **L2-bis — Diagnostica CE↔SP** ★ | nel PDF `enforce_ce_sp_identity` registra lo scarto senza cambiare CE o SP; l'XBRL usa `check_quadratura` | la divergenza resta visibile e verificabile |
 | **L3 — Segno e lato** | la **colonna** è verità sul lato (Dare/Avere); costi positivi, ricavi in Avere | non spostare un conto per il nome |
 | **L4 — Lordo→netto** | fondi amm.to / sval. nettati dall'attivo lordo, anche se stampati in colonna passivo | non gonfiare entrambi i lati con le poste rettificative |
 | **L5 — Aggregazione ai conti di legge** | sottoconti CoGe → voce di legge; layout mastro+figli puntati: prendi il **subtotale del mastro UNA volta**, ignora i figli | doppio conteggio se sommi entrambi; perdi "altri" se sommi solo i figli |
@@ -370,10 +371,9 @@ Schema unico per ogni bilancio, applicato risalendo i livelli. Il livello-chiave
 Ogni verifica stampa i propri **totali di controllo**. Sono la verità.
 - `_declared_control_totals(file_path)` li legge (robusto a header lettera-spaziati e numeri
   italiani).
-- `_reconcile_trial_to_declared()`: confronta `sp13` derivato col **risultato dichiarato**. Se
-  differiscono oltre tolleranza (max €50 / 0,5%): la massa mancante è stata persa su un lato →
-  la **riporta** sul lato corto (sp16 se passivo corto, sp09 se attivo corto), **rimette sp13 =
-  risultato dichiarato**, e la espone come `bs['_plug_residual']`.
+- `_reconcile_trial_to_declared()`: confronta `sp13` col **risultato dichiarato** e registra
+  gli scarti senza spostare massa in `sp16`/`sp09`. Può recuperare uno `sp13` omesso soltanto
+  quando risultato stampato, CE e gap dello SP concordano entro 2 €.
 - `check_quadratura` legge `_plug_residual` e alza `masked=True` (> 1% del totale) → warning
   "QUADRATURA MASCHERATA … correggere in Rettifiche".
 
@@ -382,23 +382,13 @@ Ogni verifica stampa i propri **totali di controllo**. Sono la verità.
 > `sp13` (l'utile) è ora **falso**. Il bilancio "quadra" ed è sbagliato. L2 legge i totali
 > dichiarati e confronta. "Quadra" ≠ "corretto".
 
-### L2-bis — CE↔SP (valida su OGNI route)
-SP e CE sono estratti separatamente e l'utile può divergere → la "Verifica CE↔SP" dell'app
-fallirebbe. `enforce_ce_sp_identity` (eseguito in `pdf_importer` DOPO il blocco di ogni route e
-PRIMA di `validate_balance`) forza `utile_CE == sp13` con direzione **decisa per route + arbitro**:
-- **Default**: ci si fida di **sp13** (ancorato al pareggio; su route C è già = risultato
-  dichiarato) e si allinea il CE (plug in `ce12_oneri_diversi` se troppo alto / `ce04_altri_ricavi`
-  se troppo basso) + flag `_ce_sp_plug`.
-- **Arbitro = Utile/Perdita DICHIARATO** (`declared`): vince tra `sp13` e `utile_CE` quello più
-  vicino al dichiarato.
-  - dichiarato conferma il **CE** → lo `sp13` aveva l'utile dell'esercizio **PRECEDENTE**: lo si
-    porta a `utile_CE` e la differenza va nelle **riserve** (`sp12`) — PN totale e Attivo=Passivo
-    invariati (solo ri-etichettatura nel PN). Cap 10% del passivo + riserve non negative,
-    altrimenti ripiega sull'allineamento del CE.
-  - dichiarato conferma lo **sp13** → il CE è errato (bug segno/parsing, es. budget_402/413) → si
-    allinea il CE, **sp13 NON viene toccato**.
-
-No-op quando già coincidono. Garantisce CE↔SP senza corrompere uno `sp13` corretto.
+### L2-bis — CE↔SP nel percorso PDF
+`enforce_ce_sp_identity` viene chiamato dopo l'estrazione e prima di `validate_balance`.
+Misura `utile_CE − sp13`: oltre `max(2 €; 0,1% di |sp13|)` aggiunge
+`_ce_sp_difference` e un warning. Se esiste un utile/perdita dichiarato, registra anche
+lo scarto dei due prospetti rispetto al valore stampato. Non crea `_ce_sp_plug`, non
+sposta importi in `ce04`, `ce12` o riserve e non garantisce il pareggio. L'XBRL nativo
+effettua il proprio controllo tramite `check_quadratura`.
 
 ---
 
@@ -455,27 +445,23 @@ dell'harness.
 ---
 
 ## 8. Pipeline di quadratura per route
-Entrambe le quadrature — **Attivo=Passivo** E **CE↔SP** — su OGNI route, prima di `validate_balance`.
+Nel percorso PDF i controlli di pareggio e CE↔SP non alterano i prospetti.
 
 **Route C (verifica / situazione contabile)**
-1. Estrai con CoGe-LLM **e** parser deterministico → tieni il candidato col `_plug_residual` minore.
-2. `_reconcile_trial_to_declared` sul candidato → **sp13 = utile dichiarato**, residuo sul lato
-   corto (L1+L2).
-3. `enforce_ce_sp_identity(prefer="sp13", declared=…)` → CE↔SP (sp13 autorevole, allinea il CE)
-   (L2-bis).
+1. Estrai i candidati CoGe-LLM e deterministico; scegli con la graduatoria corrente di completezza e validazione.
+2. `_reconcile_trial_to_declared` sul candidato → scarti diagnostici; recupera un `sp13` omesso solo quando risultato stampato, CE e gap SP concordano.
+3. `enforce_ce_sp_identity(prefer="sp13", declared=…)` → misura CE↔SP senza allineare i prospetti.
 4. `validate_balance` (gate Attivo=Passivo).
 
 **Route A/B (IV-CEE)**
 1. `_llm_extract` (single-year corrente + dual-year per il precedente).
-2. `reconcile_ivcee_balance` → se quasi quadrata, tampona il piccolo lato corto sul `TOTALE ATTIVO`
-   dichiarato (L1) — risolve budget_352 sul percorso dual-year.
-3. `enforce_ce_sp_identity(prefer="sp13", declared=…)` → CE↔SP con arbitro (L2-bis).
+2. `reconcile_ivcee_balance` → copia invariata e scarti diagnostici verso pareggio e totali dichiarati.
+3. `enforce_ce_sp_identity(prefer="sp13", declared=…)` → misura CE↔SP senza correzione contabile.
 4. `validate_balance`.
 
 **OTHER / XBRL nativo** (`.xbrl`/`.xml`): `xbrl_parser_enhanced.import_to_database`. I valori sono
-tassati (esatti) → Attivo=Passivo già quadrato; ma anche qui `enforce_ce_sp_identity(prefer="sp13")`
-dopo il mapping, perché lo `utile_CE` ricostruito dai tag può divergere dallo `sp13` taggato
-(budget_361/404) → CE↔SP anche su XBRL. CE-only / non-bilancio → errore onesto.
+tassati e vengono controllati da `check_quadratura`, inclusa l'identità CE↔SP.
+`enforce_ce_sp_identity` non viene chiamato sul percorso XBRL. CE-only / non-bilancio → errore onesto.
 
 ---
 
@@ -572,10 +558,11 @@ nuovo tentativo, che di norma riesce).
 
 | Parametro | File | Default | Effetto |
 |---|---|---|---|
-| `SC_PLUG_REJECT_PCT` | `importers/pdf_importer.py` | `0.20` | sopra → rifiuta best-effort (LLM/onesto); sotto → import con flag Rettifiche |
+| `SC_PLUG_REJECT_PCT` | `importers/pdf_importer.py` | `0.20` | cambia la severità del warning; non rifiuta l'import |
 | `_MASK_PCT` | `importers/iv_cee_hierarchy.py` | `0.01` | soglia diagnostica `masked` in `check_quadratura` |
 | `_COGE_SP_MAX_ATTEMPTS` | `importers/pdf_extractor_llm.py` | `3` | ritentativi del pass SP CoGe (tiene il `_plug_residual` minore) |
-| `ANTHROPIC_API_KEY` | `backend/.env` | — | senza chiave: route C usa il deterministico; A/B falliscono se richiedono LLM |
+| `ANTHROPIC_API_KEY` | ambiente backend | — | necessaria ai pass configurati su Anthropic e alla vision; i pass testuali configurati su gx10 usano `GX10_API_KEY` |
+| `PDF_LLM_PROVIDER_COGE`, `PDF_LLM_PROVIDER_IVCEE`, `PDF_LLM_PROVIDER_DETTAGLI` | ambiente backend | `anthropic` | il valore esatto `gx10` sceglie Qwen locale per ciascun pass testuale |
 
 ---
 

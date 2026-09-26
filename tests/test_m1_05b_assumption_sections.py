@@ -109,6 +109,7 @@ def test_derived_dead_field_set_is_exactly_the_wizard_list():
 
 def test_dead_fields_never_appear_among_emitted_assumptions():
     read_model = _build(_row(2027, supplied=[], investments=Decimal("5000"),
+                             sp06f_growth_pct=Decimal("50"),
                              receivables_short_growth_pct=Decimal("3"), payables_short_growth_pct=Decimal("2"),
                              interest_rate_receivables=Decimal("1"), interest_rate_payables=Decimal("1")))
     emitted = {a.field for section in read_model.sections for a in section.assumptions}

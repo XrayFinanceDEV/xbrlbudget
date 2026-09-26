@@ -63,6 +63,8 @@ sono elencati nel §5 dell'indice).
 | [FORECASTING_GUIDE.md](budget/FORECASTING_GUIDE.md) | Guida Budget & Forecasting, inclusi report finale, readiness, grafici accessibili, narrazioni e anteprima stampa |
 | [TEST_BUDGET_API.md](budget/TEST_BUDGET_API.md) | Riferimento/test degli endpoint REST degli scenari budget |
 | [FINAL-REPORT-PDF.md](budget/FINAL-REPORT-PDF.md) | Storico/backlog M2: gap analysis del PDF server, non comportamento corrente di `/report` |
+| [BUSINESS-PLAN-PDF.md](budget/BUSINESS-PLAN-PDF.md) | Business plan PDF: endpoint, dati e composizione del documento |
+| [REPORT-INFRANNUALE-PDF.md](budget/REPORT-INFRANNUALE-PDF.md) | Report infrannuale PDF e Word: struttura, renderer e fonti dei dati |
 
 ## Frontend — [`frontend/`](frontend/)
 

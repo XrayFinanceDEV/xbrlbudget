@@ -43,7 +43,7 @@ export const STEP_FIELDS: Record<WizardStepKey, readonly string[]> = {
     "existing_debt_repayment_years", "altri_finanz_repayment_years", "sp06e_growth_pct",
   ],
   "patrimoniale-piano": [
-    "sp01_growth_pct", "sp04_growth_pct", "sp06f_growth_pct",
+    "sp01_growth_pct", "sp04_growth_pct",
     "sp08_growth_pct", "sp10_growth_pct", "sp14_growth_pct", "sp16f_growth_pct",
     "sp16g_growth_pct", "sp17d_growth_pct", "sp17f_growth_pct", "sp17g_growth_pct",
     "sp18_growth_pct", "previdenza_scales_with_personnel", "tfr_accrual_suspended", "tfr_payments",
@@ -65,6 +65,8 @@ export const DEAD_FIELDS = [
   "interest_rate_receivables", "interest_rate_payables",
   // La vecchia regola di crescita dei fidi e' conservata solo per leggere i payload legacy.
   "bank_lines_rule",
+  // Le imposte anticipate restano costanti; una crescita salvata in passato non e' letta dal motore.
+  "sp06f_growth_pct",
   // Scelta dell'INFRANNUALE (quali giorni di circolante proiettare), non del
   // percorso budget: nessun passo del wizard la scrive.
   "working_capital_mode",

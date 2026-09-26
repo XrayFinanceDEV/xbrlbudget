@@ -17,12 +17,13 @@ Rules, and where each one comes from:
   comparing it with a schema default — a user may have confirmed the default
   on purpose.  A row whose list is NULL predates provenance tracking and makes
   the whole series ``legacy_unknown``, with one non-blocking diagnostic.
-* **DEAD_FIELDS** (``investments``, ``receivables_short_growth_pct``,
+* **DEAD_FIELDS** (``investments``, ``sp06f_growth_pct``, ``bank_lines_rule``,
+  ``working_capital_mode``, ``receivables_short_growth_pct``,
   ``payables_short_growth_pct``, ``interest_rate_receivables``,
-  ``interest_rate_payables``) are columns no wizard step shows and no active
-  driver path reads; they can never appear as an assumption here because only
-  catalog fields are mapped.  The legacy ``investments`` total is the one dead
-  column that is *not* inert: ``ForecastEngine._get_split_investments`` raises
+  ``interest_rate_payables``) are columns no budget wizard step shows; they can
+  never appear as an assumption here because only catalog fields are mapped.
+  In the budget forecast, the legacy ``investments`` total is not inert:
+  ``ForecastEngine._get_split_investments`` raises
   when it is valued without the tangible/intangible splits, so it is declared
   through a diagnostic instead of being presented as an active driver.
 * **Nested structures** (financing loans, pregresso runoff plans, temporary
@@ -147,7 +148,6 @@ FIELD_LABELS: Mapping[str, str] = {
     "sp01_growth_pct": "Crescita crediti verso soci %",
     "sp04_growth_pct": "Crescita immobilizzazioni finanziarie %",
     "sp06e_growth_pct": "Crescita crediti tributari %",
-    "sp06f_growth_pct": "Crescita imposte anticipate %",
     "sp08_growth_pct": "Crescita attività finanziarie correnti %",
     "sp10_growth_pct": "Crescita ratei e risconti attivi %",
     "sp14_growth_pct": "Crescita fondi per rischi e oneri %",

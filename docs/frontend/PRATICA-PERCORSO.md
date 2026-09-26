@@ -23,9 +23,12 @@ esattamente la via che lasciava un bilancio di verifica **saltare le Rettifiche*
 suoi errori in Confronto, Proiezione, Indicatori e nei due modelli di rating. `/infrannuale`, la
 vecchia rotta del wizard, è oggi un `redirect()` a `/pratica` (`app/infrannuale/page.tsx`).
 
-Altri due ingressi, entrambi in `app/page.tsx`: `nuovaPratica` (avvia una pratica `bilancio`
-già puntata su un'azienda esistente) e `riprendi` (riapre una pratica da uno scenario già creato —
-vedi §4 per il caso «scenario budget legacy»).
+Per un'azienda esistente `app/page.tsx` offre anche `nuovaPratica` (nuovo bilancio),
+`riprendi` (scenario già creato; vedi §4 per il caso «scenario budget legacy») e l'ingresso
+da bilancio esistente (`scegliBilancioEsistente` / `creaDaBilancioEsistente`). Quest'ultimo usa
+`GET /companies/{company_id}/existing-balances` e propone i `FinancialYear` annuali con SP e CE
+presenti. La rotta non filtra la provenienza: può restituire anche una proiezione promossa.
+La schermata li presenta come «bilanci annuali esistenti».
 
 Spec: `docs/superpowers/specs/2026-08-08-percorso-unico-pratica-design.md`. Piano:
 `docs/superpowers/plans/2026-08-08-percorso-unico-pratica.md`. Registro di esecuzione, con ogni
@@ -369,7 +372,7 @@ degli indicatori nel complesso.
 | `frontend/contexts/PraticaActionContext.tsx` | `usePrimaryAction`, il registro a token |
 | `frontend/components/pratica/PraticaActionBar.tsx` | la barra unica di avanzamento |
 | `frontend/app/pratica/page.tsx` | il wizard: stato, auto-load, riidratazione, i sette rami `activeTab` |
-| `frontend/app/page.tsx` | le due card «Nuova pratica», `nuovaPratica`, `riprendi` |
+| `frontend/app/page.tsx` | le due card «Nuova pratica», `nuovaPratica`, `riprendi`, scelta e creazione da bilancio annuale esistente |
 | `frontend/app/budget/page.tsx` | il doppio ingresso: dentro e fuori da una pratica |
 | `frontend/app/layout.tsx` | l'ordine dei provider (`PraticaProvider` sopra `AppProvider`) |
 
@@ -424,8 +427,9 @@ tengono la colonna coerente con sé stessa:
    diversi. Se `forecast_generated` è `false` la tabella resta vuota con l'avviso — dipingere una
    proiezione che non è stata salvata era il difetto di partenza.
 
-Il `tax_rate` inviato è la costante **27,9** (IRES + IRAP), non un'aliquota derivata dalle
-imposte modificate: le imposte proiettate arrivano al motore come `ce20_override`, che vince
+Il `tax_rate` inviato è la proposta di `getAliquotaProposta`, ricavata dall'ultimo consuntivo
+depositato quando disponibile (altrimenti 27,9), e non deriva dalle imposte modificate nella
+tabella. Le imposte proiettate arrivano al motore come `ce20_override`, che vince
 sull'aliquota. Il resto — precedenza degli override, che cosa li azzera, come si legge
 `forecast_generated` — è in [`docs/budget/API-PREVISIONALE.md`](../budget/API-PREVISIONALE.md).
 
@@ -517,7 +521,7 @@ mappa campo → passo sono dati puri in `frontend/lib/budget-wizard-steps.ts`
 | 3 | Costi | Conto economico | `fixed_materials_percentage`, `fixed_services_percentage`, `variable_materials_growth_pct`, `variable_services_growth_pct`, `fixed_materials_growth_pct`, `fixed_services_growth_pct`, `fixed_materials_growth_auto`, `fixed_services_growth_auto`, `variable_materials_growth_auto`, `variable_services_growth_auto`, `personnel_growth_pct`, `rent_growth_pct`, `other_costs_growth_pct` |
 | 4 | Capitale circolante | Stato patrimoniale | `dso_days`, `dio_days`, `dpo_days`, `receivables_long_growth_pct` |
 | 5 | Patrimoniale pregresso | Stato patrimoniale | `bank_lines_amount`, `bank_lines_rate`, `financing_loans`, `existing_debt_repayment_years`, `altri_finanz_repayment_years`, `sp06e_growth_pct` |
-| 6 | Patrimoniale piano | Stato patrimoniale | dodici `sp*_growth_pct` (sp01, sp04, sp06f, sp08, sp10, sp14, sp16f, sp16g, sp17d, sp17f, sp17g, sp18), `previdenza_scales_with_personnel`, `tfr_accrual_suspended`, `tfr_payments`, `financing_amount`, `financing_duration_years`, `financing_interest_rate`, `tangible_investments`, `intangible_investments`, `depreciation_rate`, `depreciation_rate_intangible`, `asset_disposal_nbv`, `asset_disposal_proceeds`, `cash_sweep_enabled`, `cash_sweep_min_cash`, `overdraft_allowed`, `overdraft_limit` |
+| 6 | Patrimoniale piano | Stato patrimoniale | undici `sp*_growth_pct` (sp01, sp04, sp08, sp10, sp14, sp16f, sp16g, sp17d, sp17f, sp17g, sp18), `previdenza_scales_with_personnel`, `tfr_accrual_suspended`, `tfr_payments`, `financing_amount`, `financing_duration_years`, `financing_interest_rate`, `tangible_investments`, `intangible_investments`, `depreciation_rate`, `depreciation_rate_intangible`, `asset_disposal_nbv`, `asset_disposal_proceeds`, `cash_sweep_enabled`, `cash_sweep_min_cash`, `overdraft_allowed`, `overdraft_limit` |
 | 7 | Imposte | Stato patrimoniale | `tax_rate` (proposta dall'ultimo consuntivo depositato), `tax_advances_paid`, `tax_temporary_differences`, `sp16e_growth_pct`, `sp17e_growth_pct` |
 
 Il giro di rilievi del 15/09 ha spostato i confini fra i passi (`fixed_materials_growth_auto` e
@@ -575,7 +579,7 @@ differenza dello scoperto spento di default fuori da quel regime.
 
 **`sp17e_growth_pct` è visibile per anno, non per scenario.** Dentro l'accordion «Posizione
 tributaria manuale» del passo 7, la riga «Debiti tributari oltre %» compare solo quando almeno un
-anno del piano usa la via manuale (`sp06e_growth_pct`/`sp16e_growth_pct` valorizzati su quella
+anno del piano usa la via manuale (`sp16e_growth_pct` valorizzato su quella
 riga), e su un piano **misto** — alcuni anni manuali, altri no — le celle degli anni automatici
 restano inerti con un titolo che lo spiega (`SP17E_NOTA_ANNO_AUTOMATICO`), invece di applicarsi a
 un anno che il motore governa altrove. Quando nessun anno è manuale la riga sparisce del tutto
@@ -600,9 +604,10 @@ tetto dello scoperto superato o una liquidazione TFR oltre il fondo; al passo «
 — che è anche il ripiego di default. Il progresso persiste per scenario in `localStorage`
 (`stepStorageKey`).
 
-**`DEAD_FIELDS`** (`investments`, `receivables_short_growth_pct`, `payables_short_growth_pct`,
-`interest_rate_receivables`, `interest_rate_payables`) sono le colonne che **nessun passo mostra**.
-«Morte» però vuol dire due cose diverse, e la distinzione conta:
+**`DEAD_FIELDS`** comprende `investments`, `receivables_short_growth_pct`,
+`payables_short_growth_pct`, `interest_rate_receivables`, `interest_rate_payables`,
+`bank_lines_rule`, `sp06f_growth_pct` e `working_capital_mode`: **nessun passo le mostra**.
+Per le prime cinque colonne legacy, «morte» vuol dire due cose diverse:
 
 - il giro del salvataggio le divide in due: `investments`,
   `receivables_short_growth_pct` e `payables_short_growth_pct` sono fra le chiavi che
@@ -616,6 +621,11 @@ tetto dello scoperto superato o una liquidazione TFR oltre il fondo; al passo «
   («Investments must be split into intangible_investments and tangible_investments») — cioè un
   valore non nullo in quella colonna non è inerte, ferma la generazione. Le altre quattro il
   motore non le legge davvero: non compaiono in `calculations/`.
+
+`bank_lines_rule` viene normalizzato a `costante` dal servizio di salvataggio;
+`working_capital_mode` appartiene al percorso infrannuale. La percentuale
+`sp06f_growth_pct` può ancora arrivare da uno scenario precedente, ma il motore budget
+la ignora: le imposte anticipate restano costanti salvo un override SP esplicito.
 
 Il componente del passo 3 «Costi» (`components/budget/wizard/steps/StepCosti.tsx`) applica
 l'invariante di CLAUDE.md sulla quota fissa: lo slider chiama `p.updateAll(field, v)` e scrive lo

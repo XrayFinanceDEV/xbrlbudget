@@ -4,6 +4,9 @@
 > importabile (presente e futuro), che NON contiene regole per-singolo-file. Ogni file
 > entra dalla sua **rotta** (L0) e viene quadrato risalendo i livelli L1→L5.
 > Documento di accompagnamento a `IMPORT-ROUTING-TAXONOMY.md` (che copre il routing).
+> Le sezioni storiche su estrazione e quadratura vanno lette insieme alla
+> [serie corrente](REGOLE-IMPORT-00-INDICE.md). I pass CE↔SP e IV-CEE qui sotto
+> descrivono il comportamento attuale, senza i vecchi plug.
 
 ## L0 — Rotta (macro-area)  ·  `bilancio_classifier.classify_bilancio`
 Determinata PRIMA dell'estrazione, sul testo delle prime 14 pagine. Invariata.
@@ -42,36 +45,22 @@ ATTIVITA'/PASSIVITA'`, e di norma un `UTILE/PERDITA D'ESERCIZIO` esplicito. Sono
 
 - `_declared_control_totals(file_path)` li legge (robusto a header lettera-spaziati e numeri
   italiani).
-- `_reconcile_trial_to_declared()`: confronta `sp13` derivato col **risultato dichiarato**.
-  Se differiscono oltre tolleranza (max €50 / 0.5%): la massa mancante è stata persa su un
-  lato → la **riporta** sul lato corto (sp16 se passivo corto, sp09 se attivo corto),
-  **rimette sp13 = risultato dichiarato**, e la espone come `bs['_plug_residual']`.
+- `_reconcile_trial_to_declared()`: confronta `sp13` col **risultato dichiarato** e registra
+  gli scarti diagnostici. Non sposta massa in `sp16`/`sp09` e non forza `sp13`. Può recuperare
+  un `sp13` omesso solo quando risultato stampato, CE e gap dello SP concordano entro 2 €.
 - `check_quadratura` legge `_plug_residual` e alza `masked=True` (>1% del totale) →
   warning "QUADRATURA MASCHERATA … correggere in Rettifiche".
 
-Effetto: il bilancio **quadra con totale e risultato corretti**, e l'incompletezza di
-composizione è **dichiarata** invece che nascosta.
+L'incompletezza di composizione è dichiarata; la riconciliazione non garantisce il pareggio.
 
-## L2-bis — Quadratura CE ↔ SP (identità dell'utile) ★ valida su OGNI route
-Il risultato d'esercizio è UN solo numero: appare come `sp13` nello Stato Patrimoniale E come
-ultima riga del Conto Economico. SP e CE sono estratti separatamente e divergono → la
-"Verifica CE ↔ SP" dell'app fallisce. Step **universale** (`enforce_ce_sp_identity`) eseguito
-in `pdf_importer` DOPO il blocco di ogni route e PRIMA di `validate_balance`. Forza
-`utile_CE == sp13` con direzione **decisa per route + arbitro**:
-
-- **Default**: ci si fida di **sp13** (ancorato al pareggio; su route C è già = risultato
-  dichiarato) e si allinea il CE (plug in `ce12_oneri_diversi` se CE troppo alto / `ce04_altri_ricavi`
-  se troppo basso) + flag `_ce_sp_plug`.
-- **Arbitro = Utile/Perdita DICHIARATO** (`declared`): vince tra `sp13` e `utile_CE` quello più
-  vicino al dichiarato.
-  - dichiarato conferma il **CE** → lo `sp13` aveva l'**utile dell'esercizio PRECEDENTE**: lo si
-    porta a `utile_CE` e la differenza va nelle **riserve** (`sp12`) — PN totale e Attivo=Passivo
-    invariati (solo ri-etichettatura nel PN). Cap 10% del passivo + riserve non negative, altrimenti
-    ripiega sull'allineamento del CE.
-  - dichiarato conferma lo **sp13** → il CE è errato (bug segno/parsing, `utile_CE` da milioni —
-    budget_402/413) → si allinea il CE, **sp13 NON viene toccato**.
-
-Garantisce CE↔SP su ogni file SENZA corrompere uno `sp13` corretto. No-op quando già coincidono.
+## L2-bis — Diagnostica CE ↔ SP (PDF)
+`enforce_ce_sp_identity` è chiamato nel percorso PDF, dopo l'estrazione e prima della
+validazione. Confronta l'utile ricostruito dal CE con `sp13`; oltre la tolleranza
+`max(2 €; 0,1% di |sp13|)` espone `_ce_sp_difference` e un warning. Se è disponibile un
+risultato stampato, espone anche gli scarti di CE e SP rispetto a quel valore. I parametri
+`prefer` e `declared` restano nella firma per compatibilità, ma **non modificano** CE, SP,
+`ce04`, `ce12` o riserve. Il percorso XBRL nativo usa il proprio `check_quadratura` e non
+chiama questa funzione.
 
 ## L3 — Segno e lato
 La **colonna è verità** per il lato (Dare/Avere); non spostare un conto per il nome. Costi
@@ -123,27 +112,24 @@ byte-identici 343/348 — uno completo, uno corto). Mitigazioni generali:
 3. Prompt SP: regole esplicite di *completezza* e *mastro+figli*.
 
 ## Pipeline per route (dove si applica ciascuna quadratura)
-Entrambe le quadrature — **Attivo=Passivo** E **CE↔SP** — sono applicate su OGNI route, in
-`pdf_importer.import_pdf_balance_sheet`, prima di `validate_balance`:
+Per il PDF la riconciliazione ai totali e il confronto CE↔SP precedono la validazione;
+gli scarti restano visibili e non vengono chiusi con un plug:
 
 **Route C (verifica / situazione contabile)**
-1. Estrai con CoGe-LLM **e** parser deterministico → tieni il candidato col `_plug_residual` minore.
-2. `_reconcile_trial_to_declared` sul candidato scelto → **sp13 = utile dichiarato**, residuo su lato corto (L1+L2).
-3. `enforce_ce_sp_identity(prefer="sp13", declared=…)` → **CE↔SP** (sp13 autorevole, allinea il CE) (L2-bis).
+1. Estrai i candidati CoGe-LLM e deterministico; scegli con la graduatoria corrente di completezza e validazione.
+2. `_reconcile_trial_to_declared` sul candidato scelto → scarti diagnostici; recupero di `sp13` solo con tre conferme indipendenti.
+3. `enforce_ce_sp_identity(prefer="sp13", declared=…)` → misura CE↔SP senza allineare i prospetti.
 4. `validate_balance` (gate Attivo=Passivo).
 
 **Route A/B (IV-CEE)**
 1. `_llm_extract` (single-year corrente + dual-year per il precedente).
-2. `reconcile_ivcee_balance` → se l'estrazione è quasi quadrata, tampona il piccolo lato corto sul
-   `TOTALE ATTIVO` dichiarato (L1) — *risolve budget_352 sul percorso dual-year*.
-3. `enforce_ce_sp_identity(prefer="sp13", declared=…)` → **CE↔SP** con arbitro: se il dichiarato
-   conferma il CE, corregge lo sp13 (utile anno prec. → riserve); altrimenti allinea il CE (L2-bis).
+2. `reconcile_ivcee_balance` → copia invariata e scarti diagnostici verso pareggio e totali dichiarati.
+3. `enforce_ce_sp_identity(prefer="sp13", declared=…)` → misura CE↔SP senza correzione contabile.
 4. `validate_balance`.
 
 **OTHER / XBRL nativo** (`.xbrl`/`.xml`): importer XBRL dedicato (`xbrl_parser_enhanced.import_to_database`).
-I valori sono tassati (esatti) → Attivo=Passivo già quadrato. Ma anche qui si applica
-`enforce_ce_sp_identity(prefer="sp13")` dopo il mapping dei fatti, perché lo `utile_CE` ricostruito
-dai tag CE può divergere dallo `sp13` taggato (budget_361/404) → **CE↔SP** anche su XBRL (L2-bis).
+Il parser verifica pareggio e identità CE↔SP con `check_quadratura`; non chiama
+`enforce_ce_sp_identity` e non crea una voce per pareggiare lo scarto.
 CE-only / non-bilancio → errore onesto.
 
 ## Verifica

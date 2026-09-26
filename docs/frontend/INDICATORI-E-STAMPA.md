@@ -10,7 +10,8 @@ Due grafici a barre riassumono la sezione Indicatori:
 | **Equilibrio finanziario e strutturale** | `mt` (margine di tesoreria), `ms` (margine di struttura), `pfn` | euro, notazione compatta |
 
 Li rendono **due viste**: la tab *Indicatori* di `/pratica` e la tab *Stampa* (che è il PDF).
-In Stampa stanno fra le card di rating e la tabella dei 14 indicatori: prima il quadro
+In Stampa stanno fra le card di rating e la tabella dei 15 indicatori (14 nel punteggio,
+`of_revenue` informativo): prima il quadro
 d'insieme, poi il dettaglio riga per riga.
 
 ## Un componente, non una copia

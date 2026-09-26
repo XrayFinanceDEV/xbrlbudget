@@ -609,7 +609,7 @@ export default function Home() {
                       ) : (
                         <div className="space-y-3 border-t border-dashed border-border py-3">
                           <div className="flex items-center justify-between gap-2">
-                            <span className="text-sm font-medium">Scegli il bilancio già importato</span>
+                            <span className="text-sm font-medium">Scegli un bilancio annuale esistente</span>
                             <Button size="sm" variant="ghost" onClick={() => { setBilancioScelto(null); setChooserStage("origine"); }} aria-label="Torna alla scelta del bilancio">
                               <X className="h-4 w-4" />
                             </Button>

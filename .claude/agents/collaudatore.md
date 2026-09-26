@@ -172,7 +172,8 @@ questa missione: un run che la ignora dipinge conclusioni su una proiezione che 
     quindi `current_tax = totale − differite`. Su quell'anno nessuna aliquota viene applicata.
   - **le imposte anticipate non passano dal conto economico** (stessa decisione): `sp06f`/`sp07f`
     restano quelli del consuntivo per tutto il piano, e si cambiano solo con un override dello SP
-    previsionale, la cui contropartita è `sp12e` altre riserve — **mai la cassa**. Vedertele ferme
+    previsionale, la cui contropartita è **la cassa**, anche negli anni successivi; `sp12e` resta
+    alla base storica. Vedertele ferme
     su un piano che cresce non è un difetto: `sp06f_growth_pct` non è reso da nessuna schermata e
     il motore lo ignora deliberatamente (`forecast_engine.py`, commento «anticipate COSTANTI»).
 - **La cassa è il plug** (`sp09`) e quando va negativa diventa debito a breve (`sp16`). La cassa

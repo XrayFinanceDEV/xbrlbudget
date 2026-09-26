@@ -269,8 +269,8 @@ def new_financing_schedule(loans, target_year):
     return raised, repayment, interest
 
 
-# ── Pregresso del circolante: le cinque masse di apertura ──
-# I cinque saldi che l'utente puo' scadenziare (spec lotto 2 §3.1). La massa di
+# ── Pregresso del circolante: le sette masse di apertura ──
+# I sette saldi che l'utente puo' scadenziare. La massa di
 # apertura e' letta dal bilancio dell'anno base: e' l'importo che ESISTE GIA', da
 # tenere distinto da quello che il piano genera. Il lato breve e il lato lungo si
 # sommano, perche' e' il piano — non la classificazione dell'anno base — a dire
@@ -296,7 +296,7 @@ PREGRESSO_LABELS = {
 
 
 def pregresso_opening_masses(getter: Callable[[str], Decimal], acconti_tributari=ZERO):
-    """Le cinque masse di apertura del pregresso, dall'anno base.
+    """Le sette masse di apertura del pregresso, dall'anno base.
 
     I crediti commerciali sono i soli crediti COMMERCIALI: crediti tributari e
     imposte anticipate (`sp06e/f`, `sp07e/f`) dipendono dalla posizione fiscale,

@@ -76,8 +76,9 @@ The router exposes about 75 typed routes — a count that ages at every new rout
 per-year detail. Two things about them are worth knowing:
 
 - **Import endpoints are four, not three:** `POST /api/v1/import/{xbrl|csv|pdf|pdf-ocr}`. XBRL = 6
-  taxonomies; CSV = TEBE format; PDF = PyMuPDF + Claude Haiku (**not** Docling — that path is dead
-  code with no caller left); `pdf-ocr` = MinerU, off on the VPS. All but `csv` take `period_months`
+  taxonomies; CSV = TEBE format; PDF = PyMuPDF + LLM (Anthropic by default, or gx10 for the
+  configured CoGe, IV-CEE and detail passes; **not** Docling — that path has no caller);
+  `pdf-ocr` = MinerU, off on the VPS. All but `csv` take `period_months`
   (1-11 = partial year). `GET /import/capabilities` exists and is deliberately not wired to the UI.
   Admin side: `GET /admin/uploads[/{id}[/download]]`, `X-Admin-Key` header, never called by the iframe.
 - **Prefer extending `/analysis` to adding an endpoint — but that intent is not a description of the
@@ -339,9 +340,8 @@ ciò che non si può non sapere. Ogni voce dice la regola e **cosa si rompe** a 
 - **Le imposte anticipate non passano dal conto economico** (commercialista, 2026-09-18).
   `sp06f`/`sp07f` restano quelle del consuntivo per tutto il piano: la griglia delle differenze
   temporanee e `sp06f_growth_pct` non esistono più a schermo e il motore li ignora. Si cambiano
-  solo con un override dello SP previsionale, che ha contropartita **`sp12e` altre riserve**, mai la
-  cassa (`_apply_sp_overrides(anticipate_contro_riserve=True)`); `sp12e` porta avanti quella
-  riserva negli anni dopo (`_base(sp12e)` + scostamento cumulato delle anticipate). Il fondo
+  solo con un override dello SP previsionale, che ha **la cassa** come contropartita anche negli
+  anni successivi (`_apply_sp_overrides`); `sp12e` altre riserve resta alla base storica. Il fondo
   imposte differite (`sp14b`) segue `sp14` come sempre.
 - **Il rendiconto ha una riga propria per la posizione tributaria**: `delta_tax` =
   Δ(`sp16e`+`sp17e`) − Δ(`sp06e`+`sp07e`), tolta da crediti, debiti e altre variazioni del
@@ -714,7 +714,7 @@ Projects a partial year (say 9 months) to a full 12 months, against a reference 
   then receive the kernel closing balance directly. No arbitrary `sp06g`/`sp16g` capacity or tax
   reclassification residual exists. **The kernel's `cash_out` is stale on the credit side**: it still
   subtracts the opening credit, so it no longer measures this engine's tax cash outflow — the balance sheet is
-  right (cash is the plug, so the BS decides), and that field has no reader in production (two tests only, same
+  right (cash is the plug, so the BS decides), and that field has no reader in production (three tests only, same
   for the budget `TaxYear.cash_out`). Do not anchor anything on it until it is fixed or removed.
   Financial debt (`sp16a-c`/`sp17a-c`: banks, other lenders, bonds) is carried forward from the
   partial year's own split, as its own block — never rebuilt from the reference year's proportions,
@@ -885,8 +885,8 @@ crisi d'impresa, segnali, allegati A/B), sullo stesso motore del Business plan. 
 l'interfaccia non lo chiama più. Accanto c'è «Scarica Word» (`…/infrannuale/docx`): lo stesso report in
 `.docx`, tradotto dagli stessi flowable (`renderers/docx_export.py`), per correggere i testi prima di consegnarlo.
 → [docs/budget/REPORT-INFRANNUALE-PDF.md](docs/budget/REPORT-INFRANNUALE-PDF.md)
-**I 14 indicatori della crisi, il
-punteggio e la classe A3→D si calcolano solo sul server** (`calculations/crisi_impresa.py`,
+**I 15 indicatori della crisi sono in tabella; 14 concorrono al punteggio** (`of_revenue` è
+informativo). Indicatori, punteggio e classe A3→D si calcolano sul server (`calculations/crisi_impresa.py`,
 `GET /scenarios/{id}/infrannuale/crisi`); il client sceglie il rating dal numero di segnali in
 pagina fra quelli che il server manda per 0..7 segnali, e non ha più una copia delle bande.
 

@@ -531,7 +531,10 @@ stampati. Decide quale dei due modi seguenti usare.
 
 La legenda dei percorsi (`legenda.txt`) è identica a ogni chiamata dello stesso documento, per la
 cache del prefisso. Le somme di centinaia di conti non si chiedono mai al modello: lente e
-inaffidabili, il codice le fa.
+inaffidabili, il codice le fa. Le chiamate gx10 di questo percorso (`lettura.py`) usano un
+timeout di **120 s**, più stretto del default del provider (600-900 s, vedi
+[PRODUCTION_CONFIG.md](../deployment/PRODUCTION_CONFIG.md)): un gx10 impantanato non deve tenere
+impegnato l'import per minuti.
 
 **F3 — Verifica e tappo** (`importers/import_snello/verifica.py`). `misura()` calcola lo scarto
 SP (attivo − passivo) e lo scarto CE (utile CE ricalcolato contro `sp13`), in una delle due forme
@@ -558,17 +561,41 @@ aggiunge a `sp06g_crediti_altri_breve`; utile CE diverso da `sp13` → lo scarto
 `ce06_servizi` (in più o in meno). Mai su un campo `TIER0`. Dettagli su campi, soglia e dove si
 legge nel report → [REGOLE-IMPORT-04-QUADRATURE.md §12](REGOLE-IMPORT-04-QUADRATURE.md).
 
-**La rilettura, unica.** `"vuoto"` e `"oltre_soglia"` innescano **una sola** rilettura mirata
-della sola sezione/forma che non torna (nel modo `"legge"`, in `forma="bilancio"` esplicita).
-Se anche la rilettura resta oltre soglia: **ripiego sull'importatore attuale**, intero e
-invariato, che decide da sé come oggi — compreso l'import squadrato e dichiarato descritto nelle
-sezioni precedenti di questa pagina.
+**La rilettura, unica — solo nel modo `"legge"`.** `"vuoto"` e `"oltre_soglia"` innescano, **solo
+in modo `"legge"`**, una sola rilettura mirata della sola sezione (SP o CE, quella con lo scarto
+maggiore) in `forma="bilancio"` esplicita; il modo `"conti"` non rilegge mai. Se l'esito resta
+`"vuoto"`/`"oltre_soglia"` (dopo la rilettura in modo `"legge"`, o subito in modo `"conti"`),
+l'orchestratore (`importers/import_snello/__init__.py`, `importa()`) solleva
+`SnelloNonRiuscito` e il chiamante **ripiega sull'importatore attuale**, intero e invariato, che
+decide da sé come oggi — compreso l'import squadrato e dichiarato descritto nelle sezioni
+precedenti di questa pagina.
+
+**Gli esiti nel report** (`validation_report["import_snello"]`, scritto da `pdf_importer.py`) sono
+un livello sopra quelli di `tappa()`:
+
+| Esito | Quando | Chiavi proprie |
+|---|---|---|
+| *(chiave assente)* | `IMPORT_MOTORE` spento o su un valore diverso da `"snello"` | — |
+| `"non_applicabile"` | il documento è una scansione o viene da OCR (RapidOCR locale o MinerU): il percorso snello **non si tenta nemmeno**, un testo OCR non è mai un text layer nativo | `motivo`: `"scansione"` \| `"ocr"` (mai `fase`/`errore`) |
+| `"ok"` / `"tappo"` | successo dell'orchestratore | `modo`, `struttura`, `misura`, `tappo`, `letture`, `diag`, `anomalie`, `secondi`, più `precedente` (`"incluso"` \| `"escluso_oltre_soglia"`) quando in modo `"legge"` c'è un anno precedente |
+| `"ripiego"` | fallimento — dichiarato dall'orchestratore o un'eccezione imprevista | `fase` (`"struttura"` \| `"lettura"` \| `"conti"` \| `"verifica"` \| `"eccezione"`), `errore` (il tipo di eccezione, o `"vuoto"`/`"oltre_soglia"` quando la causa è la verifica) |
+
+`diag` porta sempre `lato_irrisolti` (lista, presente anche vuota): i conti SP letti sul lato
+sbagliato e senza contropartita nota (`percorsi.CONTROPARTE`, applicata da `conti.applica_lato` in
+modo `"conti"`) restano sul lato che la colonna dichiara e cadono su un secchio esplicito di
+quella sezione — `sp06g_crediti_altri_breve` fra le attività, `sp16g_altri_debiti_breve` fra le
+passività — mai su un campo `TIER0`, mai un segno ribaltato. `_unclassified_mass` (sul `bs`
+finale) è la somma di quei valori; `_plug_residual` è l'importo del tappo SP (0 se nessun tappo) —
+entrambe sempre dichiarate, anche a zero.
 
 **Regole contabili.** Applicate all'uscita di F2, riusando il codice esistente: la colonna è la
-verità sul lato (mai il contrario), netting cespite/fondo per sottoconto (all'aggregato se manca
-il dettaglio), compensazioni sulle voci minori, debito senza scadenza dichiarata → a breve, e le
-chiavi diagnostiche (`_plug_residual`, `_unclassified_mass`) sempre dichiarate, anche a zero.
+verità sul lato (mai il contrario — vedi `applica_lato` sopra), netting cespite/fondo per
+sottoconto (all'aggregato se manca il dettaglio), compensazioni sulle voci minori, debito senza
+scadenza dichiarata → a breve.
 
-**F4 — Dettagli per il budget.** In F2-C i dettagli escono già dalle foglie classificate; in
-F2-L si riusa la seconda lettura di oggi (`enrich_pdf_details`), ristretta alle pagine SP e di
-dettaglio della struttura.
+**F4 — Dettagli per il budget, sempre attraversata.** `enrich_pdf_details` gira **sempre** dopo un
+successo snello, in entrambi i modi: in modo `"legge"` con le pagine di dettaglio della struttura
+(`struttura.pagine_dettagli()`) e l'LLM di dettaglio **attivo**; in modo `"conti"` **senza** LLM
+(`usa_llm=False`), perché i dettagli sono già usciti dalle foglie classificate in F2-C. La sua
+riclassificazione deterministica di maturità (entro/oltre l'esercizio) può spostare massa fra il
+lato breve e il lato lungo dello stesso aggregato — non tocca mai i totali.

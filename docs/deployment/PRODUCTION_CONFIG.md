@@ -78,3 +78,8 @@ snello. Default **100**.
 `IMPORT_SNELLO_SOGLIA_PCT` — soglia relativa, in percento del totale attivo, della stessa
 verifica. Default **0.1** (0,1%). La soglia effettiva per esercizio è
 `max(IMPORT_SNELLO_SOGLIA_MIN, IMPORT_SNELLO_SOGLIA_PCT% × totale attivo)`.
+
+Nota operativa sul percorso snello: le sue chiamate gx10 (`importers/import_snello/lettura.py`)
+usano un timeout di **120 s**, più stretto del timeout generico di 900 s del pass CoGe di route C
+descritto sopra — un gx10 impantanato sul percorso snello non deve tenere impegnato l'import per
+minuti prima di ripiegare.

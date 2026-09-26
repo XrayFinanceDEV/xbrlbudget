@@ -287,17 +287,22 @@ esplicito — `sp06g_crediti_altri_breve` o `sp16g_altri_debiti_breve` sullo SP,
 CE e SP — mai su un campo `TIER0`. Un tappo che porterebbe `ce06_servizi` sotto zero **non si
 applica**: l'esito diventa "oltre soglia" invece di un tappo negativo.
 
-**Dove si legge.** Nel `validation_report["import_snello"]` del foglio: l'esito (`ok` / `tappo` /
-`squadrato` / `ripiego`), il tappo (campo, importo, soglia), gli scarti SP/CE per esercizio prima
-e dopo il tappo. Le chiavi diagnostiche generali restano quelle di sempre: `_plug_residual` =
-l'importo del tappo sullo SP (0 se nessun tappo), `_unclassified_mass` = la massa messa sui
-secchi espliciti per un conto sul lato sbagliato senza contropartita — mai zero per omissione,
-sempre dichiarate.
+**Dove si legge.** Nel `validation_report["import_snello"]` del foglio: `misura` porta lo scarto
+SP/CE misurato prima del tappo (per esercizio: `corrente` e, in modo `"legge"`, `precedente`),
+`tappo` il campo/importo scelto. Gli esiti realmente emessi sono **`"ok"` / `"tappo"` /
+`"ripiego"` / `"non_applicabile"`** (mai `"squadrato"`) — la tabella completa, con le chiavi
+proprie di ciascuno, è in
+[REGOLE-IMPORT-02-ESTRAZIONE.md §10](REGOLE-IMPORT-02-ESTRAZIONE.md). Le chiavi diagnostiche
+generali restano quelle di sempre, sul `BalanceSheet` finale: `_plug_residual` = l'importo del
+tappo sullo SP (0 se nessun tappo), `_unclassified_mass` = la massa in `diag["lato_irrisolti"]`,
+per un conto sul lato sbagliato senza contropartita — mai zero per omissione, sempre dichiarate.
 
-**Oltre soglia, una rilettura mirata; ancora oltre, ripiego.** Il ripiego è l'importatore attuale,
-intero e invariato: da lì in avanti valgono **tutte** le regole di questa pagina, comprese quelle
-che qui sopra il percorso snello supera (nessun plug, chiusura solo diagnostica). Il ripiego si
-dichiara con `validation_report["import_snello"]["esito"] = "ripiego"`.
+**Oltre soglia, una rilettura mirata (solo in modo `"legge"`); ancora oltre, ripiego.** Il ripiego
+è l'importatore attuale, intero e invariato: da lì in avanti valgono **tutte** le regole di questa
+pagina, comprese quelle che qui sopra il percorso snello supera (nessun plug, chiusura solo
+diagnostica). Il ripiego si dichiara con `validation_report["import_snello"]["esito"] =
+"ripiego"` (`fase`/`errore` accanto). Un documento scansionato o letto da OCR non tenta nemmeno il
+percorso snello: `"non_applicabile"`, con `motivo`, deciso prima di leggere una sola riga.
 
 **La chiusura al centesimo resta la regola dell'importatore attuale.** La soglia relativa e il
 tappo governano solo il **percorso snello** (F3, prima del punto di convergenza): non toccano

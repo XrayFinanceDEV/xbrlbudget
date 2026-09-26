@@ -32,6 +32,11 @@ ANALYTICAL_FAMILIES = {k: detail_fields(k) for k in (
 )}
 _CREDIT_MATURITIES = {"sp06_crediti_breve": "short", "sp07_crediti_lungo": "long"}
 _AMOUNT = re.compile(r"^(?:-?\d+(?:\.\d{3})*(?:,\d{1,2})?-?|\(\d+(?:\.\d{3})*(?:,\d{1,2})?\))$")
+# A genuine account description has a run of letters; a residual made only of
+# digits/punctuation (e.g. leftover numeric-column fragments once the trailing
+# amount is stripped) still passes _be_collect_side_facts's length>=3 check
+# and would otherwise look like a valid "description-bearing" row.
+_ALPHA_RUN = re.compile(r"[^\W\d_]{3,}", re.UNICODE)
 _ACCOUNT = re.compile(r"^\d{1,3}(?:[./][\d*]+)+$")
 
 
@@ -91,7 +96,9 @@ def collect_source_rows(file_path: str, ocr_text: str | None = None) -> list[Sou
     to distinguish periods, balances, movements and maturity columns.
     """
     from importers.situazione_contabile_parser import (
-        _be_cluster_physical_rows, _be_split, is_contrapposte_file, classify_page_section,
+        _be_cluster_physical_rows, _be_split, _be_split_codeless,
+        _be_page_needs_coordinate_repair, _be_collect_side_facts, _be_repair_parent_codes,
+        is_contrapposte_file, classify_page_section,
     )
 
     rows = []
@@ -117,12 +124,17 @@ def collect_source_rows(file_path: str, ocr_text: str | None = None) -> list[Sou
                     sap_columns.append((diff[2], 'difference'))
                 if 'scost.rel.' in sap_headers:
                     sap_columns.append((sap_headers['scost.rel.'][2], 'percentage'))
-            atts = [w for w in words if w[4].startswith('ATTIV') and w[1] < page.rect.height * .35]
-            pasv = [w for w in words if w[4].startswith('PASSIV') and w[1] < page.rect.height * .35]
+            # Case-insensitive: some ERPs print "Attività"/"Passività" in Title
+            # case rather than "ATTIVITA'". Words here are already in the
+            # displayed (rotated) frame, so this also recognises a rotated page's
+            # headers without a separate rotation fix in this per-page check.
+            atts = [w for w in words if w[4].upper().startswith('ATTIV') and w[1] < page.rect.height * .35]
+            pasv = [w for w in words if w[4].upper().startswith('PASSIV') and w[1] < page.rect.height * .35]
             physical_pair = any(abs(a[1] - p[1]) < 15 and abs(a[0] - p[0]) > 40
                                 for a in atts for p in pasv)
             two_sides = two_sides or physical_pair
             section = classify_page_section(page.get_text()) if two_sides else None
+            needs_repair = _be_page_needs_coordinate_repair(words)
             boundaries = []
             for line in _be_cluster_physical_rows(words, -1e9, 1e9):
                 caption = ' '.join(str(w[4]) for w in line).upper()
@@ -140,13 +152,84 @@ def collect_source_rows(file_path: str, ocr_text: str | None = None) -> list[Sou
             boundaries.sort()
             page_statement = ('bs' if section == (True, False) else
                               'ce' if section == (False, True) else last_statement)
-            split = _be_split(words) if two_sides else None
+            if two_sides and needs_repair:
+                # A damaged text layer (amounts split across several PDF words,
+                # e.g. "2.280" / "," / "30") inflates the code-like-token count
+                # that _be_split's gutter search relies on: a fragment such as
+                # "30" reads as a plausible account code, and on a genuine
+                # two-column page this can make _be_split settle on a gutter
+                # that falsely validates (each side still shows description-
+                # bearing rows) while actually splitting a row's own trailing
+                # digits from its neighbour's real code. _be_split_codeless
+                # does not cluster by code-like tokens at all: it scans
+                # candidate gutters across the page and validates each one
+                # through _be_collect_side, which already reconstructs rows
+                # from coordinates on a repair-needed page — reuse that
+                # existing, already-validated fallback instead of trusting
+                # _be_split's contaminated candidate list.
+                #
+                # _be_split_codeless validates a candidate on ROW COUNT alone
+                # (_be_collect_side's len()>=2 with a non-empty "description"),
+                # which a genuinely single-column ledger's own numeric columns
+                # can satisfy by accident: once the trailing amount is peeled
+                # off, a leftover run of digits from another numeric column is
+                # still a non-empty string of length>=3. Require an actual run
+                # of letters on BOTH sides before trusting the split, or a
+                # single-column page (several numeric columns, one account per
+                # row) gets its account cut in half between two of its own
+                # numeric columns.
+                candidate = _be_split_codeless(words)
+                if candidate is not None:
+                    def _has_description(lo, hi):
+                        facts = _be_collect_side_facts(words, lo, hi, codeless=True, page=page.number + 1)
+                        return sum(1 for f in facts if _ALPHA_RUN.search(f.description)) >= 2
+                    if not (_has_description(-1e9, candidate) and _has_description(candidate, 1e9)):
+                        candidate = None
+                split = candidate
+            else:
+                split = _be_split(words) if two_sides else None
             layout = (round(page.rect.width), round(page.rect.height))
             if split and two_sides:
                 physical_splits[layout] = split
             elif split is None:
                 split = physical_splits.get(layout)
             bands = (("L", -1e9, split), ("R", split, 1e9)) if split else (("T", -1e9, 1e9),)
+            if needs_repair:
+                # A damaged text layer breaks the token-join loop below: it joins
+                # a physical row's tokens in reading order, and a fragmented
+                # amount ("2.280," + "30") is invisible to _amount() as two
+                # separate non-numeric-looking tokens. _be_collect_side_facts is
+                # the reconstruction the fallback importer already trusts for
+                # exactly this damage (repairs the amount, the account code and
+                # the code/description boundary from coordinates); reuse it
+                # instead of adding a second, divergent heuristic here.
+                for side, lo, hi in bands:
+                    facts = _be_repair_parent_codes(_be_collect_side_facts(
+                        words, lo, hi, codeless=True, page=page.number + 1,
+                        include_controls=True))
+                    for fact in facts:
+                        statement = page_statement
+                        for y, scope in boundaries:
+                            if y <= fact.bbox[1] + 2:
+                                statement = scope
+                        # No equivalent of the per-value `xs`/multi-amount `kinds`:
+                        # a ReconstructedRow carries exactly one amount (the
+                        # row's trailing numeric run), never several comparative
+                        # columns, so `positions` stays empty and `kinds` holds at
+                        # most the single ledger_final/income tag the manual path
+                        # would also assign to a one-value two-sided row.
+                        kinds = (("ledger_final" if statement == 'bs' else "income"),) if (
+                            two_sides and fact.code) else ("",)
+                        text = " ".join(t for t in (fact.raw_code, fact.raw_description, fact.raw_amount) if t)
+                        rows.append(SourceRow(
+                            f"p{page.number + 1}{side}r{len(rows) + 1}", page.number + 1,
+                            side, text, (fact.amount,), fact.code, (), kinds, statement,
+                        ))
+                if boundaries:
+                    last_statement = boundaries[-1][1]
+                elif page_statement:
+                    last_statement = page_statement
+                continue
             for side, lo, hi in bands:
                 headings = []
                 ledger_root = ''

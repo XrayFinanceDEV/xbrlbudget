@@ -5,20 +5,46 @@ from __future__ import annotations
 from collections import Counter, defaultdict
 from decimal import Decimal
 
-from importers.import_snello.percorsi import (CONTROPARTE, campo_da_percorso, completa, e_fondo,
-                                              e_risultato, famiglia, lato_di)
+from importers.import_snello.percorsi import (CONTROPARTE, NOMI, campo_da_percorso, completa,
+                                              e_fondo, e_risultato, famiglia, lato_di)
+from importers.iv_cee_hierarchy import detail_fields
 
 _C = Decimal("0.01")
+_IMMOBILIZZAZIONI = ("sp02", "sp03", "sp04")
+# Nessuna contropartita nota: la colonna resta la verita' sul lato, e l'importo va nel secchio
+# esplicito di quel lato (credito se stampato fra gli attivi, debito se fra i passivi) - mai
+# lasciato a rovesciare il segno di un campo TIER0 per un voto di famiglia.
+_FALLBACK = {"att": "SPA.C.II.5-quater", "pas": "SPP.D.14"}
 
 
 def _corsia(f, due_lati: bool):
     return (1 if f.lato == "R" else 0) if due_lati else (f.valore >= 0)
 
 
-def applica_lato(foglie) -> int:
+def _netta_fondi_negativi(importi: dict) -> dict:
+    """Un fondo puo' essere piu' fine del lordo stampato: se un dettaglio di immobilizzazioni
+    (sp02/sp03/sp04) resta negativo dopo la sottrazione del fondo, l'importo si sposta sul
+    valore diretto dell'aggregato e il dettaglio sparisce - senza dettaglio si netta
+    all'aggregato."""
+    importi = dict(importi)
+    for aggregato in _IMMOBILIZZAZIONI:
+        pieno = NOMI.get(aggregato)
+        if not pieno:
+            continue
+        for dettaglio_pieno in detail_fields(pieno):
+            codice = dettaglio_pieno.split("_")[0]
+            v = importi.get(codice)
+            if v is not None and v < 0:
+                importi[aggregato] = importi.get(aggregato, Decimal(0)) + importi.pop(codice)
+    return importi
+
+
+def applica_lato(foglie, irrisolti: list | None = None) -> int:
     """Un conto il cui percorso sta dall'altra parte rispetto a dove e' stampato passa alla voce
     corrispondente del lato giusto (c/c fra le passivita' -> debiti verso banche). La colonna e' la
-    verita' sul lato; la descrizione decide la voce."""
+    verita' sul lato; la descrizione decide la voce. Senza una contropartita nota il conto resta
+    comunque sul lato che la colonna dichiara: cade su un secchio esplicito (mai su un voto di
+    segno che lo confonderebbe con un campo TIER0), e viene dichiarato in ``irrisolti`` se dato."""
     sp = [f for f in foglie if f.percorso and lato_di(f.percorso) in ("att", "pas") and not e_fondo(f.percorso)]
     due_lati = len({f.lato for f in sp} & {"L", "R"}) == 2
     peso = Counter()
@@ -35,17 +61,28 @@ def applica_lato(foglie) -> int:
     for f in sp:
         if _corsia(f, due_lati) == lato_normale[lato_di(f.percorso)]:
             continue
+        corretto = False
         for prefisso, destinazione in CONTROPARTE.items():
             if f.percorso == prefisso or f.percorso.startswith(prefisso + "."):
                 f.percorso = destinazione
                 n += 1
+                corretto = True
                 break
+        if not corretto:
+            sezione_stampata = "att" if _corsia(f, due_lati) == lato_normale["att"] else "pas"
+            originale, valore = f.percorso, abs(f.valore)
+            f.percorso = _FALLBACK[sezione_stampata]
+            f.valore = valore
+            if irrisolti is not None:
+                irrisolti.append([f.id, originale, str(valore.quantize(_C))])
     return n
 
 
 def da_foglie(foglie):
-    diag = {"non_mappati": [], "escluse": [], "risultato_stampato": None, "lato_corretti": 0}
-    diag["lato_corretti"] = applica_lato(foglie)
+    diag = {"non_mappati": [], "escluse": [], "risultato_stampato": None, "lato_corretti": 0,
+            "lato_irrisolti": []}
+    diag["lato_corretti"] = applica_lato(foglie, diag["lato_irrisolti"])
+    irrisolti_ids = {r[0] for r in diag["lato_irrisolti"]}
     due_lati = len({f.lato for f in foglie} & {"L", "R"}) == 2
     per_famiglia = defaultdict(list)
     for f in foglie:
@@ -64,7 +101,7 @@ def da_foglie(foglie):
     for elementi in per_famiglia.values():
         peso_corsia, peso_segno = Counter(), Counter()
         for f, _ in elementi:
-            if not e_fondo(f.percorso):
+            if not e_fondo(f.percorso) and f.id not in irrisolti_ids:
                 peso_corsia[_corsia(f, True) if due_lati else 0] += abs(f.valore)
                 peso_segno[f.valore >= 0] += abs(f.valore)
         corsia_n = peso_corsia.most_common(1)[0][0] if peso_corsia else 0
@@ -73,18 +110,23 @@ def da_foglie(foglie):
             v = abs(f.valore)
             if e_fondo(f.percorso):
                 contro = True
+            elif f.id in irrisolti_ids:
+                # gia' sul lato giusto (la colonna l'ha deciso in applica_lato): il voto di
+                # famiglia non lo deve piu' ribaltare.
+                contro = False
             else:
                 corsia = _corsia(f, True) if due_lati else 0
                 contro = (corsia != corsia_n) ^ ((f.valore >= 0) != positivo_n)
             importi[codice] += -v if contro else v
-    bs, ce = completa(dict(importi))
+    bs, ce = completa(_netta_fondi_negativi(dict(importi)))
     return bs, ce, diag
 
 
 def da_coppie(coppie):
     """Schema di legge: coppie (percorso, importo) come stampate. Un percorso che ha un discendente
     fra le coppie e' un totale e cade; una voce ripetuta conta una volta; un fondo si sottrae."""
-    diag = {"non_mappati": [], "escluse": [], "risultato_stampato": None, "lato_corretti": 0}
+    diag = {"non_mappati": [], "escluse": [], "risultato_stampato": None, "lato_corretti": 0,
+            "lato_irrisolti": []}
     viste, uniche = set(), []
     for p, v in coppie:
         if p not in viste:
@@ -103,5 +145,5 @@ def da_coppie(coppie):
             diag["non_mappati" if p not in ("X", "R") else "escluse"].append([p, p, str(v.quantize(_C))])
             continue
         importi[codice] += -abs(v) if e_fondo(p) else v
-    bs, ce = completa(dict(importi))
+    bs, ce = completa(_netta_fondi_negativi(dict(importi)))
     return bs, ce, diag

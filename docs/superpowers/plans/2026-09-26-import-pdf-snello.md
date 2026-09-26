@@ -359,7 +359,7 @@ def _nomi() -> dict[str, str]:
 
 NOMI = _nomi()
 _CR = {"1": "a", "2": "b", "3": "c", "4": "d", "5-bis": "e", "5-ter": "f", "5-quater": "g"}
-_DEB = {"1": "c", "2": "c", "3": "b", "4": "a", "5": "b", "6": "g", "7": "d", "8": "d", "9": "g",
+_DEB = {"1": "c", "2": "c", "3": "b", "4": "a", "5": "b", "6": "g", "7": "d", "8": "g", "9": "g",
         "10": "g", "11": "g", "11-bis": "g", "12": "e", "13": "f", "14": "g"}
 _PN = {"I": "sp11", "II": "sp12a", "III": "sp12b", "IV": "sp12c", "V": "sp12d", "VI": "sp12e",
        "VII": "sp12f", "VIII": "sp12g", "IX": "sp13", "X": "sp12h"}
@@ -445,7 +445,7 @@ def campo_da_percorso(p: str) -> str | None:
             if voce == "9":
                 return {"a": "ce08b", "b": "ce08c", "c": "ce08a", "d": "ce08d", "e": "ce08d"}.get(sub, "ce08") if sub else "ce08"
             if voce == "10":
-                return {"a": "ce09a", "b": "ce09b", "c": "ce09c", "d": "ce09d"}.get(sub, "ce09") if sub else "ce09"
+                return {"a": "ce09a", "b": "ce09b", "c": "ce09c", "d": "ce09d"}.get(sub) if sub else "ce09"
             return _CE.get(voce)
     except (ValueError, KeyError, IndexError):
         return None

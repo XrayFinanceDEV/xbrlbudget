@@ -877,6 +877,67 @@ def import_pdf_balance_sheet(
 
         is_trial_balance = (classification.route == ROUTE_TRIAL)
 
+        # Import snello (economia): dietro IMPORT_MOTORE=snello, un unico motore
+        # legge la struttura del documento e produce SP/CE gia' quadrati. E'
+        # un'economia, non una nuova rotta: se non produce nulla di utilizzabile
+        # (o solleva), il codice sotto — is_trial_balance/IV-CEE come oggi — resta
+        # il ripiego dichiarato, mai silenzioso (validation_report["import_snello"]
+        # lo dice sempre, quando l'interruttore e' acceso). Scansioni e testo da
+        # OCR (is_scanned/_ocr_source) non hanno mai una struttura testuale
+        # affidabile da analizzare: il percorso snello non si tenta nemmeno, e lo
+        # dichiara con esito "non_applicabile" invece di un ripiego silenzioso.
+        # Un'istanza XBRL nativa non arriva qui: la rotta ROUTE_XBRL solleva sopra.
+        _snello = None
+        _snello_report = None
+        if os.environ.get("IMPORT_MOTORE") == "snello":
+            if is_scanned or _ocr_source:
+                _snello_report = {
+                    "esito": "non_applicabile",
+                    "motivo": "scansione" if is_scanned else "ocr",
+                }
+            else:
+                from importers import import_snello
+                try:
+                    # Tutto in locali fino in fondo: un'eccezione IN QUALUNQUE punto di
+                    # questo blocco (compreso il calcolo dei totali sotto) non deve
+                    # lasciare _snello/balance_sheet_data/... assegnati a meta': i due
+                    # cancelli piu' sotto leggono "_snello is None" per decidere se il
+                    # codice di oggi deve girare, e un _snello legato a un risultato mai
+                    # adottato per intero li terrebbe chiusi su un bilancio incompleto o
+                    # con tipi non validi (bug riprodotto in revisione: un valore non
+                    # numerico dentro bs fa fallire proprio il calcolo dei totali qui
+                    # sotto, DOPO che _snello era gia' assegnato nella versione precedente).
+                    _risultato_snello = import_snello.importa(file_path, ocr_text=ocr_text)
+                    _bs_snello, _ce_snello = _risultato_snello.bs, _risultato_snello.ce
+                    _prior_bs_snello = _risultato_snello.prior_bs
+                    _prior_ce_snello = _risultato_snello.prior_ce
+                    # Il motore snello lavora sulle somme sp01..sp18 (stesse
+                    # _ATTIVO_FIELDS/_PASSIVO_FIELDS di mapper.validate_balance,
+                    # gia' quadrate da tappa()/misura()), ma non scrive mai
+                    # 'totale_attivo'/'totale_passivo' sul dict: ogni altro
+                    # estrattore li dichiara da se'. Senza, validate_balance li
+                    # legge assenti (= zero) e _classify_balance_failure tratta
+                    # un bilancio quadrato come un'estrazione vuota (hard_error).
+                    from importers.iv_cee_hierarchy import _ATTIVO_FIELDS, _PASSIVO_FIELDS
+                    for _dati_snello in (_bs_snello, _prior_bs_snello):
+                        if _dati_snello is not None:
+                            _dati_snello["totale_attivo"] = sum(
+                                (Decimal(_dati_snello.get(k, 0)) for k in _ATTIVO_FIELDS), Decimal(0))
+                            _dati_snello["totale_passivo"] = sum(
+                                (Decimal(_dati_snello.get(k, 0)) for k in _PASSIVO_FIELDS), Decimal(0))
+                    # Il blocco e' riuscito per intero: solo ora si adotta il risultato.
+                    _snello = _risultato_snello
+                    _snello_report = _snello.report
+                    balance_sheet_data, income_data = _bs_snello, _ce_snello
+                    prior_bs_data, prior_ce_data = _prior_bs_snello, _prior_ce_snello
+                except import_snello.SnelloNonRiuscito as exc:
+                    _snello = None
+                    _snello_report = exc.report
+                except Exception as exc:  # il percorso snello e' un'economia: senza, l'import di oggi
+                    _snello = None
+                    logger.warning("Import snello non riuscito (%s): importatore attuale", type(exc).__name__)
+                    _snello_report = {"esito": "ripiego", "fase": "eccezione", "errore": type(exc).__name__}
+
         # Reject an explicitly contradictory legal statement before choosing an
         # extractor.  Previously this check ran only *after* extraction failed:
         # on a clean text PDF without an API key, a printed Attivo/Passivo mismatch
@@ -1250,13 +1311,16 @@ def import_pdf_balance_sheet(
             logger.warning("Source cross-foot unavailable: %s", source_err)
         _source_complete = bool(_source_candidates and _source_candidates[0][0] is not None
                                 and _source_candidates[0][1] is not None)
-        if _source_complete:
+        if _source_complete and _snello is None:
+            # Un risultato snello gia' quadrato non va scavalcato da un candidato
+            # indipendente: _snello is None e' l'unico caso in cui questo blocco
+            # puo' sovrascrivere balance_sheet_data/income_data.
             balance_sheet_data, income_data = map(dict, _source_candidates[0][:2])
             prior_bs_data = prior_ce_data = None
             if len(_source_candidates) > 1 and all(v is not None for v in _source_candidates[1][:2]):
                 prior_bs_data, prior_ce_data = map(dict, _source_candidates[1][:2])
             logger.info("Using independently cross-footed source SP and CE")
-        if is_trial_balance and not _source_complete:
+        if is_trial_balance and not _source_complete and _snello is None:
             # Route C (trial balance / situazione contabile). GENERAL rule: run BOTH the
             # CoGe LLM extractor and the deterministic best-effort parser, then keep the
             # CLEANER one — the candidate whose unclassified residual (_plug_residual, read
@@ -1519,7 +1583,7 @@ def import_pdf_balance_sheet(
                  prior_bs_data, prior_ce_data) = _extract_route_c_last_resort(
                     _llm_extract
                 )
-        if not is_trial_balance and not _source_complete:
+        if not is_trial_balance and not _source_complete and _snello is None:
             # IV CEE format (routes A/B) — use LLM extraction
             balance_sheet_data, income_data, prior_bs_data, prior_ce_data = _llm_extract()
             # Debiti aggregates (sp16/sp17) are schema-derived totals with no source
@@ -1589,6 +1653,9 @@ def import_pdf_balance_sheet(
         balance_sheet_data, prior_bs_data, _detail_report = enrich_pdf_details(
             file_path, balance_sheet_data, prior_bs_data, fiscal_year=fiscal_year,
             ocr_text=ocr_text,
+            pagine=(_snello.struttura.pagine_dettagli()
+                    if _snello is not None and _snello.report.get("modo") == "legge" else None),
+            usa_llm=not (_snello is not None and _snello.report.get("modo") == "conti"),
         )
         sc_quadratura_warnings.extend(_detail_report.get('warnings', []))
 
@@ -1794,6 +1861,8 @@ def import_pdf_balance_sheet(
             logger.warning(f"Reliability non calcolata: {_rel_err}")
 
         _validation_payload = _validation_report_payload(_qd, reliability=_reliability)
+        if _snello_report is not None:
+            _validation_payload["import_snello"] = _snello_report
         if is_trial_balance:
             # Fornitore configurato per il pass CoGe di route C, dichiarato su OGNI import
             # di route C (non solo quando il pass CoGe ha vinto il confronto col candidato
@@ -1976,6 +2045,8 @@ def import_pdf_balance_sheet(
                         db.flush()
 
                     _prior_validation = _validation_report_payload(_prior_q)
+                    if _snello_report is not None:
+                        _prior_validation["import_snello"] = _snello_report
                     if is_trial_balance:
                         # Stesso fornitore dichiarato dell'anno corrente (route C legge
                         # entrambe le colonne con lo stesso pass CoGe): vedi il commento
@@ -2053,7 +2124,9 @@ def import_pdf_balance_sheet(
         db.commit()
 
         extraction_time = (datetime.utcnow() - extraction_start).total_seconds()
-        if is_trial_balance:
+        if _snello is not None:
+            extraction_method = "import_snello"
+        elif is_trial_balance:
             # Route C: distinguish the CoGe LLM pass from the deterministic parser fallback.
             extraction_method = "situazione_contabile_llm" if _coge_ok else "situazione_contabile"
         elif balance_sheet_data.get("_source_mineru_ivcee"):

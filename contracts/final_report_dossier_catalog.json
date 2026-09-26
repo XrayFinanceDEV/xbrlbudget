@@ -2199,7 +2199,7 @@
     },
     {
       "key": "coverage.fixed_assets_coverage_with_equity_and_ltdebt",
-      "label": "(CN+PF)/AF",
+      "label": "(CN+PF+TFR)/AF",
       "category": "coverage",
       "format": "ratio"
     },

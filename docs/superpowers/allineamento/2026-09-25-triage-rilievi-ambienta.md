@@ -157,7 +157,7 @@ tutti senza marcatore `xfail`, i soli xfail residui sono del lotto 2 (A01-bis, A
 
 ## Lotto 2, 2026-09-26
 
-Fix su report e indici (`docs/superpowers/specs/2026-09-26-fix-rilievi-ambienta-design.md` §4, piano
+Fix su report e indici (`docs/superpowers/specs/2026-09-26-fix-rilievi-ambienta-design.md` §3, piano
 `docs/superpowers/plans/2026-09-26-fix-rilievi-lotto2-report.md`, worktree `../budget-fix-rilievi-l2`, branch
 `fix/rilievi-lotto2` da `fix/rilievi-ambienta` — lotto 1 compreso, task 1-8). `tools/triage_rilievi.py::LETTURE`
 aggiornato per A01, A02, C01-C09 — «Risolto nel lotto 2 fix rilievi (2026-09-26)»; il banco

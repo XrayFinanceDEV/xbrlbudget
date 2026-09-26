@@ -83,8 +83,9 @@ per-year detail. Two things about them are worth knowing:
 - **Prefer extending `/analysis` to adding an endpoint — but that intent is not a description of the
   code.** The reclassified statement and the detailed cashflow have live endpoints of their own
   (`GET /scenarios/{id}/reclassified`, `/detailed-cashflow`, called by `/forecast/reclassified` and
-  `/cashflow`), and the Indici page reads `GET /companies/{id}/years/{year}/calculations/complete`.
-  One call per page is the target, not the current state. The only routes with **no caller at all**
+  `/cashflow`), and the Indici page reads **both** `GET /companies/{id}/years/{year}/calculations/complete`
+  (annual summary) and `GET /companies/{id}/scenarios/{scenario_id}/ratios` (multi-year table) —
+  two calls, not one. One call per page is the target, not the current state. The only routes with **no caller at all**
   are `GET /companies/{id}/years/{year}/calculations/{altman|fgpmi|ratios}`: their wrappers still sit
   in `frontend/lib/api.ts`; use `/analysis` rather than reviving them.
 
@@ -247,7 +248,11 @@ esistente**, storico compreso, non solo su quelli generati dopo il lotto.
 - **Un solo DSO, sui crediti commerciali.** `receivables_turnover_days` legge
   `sp06a_crediti_clienti_breve + sp07a_crediti_clienti_lungo`, non gli aggregati `sp06+sp07`
   (che includono crediti tributari e diversi): su ogni azienda con crediti non commerciali
-  dentro sp06/sp07 il DSO scende, sia in Indici sia nel report.
+  dentro sp06/sp07 il DSO scende, sia in Indici sia nel report. **`None`, non zero, quando il
+  dettaglio manca** (revisione finale, F1): sp06a+sp07a a zero mentre l'aggregato sp06+sp07 resta
+  positivo (import abbreviato/riconciliato, la massa finisce in sp06g/sp07g) non è "zero crediti
+  commerciali" — reason `trade_receivables_detail_unavailable`. TdC (turnover crediti) e TdCCN/
+  giorni CCN seguono la stessa perimetrazione (F7): vedi la voce «Un solo current ratio» sotto.
 - **DIO sul consumo di materie, `None` se non positivo.** Il denominatore di
   `inventory_turnover_days` è `ce05_materie_prime + ce10_var_rimanenze_mat_prime` (convenzione
   OIC B11), non il fatturato: comune nei servizi, senza una riga di materie prime distinta, dove
@@ -255,12 +260,25 @@ esistente**, storico compreso, non solo su quelli generati dopo il lotto.
 - **ROD e PFN su un solo perimetro di debito finanziario**: `financial_debt_total` (banche +
   altri finanziatori + obbligazioni, sp16a-c/sp17a-c, somma incondizionata) — prima un ramo
   tagliava fuori gli altri finanziatori quando c'erano già banche, sottostimando ROD e PFN su
-  ogni azienda con debito misto. `rod` è `None` (mai zero) a perimetro zero.
-- **Un solo current ratio, quick ratio e CCN, simmetrici sui ratei.** Attivo corrente =
-  sp05+sp06+sp08+sp09+sp10 (sp07 escluso: crediti commerciali a lungo non liquidabili nell'anno),
-  passivo corrente = sp16+sp18 (ratei passivi, prima assenti) — `attivo_corrente`/
-  `passivo_corrente` in `report_indicators.py`, richiamate anche da `ratios.py`. **Non toccati
-  apposta**: margine di tesoreria e acid test (passivo resta sp16 solo) e Altman/FGPMI
+  ogni azienda con debito misto. `rod` è `None` (mai zero) a perimetro zero. **`None`, non
+  "-cassa"/zero, quando il dettaglio manca** (revisione finale, F1): sp16a/b/c e sp17a/b/c tutti a
+  zero mentre l'aggregato sp16+sp17 resta positivo non vuol dire "nessun debito finanziario" —
+  vuol dire che l'import non l'ha classificato. PFN, PFN/EBITDA e ROD analitico diventano `None`
+  con reason `financial_debt_detail_unavailable`, in `report_indicators.py` (dossier) — dichiarare
+  "PFN = -cassa" in quel caso sarebbe un dato inventato su 98% dei bilanci senza dettaglio
+  finanziario (stima CLAUDE.md sull'infrannuale, stesso fenomeno).
+- **Un solo current ratio, quick ratio, CCN e margine di tesoreria, simmetrici sui ratei.**
+  Attivo corrente = sp05+sp06+sp08+sp09+sp10 (sp07 escluso: crediti commerciali a lungo non
+  liquidabili nell'anno), passivo corrente = sp16+sp18 (ratei passivi, prima assenti) —
+  `attivo_corrente`/`passivo_corrente` in `report_indicators.py`, richiamate anche da `ratios.py`.
+  Il margine di tesoreria (`practice.mt`, `WorkingCapitalMetrics.mt`) usa lo stesso passivo
+  corrente da revisione finale del lotto 2 (F6): prima toglieva solo `sp16`, un terzo numero
+  diverso da CCN/current ratio sullo stesso bilancio. Lo stesso CCN alimenta anche giorni CCN e
+  TdCCN (`working_capital_days`, `working_capital_turnover`, F7): non più `BalanceSheet.
+  working_capital_net`. Come TdC (turnover crediti), ora sui soli crediti commerciali
+  (sp06a+sp07a), non l'aggregato — stessa base del DSO che gli sta accanto in etichetta
+  («360/TdC»). **Non toccati apposta**: l'acid test (crediti oltre 12 mesi al numeratore, solo
+  `sp16` al denominatore — una definizione classica diversa, non un refuso) e Altman/FGPMI
   (`BalanceSheet.current_assets`/`.current_liabilities`/`.working_capital_net`, definizione
   propria del modello di rating).
 - **Indice di indebitamento = debiti totali / patrimonio netto** (`leverage_ratio` ora uguale a
@@ -283,7 +301,12 @@ esistente**, storico compreso, non solo su quelli generati dopo il lotto.
   righe invece di una netta; `erogazioni_incoerenti` (in `FinancingActivities`) segnala quando le
   erogazioni note non bastano a spiegare l'aumento di debito, e in quel caso si ripiega sulla riga
   netta di sempre. `engine_meta` `NULL` (scenari pre-lotto, anni infrannuale) = nessuna
-  separazione, comportamento identico a prima.
+  separazione, comportamento identico a prima. **Vale su entrambe le pagine che leggono il
+  rendiconto** (revisione finale, F3): `/analysis` (`analysis_service.py`) e la pagina Rendiconto
+  (`GET /scenarios/{id}/detailed-cashflow`, `calculation_service.
+  calculate_detailed_cashflow_historical_and_forecast`) — questa seconda restava al netto perché
+  non passava `erogazioni=` al calcolatore, mostrando un numero diverso da `/analysis` sullo
+  stesso scenario.
 - **Il punto di pareggio degli anni di piano viene dal motore**,
   `ForecastYear.engine_meta['pareggio']` (`costi_variabili`, `costi_fissi_operativi`,
   `fatturato_pareggio`, `margine_sicurezza_pct`), non più dalla ripartizione fissa 60/40 costi

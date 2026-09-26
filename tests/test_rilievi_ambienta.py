@@ -161,9 +161,6 @@ def test_B02_ammortamento_dei_cespiti_esistenti_si_ferma_al_residuo():
     assert e.anni[2029][1]["ce09b_ammort_materiali"] == D("25716.59")
 
 
-@pytest.mark.xfail(strict=True, raises=AssertionError, reason="B03 confermato dal triage 2026-09-25: l'accantonamento TFR "
-                    "è il residuo del costo del personale, non retribuzioni/13,5 come dice l'interfaccia"
-                    " — togli il marcatore quando il fix lo fa passare")
 def test_B03_tfr_uguale_retribuzioni_diviso_13_5():
     """B03 · Passo 3/6: l'accantonamento è il residuo personale − salari − oneri, non retribuzioni/13,5
     come dice l'interfaccia. Oracolo: ce08a = ce08b / 13,5 in ogni anno."""

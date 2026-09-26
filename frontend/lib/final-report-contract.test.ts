@@ -123,7 +123,7 @@ describe("FinalReportModel v1 runtime contract", () => {
     expect(values.get("ce_overrides")?.ce_overrides?.[0].field).toBe("ce02_override");
     expect(values.get("sp_indexing")?.sp_indexing?.[0].driver).toBe("ricavi");
     expect(values.get("sp_overrides")?.sp_overrides?.[0].value).toBe("50.00");
-    for (const field of ["cash_sweep_enabled", "overdraft_allowed", "previdenza_scales_with_personnel", "tfr_accrual_suspended"]) {
+    for (const field of ["cash_sweep_enabled", "overdraft_allowed", "tfr_accrual_suspended"]) {
       expect(values.get(field)?.values.every((value) => typeof value === "boolean")).toBe(true);
     }
 

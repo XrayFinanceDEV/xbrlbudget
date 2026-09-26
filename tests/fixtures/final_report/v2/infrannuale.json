@@ -297,24 +297,6 @@
           "other_lenders": null
         },
         {
-          "field": "previdenza_scales_with_personnel",
-          "label": "Previdenza scala con personale",
-          "values": [
-            true,
-            true,
-            false
-          ],
-          "provenance": "user",
-          "active": true,
-          "financing_loans": null,
-          "pregresso": null,
-          "temporary_differences": null,
-          "ce_overrides": null,
-          "sp_indexing": null,
-          "sp_overrides": null,
-          "other_lenders": null
-        },
-        {
           "field": "tfr_accrual_suspended",
           "label": "Accantonamento TFR sospeso",
           "values": [

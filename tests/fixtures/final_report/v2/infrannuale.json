@@ -1,8 +1,8 @@
 {
   "schema_version": 2,
   "generated_at": "2026-09-14T10:00:00Z",
-  "model_hash": "ddc021c5511f825ecf604ab57b8262f55ec4beb8df7b36eeefff5a3d4924619d",
-  "source_hash": "727992589b3136144109d283fd191353f4d6569d2dbc5a82f5d3a80324b0194b",
+  "model_hash": "26718e1033658a1518f2cc37df7f067f3437612b11654b50de44b7d513edf504",
+  "source_hash": "64e988d69f495d1900c738dcb4a92ef13ea6891e7658704dbace9ef4d11b8c0d",
   "company": {
     "id": 1,
     "name": "Officina Aurora Srl",
@@ -5059,7 +5059,7 @@
       "label": "Margine di Tesoreria",
       "family": "pratica",
       "unit": "eur",
-      "methodology": "Attivo corrente pratica - rimanenze - debiti entro 12 mesi",
+      "methodology": "Attivo corrente pratica - rimanenze - passivo corrente (debiti entro 12 mesi + ratei passivi)",
       "convention": "pratica-v1: attivo corrente senza crediti oltre 12 mesi, con ratei attivi; CE canonico; flussi del periodo non annualizzati; nessun punteggio implicito.",
       "periods": [
         {
@@ -7562,7 +7562,7 @@
         }
       ],
       "source": "persisted_statement; balance_aggregates; financial_debt_total",
-      "methodology": "Patrimonio netto dagli aggregati; debiti finanziari con la convenzione della PFN (banche e obbligazioni se positive, altrimenti debito meno i dettagli non bancari noti, altrimenti il debito totale); altre passività come residuo sul totale del passivo."
+      "methodology": "Patrimonio netto dagli aggregati; debiti finanziari con la convenzione della PFN (somma incondizionata di banche, altri finanziatori e obbligazioni, breve e lungo termine); altre passività come residuo sul totale del passivo."
     },
     {
       "id": "cost_incidence",

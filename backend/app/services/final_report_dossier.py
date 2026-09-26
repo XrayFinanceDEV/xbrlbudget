@@ -337,9 +337,12 @@ def build_structure_series(sources: list[DossierSource], indicators: list[Indica
                           methodology="Immobilizzazioni nette e disponibilità liquide dagli aggregati di bilancio; il circolante e altro è il residuo sul totale dell'attivo. Quote percentuali sullo stesso totale."),
         ReportSeriesGroup(id='composition_sources', title='Composizione delle fonti', periods=periods,
                           series=_finish(sources_group, labels, units), source='persisted_statement; balance_aggregates; financial_debt_total',
-                          methodology='Patrimonio netto dagli aggregati; debiti finanziari con la convenzione della PFN (banche'
-                                      ' e obbligazioni se positive, altrimenti debito meno i dettagli non bancari noti, altrimenti'
-                                      ' il debito totale); altre passività come residuo sul totale del passivo.'),
+                          # Minore (revisione finale lotto 2, 2026-09-26): testo allineato a C03/C04
+                          # — `financial_debt_total` è una somma incondizionata, mai un ramo "banche
+                          # positive altrimenti fallback" che tagliava fuori gli altri finanziatori.
+                          methodology='Patrimonio netto dagli aggregati; debiti finanziari con la convenzione della PFN (somma'
+                                      ' incondizionata di banche, altri finanziatori e obbligazioni, breve e lungo termine);'
+                                      ' altre passività come residuo sul totale del passivo.'),
         ReportSeriesGroup(id='cost_incidence', title='Incidenza dei costi sui ricavi', periods=periods,
                           series=incidence, source='calculations.report_indicators',
                           methodology="Valori del catalogo indicatori (practice.*): rapporto sull'articolo CE 1 × 100, con i flussi del periodo senza annualizzazione."),

@@ -395,6 +395,18 @@ def test_composition_values_tie_to_the_statement_and_shares_declare_their_denomi
                 assert share == value / total * Decimal('100')
 
 
+def test_composition_sources_methodology_describes_the_unconditional_pfn_convention():
+    """Minore (revisione finale lotto 2, 2026-09-26): la metodologia della «Composizione delle
+    fonti» descriveva ancora la vecchia convenzione della PFN («banche e obbligazioni se
+    positive, altrimenti debito meno i dettagli non bancari noti, altrimenti il debito totale»),
+    superata da C03/C04 — `financial_debt_total` è ormai una somma incondizionata di banche,
+    altri finanziatori e obbligazioni, sempre."""
+    report = fixture_report('bilancio')
+    sources = group(report, 'composition_sources')
+    assert 'se positive' not in sources.methodology, sources.methodology
+    assert 'altri finanziatori' in sources.methodology, sources.methodology
+
+
 def test_break_even_uses_the_engine_declared_figures_on_plan_years():
     """A02 (lotto 2 fix rilievi, 2026-09-26): un anno di piano non ricalcola più
     fissi/variabili con la quota delle ipotesi (60/40 di default); riporta

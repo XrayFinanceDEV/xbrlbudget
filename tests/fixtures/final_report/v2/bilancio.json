@@ -1,8 +1,8 @@
 {
   "schema_version": 2,
   "generated_at": "2026-09-14T11:00:00Z",
-  "model_hash": "90ae51d045fb55009dac898140b673cca63ba08a1ac94fa08ae1f584987ca3e9",
-  "source_hash": "d38141f4d825e986af99416b2456a698216e08b74ae3d8c04de558fb9cf3ec0a",
+  "model_hash": "39ee3ebac072c4a7b8d59690296ed051c7772f74e7abe24c913dd5a74c21d345",
+  "source_hash": "d8238a6360debf0237b61f2bb7cd21c78aaf0e3c68e0b4075b1f265f0943d3cc",
   "company": {
     "id": 2,
     "name": "Bilancio Spa",
@@ -3723,7 +3723,7 @@
       "label": "Margine di Tesoreria",
       "family": "pratica",
       "unit": "eur",
-      "methodology": "Attivo corrente pratica - rimanenze - debiti entro 12 mesi",
+      "methodology": "Attivo corrente pratica - rimanenze - passivo corrente (debiti entro 12 mesi + ratei passivi)",
       "convention": "pratica-v1: attivo corrente senza crediti oltre 12 mesi, con ratei attivi; CE canonico; flussi del periodo non annualizzati; nessun punteggio implicito.",
       "periods": [
         {
@@ -5130,7 +5130,7 @@
         }
       ],
       "source": "persisted_statement; balance_aggregates; financial_debt_total",
-      "methodology": "Patrimonio netto dagli aggregati; debiti finanziari con la convenzione della PFN (banche e obbligazioni se positive, altrimenti debito meno i dettagli non bancari noti, altrimenti il debito totale); altre passività come residuo sul totale del passivo."
+      "methodology": "Patrimonio netto dagli aggregati; debiti finanziari con la convenzione della PFN (somma incondizionata di banche, altri finanziatori e obbligazioni, breve e lungo termine); altre passività come residuo sul totale del passivo."
     },
     {
       "id": "cost_incidence",

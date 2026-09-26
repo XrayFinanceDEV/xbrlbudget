@@ -1,8 +1,8 @@
 {
   "schema_version": 2,
   "generated_at": "2026-09-14T12:00:00Z",
-  "model_hash": "2e60df62840627157895649ed01c9ddff9607360b14bc606a4d408b099805367",
-  "source_hash": "4d212ff94656eea4c06869a60f3107225414e46e397fb67603638412910834eb",
+  "model_hash": "e236b1f479b9a6167f236d86ec6393eed781d41ea7f21334d8ad17fd73f9d673",
+  "source_hash": "e198f3358534b3cf4eca73ce7459254b89bb8440c5137de1ab6e38bff28f9aa5",
   "company": {
     "id": 3,
     "name": "Startup Srl",
@@ -5610,7 +5610,7 @@
       "label": "Margine di Tesoreria",
       "family": "pratica",
       "unit": "eur",
-      "methodology": "Attivo corrente pratica - rimanenze - debiti entro 12 mesi",
+      "methodology": "Attivo corrente pratica - rimanenze - passivo corrente (debiti entro 12 mesi + ratei passivi)",
       "convention": "pratica-v1: attivo corrente senza crediti oltre 12 mesi, con ratei attivi; CE canonico; flussi del periodo non annualizzati; nessun punteggio implicito.",
       "periods": [
         {
@@ -9209,7 +9209,7 @@
         }
       ],
       "source": "persisted_statement; balance_aggregates; financial_debt_total",
-      "methodology": "Patrimonio netto dagli aggregati; debiti finanziari con la convenzione della PFN (banche e obbligazioni se positive, altrimenti debito meno i dettagli non bancari noti, altrimenti il debito totale); altre passività come residuo sul totale del passivo."
+      "methodology": "Patrimonio netto dagli aggregati; debiti finanziari con la convenzione della PFN (somma incondizionata di banche, altri finanziatori e obbligazioni, breve e lungo termine); altre passività come residuo sul totale del passivo."
     },
     {
       "id": "cost_incidence",

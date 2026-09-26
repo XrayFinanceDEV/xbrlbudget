@@ -10,7 +10,7 @@ import {
   usePreferredBudgetScenarioId,
 } from "@/hooks/use-queries";
 
-import { formatCurrency, formatPercentage } from "@/lib/formatters";
+import { formatCurrency, formatNumberOrNA, formatPercentage, formatPercentageOrNA } from "@/lib/formatters";
 import type {
   FinancialAnalysis,
   AllRatios,
@@ -728,7 +728,7 @@ export default function AnalysisPage() {
                 <div className="flex justify-between">
                   <span className="text-sm text-muted-foreground">Ciclo Cassa:</span>
                   <span className="text-sm font-medium text-foreground">
-                    {analysis.ratios.activity.cash_conversion_cycle.toFixed(0)}
+                    {formatNumberOrNA(analysis.ratios.activity.cash_conversion_cycle, 0)}
                   </span>
                 </div>
               </div>
@@ -964,7 +964,9 @@ export default function AnalysisPage() {
                     <FormulaCell formula="360/TdM" />
                     {multiYearRatios.ratios.map((r, i) => (
                       <td key={i} className="py-2 px-4 text-right font-medium">
-                        {r.activity.inventory_turnover_days.toFixed(0)} gg
+                        {r.activity.inventory_turnover_days === null
+                          ? "n.d."
+                          : `${r.activity.inventory_turnover_days.toFixed(0)} gg`}
                       </td>
                     ))}
                   </tr>
@@ -1043,7 +1045,7 @@ export default function AnalysisPage() {
                     <FormulaCell formula="OF/(PC+PF)" />
                     {multiYearRatios.ratios.map((r, i) => (
                       <td key={i} className="py-2 px-4 text-right font-medium">
-                        {formatPercentage(r.profitability.rod)}
+                        {formatPercentageOrNA(r.profitability.rod)}
                       </td>
                     ))}
                   </tr>
@@ -1052,7 +1054,7 @@ export default function AnalysisPage() {
                     <FormulaCell formula="(ROI-ROD)" />
                     {multiYearRatios.ratios.map((r, i) => (
                       <td key={i} className="py-2 px-4 text-right font-medium">
-                        {r.extended_profitability.spread.toFixed(2)}
+                        {formatNumberOrNA(r.extended_profitability.spread, 2)}
                       </td>
                     ))}
                   </tr>

@@ -69,6 +69,19 @@ export function formatDecimal(value: number, decimals: number = 4): string {
   }).format(value);
 }
 
+/**
+ * Un indice che il backend dichiara indefinito (ROD senza debito finanziario, DIO con consumo di
+ * materie non positivo, spread e ciclo di conversione del denaro quando ne dipendono) arriva come
+ * `null`, mai come uno zero misurato: "n.d.", non "0,00%" — fix round 1, review lotto 2, 2026-09-26.
+ */
+export function formatPercentageOrNA(value: number | null, decimals: number = 2): string {
+  return value === null ? "n.d." : formatPercentage(value, decimals);
+}
+
+export function formatNumberOrNA(value: number | null, decimals: number = 2): string {
+  return value === null ? "n.d." : formatNumber(value, decimals);
+}
+
 // Sector names in Italian
 export const sectorNames: Record<number, string> = {
   1: 'Industria',

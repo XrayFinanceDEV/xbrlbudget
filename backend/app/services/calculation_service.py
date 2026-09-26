@@ -24,7 +24,13 @@ from decimal import Decimal
 
 
 def _convert_namedtuple_to_dict(nt):
-    """Convert NamedTuple to dictionary with appropriate types"""
+    """Convert NamedTuple to dictionary with appropriate types.
+
+    A field that is genuinely `None` (ROD with no financial debt, DIO with a non-positive
+    materials consumption — fix round 1, review lotto 2, 2026-09-26) stays `None`: it used to be
+    silently rewritten to `0.0`, which is exactly the "diagnose, never fabricate" trap — a missing
+    indicator is "I don't know", never a measured zero.
+    """
     if nt is None:
         return None
     result = {}
@@ -39,7 +45,7 @@ def _convert_namedtuple_to_dict(nt):
             except (ValueError, TypeError):
                 result[key] = value  # Keep original if conversion fails
         else:
-            result[key] = 0.0
+            result[key] = None
     return result
 
 

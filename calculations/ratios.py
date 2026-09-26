@@ -36,7 +36,7 @@ class ProfitabilityRatios(NamedTuple):
     roe: Decimal    # Return on Equity
     roi: Decimal    # Return on Investment
     ros: Decimal    # Return on Sales
-    rod: Decimal    # Costo del Denaro (Return on Debt)
+    rod: Optional[Decimal]    # Costo del Denaro (Return on Debt); None senza debito finanziario
     ebitda_margin: Decimal  # EBITDA / Revenue
     ebit_margin: Decimal    # EBIT / Revenue
     net_margin: Decimal     # Net Profit / Revenue
@@ -45,11 +45,11 @@ class ProfitabilityRatios(NamedTuple):
 class ActivityRatios(NamedTuple):
     """Activity/Efficiency ratios"""
     asset_turnover: Decimal         # Fatturato / Totale Attivo
-    inventory_turnover_days: Decimal  # DMAG - Giorni di Magazzino
+    inventory_turnover_days: Optional[Decimal]  # DMAG - Giorni di Magazzino; None con consumo non positivo
     receivables_turnover_days: Decimal  # DCRED - Giorni di Credito
     payables_turnover_days: Decimal  # DDEB - Giorni di Debito
     working_capital_days: Decimal    # DCCN - Giorni CCN
-    cash_conversion_cycle: Decimal   # Ciclo di conversione del denaro
+    cash_conversion_cycle: Optional[Decimal]   # Ciclo di conversione del denaro; None se il DMAG lo è
 
 
 class CoverageRatios(NamedTuple):
@@ -70,7 +70,7 @@ class TurnoverRatios(NamedTuple):
 
 class ExtendedProfitabilityRatios(NamedTuple):
     """Extended profitability indices"""
-    spread: Decimal                      # ROI - ROD
+    spread: Optional[Decimal]            # ROI - ROD; None se il ROD è None (nessun debito finanziario)
     financial_leverage_effect: Decimal   # (PC+PF)/CN
     ebitda_on_sales: Decimal            # MOL/RIC
     financial_charges_on_revenue: Decimal  # OF/RIC
@@ -260,10 +260,12 @@ class FinancialRatiosCalculator(BaseCalculator):
         # ROD = Costo del Denaro = Oneri Finanziari / Debito Finanziario (banche, altri
         # finanziatori, obbligazioni) — non Debiti Totali, che comprendono i fornitori (C03,
         # lotto 2 fix rilievi 2026-09-26). Stessa definizione di `BalanceSheet.financial_debt_total`.
-        rod = self.safe_divide(
-            self.inc.ce15_oneri_finanziari,
-            self.bs.financial_debt_total
-        )
+        # Senza debito finanziario il ROD è indefinito, non zero (fix round 1, review lotto 2):
+        # un'azienda senza banche/altri finanziatori/obbligazioni non ha "un costo del denaro pari
+        # a zero", non ha un costo del denaro da misurare — `safe_divide` con default 0 lo
+        # dichiarerebbe silenziosamente pulito.
+        financial_debt = self.bs.financial_debt_total
+        rod = self.safe_divide(self.inc.ce15_oneri_finanziari, financial_debt) if financial_debt > 0 else None
 
         # EBITDA Margin = EBITDA / Fatturato
         ebitda_margin = self.safe_divide(
@@ -287,7 +289,7 @@ class FinancialRatiosCalculator(BaseCalculator):
             roe=self.round_decimal(roe, 4),
             roi=self.round_decimal(roi, 4),
             ros=self.round_decimal(ros, 4),
-            rod=self.round_decimal(rod, 4),
+            rod=self.round_decimal(rod, 4) if rod is not None else None,
             ebitda_margin=self.round_decimal(ebitda_margin, 4),
             ebit_margin=self.round_decimal(ebit_margin, 4),
             net_margin=self.round_decimal(net_margin, 4)
@@ -315,12 +317,13 @@ class FinancialRatiosCalculator(BaseCalculator):
         # rilievi 2026-09-26: era / Fatturato, che non ha alcun legame col magazzino di materie).
         # Consumo = ce05 + ce10 (variazione rimanenze materie prime, convenzione OIC B11), stessa
         # convenzione di `calculations/forecast_engine.py::consumo_base_materie`. Un consumo non
-        # positivo lascia il DMAG a 0 qui (nessun ratio di questa classe restituisce None); la
-        # dichiarazione "indefinito, non zero" vive nel report (`report_indicators.indicator_results`).
+        # positivo (frequente: nessuna riga di materie prime distinta, es. servizi) rende il DMAG
+        # indefinito, non zero (fix round 1, review lotto 2): `safe_divide` con default 0
+        # dichiarerebbe un magazzino istantaneo che non è mai stato misurato.
         consumo_materie = (self.inc.ce05_materie_prime or Decimal('0')) + (self.inc.ce10_var_rimanenze_mat_prime or Decimal('0'))
-        inventory_turnover_days = self.safe_divide(
-            Decimal(days_in_year) * self.bs.sp05_rimanenze,
-            consumo_materie
+        inventory_turnover_days = (
+            self.safe_divide(Decimal(days_in_year) * self.bs.sp05_rimanenze, consumo_materie)
+            if consumo_materie > 0 else None
         )
 
         # DCRED = Giorni di Credito = 360 * Crediti verso clienti / Fatturato (C02, lotto 2 fix
@@ -356,20 +359,21 @@ class FinancialRatiosCalculator(BaseCalculator):
             self.inc.revenue
         )
 
-        # Cash Conversion Cycle = DMAG + DCRED - DDEB
+        # Cash Conversion Cycle = DMAG + DCRED - DDEB. Un DMAG indefinito rende indefinito anche
+        # il ciclo (fix round 1, review lotto 2): sommare None non è possibile, e sommare uno zero
+        # al suo posto dichiarerebbe un magazzino sereno che nessuno ha misurato.
         cash_conversion_cycle = (
-            inventory_turnover_days +
-            receivables_turnover_days -
-            payables_turnover_days
+            inventory_turnover_days + receivables_turnover_days - payables_turnover_days
+            if inventory_turnover_days is not None else None
         )
 
         return ActivityRatios(
             asset_turnover=self.round_decimal(asset_turnover, 4),
-            inventory_turnover_days=self.round_decimal(inventory_turnover_days, 0),
+            inventory_turnover_days=self.round_decimal(inventory_turnover_days, 0) if inventory_turnover_days is not None else None,
             receivables_turnover_days=self.round_decimal(receivables_turnover_days, 0),
             payables_turnover_days=self.round_decimal(payables_turnover_days, 0),
             working_capital_days=self.round_decimal(working_capital_days, 0),
-            cash_conversion_cycle=self.round_decimal(cash_conversion_cycle, 0)
+            cash_conversion_cycle=self.round_decimal(cash_conversion_cycle, 0) if cash_conversion_cycle is not None else None
         )
 
     # ============= COVERAGE RATIOS =============
@@ -473,8 +477,10 @@ class FinancialRatiosCalculator(BaseCalculator):
         # Calculate base ratios first
         profitability = self.calculate_profitability_ratios()
 
-        # Spread = ROI - ROD
-        spread = profitability.roi - profitability.rod
+        # Spread = ROI - ROD. Un ROD indefinito (nessun debito finanziario) rende indefinito anche
+        # lo spread (fix round 1, review lotto 2): sottrarre None non è possibile, e sostituirlo con
+        # zero dichiarerebbe un costo del denaro che non è mai stato misurato.
+        spread = profitability.roi - profitability.rod if profitability.rod is not None else None
 
         # Financial Leverage Effect = (PC+PF)/CN
         total_liabilities = self.bs.current_liabilities + self.bs.sp17_debiti_lungo
@@ -496,7 +502,7 @@ class FinancialRatiosCalculator(BaseCalculator):
         )
 
         return ExtendedProfitabilityRatios(
-            spread=self.round_decimal(spread, 4),
+            spread=self.round_decimal(spread, 4) if spread is not None else None,
             financial_leverage_effect=self.round_decimal(financial_leverage_effect, 4),
             ebitda_on_sales=self.round_decimal(ebitda_on_sales, 4),
             financial_charges_on_revenue=self.round_decimal(financial_charges_on_revenue, 4)

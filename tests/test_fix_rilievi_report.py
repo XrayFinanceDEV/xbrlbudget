@@ -1,6 +1,7 @@
 """A01-bis (lotto 2 fix rilievi, 2026-09-26): avviso di previsionale vecchio nel PDF, nel Word e su
 /report — sia per ipotesi salvate dopo l'ultima generazione (`forecast_stale`), sia per un
 previsionale generato da una versione precedente del motore (`engine_version_stale`)."""
+from decimal import ROUND_HALF_UP
 from decimal import Decimal as D
 
 import pytest
@@ -209,7 +210,7 @@ def test_C02_dio_sul_consumo_di_materie_prime():
     bs, inc = _statements()
     activity = FinancialRatiosCalculator(bs, inc).calculate_activity_ratios()
     consumo = BASE_CE["ce05_materie_prime"] + BASE_CE["ce10_var_rimanenze_mat_prime"]
-    atteso = (D("360") * BASE_BS["sp05_rimanenze"] / consumo).quantize(D("1"))
+    atteso = (D("360") * BASE_BS["sp05_rimanenze"] / consumo).quantize(D("1"), rounding=ROUND_HALF_UP)
     assert activity.inventory_turnover_days == atteso
 
 
@@ -219,7 +220,7 @@ def test_C02_dso_sui_soli_crediti_commerciali_in_ratios_py():
     bs, inc = _statements()
     activity = FinancialRatiosCalculator(bs, inc).calculate_activity_ratios()
     atteso = (D("360") * (BASE_BS["sp06a_crediti_clienti_breve"] + BASE_BS["sp07a_crediti_clienti_lungo"])
-              / BASE_CE["ce01_ricavi_vendite"]).quantize(D("1"))
+              / BASE_CE["ce01_ricavi_vendite"]).quantize(D("1"), rounding=ROUND_HALF_UP)
     assert activity.receivables_turnover_days == atteso
 
 
@@ -252,7 +253,7 @@ def test_C03_rod_divide_per_il_debito_finanziario_in_ratios_py():
     profitability = FinancialRatiosCalculator(bs, inc).calculate_profitability_ratios()
     fin = (BASE_BS["sp16a_debiti_banche_breve"] + BASE_BS["sp17a_debiti_banche_lungo"]
            + BASE_BS["sp17b_debiti_altri_finanz_lungo"])
-    atteso = (BASE_CE["ce15_oneri_finanziari"] / fin).quantize(D("0.0001"))
+    atteso = (BASE_CE["ce15_oneri_finanziari"] / fin).quantize(D("0.0001"), rounding=ROUND_HALF_UP)
     assert profitability.rod == atteso
 
 
@@ -282,7 +283,7 @@ def test_C07_copertura_immob_include_il_tfr_in_ratios_py():
     coverage = FinancialRatiosCalculator(bs, inc).calculate_coverage_ratios()
     pn = BASE_BS["sp11_capitale"] + BASE_BS["sp12_riserve"] + BASE_BS["sp13_utile_perdita"]
     fixed = BASE_BS["sp02_immob_immateriali"] + BASE_BS["sp03_immob_materiali"] + BASE_BS["sp04_immob_finanziarie"]
-    atteso = ((pn + BASE_BS["sp17_debiti_lungo"] + BASE_BS["sp15_tfr"]) / fixed).quantize(D("0.0001"))
+    atteso = ((pn + BASE_BS["sp17_debiti_lungo"] + BASE_BS["sp15_tfr"]) / fixed).quantize(D("0.0001"), rounding=ROUND_HALF_UP)
     assert coverage.fixed_assets_coverage_with_equity_and_ltdebt == atteso
 
 
@@ -306,3 +307,93 @@ def test_C07_copertura_immob_practice_none_con_immobilizzazioni_zero():
     res = indicator_results(bs_dict, dict(BASE_CE), {})
     r = res["practice.copertura_immob"]
     assert r.value is None and r.reason == "zero_denominator", r
+
+
+# ===========================================================================
+# Fix round 1 (review lotto 2, 2026-09-26): ROD e DIO indefiniti sono `None` alla FONTE
+# (`calculations/ratios.py`), non solo dichiarati dal report. La pagina Indici legge
+# `GET /companies/{id}/scenarios/{scenario_id}/ratios` (`calculation_service.calculate_ratios_
+# historical_and_forecast`, `response_model=Any`) che non passa mai da `report_indicators.py`:
+# senza il `None` alla fonte un'azienda senza debito finanziario, o senza una riga di materie
+# prime distinta (entrambi comuni), mostrava un ROD/DIO di 0 silenzioso invece di «n.d.», e
+# `_convert_namedtuple_to_dict` lo avrebbe comunque riscritto a 0.0 anche se non lo fosse stato.
+# ===========================================================================
+
+_NESSUN_DEBITO_FINANZIARIO = {
+    "sp16a_debiti_banche_breve": D("0"), "sp17a_debiti_banche_lungo": D("0"),
+    "sp16b_debiti_altri_finanz_breve": D("0"), "sp17b_debiti_altri_finanz_lungo": D("0"),
+    "sp16c_debiti_obbligazioni_breve": D("0"), "sp17c_debiti_obbligazioni_lungo": D("0"),
+}
+
+
+def test_rod_none_senza_debito_finanziario():
+    """ROD = None quando l'azienda non ha banche, altri finanziatori o obbligazioni (comune: tutto
+    debito verso fornitori) — zero non è un costo del denaro misurato."""
+    bs, inc = _statements(bs_over=_NESSUN_DEBITO_FINANZIARIO)
+    profitability = FinancialRatiosCalculator(bs, inc).calculate_profitability_ratios()
+    assert profitability.rod is None
+
+
+def test_dio_none_con_consumo_zero_alla_fonte():
+    """DIO = None quando il consumo di materie prime è zero (es. un'azienda di servizi senza una
+    riga di materie distinta) — alla fonte in `ratios.py`, non solo nel report."""
+    bs, inc = _statements(ce_over={"ce05_materie_prime": D("0"), "ce10_var_rimanenze_mat_prime": D("0")})
+    activity = FinancialRatiosCalculator(bs, inc).calculate_activity_ratios()
+    assert activity.inventory_turnover_days is None
+
+
+def test_dio_none_con_consumo_negativo_alla_fonte():
+    """DIO = None quando il consumo è negativo (variazione rimanenze che eccede gli acquisti):
+    mai un giorno di magazzino negativo pubblicato."""
+    bs, inc = _statements(ce_over={"ce05_materie_prime": D("100"), "ce10_var_rimanenze_mat_prime": D("-500")})
+    activity = FinancialRatiosCalculator(bs, inc).calculate_activity_ratios()
+    assert activity.inventory_turnover_days is None
+
+
+def test_cash_conversion_cycle_none_quando_il_dio_lo_e():
+    """Il ciclo di conversione del denaro non somma un DIO indefinito: None, non un ciclo che
+    ignora il magazzino."""
+    bs, inc = _statements(ce_over={"ce05_materie_prime": D("0"), "ce10_var_rimanenze_mat_prime": D("0")})
+    activity = FinancialRatiosCalculator(bs, inc).calculate_activity_ratios()
+    assert activity.inventory_turnover_days is None
+    assert activity.cash_conversion_cycle is None
+
+
+def test_spread_none_quando_il_rod_lo_e():
+    """Lo spread ROI-ROD non sottrae un ROD indefinito: None, non uno spread che include un costo
+    del denaro mai misurato."""
+    bs, inc = _statements(bs_over=_NESSUN_DEBITO_FINANZIARIO)
+    calc = FinancialRatiosCalculator(bs, inc)
+    assert calc.calculate_profitability_ratios().rod is None
+    assert calc.calculate_extended_profitability_ratios().spread is None
+
+
+def test_convert_namedtuple_to_dict_non_riscrive_none_a_zero():
+    """`_convert_namedtuple_to_dict` (calculation_service.py) è dietro l'unico endpoint che legge
+    la pagina Indici multi-anno (`.../scenarios/{id}/ratios`, `response_model=Any`, nessuna
+    validazione Pydantic): un `None` deve arrivare come `None`, non come lo `0.0` che riscriveva
+    prima del fix — «diagnose, never fabricate» vale anche in serializzazione."""
+    from backend.app.services.calculation_service import _convert_namedtuple_to_dict
+    bs, inc = _statements(bs_over=_NESSUN_DEBITO_FINANZIARIO)
+    profitability = FinancialRatiosCalculator(bs, inc).calculate_profitability_ratios()
+    d = _convert_namedtuple_to_dict(profitability)
+    assert d["rod"] is None
+
+
+def test_schema_ratios_accetta_rod_e_dio_none():
+    """Gli schemi Pydantic (`backend/app/schemas/calculations.py`) validano `rod`,
+    `inventory_turnover_days`, `cash_conversion_cycle` e `spread` a `None` senza sollevare: erano
+    `float` non opzionali, e la validazione avrebbe rotto ogni endpoint tipizzato che li serve
+    (`/companies/{id}/years/{year}/calculations/{ratios|complete}`) per un'azienda senza debito
+    finanziario o senza una riga di materie prime distinta."""
+    from backend.app.schemas import calculations as calc_schemas
+    p = calc_schemas.ProfitabilityRatios(roe=0.1, roi=0.05, ros=0.02, rod=None,
+                                          ebitda_margin=0.1, ebit_margin=0.05, net_margin=0.02)
+    assert p.rod is None
+    a = calc_schemas.ActivityRatios(asset_turnover=1.0, inventory_turnover_days=None,
+                                     receivables_turnover_days=30, payables_turnover_days=60,
+                                     working_capital_days=10, cash_conversion_cycle=None)
+    assert a.inventory_turnover_days is None and a.cash_conversion_cycle is None
+    e = calc_schemas.ExtendedProfitabilityRatios(spread=None, financial_leverage_effect=1.0,
+                                                  ebitda_on_sales=0.1, financial_charges_on_revenue=0.02)
+    assert e.spread is None

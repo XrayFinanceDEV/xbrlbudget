@@ -4432,7 +4432,7 @@ class ForecastEngine:
                 # diretta del kernel — nell'ultimo anno di piano un contratto scadenziato a
                 # mano la cui lista non copre l'anno dopo ripete l'ultima rata invece di
                 # lasciare a lungo termine un residuo che nessun anno vedra' mai scadere.
-                rata_dopo, _ = rata_anno_dopo(c, anno, ultimo_anno_piano)
+                rata_dopo, rata_ripetuta = rata_anno_dopo(c, anno, ultimo_anno_piano)
                 breve = min(residuo, rata_dopo)
                 righe.append({
                     'indice': c['indice'], 'nome': c['nome'],
@@ -4440,6 +4440,9 @@ class ForecastEngine:
                     'rimborso': _q2(rimborso), 'interessi': _q2(interessi),
                     'residuo': _q2(residuo), 'breve': _q2(breve),
                     'lungo': _q2(residuo - breve),
+                    # B05, esteso agli altri finanziatori (ruling del controller, Task 6):
+                    # una chiave diagnostica si dichiara sempre, anche a False.
+                    'rata_ripetuta': rata_ripetuta,
                 })
                 tot_res += _q2(residuo)
                 tot_breve += _q2(breve)

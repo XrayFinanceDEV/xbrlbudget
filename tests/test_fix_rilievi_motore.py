@@ -3,6 +3,8 @@ from decimal import Decimal as D
 
 from calculations.projection_common import ammortamento_categoria, rata_anno_dopo, rimanenze_materie
 from tests.rilievi_kit import BASE_BS, BASE_CE, genera, generato, per_anno, righe
+from tests.test_forecast_altri_finanziatori import _genera as _genera_altri_finanziatori
+from tests.test_forecast_altri_finanziatori import _rows as _rows_altri_finanziatori
 from tests.test_rilievi_ambienta import _banche
 
 
@@ -257,3 +259,15 @@ def test_B05_motore_anno_non_ultimo_rata_non_ripetuta():
     contratti = e.det[2028]["debito_bancario"]["contratti"]
     assert len(contratti) == 1, contratti
     assert contratti[0]["rata_ripetuta"] is False
+
+
+def test_B05_rata_ripetuta_dichiarata_anche_su_altri_finanziatori():
+    # Controller ruling del Task 6: la stessa regola B05 si applica ai contratti
+    # `other_lenders`, e la chiave diagnostica va dichiarata anche lì (una chiave
+    # diagnostica si dichiara sempre — CLAUDE.md). Scenario di
+    # tests/test_forecast_altri_finanziatori.py::test_rimborsi_per_anno_e_quota_a_breve:
+    # il contratto soci [0, 50000, 0] non copre il 2030, ultimo anno di piano il 2029.
+    _, _, det, _ = _genera_altri_finanziatori("soci-rata-ripetuta", _rows_altri_finanziatori())
+    assert det[2027]["altri_finanziatori"]["contratti"][0]["rata_ripetuta"] is False
+    assert det[2028]["altri_finanziatori"]["contratti"][0]["rata_ripetuta"] is False
+    assert det[2029]["altri_finanziatori"]["contratti"][0]["rata_ripetuta"] is True

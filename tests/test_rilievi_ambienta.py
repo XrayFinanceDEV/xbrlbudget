@@ -86,24 +86,19 @@ def _a04_base(sp07a, sp07g) -> dict:
 # creditiComponents(bs).long, che comprende sp07g (misurato con un Vitest usa e getta, 2026-09-25).
 
 
-@pytest.mark.parametrize("sp07a, sp07g", [
-    pytest.param(0, 45000, id="tutto_su_sp07g"),
-    pytest.param(35231, 9769, id="mix_del_consulente", marks=pytest.mark.xfail(
-        strict=True, raises=AssertionError,
-        reason="A04 confermato dal triage 2026-09-25: con clienti e altri crediti oltre 12 mesi insieme, "
-               "l'incasso scadenziato si ripartisce per proporzione (sp07g 2027 = 9.551,91, non 8.769) "
-               "— togli il marcatore quando il fix lo fa passare")),
+@pytest.mark.parametrize("sp07a, sp07g, atteso_a, atteso_g", [
+    pytest.param(0, 45000, 0, 44000, id="tutto_su_sp07g"),
+    pytest.param(35231, 9769, 34231, 9769, id="mix_del_consulente"),
 ])
-def test_A04_incasso_scadenziato_arriva_agli_altri_crediti_oltre_12_mesi(sp07a, sp07g):
-    """A04 · la riga del consulente è «Altri crediti oltre 12 mesi» = sp07g (9.769, «resta 8.769»), non sp07a.
-    Il motore scrive il residuo del piano sull'aggregato sp07 e lo ripartisce per proporzione fra
-    sp07a/b/c/d/g (forecast_engine.py, blocco crediti_commerciali). Oracolo del consulente: la riga su cui
-    ha scadenziato l'incasso scende di esattamente 1.000 nel 2027 — tutto_su_sp07g: 45.000 → 44.000;
-    mix_del_consulente: sp07g 9.769 → 8.769."""
+def test_A04_incasso_scadenziato_consuma_prima_i_clienti(sp07a, sp07g, atteso_a, atteso_g):
+    """A04 · decisione del proprietario (2026-09-26): l'incasso della massa «oltre 12 mesi» dei crediti
+    commerciali consuma prima i clienti (sp07a), poi le altre sotto-voci. Supera l'oracolo del consulente
+    («scende la voce altri crediti»): sul mix scende sp07a, sp07g resta 9.769."""
     rows = righe()
     rows[0]["pregresso"] = PREGRESSO_A04
     e = generato(genera(rows, bs=_a04_base(sp07a, sp07g)))
-    assert e.anni[2027][0]["sp07g_crediti_altri_lungo"] == D(str(sp07g)) - D("1000"), e.anni[2027][0]
+    sp = e.anni[2027][0]
+    assert (sp["sp07a_crediti_clienti_lungo"], sp["sp07g_crediti_altri_lungo"]) == (D(str(atteso_a)), D(str(atteso_g))), sp
 
 
 def test_A05_immobilizzazioni_finanziarie_senza_regola_non_seguono_i_ricavi():

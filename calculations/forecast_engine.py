@@ -597,6 +597,35 @@ _e_contratto_pregresso = e_contratto_pregresso
 _quota_breve_prestiti_nuovi = quota_breve_prestiti_nuovi
 
 
+def _consuma_in_ordine(totale: Decimal, valori_base: "List[Decimal]") -> "List[Decimal]":
+    """A04 (spec fix rilievi 2026-09-26, decisione del proprietario): ripartizione del residuo
+    lungo dei crediti commerciali (`sp07a/b/c/d/g`) quando il piano `crediti_commerciali` incassa
+    parte della massa oltre 12 mesi.
+
+    Se il totale SCENDE sotto la somma delle basi (un incasso), la riduzione si toglie prima dalla
+    prima voce (`sp07a`, i clienti), poi dalle successive nello stesso ordine, mai sotto zero — un
+    incasso consuma prima i clienti, non «un po' di ognuno». Se il totale è pari o sopra la somma
+    delle basi (crescita, o nessuna base da cui ripartire proporzione), la ripartizione resta
+    proporzionale come `_alloc`: sulla base nulla tutto sulla prima voce.
+    """
+    zero = Decimal('0')
+    tot_base = sum(valori_base, zero)
+    if totale >= tot_base or tot_base == 0:
+        if tot_base > 0:
+            return [totale * (v / tot_base) for v in valori_base]
+        out = [zero] * len(valori_base)
+        if valori_base:
+            out[0] = totale
+        return out
+    riduzione = tot_base - totale
+    risultato = []
+    for v in valori_base:
+        taglio = min(riduzione, v)
+        risultato.append(v - taglio)
+        riduzione -= taglio
+    return risultato
+
+
 def load_forecast_source(db: Session, scenario_id: int) -> ForecastSource:
     """Scenario, anno base e i due prospetti, con gli stessi controlli di
     generate_forecast: scenario assente, base assente o incompleto, gate
@@ -4698,23 +4727,47 @@ class ForecastEngine:
             'sp07c_crediti_collegate_lungo', 'sp07d_crediti_controllanti_lungo',
             'sp07e_crediti_tributari_lungo', 'sp07g_crediti_altri_lungo',
         ]
+        # A04 (spec fix rilievi 2026-09-26): col piano `crediti_commerciali` (`crediti_plan`) il
+        # lato oltre commerciale (a/b/c/d/g) si ripartisce con `_consuma_in_ordine`, non `_alloc`
+        # — un incasso scadenziato consuma prima i clienti. `sp07e` (tributari) e `sp07f`
+        # (anticipate) restano calcolati esattamente come oggi: quando entrano nello stesso
+        # `_alloc` dei commerciali (i due rami sotto) si estrae il loro valore da quella stessa
+        # chiamata, invariata, e solo il residuo commerciale passa da `_consuma_in_ordine`.
+        campi_commerciali_lunghi = sp07_non_deferred_fields[:4] + sp07_non_deferred_fields[5:]
         if piano_crediti_tributari_lungo:
             sp07e = pregresso_runoff['crediti_tributari_lungo'].residual
-            campi_commerciali_lunghi = sp07_non_deferred_fields[:4] + sp07_non_deferred_fields[5:]
-            sp07a, sp07b, sp07c, sp07d, sp07g = _alloc(
-                sp07_non_deferred - sp07e, campi_commerciali_lunghi
-            )
+            residuo_commerciale = sp07_non_deferred - sp07e
+            if crediti_plan:
+                sp07a, sp07b, sp07c, sp07d, sp07g = _consuma_in_ordine(
+                    residuo_commerciale, [_base(f) for f in campi_commerciali_lunghi]
+                )
+            else:
+                sp07a, sp07b, sp07c, sp07d, sp07g = _alloc(
+                    residuo_commerciale, campi_commerciali_lunghi
+                )
             if not tax_difference_lines:
                 sp07f = sp07 - sp07_non_deferred
         elif tax_difference_lines:
-            sp07a, sp07b, sp07c, sp07d, sp07e, sp07g = _alloc(
-                sp07_non_deferred, sp07_non_deferred_fields
-            )
+            if crediti_plan:
+                _, _, _, _, sp07e, _ = _alloc(sp07_non_deferred, sp07_non_deferred_fields)
+                sp07a, sp07b, sp07c, sp07d, sp07g = _consuma_in_ordine(
+                    sp07_non_deferred - sp07e, [_base(f) for f in campi_commerciali_lunghi]
+                )
+            else:
+                sp07a, sp07b, sp07c, sp07d, sp07e, sp07g = _alloc(
+                    sp07_non_deferred, sp07_non_deferred_fields
+                )
         else:
             sp07_fields = sp07_non_deferred_fields[:5] + [
                 'sp07f_imposte_anticipate_lungo', 'sp07g_crediti_altri_lungo'
             ]
-            sp07a, sp07b, sp07c, sp07d, sp07e, sp07f, sp07g = _alloc(sp07, sp07_fields)
+            if crediti_plan:
+                _, _, _, _, sp07e, sp07f, _ = _alloc(sp07, sp07_fields)
+                sp07a, sp07b, sp07c, sp07d, sp07g = _consuma_in_ordine(
+                    sp07 - sp07e - sp07f, [_base(f) for f in campi_commerciali_lunghi]
+                )
+            else:
+                sp07a, sp07b, sp07c, sp07d, sp07e, sp07f, sp07g = _alloc(sp07, sp07_fields)
 
         # sp05a viene dal CE (spec B01): non e' una quota proporzionale dell'aggregato, e'
         # esattamente `rim_materie['chiusura']` (gia' quantizzata al centesimo). Le altre

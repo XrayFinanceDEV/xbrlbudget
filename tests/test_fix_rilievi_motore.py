@@ -1,11 +1,25 @@
 """Test unitari e di regola dei fix del lotto 1 (spec fix rilievi AMBIENTA 2026-09-26 §3)."""
 from decimal import Decimal as D
 
+from calculations.forecast_engine import _consuma_in_ordine
 from calculations.projection_common import ammortamento_categoria, rata_anno_dopo, rimanenze_materie
 from tests.rilievi_kit import BASE_BS, BASE_CE, genera, generato, per_anno, righe
 from tests.test_forecast_altri_finanziatori import _genera as _genera_altri_finanziatori
 from tests.test_forecast_altri_finanziatori import _rows as _rows_altri_finanziatori
 from tests.test_rilievi_ambienta import _banche
+
+
+def test_consuma_in_ordine_toglie_prima_dalla_prima_voce():
+    assert _consuma_in_ordine(D("44"), [D("35"), D("0"), D("0"), D("0"), D("10")]) == \
+        [D("34"), D("0"), D("0"), D("0"), D("10")]
+    assert _consuma_in_ordine(D("5"), [D("35"), D("0"), D("0"), D("0"), D("10")]) == \
+        [D("0"), D("0"), D("0"), D("0"), D("5")]
+
+
+def test_consuma_in_ordine_crescita_proporzionale():
+    assert _consuma_in_ordine(D("90"), [D("30"), D("0"), D("0"), D("0"), D("15")]) == \
+        [D("60"), D("0"), D("0"), D("0"), D("30")]
+    assert _consuma_in_ordine(D("7"), [D("0")] * 5) == [D("7"), D("0"), D("0"), D("0"), D("0")]
 
 
 def test_B03_personale_ricomposto_quando_il_tfr_sfonda_il_totale():

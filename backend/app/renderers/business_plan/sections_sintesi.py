@@ -49,10 +49,13 @@ def _cover_name(name: str) -> tuple:
 
 
 def cover_lines(data: BusinessPlanData) -> layout.CoverLines:
-    """I testi della fascia di copertina: gli stessi nel PDF e nel Word."""
+    """I testi della fascia di copertina: gli stessi nel PDF e nel Word. Con un avviso A01-bis
+    (previsionale vecchio) la riga sotto il titolo lo dice, al posto della frase generica."""
+    seconda_riga = (" · ".join(data.avvisi) if data.avvisi
+                    else "Andamento economico, flussi di cassa, sostenibilità del debito e circolante")
     return layout.CoverLines(f"REPORT DI BUDGET {_years(data)}" + (" · BOZZA" if data.draft else ""), data.company_name,
                       f"Piano economico-finanziario {_years(data)}",
-                      (data.base_description, "Andamento economico, flussi di cassa, sostenibilità del debito e circolante"))
+                      (data.base_description, seconda_riga))
 
 
 def draw_cover_band(canvas, data: BusinessPlanData) -> None:

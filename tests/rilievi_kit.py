@@ -46,10 +46,12 @@ class Esito:
     meta: dict
 
 
-def genera(rows, *, bs=None, ce=None, report=False, prima=None) -> Esito:
+def genera(rows, *, bs=None, ce=None, report=False, prima=None, ritocca=None) -> Esito:
     """Semina la base (con eventuali ritocchi `bs`/`ce`), salva le righe col bulk di produzione
     (`auto_generate=True`) e rilegge ciò che è persistito. `prima`: righe salvate e generate PRIMA di
-    `rows`, per i test che vogliono un previsionale vecchio sotto un salvataggio respinto."""
+    `rows`, per i test che vogliono un previsionale vecchio sotto un salvataggio respinto. `ritocca`:
+    `callable(db, scenario_id)` eseguito dopo la generazione e prima del report, per i test che
+    scrivono a mano un campo persistito (es. `ForecastYear.engine_meta`) che nessuna API espone."""
     engine, sessions = memory_sessions()
     try:
         with sessions() as db:
@@ -70,6 +72,9 @@ def genera(rows, *, bs=None, ce=None, report=False, prima=None) -> Esito:
                     pytest.fail(f"precondizione: il previsionale di partenza non si genera: {r0['message']}")
             res = assumptions_service.bulk_upsert_assumptions(db, sc.id, [dict(r) for r in rows],
                                                               auto_generate=True)
+            if ritocca is not None:
+                ritocca(db, sc.id)
+                db.flush()
             anni = {y: (sp, c) for y, sp, c in read_forecast_maps(db, sc.id)}
             meta = {fy.year: fy.engine_meta for fy in
                     db.query(ForecastYear).filter(ForecastYear.scenario_id == sc.id)}

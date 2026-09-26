@@ -35,8 +35,12 @@ def header_title(data: BusinessPlanData) -> str:
 
 
 def page_texts(data: BusinessPlanData) -> tuple:
-    """Intestazione sinistra, destra e piè di pagina: gli stessi nel PDF e nel Word."""
-    return (data.company_name, header_title(data) + (" · BOZZA" if data.draft else ""),
+    """Intestazione sinistra, destra e piè di pagina: gli stessi nel PDF e nel Word. L'avviso A01-bis
+    (previsionale vecchio) sta accanto a «BOZZA», nella stessa riga di destra."""
+    suffix = " · BOZZA" if data.draft else ""
+    if data.avvisi:
+        suffix += " · " + " · ".join(data.avvisi)
+    return (data.company_name, header_title(data) + suffix,
             f"Riservato e confidenziale · {legend(data)}")
 
 

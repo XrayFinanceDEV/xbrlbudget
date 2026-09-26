@@ -28,6 +28,7 @@ from app.services.final_report_domain import (
     ChainMatch, build_adjustments, build_infrannual_closing, reconcile_adjustments,
     resolve_source_scenario,
 )
+from calculations.forecast_engine import ENGINE_VERSION
 from calculations.intra_year_engine import CE_OVERRIDE_FIELDS as INTRA_YEAR_CE_OVERRIDE_FIELDS
 from importers.iv_cee_hierarchy import check_quadratura
 from database.models import BudgetScenario, FinancialYear, ForecastYear as ForecastYearRecord
@@ -54,6 +55,25 @@ ZERO = Decimal("0")
 
 def _diagnostic(code: str, severity: str, section: str, message: str) -> Diagnostic:
     return Diagnostic(code=code, severity=severity, section=section, message=message)
+
+
+def _engine_version_stale(workflow: str, forecast_years: Iterable[Any]) -> bool:
+    """A01-bis: `True` when a **budget** scenario (`workflow != "infrannuale"`) has at least one
+    persisted forecast year whose `engine_meta.engine_version` is present and older than
+    `calculations.forecast_engine.ENGINE_VERSION`. `engine_meta` `NULL`, or without a version, is
+    "non lo so" — never a verdict. Infrannuale scenarios never qualify (spec, Task 1)."""
+    if workflow == "infrannuale":
+        return False
+    for row in forecast_years:
+        version = (getattr(row, "engine_meta", None) or {}).get("engine_version")
+        if version is None:
+            continue
+        try:
+            if int(version) < int(ENGINE_VERSION):
+                return True
+        except (TypeError, ValueError):
+            continue
+    return False
 
 
 def _stamp(value: Any) -> datetime:
@@ -389,6 +409,9 @@ def assemble_final_report(db: Session, company_id: int, scenario_id: int, *, sch
             diagnostics.append(_diagnostic("forecast_years_missing", "error", "forecast", f"Anni forecast mancanti: {', '.join(map(str, missing))}."))
         if analysis.get("forecast_stale"):
             diagnostics.append(_diagnostic("forecast_stale", "error", "forecast", "Forecast precedente alle ipotesi salvate."))
+        if _engine_version_stale(workflow, scenario.forecast_years):
+            diagnostics.append(_diagnostic("engine_version_stale", "error", "forecast",
+                                           "Forecast generato da una versione precedente del motore."))
 
         by_forecast_year = {row.year: row for row in scenario.forecast_years}
         for year in wanted:

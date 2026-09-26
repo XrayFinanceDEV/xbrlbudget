@@ -238,9 +238,6 @@ def _bp():
     pytest.importorskip("backend.app.renderers.business_plan.data")
 
 
-@pytest.mark.xfail(strict=True, raises=AssertionError, reason="A01-bis confermato dal triage 2026-09-25: il PDF in bozza "
-                    "tace sul previsionale vecchio dopo un salvataggio respinto"
-                    " — togli il marcatore quando il fix lo fa passare")
 def test_A01_bis_salvataggio_respinto_non_stampa_il_previsionale_vecchio_come_buono():
     """A01/A04/B04 · ipotesi della verifica sul codice: un salvataggio respinto risponde 200, a schermo resta il
     previsionale vecchio e il report lo stampa. Oracolo: il report è bloccato E il PDF in bozza dice che il

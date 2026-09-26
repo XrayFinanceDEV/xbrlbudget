@@ -819,11 +819,16 @@ def note_details(rows: list[SourceRow]) -> list[DetailProposal]:
 
 def enrich_pdf_details(file_path: str, current: dict, prior: dict | None = None,
                        *, fiscal_year: int | None = None,
-                       ocr_text: str | None = None) -> tuple[dict, dict | None, dict]:
+                       ocr_text: str | None = None, pagine: set[int] | None = None,
+                       usa_llm: bool = True) -> tuple[dict, dict | None, dict]:
     """Best-effort analytic pass, independent of route, winner and quadratura.
 
     Failure preserves the original extraction and is exposed in validation
     metadata. The environment switch makes rollout/replay independently testable.
+    `pagine` restricts the source rows to those pages (1-based, SourceRow.page);
+    an empty set restricts nothing, exactly like `None`. `usa_llm=False` skips
+    the LLM reader entirely (the deterministic maturity reclassification and
+    local details still run) and declares "llm_disattivato".
     """
     from importers.detail_search import search_details, finish_search_report, active_families
     balances = {'current': current, 'prior': prior}
@@ -837,6 +842,9 @@ def enrich_pdf_details(file_path: str, current: dict, prior: dict | None = None,
     original_current = current
     try:
         rows = collect_source_rows(file_path, ocr_text=ocr_text)
+        if pagine:
+            rows = [r for r in rows if r.page in pagine]
+            report['pagine'] = sorted(pagine)
         report['source_rows_total'] = len(rows)
         if not any(row.amounts for row in rows):
             report["reason"] = "no_source_cells"
@@ -847,7 +855,7 @@ def enrich_pdf_details(file_path: str, current: dict, prior: dict | None = None,
         report['local_search_completed'] = True
         reading = DetailReading()
         report["status"] = "local_only"
-        if llm_provider.lettore_dettagli_disponibile():
+        if usa_llm and llm_provider.lettore_dettagli_disponibile():
             try:
                 reading, report['search'] = search_details(rows, {"current": current, "prior": prior}, fiscal_year)
                 report["status"] = ('completed' if report['search']['status'] == 'complete' else
@@ -864,6 +872,8 @@ def enrich_pdf_details(file_path: str, current: dict, prior: dict | None = None,
             except Exception as exc:
                 logger.warning("Analytic reader unavailable (%s); keeping local evidence", type(exc).__name__)
                 report.update(status="partial" if seeds else "unavailable", reason=type(exc).__name__)
+        elif not usa_llm:
+            report["reason"] = "llm_disattivato"
         else:
             report["reason"] = "no_api_key"
         # Identical confirmations aren't duplicate accounting facts. Keep the

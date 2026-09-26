@@ -29,6 +29,8 @@ TITOLI_TABELLE_NOTA = re.compile(
     r"|finanziamenti effettuati da soci"
     r"|analisi delle variazioni delle rimanenze", re.I)
 
+SCHEMI_CONTI_MODO = {"piano_dei_conti_gerarchico", "elenco_piatto"}
+
 
 @dataclass
 class Struttura:
@@ -40,6 +42,12 @@ class Struttura:
     chiamate_vision: int
     secondi: float
     mappe: list[dict] = field(default_factory=list)
+    modo: str = "legge"             # "conti" | "legge"
+    colonne_sp: list[str] = field(default_factory=list)
+    colonne_ce: list[str] = field(default_factory=list)
+    intestazioni_sp: list[str] = field(default_factory=list)
+    intestazioni_ce: list[str] = field(default_factory=list)
+    pagine_senza_testo: list[int] = field(default_factory=list)
 
     def pagine_macro(self) -> set[int] | None:
         pagine = set(self.pagine_sp) | set(self.pagine_ce)
@@ -53,7 +61,24 @@ class Struttura:
         return {"stato": "ok", "fonte": self.fonte, "route_struttura": self.route,
                 "pagine_sp": self.pagine_sp, "pagine_ce": self.pagine_ce,
                 "pagine_dettaglio": self.pagine_dettaglio,
-                "chiamate_vision": self.chiamate_vision, "secondi": round(self.secondi, 1)}
+                "chiamate_vision": self.chiamate_vision, "secondi": round(self.secondi, 1),
+                "modo": self.modo, "colonne_sp": self.colonne_sp, "colonne_ce": self.colonne_ce,
+                "intestazioni_sp": self.intestazioni_sp, "intestazioni_ce": self.intestazioni_ce,
+                "pagine_senza_testo": self.pagine_senza_testo}
+
+
+def modo_da_mappe(mappe: list[dict]) -> str:
+    prospetti = [m for m in mappe if m.get("tipo_pagina") in TIPI_SP | TIPI_CE]
+    conti = sum(1 for m in prospetti if m.get("schema") in SCHEMI_CONTI_MODO)
+    return "conti" if prospetti and conti * 2 > len(prospetti) else "legge"
+
+
+def _colonne_di(mappe: list[dict], tipi: set[str]) -> tuple[list[str], list[str]]:
+    for m in mappe:
+        if m.get("tipo_pagina") in tipi and m.get("sezioni"):
+            col = m["sezioni"][0].get("colonne") or []
+            return [c.get("ruolo", "altro") for c in col], [c.get("intestazione", "") for c in col]
+    return [], []
 
 
 def route_da_mappe(mappe: list[dict]) -> str | None:
@@ -99,6 +124,15 @@ def analizza_struttura(pdf: str, *, mappa_pagina_fn=None) -> Struttura:
     prospetti = set(pagine_sp) | set(pagine_ce)
     dettaglio = {m["pagina"] for m in mappe if m.get("tipo_pagina") == "dettaglio_conti"}
     dettaglio |= set(pagine_tabelle_nota(pdf))
+    modo = modo_da_mappe(mappe)
+    colonne_sp, intestazioni_sp = _colonne_di(mappe, TIPI_SP)
+    colonne_ce, intestazioni_ce = _colonne_di(mappe, TIPI_CE)
+    import fitz
+    with fitz.open(pdf) as doc:
+        pagine_senza_testo = [i + 1 for i, p in enumerate(doc) if not p.get_text().strip()]
     return Struttura(fonte=fonte, route=route, pagine_sp=pagine_sp, pagine_ce=pagine_ce,
                      pagine_dettaglio=sorted(dettaglio - prospetti), chiamate_vision=chiamate,
-                     secondi=time.monotonic() - inizio, mappe=mappe)
+                     secondi=time.monotonic() - inizio, mappe=mappe, modo=modo,
+                     colonne_sp=colonne_sp, colonne_ce=colonne_ce,
+                     intestazioni_sp=intestazioni_sp, intestazioni_ce=intestazioni_ce,
+                     pagine_senza_testo=pagine_senza_testo)

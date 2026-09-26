@@ -1,6 +1,6 @@
 from importers.bilancio_classifier import ROUTE_IVCEE, ROUTE_TRIAL
 from importers.struttura_documento.analisi import (
-    Struttura, analizza_struttura, pagine_tabelle_nota, route_da_mappe)
+    Struttura, analizza_struttura, modo_da_mappe, pagine_tabelle_nota, route_da_mappe)
 from tests._struttura_fixtures import (MAPPA_COLONNA_UNICA, MAPPA_CONTRAPPOSTE, pdf_contrapposte,
                                        pdf_xbrl_con_tabelle_nota, pdf_xbrl_legge)
 
@@ -57,3 +57,26 @@ def test_insiemi_vuoti_non_restringono():
     r = s2.report()
     assert r["stato"] == "ok" and r["route_struttura"] == ROUTE_IVCEE and r["pagine_sp"] == [1, 2]
     assert "mappe" not in r                          # il report persistito non porta le mappe intere
+
+
+def _p(pagina, tipo, schema, ruoli, intest):
+    return {"pagina": pagina, "tipo_pagina": tipo, "schema": schema,
+            "sezioni": [{"posizione": "unica", "contenuto": "misto",
+                         "colonne": [{"ruolo": r, "intestazione": i} for r, i in zip(ruoli, intest)]}]}
+
+
+def test_modo_conti_o_legge():
+    assert modo_da_mappe([_p(1, "prospetto_sp", "piano_dei_conti_gerarchico", ["saldo_corrente"], ["Saldo"])]) == "conti"
+    assert modo_da_mappe([_p(1, "prospetto_sp", "elenco_piatto", ["saldo_corrente"], ["Saldo"])]) == "conti"
+    assert modo_da_mappe([_p(1, "prospetto_sp", "iv_cee_di_legge", ["saldo_corrente"], ["2025"])]) == "legge"
+    assert modo_da_mappe([_p(1, "prospetto_sp", "riclassificato_con_codici_ivcee", ["saldo_corrente"], ["x"])]) == "legge"
+
+
+def test_struttura_porta_colonne_e_pagine_senza_testo(tmp_path):
+    from importers.struttura_documento.analisi import analizza_struttura
+    from tests._struttura_fixtures import pdf_colonna_unica, MAPPA_COLONNA_UNICA
+    pdf = pdf_colonna_unica(str(tmp_path / "c.pdf"))
+    s = analizza_struttura(pdf, mappa_pagina_fn=lambda client, png: MAPPA_COLONNA_UNICA)
+    assert s.modo in ("conti", "legge")
+    assert s.colonne_sp and all(isinstance(r, str) for r in s.colonne_sp)
+    assert s.pagine_senza_testo == []

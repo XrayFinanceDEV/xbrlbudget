@@ -381,3 +381,29 @@ def test_interruttore_non_snello_e_byte_identico_a_oggi(tmp_path, monkeypatch, v
     confronto_confrontabile = {k: v for k, v in confronto.items() if k not in _CHIAVI_TEMPO}
     assert confronto_confrontabile == riferimento_confrontabile
     assert "import_snello" not in confronto["validation_report"]
+
+
+def test_successo_snello_non_rilegge_la_fonte_con_ledger_evidence(tmp_path, monkeypatch):
+    # Banco del 2026-09-27: dopo un import snello quadrato in 27 s, extract_source_candidates
+    # (ledger_evidence su gx10) ne spendeva altri 560 per una prova che il percorso snello ha
+    # gia' fatto. Con un risultato snello adottato la lettura delle fonti non parte.
+    monkeypatch.setenv("IMPORT_MOTORE", "snello")
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    _vieta_estrattori_di_oggi(monkeypatch)
+    monkeypatch.setattr(import_snello, "importa", lambda file_path, **_: _risultato_quadrato())
+    from importers import source_reconciliation
+
+    chiamate = []
+    def contata(*a, **k):
+        chiamate.append(a)
+        return []
+    monkeypatch.setattr(source_reconciliation, "extract_source_candidates", contata)
+    _db_in_memoria(monkeypatch)
+    result = pdf_importer.import_pdf_balance_sheet(
+        file_path=_pdf(tmp_path, RIGHE_PAREGGIO), fiscal_year=2025,
+        company_name="Snello senza fonti", create_company=True, sector=1,
+        user_id="snello-fonti", period_months=12,
+    )
+    assert result["extraction_method"] == "import_snello"
+    assert result["validation_report"]["import_snello"]["esito"] == "ok"
+    assert chiamate == []

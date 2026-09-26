@@ -1305,7 +1305,9 @@ def import_pdf_balance_sheet(
         _source_candidates = []
         _source_reports = {}
         try:
-            if not is_scanned and not _ocr_source:
+            # Un risultato snello adottato ha gia' fatto la propria verifica: rileggere
+            # le fonti (ledger_evidence su gx10) costava fino a 10 minuti per file.
+            if not is_scanned and not _ocr_source and _snello is None:
                 _source_candidates = extract_source_candidates(file_path)
         except Exception as source_err:
             logger.warning("Source cross-foot unavailable: %s", source_err)

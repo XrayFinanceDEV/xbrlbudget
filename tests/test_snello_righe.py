@@ -1,3 +1,4 @@
+import time
 from decimal import Decimal as D
 
 from importers.detail_enrichment import SourceRow
@@ -88,3 +89,26 @@ def test_senza_valori_non_va_in_crash():
     righe = [_r(1, None), _r(2, None), _r(3, None)]
     assert not R.marca_totali(righe)
     assert not any(r.totale for r in righe)
+
+
+def test_prestazioni_duemila_righe():
+    # 666 gruppi (a, b, a+b "tot") su lati alternati L/R, valori senza alcuna collisione fra
+    # gruppi (intervalli disgiunti), piu' una piccola catena in coda: deve restare sotto un
+    # secondo anche con ~2000 righe, senza cambiare il risultato (ogni terza riga e' il totale).
+    righe = []
+    for g in range(666):
+        a, b = 10000 + g * 10, 20000 + g * 10
+        lato = "L" if g % 2 == 0 else "R"
+        righe.append(_r(f"{g}a", str(a), lato=lato))
+        righe.append(_r(f"{g}b", str(b), lato=lato))
+        righe.append(_r(f"{g}tot", str(a + b), lato=lato, testo=f"tot {g}"))
+    righe.append(_r("c1", "99999999"))
+    righe.append(_r("c2", "99999999", testo="mastro catena"))
+
+    inizio = time.perf_counter()
+    R.marca_totali(righe)
+    durata = time.perf_counter() - inizio
+
+    assert durata < 1.0, f"marca_totali troppo lento su 2000 righe: {durata:.2f}s"
+    attesi = {f"{g}tot" for g in range(666)} | {"c2"}
+    assert {r.id for r in righe if r.totale} == attesi

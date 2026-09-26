@@ -84,42 +84,87 @@ def _per_lato(righe: list[Riga]) -> dict[str, list[Riga]]:
     return per_lato
 
 
+def _valori_per_lato(righe: list[Riga]) -> dict[str, list[Decimal]]:
+    """Come _per_lato, ma solo i valori: per contare senza mai copiare le Riga."""
+    per_lato: dict[str, list[Decimal]] = defaultdict(list)
+    for r in righe:
+        if r.valore is not None:
+            per_lato[r.lato].append(r.valore)
+    return per_lato
+
+
+def _lista_concatenata(vivo: list[bool]) -> tuple[list[int], list[int]]:
+    """nxt/prv sulle sole posizioni vive, saltando le altre: n (fuori lista) e -1 come
+    sentinelle di fine e inizio."""
+    n = len(vivo)
+    nxt, prv = [n] * n, [-1] * n
+    precedente = -1
+    for i in range(n):
+        if vivo[i]:
+            if precedente != -1:
+                nxt[precedente] = i
+            prv[i] = precedente
+            precedente = i
+    return nxt, prv
+
+
+def _trova_totali(valori: list[Decimal], vivo: list[bool], direzione: int, kmin: int) -> list[tuple[int, list[int]]]:
+    """Una sola passata, senza riavvii dopo ogni marcatura: ascendente per la direzione -1 (i
+    figli sono prima; una rimozione conta solo per i candidati dopo, mai per quelli gia'
+    passati), discendente per la direzione +1 (simmetrico, i figli sono dopo). Il punto fisso
+    e' identico al riavvio-a-ogni-marcatura, perche' la marcatura di un candidato dipende solo
+    dalle posizioni gia' visitate in quest'ordine: una lista concatenata rende O(1) la
+    rimozione e il passo al vivo successivo, col tetto di 80 membri per candidato."""
+    n = len(valori)
+    nxt, prv = _lista_concatenata(vivo)
+    passo = prv if direzione == -1 else nxt
+    ordine = range(n) if direzione == -1 else range(n - 1, -1, -1)
+    trovati: list[tuple[int, list[int]]] = []
+    for i in ordine:
+        if not vivo[i] or not valori[i]:
+            continue
+        s, j, membri = Decimal(0), passo[i], []
+        while j != -1 and j != n and len(membri) < 80:
+            s += valori[j]
+            membri.append(j)
+            if len(membri) >= kmin and s == valori[i]:
+                vivo[i] = False
+                a, b = prv[i], nxt[i]
+                if a != -1:
+                    nxt[a] = b
+                if b != n:
+                    prv[b] = a
+                trovati.append((i, membri))
+                break
+            j = passo[j]
+    return trovati
+
+
 def _passata(per_lato: dict[str, list[Riga]], direzione: int, kmin: int) -> int:
-    """Marca, in una sola direzione, i totali di almeno kmin figli. Ritorna quanti ne marca."""
+    """Marca, in una sola direzione, i totali di almeno kmin figli sulle Riga vere. Ritorna
+    quanti ne marca."""
     marcati = 0
     for seq in per_lato.values():
-        cambiato = True
-        while cambiato:
-            cambiato = False
-            vive = [r for r in seq if not r.totale]
-            for i, r in enumerate(vive):
-                if not r.valore:
-                    continue
-                s, j, membri = Decimal(0), i + direzione, []
-                while 0 <= j < len(vive) and len(membri) < 80:
-                    s += vive[j].valore
-                    membri.append(vive[j])
-                    if len(membri) >= kmin and s == r.valore:
-                        r.totale = cambiato = True
-                        marcati += 1
-                        for m in membri:
-                            m.mastro = m.mastro or r.testo
-                        break
-                    j += direzione
-                if cambiato:
-                    break
-            if cambiato:
-                continue
+        vivo = [not r.totale for r in seq]
+        valori = [r.valore for r in seq]
+        for ti, membri in _trova_totali(valori, vivo, direzione, kmin):
+            seq[ti].totale = True
+            for mi in membri:
+                seq[mi].mastro = seq[mi].mastro or seq[ti].testo
+            marcati += 1
     return marcati
 
 
 def _conta_forzata(righe: list[Riga], direzione: int) -> int:
-    """Su una copia usa e getta: quante righe marcherebbe questa sola direzione, gruppi (k>=2)
-    e catene (k=1) insieme. Serve solo a confrontare le due direzioni, mai a marcare davvero:
-    una catena a due cifre uguali puo' comparire in entrambe le direzioni per coincidenza, ma
-    conta comunque quanto un gruppo vero ai fini del confronto."""
-    per_lato = _per_lato(deepcopy(righe))
-    return _passata(per_lato, direzione, 2) + _passata(per_lato, direzione, 1)
+    """Su array booleani usa e getta (mai una copia delle Riga): quante righe marcherebbe
+    questa sola direzione, gruppi (k>=2) e catene (k=1) insieme. Serve solo a confrontare le
+    due direzioni, mai a marcare davvero."""
+    marcati = 0
+    for valori in _valori_per_lato(righe).values():
+        vivo = [True] * len(valori)
+        marcati += len(_trova_totali(valori, vivo, direzione, 2))
+        marcati += len(_trova_totali(valori, vivo, direzione, 1))
+    return marcati
 
 
 def _voti_apprendimento(righe: list[Riga]) -> Counter:

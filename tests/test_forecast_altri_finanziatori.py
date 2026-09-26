@@ -2,7 +2,9 @@
 
 Base: sp17b 150.000 (finanziamento soci, 0%). Rimborsi [0, 50.000, 0]. Oracolo: 2027 residuo
 150.000 con 50.000 a breve (la rata 2028) e 100.000 a lungo; 2028 residuo 100.000, breve 0,
-lungo 100.000; 2029 uguale (resta aperto). Al 2% gli interessi 2027 sono 3.000.
+lungo 100.000; 2029 (ULTIMO anno di piano) 50.000 a breve — la lista non copre il 2030, quindi
+si ripete l'ultima rata positiva (B05, lotto 1 fix rilievi 2026-09-26) — e 50.000 a lungo. Al 2%
+gli interessi 2027 sono 3.000.
 """
 from decimal import Decimal as D
 
@@ -51,8 +53,11 @@ def _rows(soci=SOCI, **primo):
 def test_rimborsi_per_anno_e_quota_a_breve():
     res, anni, det, _ = _genera("soci", _rows())
     assert res["forecast_generated"] is True, res["message"]
+    # lotto 1 fix rilievi (2026-09-26): B05, 2029 e' l'ultimo anno di piano e la lista
+    # [0, 50000, 0] non copre il 2030 — la rata si ripete a breve (50.000) invece di
+    # lasciare l'intero residuo a lungo termine oltre l'orizzonte del piano.
     assert [(anni[a][0][SP16B], anni[a][0][SP17B]) for a in (2027, 2028, 2029)] == [
-        (D("50000.00"), D("100000.00")), (D("0.00"), D("100000.00")), (D("0.00"), D("100000.00"))]
+        (D("50000.00"), D("100000.00")), (D("0.00"), D("100000.00")), (D("50000.00"), D("50000.00"))]
     a = det[2027]["altri_finanziatori"]
     assert a["mode"] == "contratti" and [D(str(a[k])) for k in ("apertura", "rimborso", "breve")] == [D("150000.00"), D("0.00"), D("50000.00")]
     b = det[2028]["altri_finanziatori"]

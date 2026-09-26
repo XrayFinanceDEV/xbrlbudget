@@ -1,8 +1,9 @@
 """Test unitari e di regola dei fix del lotto 1 (spec fix rilievi AMBIENTA 2026-09-26 §3)."""
 from decimal import Decimal as D
 
-from calculations.projection_common import ammortamento_categoria, rimanenze_materie
-from tests.rilievi_kit import BASE_CE, genera, generato, per_anno, righe
+from calculations.projection_common import ammortamento_categoria, rata_anno_dopo, rimanenze_materie
+from tests.rilievi_kit import BASE_BS, BASE_CE, genera, generato, per_anno, righe
+from tests.test_rilievi_ambienta import _banche
 
 
 def test_B03_personale_ricomposto_quando_il_tfr_sfonda_il_totale():
@@ -207,3 +208,52 @@ def test_B01_base_senza_sotto_voci_usa_l_aggregato_come_materie():
     e = generato(genera(righe(dio_days=22), bs={"sp05a_materie_prime": D("0")}))
     sp, ce = e.anni[2027]
     assert ce["ce10_var_rimanenze_mat_prime"] == D("287312.00") - sp["sp05_rimanenze"]
+
+
+MUTUO = {"year": 2027, "opening_residual": D("1000"), "rate": D("0"), "repayments": [D("100"), D("100"), D("100")]}
+
+
+def test_rata_anno_dopo_ripete_l_ultima_solo_nell_ultimo_anno():
+    assert rata_anno_dopo(MUTUO, 2029, ultimo_anno_piano=2029) == (D("100"), True)
+    assert rata_anno_dopo(MUTUO, 2028, ultimo_anno_piano=2029) == (D("100"), False)
+    assert rata_anno_dopo(MUTUO, 2029) == (D("0"), False)
+
+
+def test_rata_anno_dopo_zero_scadenziato_vince():
+    m = {**MUTUO, "repayments": [D("100"), D("100"), D("100"), D("0")]}
+    assert rata_anno_dopo(m, 2029, ultimo_anno_piano=2029) == (D("0"), False)
+
+
+def test_rata_anno_dopo_mai_oltre_il_residuo():
+    m = {**MUTUO, "opening_residual": D("350")}
+    assert rata_anno_dopo(m, 2029, ultimo_anno_piano=2029) == (D("50"), True)
+
+
+def test_B05_motore_rata_ultimo_anno_ripetuta_sta_a_breve():
+    # B05 · stesso scenario di test_B05_rata_oltre_orizzonte_non_scadenziata_sta_a_breve
+    # (tests/test_rilievi_ambienta.py): il piano del Finanziamento A scadenzia solo
+    # 2027-2029 (3 rate), quindi il calendario del contratto non copre il 2030 e a fine
+    # 2029 (ultimo anno di piano) resta un residuo. Oracolo: il contratto dichiara la
+    # rata dell'ultimo anno ripetuta e la porta a breve (53.409).
+    banche = BASE_BS["sp16a_debiti_banche_breve"] + BASE_BS["sp17a_debiti_banche_lungo"]
+    rows = righe()
+    rows[0].update(_banche(300000, float(banche - D("300000"))))
+    rows[0]["financing_loans"][0]["repayments"] = [53409, 53409, 53409]
+    e = generato(genera(rows))
+    contratti = e.det[2029]["debito_bancario"]["contratti"]
+    assert len(contratti) == 1, contratti
+    assert contratti[0]["rata_ripetuta"] is True
+    assert contratti[0]["breve"] == D("53409")
+
+
+def test_B05_motore_anno_non_ultimo_rata_non_ripetuta():
+    # Stesso scenario, ma il 2028 non è l'ultimo anno di piano: la lista di rimborsi
+    # copre ancora il 2029 (elapsed 2 < len 3), quindi nessuna ripetizione.
+    banche = BASE_BS["sp16a_debiti_banche_breve"] + BASE_BS["sp17a_debiti_banche_lungo"]
+    rows = righe()
+    rows[0].update(_banche(300000, float(banche - D("300000"))))
+    rows[0]["financing_loans"][0]["repayments"] = [53409, 53409, 53409]
+    e = generato(genera(rows))
+    contratti = e.det[2028]["debito_bancario"]["contratti"]
+    assert len(contratti) == 1, contratti
+    assert contratti[0]["rata_ripetuta"] is False

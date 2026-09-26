@@ -192,9 +192,6 @@ def test_B04_fidi_e_residui_che_non_quadrano_col_bilancio_si_rifiutano():
     assert "11.000" in e.res["message"], e.res["message"]
 
 
-@pytest.mark.xfail(strict=True, raises=AssertionError, reason="B05 confermato dal triage 2026-09-25: "
-                   "quando il piano scadenzia solo 2027-2029 e resta un residuo, la rata dell'ultimo anno non "
-                   "finisce a breve — togli il marcatore quando il fix lo fa passare")
 def test_B05_rata_oltre_orizzonte_non_scadenziata_sta_a_breve():
     """B05 · lo scenario del consulente: il piano del Finanziamento A scadenzia solo 2027-2029 e a fine 2029 resta
     un residuo (360.710 nel foglio). Oracolo del consulente: a breve almeno la rata dell'ultimo anno (53.409),

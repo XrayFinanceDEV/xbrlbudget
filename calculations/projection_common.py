@@ -716,7 +716,50 @@ def residuo_prestiti_nuovi(loans, fino_al_anno: int) -> Decimal:
     return residuo
 
 
-def quota_breve_prestiti_nuovi(loans, anno: int, lungo: Decimal) -> Decimal:
+def rata_anno_dopo(loan: Mapping[str, Any], anno: int,
+                    ultimo_anno_piano: Optional[int] = None) -> Tuple[Decimal, bool]:
+    """(capitale dovuto in `anno + 1`, ripetuta) per UN contratto (spec B05).
+
+    Il caso normale e' `new_financing_schedule([loan], anno + 1)[1]`: la rata che il
+    calendario del contratto scadenzia per l'anno dopo, zero oltre la lista `repayments`
+    o oltre la durata di un contratto a rata fissa.
+
+    Nell'ULTIMO anno di piano (`anno == ultimo_anno_piano`) un contratto scadenziato a
+    mano (`repayments`) la cui lista non arriva a coprire l'anno dopo
+    (`anno + 1 - loan['year'] >= len(repayments)`) lascerebbe a lungo termine un residuo
+    che nessun anno del piano vedra' mai scadere: il calendario del contratto non sa dove
+    finisce l'orizzonte, quindi qui — e solo qui — si RIPETE l'ultima rata positiva della
+    lista, fino al residuo di fine `anno` se questo e' piu' piccolo. Un residuo di fine
+    anno gia' a zero (contratto estinto) non ripete nulla. Una lista che copre l'anno
+    dopo, anche con un valore a zero, vince sempre: uno zero scadenziato e' una scelta del
+    piano, non un buco da tappare.
+
+    Il residuo di fine `anno` si calcola come lo calcola `new_financing_schedule`
+    all'apertura dell'anno dopo: `principal - Σ repayments[:anno + 1 - year]`, mai sotto
+    zero — e' esattamente l'`opening` che quella funzione calcolerebbe chiamata con
+    `target_year = anno + 1`, quindi non e' un secondo kernel del residuo, solo lo stesso
+    conto letto qui per decidere la ripetizione.
+    """
+    zero = Decimal('0')
+    _, rata, _ = new_financing_schedule([loan], anno + 1)
+    repayments = loan.get('repayments')
+    if anno == ultimo_anno_piano and repayments is not None:
+        amount = Decimal(str(loan.get('amount') or 0))
+        opening_residual = Decimal(str(loan.get('opening_residual') or 0))
+        principal = amount + opening_residual
+        if principal > zero:
+            piano = [Decimal(str(r or 0)) for r in repayments]
+            elapsed_dopo = anno + 1 - int(loan['year'])
+            if elapsed_dopo >= len(piano):
+                residuo_fine_anno = max(zero, principal - sum(piano[:elapsed_dopo], zero))
+                if residuo_fine_anno > zero:
+                    ultima_rata_positiva = next((r for r in reversed(piano) if r > zero), zero)
+                    return min(residuo_fine_anno, ultima_rata_positiva), True
+    return rata, False
+
+
+def quota_breve_prestiti_nuovi(loans, anno: int, lungo: Decimal,
+                                ultimo_anno_piano: Optional[int] = None) -> Decimal:
     """Quanto del residuo dei prestiti NUOVI dentro `lungo` (`sp17a` grezzo a fine `anno`) scade l'anno dopo.
 
     Il residuo nuovo e' quello che l'anno dopo trovera' all'apertura,
@@ -743,6 +786,14 @@ def quota_breve_prestiti_nuovi(loans, anno: int, lungo: Decimal) -> Decimal:
       dove finisce il piano. (E' qui che la regola si separa da `runoff_schedule`,
       che oltre l'orizzonte non ha importi e restituisce zero.)
 
+    `ultimo_anno_piano` (spec B05, lotto 1 fix rilievi 2026-09-26): quando `anno` e'
+    l'ultimo anno del piano, la rata di ciascun prestito si legge da
+    `rata_anno_dopo(loan, anno, ultimo_anno_piano)`, che ripete l'ultima rata positiva
+    di un contratto scadenziato a mano la cui lista non arriva a coprire l'anno dopo —
+    altrimenti il residuo che nessun anno vedra' mai scadere finirebbe intero a lungo
+    termine, oltre l'orizzonte del piano. Fuori dall'ultimo anno (o senza
+    `ultimo_anno_piano`) e' lo stesso conto di sempre.
+
     Contano solo i prestiti gia' erogati a fine `anno`: un prestito che nasce
     l'anno dopo non e' debito di quest'anno, ne' a breve ne' oltre.
 
@@ -757,7 +808,7 @@ def quota_breve_prestiti_nuovi(loans, anno: int, lungo: Decimal) -> Decimal:
     if residuo <= zero:
         return zero
     erogati = [loan for loan in (loans or ()) if int(loan['year']) <= anno]
-    _, rimborso, _ = new_financing_schedule(erogati, anno + 1)
+    rimborso = sum((rata_anno_dopo(loan, anno, ultimo_anno_piano)[0] for loan in erogati), zero)
     dopo = max(zero, residuo - rimborso).quantize(cent, rounding=ROUND_HALF_UP)
     return min(residuo - dopo, lungo.quantize(cent, rounding=ROUND_DOWN))
 

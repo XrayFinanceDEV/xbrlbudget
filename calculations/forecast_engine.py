@@ -15,7 +15,7 @@ from database.models import (
 from calculations.projection_common import (
     base_bank_debt, financial_repayment_instalment, altri_finanz_repayment_instalment,
     tfr_accrual_quota, deferred_tax_position, ammortamento_categoria,
-    new_financing_schedule, PREGRESSO_KEYS, PREGRESSO_LABELS,
+    new_financing_schedule, rata_anno_dopo, PREGRESSO_KEYS, PREGRESSO_LABELS,
     pregresso_opening_masses, runoff_schedule, validate_runoff,
     tax_settlement_saldo_acconto, soglia_giorni_magazzino, rimanenze_materie,
     e_contratto_pregresso, contratti_da_riga_finanziamento,
@@ -380,7 +380,8 @@ def _residuo_contratto(loan, fino_al_anno: int) -> Decimal:
 
 
 def _contratti_dell_anno(loans, anno: int, quota_breve_nuovi: Decimal, residuo_nuovi: Decimal,
-                         breve_pregresso: Decimal, lungo_pregresso: Decimal) -> List[Dict[str, Any]]:
+                         breve_pregresso: Decimal, lungo_pregresso: Decimal,
+                         ultimo_anno_piano: Optional[int] = None) -> List[Dict[str, Any]]:
     """Le righe `contratti` di `details['debito_bancario']`, grezze (le quantizza `_dichiara_debito_bancario`).
 
     Per ogni contratto: erogato, rimborso e interessi dell'anno dal kernel sul solo contratto, e il
@@ -391,11 +392,16 @@ def _contratti_dell_anno(loans, anno: int, quota_breve_nuovi: Decimal, residuo_n
       `residuo_nuovi - quota_breve_nuovi`;
     - contratti col residuo iniziale: `breve_pregresso` si assegna in ordine, fino al residuo di
       ciascuno; l'ultimo assorbe la differenza verso `breve_pregresso` e verso `lungo_pregresso`.
+
+    `rata_ripetuta` (spec B05, lotto 1 fix rilievi 2026-09-26): SEMPRE dichiarata su ogni riga,
+    dal `rata_anno_dopo` del solo contratto — vera quando l'anno e' l'ultimo di piano e la sua
+    rata a breve e' la ripetizione dell'ultima rata scadenziata, mai la lettura del calendario.
     """
     zero = Decimal('0')
     righe: List[Dict[str, Any]] = []
     for indice, loan in enumerate(loans or []):
         erogato, rimborso, interessi = new_financing_schedule([loan], anno)
+        _, rata_ripetuta = rata_anno_dopo(loan, anno, ultimo_anno_piano)
         righe.append({
             'indice': indice,
             'anno': int(loan['year']),
@@ -405,6 +411,7 @@ def _contratti_dell_anno(loans, anno: int, quota_breve_nuovi: Decimal, residuo_n
             'residuo_iniziale': Decimal(str(loan.get('opening_residual') or 0)),
             'rimborso': rimborso,
             'interessi': interessi,
+            'rata_ripetuta': rata_ripetuta,
             '_residuo': _residuo_contratto(loan, anno),
             '_pregresso': _e_contratto_pregresso(loan),
             '_loan': loan,
@@ -412,7 +419,7 @@ def _contratti_dell_anno(loans, anno: int, quota_breve_nuovi: Decimal, residuo_n
     nuovi = [r for r in righe if not r['_pregresso']]
     pregressi = [r for r in righe if r['_pregresso']]
     for r in nuovi:
-        r['breve'] = _quota_breve_prestiti_nuovi([r['_loan']], anno, r['_residuo'])
+        r['breve'] = _quota_breve_prestiti_nuovi([r['_loan']], anno, r['_residuo'], ultimo_anno_piano)
         r['lungo'] = r['_residuo'] - r['breve']
     if nuovi:
         ultimo = nuovi[-1]
@@ -3528,6 +3535,13 @@ class ForecastEngine:
         D = Decimal
         ZERO = D('0')
         DAYS = D('360')
+        # B05 (spec, lotto 1 fix rilievi 2026-09-26): l'anno di calendario dell'ULTIMA
+        # riga di piano, `None` se questo non e' l'ultimo anno. Ogni lettura «la rata
+        # dell'anno dopo» di un contratto passa da qui verso `rata_anno_dopo`: nell'anno
+        # in cui `anno == ultimo_anno_piano` un contratto scadenziato a mano la cui lista
+        # non copre l'anno dopo ripete l'ultima rata invece di lasciare a lungo termine
+        # un residuo che nessun anno del piano vedra' mai scadere.
+        ultimo_anno_piano = assumption.forecast_year if year_index == horizon - 1 else None
         # Senza `overdraft` nessun cancello gira a valle: il plug negativo alza qui,
         # come ha sempre fatto. Con `overdraft` la cassa resta netta fino alla
         # quadratura finale, che e' l'unico cancello.
@@ -4414,7 +4428,11 @@ class ForecastEngine:
             for c in altri_finanziatori:
                 _, rimborso, interessi = new_financing_schedule([c], anno)
                 residuo = _residuo_contratto(c, anno)
-                _, rata_dopo, _ = new_financing_schedule([c], anno + 1)
+                # B05: la rata dell'anno dopo passa da `rata_anno_dopo`, non da una lettura
+                # diretta del kernel — nell'ultimo anno di piano un contratto scadenziato a
+                # mano la cui lista non copre l'anno dopo ripete l'ultima rata invece di
+                # lasciare a lungo termine un residuo che nessun anno vedra' mai scadere.
+                rata_dopo, _ = rata_anno_dopo(c, anno, ultimo_anno_piano)
                 breve = min(residuo, rata_dopo)
                 righe.append({
                     'indice': c['indice'], 'nome': c['nome'],
@@ -4464,8 +4482,12 @@ class ForecastEngine:
         quota_dopo_contratti = None
         if fidi_apertura is not None:
             residuo_pregresso = sp16a + sp17a_pregresso
+            # B05: per contratto, non sul kernel grezzo — nell'ultimo anno di piano un
+            # contratto scadenziato a mano la cui lista non copre l'anno dopo ripete la
+            # sua ultima rata invece di lasciare a lungo termine un residuo che nessun
+            # anno del piano vedra' mai scadere.
             quota_dopo_contratti = min(
-                sum((new_financing_schedule([c], assumption.forecast_year + 1)[1]
+                sum((rata_anno_dopo(c, assumption.forecast_year, ultimo_anno_piano)[0]
                      for c in contratti_pregresso), ZERO),
                 max(ZERO, residuo_pregresso),
             )
@@ -4576,7 +4598,8 @@ class ForecastEngine:
         # prima spostata di `quota`, e l'apertura dell'anno dopo la ricompone
         # senza perdere un centesimo. `sp16a`/`sp17a` sono in
         # `_BANK_DEBT_SPLIT_FIELDS`: il residuo di quadratura non li riscrive.
-        quota_breve = _quota_breve_prestiti_nuovi(prestiti_nuovi, assumption.forecast_year, sp17a)
+        quota_breve = _quota_breve_prestiti_nuovi(prestiti_nuovi, assumption.forecast_year, sp17a,
+                                                   ultimo_anno_piano)
         breve_pregresso_fine = sp16a
         sp16a += quota_breve; sp16 += quota_breve
         sp17a -= quota_breve; sp17 -= quota_breve
@@ -4593,6 +4616,7 @@ class ForecastEngine:
                 (quota_dopo_contratti if fidi_apertura is not None else breve_pregresso_fine)
                 if use_detailed_existing_schedule else ZERO,
                 sp17a_pregresso if use_detailed_existing_schedule else ZERO,
+                ultimo_anno_piano,
             )
             if fidi_apertura is not None:
                 # `rimborso_sweep` a zero qui: lo scrive `_dichiara_debito_bancario`

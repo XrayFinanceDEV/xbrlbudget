@@ -54,9 +54,14 @@ const OVERDRAFT_ROWS: YearInputRow[] = [
   { field: "overdraft_limit", label: "Tetto dello scoperto €", sub: "vuoto = senza tetto", baseLabel: "—" },
 ];
 
+// `sub` (M8, revisione finale lotto 1, 2026-09-26): il nuovo investimento dell'anno ammortizza a
+// META' di questa aliquota nell'anno in cui entra (E05), piena dopo — senza la nota il tasso
+// scritto qui sembra valere per intero fin dal primo anno.
 const INVESTMENT_DETAIL_ROWS: YearInputRow[] = [
-  { field: "depreciation_rate", label: "Ammortamento nuovi investimenti materiali %", baseLabel: "—" },
-  { field: "depreciation_rate_intangible", label: "Ammortamento nuovi investimenti immateriali %", baseLabel: "—" },
+  { field: "depreciation_rate", label: "Ammortamento nuovi investimenti materiali %", baseLabel: "—",
+    sub: "meta' nel primo anno del nuovo investimento, piena dopo" },
+  { field: "depreciation_rate_intangible", label: "Ammortamento nuovi investimenti immateriali %", baseLabel: "—",
+    sub: "meta' nel primo anno del nuovo investimento, piena dopo" },
   { field: "asset_disposal_nbv", label: "Cessioni: valore contabile netto €", baseLabel: "—" },
   { field: "asset_disposal_proceeds", label: "Cessioni: corrispettivo €", baseLabel: "—" },
 ];

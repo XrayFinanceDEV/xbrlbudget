@@ -199,12 +199,23 @@ def _risolvi_totali(seq: list["Riga"], valori: list[Decimal], vivo: list[bool],
     ``.totale = True`` e il suo stesso figlio, mai reclamato, resta una foglia gemella con lo
     stesso importo: la massa raddoppia. Prima di accettare il match trovato per ``i``, ogni
     membro ancora ``candidabile`` (mai risolto) ha quindi diritto a un tentativo di
-    risoluzione k=1 sul posto, con lo stesso ``passo``: se risolve, ``mi`` diventa esso
-    stesso un totale (mastro del proprio figlio) PRIMA di essere marcato come membro di
+    risoluzione sul posto, con lo stesso ``passo``: se risolve, ``mi`` diventa esso
+    stesso un totale (mastro dei propri figli) PRIMA di essere marcato come membro di
     ``i`` - le due cose coesistono, come per ogni totale intermedio a piu' livelli. Il
     tentativo usa solo membri gia' vivi in quel momento (mai ``i`` o gli altri membri dello
     stesso match, che sono fisicamente dall'altra parte rispetto ai figli di ``mi``), e non
-    scavalca nulla: se ``mi`` non risolve, resta un membro grezzo esattamente come oggi."""
+    scavalca nulla: se ``mi`` non risolve, resta un membro grezzo esattamente come oggi.
+
+    Task 22 (G4, diagnosi budget_330): il primo tentativo qui e' a k>=2 (un mastro a PIU' di un
+    figlio, non solo il caso a figlio unico di Task 20), con lo stesso ``_cerca_membri`` e lo
+    stesso tetto di 80 membri usato ovunque; solo se NON risolve a k>=2 si ripiega su k=1, come
+    prima. L'ordine (k>=2 prima, k=1 dopo) e' lo stesso che ``marca_totali`` applica al giro
+    esterno (Task 4): una catena a un solo figlio si accetta solo quando un gruppo vero non la
+    precede, mai il contrario. ``mi`` puo' pero' gia' essere risolto per proprio conto (turno
+    proprio, stesso ``kmin`` di questa stessa passata) prima che ``i`` lo consumi come membro -
+    in quel caso e' il turno proprio, non questo tentativo, che gia' lo marca ``.totale``: qui
+    resta solo il caso residuo (a k=1, come da Task 20) in cui il turno proprio di ``mi`` non e'
+    mai riuscito a trovare nulla."""
     n = len(valori)
     nxt, prv = _lista_concatenata(vivo)
     passo = prv if direzione == -1 else nxt
@@ -218,7 +229,9 @@ def _risolvi_totali(seq: list["Riga"], valori: list[Decimal], vivo: list[bool],
             continue
         for mi in membri:
             if candidabile[mi]:
-                sotto = _cerca_membri(valori, passo, mi, 1)
+                sotto = _cerca_membri(valori, passo, mi, 2)
+                if sotto is None:
+                    sotto = _cerca_membri(valori, passo, mi, 1)
                 if sotto is not None:
                     _marca_come_totale(seq, vivo, candidabile, passo, mi, sotto)
                     marcati += 1

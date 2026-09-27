@@ -236,3 +236,39 @@ def test_totale_di_terzo_livello_non_scavalca_un_totale_intermedio_non_ancora_ri
     tot = {r.id for r in righe if r.totale}
     assert tot == {"I", "II", "III", "B", "Totale"}
     assert sum(r.valore for r in R.foglie(righe)) == D(str(Totale))
+
+
+def test_membro_a_saldo_zero_rescatato_a_k_due_non_a_una_coincidenza_a_un_solo_elemento():
+    # Task 22, G4 (diagnosi budget_330: "73005000 - Costi per servizi" 2.505,51 =
+    # 32,94+69,14+2.403,43, un mastro a PIU' di un figlio consumato raw da "TOTALE COSTI"). Qui
+    # il caso e' isolato al mastro a saldo ZERO ("mi", stampato 0,00: un vero conto con due
+    # componenti che si annullano, c1=5 e c2=-5): il turno proprio di "mi" e' saltato per
+    # costruzione (`valori[i]` falsy, come ogni riga a saldo zero - `marca_totali` non prova
+    # nemmeno a risolverla per conto proprio), quindi l'UNICA occasione di marcarla e' il
+    # rescue on-demand, quando "E" la consuma come proprio membro (E = mi + sib, 0+100=100).
+    # Il rescue trova, PRIMA del fix, il conto "decoy" (0,00, un conto sganciato e senza alcuna
+    # relazione con "mi", che ha pero' lo stesso saldo per coincidenza, ed e' il vicino piu'
+    # prossimo di "mi" nel cammino) con un tentativo a k=1 SOLO - senza mai controllare se un
+    # gruppo vero a k>=2 (che risale fino ai due componenti VERI di "mi", passando comunque per
+    # "decoy" nella stessa somma cumulativa) esiste. Il totale di `foglie()` non cambia (100 in
+    # entrambi i casi: c1/c2 si annullano a vicenda anche se restano non reclamati) - cambia la
+    # correttezza dell'attribuzione (`mastro`), che l'utente legge in diagnostica per capire da
+    # dove viene un totale: prima del fix "decoy" e' l'UNICO conto etichettato come componente
+    # di "mi" e c1/c2 restano senza mastro (mai spiegati, un totale che l'utente non riesce a
+    # ricostruire in Rettifiche); dopo, il rescue prova prima k>=2, risale la somma cumulativa
+    # fino a c1 e c2 e li etichetta anche loro (insieme a "decoy", che resta comunque nel
+    # cammino: il fix non separa un conto estraneo dalla somma, spiega solo PIU' del documento).
+    righe = [
+        _r("c1", "5"), _r("c2", "-5"),
+        _r("decoy", "0", testo="99/999 conto estraneo a saldo zero"),
+        _r("mi", "0", testo="73005000 mastro a saldo zero"),
+        _r("sib", "100"),
+        _r("E", "100", testo="TOTALE E"),
+    ]
+    R.marca_totali(righe)
+    by_id = {r.id: r for r in righe}
+    assert by_id["mi"].totale is True and by_id["E"].totale is True
+    assert by_id["c1"].mastro == "73005000 mastro a saldo zero"
+    assert by_id["c2"].mastro == "73005000 mastro a saldo zero"
+    assert by_id["decoy"].mastro == "73005000 mastro a saldo zero"
+    assert sum(r.valore for r in R.foglie(righe)) == D("100")

@@ -803,3 +803,43 @@ def pdf_xbrl_sp_continuazione_tre_pagine_con_totale_passivo(path: str) -> str:
         y += 14
     doc.save(path)
     return path
+
+
+def pdf_sp_poi_rendiconto_senza_ce(path: str) -> str:
+    """SP con titolo, seguito DIRETTAMENTE da un Rendiconto Finanziario (nessun CE in mezzo, a
+    differenza di `pdf_xbrl_rendiconto_con_attivita_senza_preposizione`): il blocco SP
+    immediatamente precedente ha lo STESSO titolo che il vecchio bug avrebbe attribuito per
+    errore al Rendiconto ("stato patrimoniale") - la forma che avrebbe fatto FONDERE le due
+    pagine in un solo blocco (`blocchi()`), riusando l'immagine della pagina SP per la pagina di
+    Rendiconto. Nessuna intestazione di colonna sul Rendiconto: il solo titolo decide la fusione."""
+    doc = fitz.open()
+    intest = [(380, "31-12-2025", True), (480, "31-12-2024", True)]
+
+    sp = doc.new_page(width=595, height=842)
+    sp.insert_text((30, 40), "Stato patrimoniale", fontname=FONT, fontsize=10)
+    _riga(sp, 60, intest)
+    righe_sp = [(30, "B) Immobilizzazioni", "900,00", "950,00"),
+                (30, "C) Attivo circolante", "300,00", "200,00"),
+                (30, "Totale attivo", "1.200,00", "1.150,00")]
+    y = 80
+    for x, testo, a, b in righe_sp:
+        _riga(sp, y, [(x, testo, False), (380, a, True), (480, b, True)])
+        y += 14
+
+    rendiconto = doc.new_page(width=595, height=842)
+    rendiconto.insert_text((30, 40), "Rendiconto finanziario, metodo indiretto", fontname=FONT, fontsize=8)
+    _riga(rendiconto, 60, intest)
+    righe = [
+        "A) Flussi finanziari derivanti dall'attivita' operativa (metodo indiretto)",
+        "Utile (perdita) dell'esercizio                       500,00      450,00",
+        "(Plusvalenze)/Minusvalenze derivanti dalla cessione di attivita'",
+        "0                                                       0",
+        "1) Utile prima delle imposte, interessi                1.034,00   1.033,00",
+        "Ammortamenti                                          200,00       90,00",
+    ]
+    y = 80
+    for riga in righe:
+        rendiconto.insert_text((30, y), riga, fontname=FONT, fontsize=8)
+        y += 14
+    doc.save(path)
+    return path

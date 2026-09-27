@@ -696,51 +696,80 @@ def test_formetal_test_righe_reali_codice_conto_decide_deterministico():
     assert att == pas == D("1195896.96")
 
 
-# --- Task 22, G2: un'unica riga fuori lato non ribalta l'intera famiglia costi -------------
-# --- (diagnosi budget_624/664/297/115): il voto di corsia/segno era pesato in EURO, mai per --
-# --- CONTEGGIO, e un'unica riga enorme sul lato sbagliato dominava tutta la famiglia "cos". --
+# --- Task 22, G2, fix round 1 (ruling del proprietario, 2026-09-28): un campo CE di costo o --
+# --- di ricavo prende il valore assoluto, mai un voto di famiglia - nemmeno per conteggio: ---
+# --- su budget_624 il voto per conteggio del giro precedente ribaltava ANCHE l'unica riga ---
+# --- vera (ce05, minoranza per numero: 1 positivo contro 8 negativi), lo stesso difetto -----
+# --- di segno che doveva correggere, solo con la minoranza sbagliata invece della maggioranza.
 
 
-def test_g2_singola_riga_fuori_lato_non_ribalta_lintera_famiglia_costi():
-    """Riproduce il meccanismo di budget_624 (Task 22, causa (b), la sola di competenza di
-    questo modulo - la causa (a), la riga stampata sul lato sbagliato da collect_source_rows,
-    e' fuori scopo, in un modulo condiviso non di import_snello). Molte righe di costo VERE
-    (servizi, godimento beni, personale, oneri finanziari) sul lato "L" battono per CONTEGGIO
-    l'unica riga fuori posto (CE.B.11, 1.468.999,24 - piu' grande della somma di tutte le
-    altre messe insieme) sul lato "R": il voto ora e' per numero di conti, l'euro decide solo
-    a parita' di conteggio."""
+def test_g2_budget_624_la_minoranza_per_conteggio_non_viene_piu_ribaltata():
+    """Riproduce il meccanismo REALE di budget_624 (rilievo della review, 2026-09-27): 8 conti
+    di costo letti negativi (convenzione di stampa) contro un solo conto (ce05_materie_prime)
+    letto positivo - il VERO valore. Il voto per conteggio del fix precedente ribaltava anche
+    quell'unico conto vero perche' era una minoranza per NUMERO (1 contro 8), non per euro:
+    esattamente il difetto diagnosticato, spostato su un campo diverso. Senza alcun voto - un
+    campo per campo, mai per maggioranza - ogni campo prende il proprio valore assoluto."""
     foglie = [
-        _f(1, "L", "300000", "CE.B.7"),       # servizi -> ce06
-        _f(2, "L", "200000", "CE.B.8"),       # godimento beni -> ce07
-        _f(3, "L", "400000", "CE.B.9"),       # personale -> ce08
-        _f(4, "L", "142750", "CE.C.17"),      # oneri finanziari -> ce15
-        _f(5, "R", "1468999.24", "CE.B.11"),  # riga fuori lato, causa (a): fuori scopo qui
-        _f(6, "R", "2050000", "CE.A.1"),      # ricavi, ancora del voto
+        _f(1, "L", "138665", "CE.A.1"),          # ricavi, ancora ric (non tocca la famiglia cos)
+        _f(2, "L", "235559", "CE.B.6", sezione="ce"),   # ce05, letto positivo: il vero valore
+        _f(3, "L", "-897132", "CE.B.7", sezione="ce"),  # ce06
+        _f(4, "L", "-18246", "CE.B.8", sezione="ce"),   # ce07
+        _f(5, "L", "-1292842", "CE.9", sezione="ce"),   # ce08
+        _f(6, "L", "-67442", "CE.10", sezione="ce"),    # ce09
+        _f(7, "L", "-96110", "CE.14", sezione="ce"),    # ce12
+        _f(8, "L", "-36447", "CE.17", sezione="ce"),    # ce15
+        _f(9, "L", "-9115", "CE.14", sezione="ce"),     # ce12 (secondo conto, stessa voce)
+        _f(10, "L", "-67442", "CE.10", sezione="ce"),   # ce09 (secondo conto, stessa voce)
     ]
     bs, ce, diag = da_foglie(foglie)
-    assert ce["ce06_servizi"] == D("300000.00")
-    assert ce["ce07_godimento_beni"] == D("200000.00")
-    assert ce["ce08_costi_personale"] == D("400000.00")
-    assert ce["ce15_oneri_finanziari"] == D("142750.00")
+    assert ce["ce05_materie_prime"] == D("235559.00")       # era ribaltato a -235559,00
+    assert ce["ce06_servizi"] == D("897132.00")
+    assert ce["ce07_godimento_beni"] == D("18246.00")
+    assert ce["ce08_costi_personale"] == D("1292842.00")
+    assert ce["ce09_ammortamenti"] == D("134884.00")
+    assert ce["ce12_oneri_diversi"] == D("105225.00")
+    assert ce["ce15_oneri_finanziari"] == D("36447.00")
+    # ogni forzatura si dichiara (segno letto -> segno applicato), mai in silenzio.
+    forzati = {r[0] for r in diag["ce_segno_forzato"]}
+    assert forzati == {"3", "4", "5", "6", "7", "8", "9", "10"}
+    assert "2" not in forzati                              # letto positivo, nessuna forzatura
 
 
-def test_g2_voto_per_conteggio_a_parita_ricade_sull_euro():
-    """A parita' di CONTEGGIO (1 contro 1) lo spareggio resta l'euro, come oggi: nessuna
-    regressione sui casi minimi gia' coperti (es. il tag interno ce01_return, sopra)."""
+def test_g2_resi_su_acquisti_riduce_le_materie_prime():
+    """Una didascalia di rettifica esplicita (RESI, qui su un acquisto) riduce il campo anche
+    se stampata positiva: la riduzione e' dichiarata dal TESTO del conto, non da un voto su
+    altre righe. Il conto normale (materie prime vere) resta positivo per default."""
     foglie = [
-        _f(1, "L", "300", "CE.B.6", sezione="ce"),
-        _f(2, "R", "1000", "CE.A.1", sezione="ce"),
-        _f(3, "L", "50", "X", testo="60/00000 RESI SU RICAVI", sezione="ce"),
+        _f(1, "L", "1000", "CE.B.6", testo="70/001 MATERIE PRIME", sezione="ce"),
+        _f(2, "L", "200", "CE.B.6", testo="70/002 RESI SU ACQUISTI", sezione="ce"),
     ]
     bs, ce, diag = da_foglie(foglie)
-    assert ce["ce01_ricavi_vendite"] == D("950.00")
+    assert ce["ce05_materie_prime"] == D("800.00")           # 1000 - 200
+    assert diag["ce_segno_forzato"] == [["2", "ce05", "200.00", "-200.00"]]
+
+
+def test_g2_ce10_variazione_rimanenze_segno_libero_non_si_forza():
+    """ce10 (variazione rimanenze materie prime, OIC B.11) e' a segno libero per natura: il
+    segno letto e' l'unico segno che conta, in ``da_foglie`` come in ``da_coppie`` - mai
+    forzato positivo, mai dichiarato come forzatura (non lo e')."""
+    foglie = [_f(1, "L", "-300", "CE.B.11", sezione="ce")]
+    bs, ce, diag = da_foglie(foglie)
+    assert ce["ce10_var_rimanenze_mat_prime"] == D("-300.00")
+    assert diag["ce_segno_forzato"] == []
+
+    coppie = [("CE.B.11", D("-300"))]
+    bs2, ce2, diag2 = da_coppie(coppie)
+    assert ce2["ce10_var_rimanenze_mat_prime"] == D("-300.00")
+    assert diag2["ce_segno_forzato"] == []
 
 
 def test_g2_costi_stampati_tra_parentesi_si_normalizzano_positivi():
     """Riproduce il meccanismo di budget_664 (Task 22, G2): un documento che stampa OGNI voce
     di costo fra parentesi (convenzione di stampa) non ha, in ``da_coppie`` (modo "legge"),
-    alcuna normalizzazione di segno: si ribalta l'intera famiglia "cos" quando la maggioranza
-    per NUMERO di voci (mai per euro) e' negativa."""
+    alcuna normalizzazione di segno. Fix round 1: nessun voto, ogni campo di costo prende il
+    proprio valore assoluto - una convenzione di stampa uniforme non ha piu' bisogno di essere
+    riconosciuta come tale, perche' non c'e' piu' nulla da "ribaltare in blocco"."""
     coppie = [
         ("CE.A.1", D("500000")),
         ("CE.B.7", D("-81052.54")),
@@ -754,32 +783,16 @@ def test_g2_costi_stampati_tra_parentesi_si_normalizzano_positivi():
     assert ce["ce07_godimento_beni"] == D("19041.05")
     assert ce["ce08_costi_personale"] == D("90315.28")
     assert ce["ce15_oneri_finanziari"] == D("117.56")
+    assert {r[1] for r in diag["ce_segno_forzato"]} == {"ce06", "ce07", "ce08", "ce15"}
 
 
-def test_g2_contropartita_vera_dentro_famiglia_costi_ribaltata_resta_contro():
-    """Una vera contropartita (una riduzione di costo stampata con il segno OPPOSTO alla
-    convenzione della sezione) non viene amplificata dal ribaltamento: dopo il ribaltamento
-    uniforme della famiglia resta con l'effetto di riduzione (negativa), mai sommata come un
-    costo vero - il ribaltamento e' un cambio di segno UNIFORME per famiglia, non un
-    "tutti positivi"."""
-    coppie = [
-        ("CE.A.1", D("500000")),
-        ("CE.B.7", D("-81052.54")),
-        ("CE.B.8", D("-19041.05")),
-        ("CE.B.9", D("-90315.28")),
-        ("CE.B.11", D("2000")),      # contropartita, stampata con segno opposto alla sezione
-    ]
-    bs, ce, diag = da_coppie(coppie)
-    assert ce["ce06_servizi"] == D("81052.54")
-    assert ce["ce10_var_rimanenze_mat_prime"] == D("-2000.00")
-
-
-def test_g2_famiglia_costi_maggioranza_positiva_non_si_tocca():
-    """Con la maggioranza dei costi (per conteggio) GIA' positiva, ``da_coppie`` non ribalta
-    nulla: nessuna regressione sul caso normale (nessuna convenzione di stampa negativa)."""
+def test_g2_famiglia_costi_gia_positiva_non_dichiara_alcuna_forzatura():
+    """Con i costi gia' positivi (nessuna convenzione di stampa negativa), ``abs()`` non
+    cambia nulla: nessuna forzatura si dichiara, perche' non ce n'e' stata alcuna."""
     coppie = [("CE.A.1", D("1000")), ("CE.B.7", D("300")), ("CE.B.8", D("200")),
               ("CE.B.9", D("100"))]
     bs, ce, diag = da_coppie(coppie)
     assert ce["ce06_servizi"] == D("300.00")
     assert ce["ce07_godimento_beni"] == D("200.00")
     assert ce["ce08_costi_personale"] == D("100.00")
+    assert diag["ce_segno_forzato"] == []

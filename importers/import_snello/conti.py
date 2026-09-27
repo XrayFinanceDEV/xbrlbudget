@@ -2,6 +2,7 @@
 la colonna decide il lato, un fondo si sottrae al bene, nessun conto contato due volte."""
 from __future__ import annotations
 
+import re
 from collections import Counter, defaultdict
 from decimal import Decimal
 
@@ -101,6 +102,75 @@ def applica_lato(foglie, irrisolti: list | None = None) -> int:
     return n
 
 
+_CODICE_CONTO = re.compile(r"^[\d./*]+$")
+
+
+def _prima_parola(testo: str) -> str:
+    toks = (testo or "").split()
+    return toks[0] if toks else ""
+
+
+def _ha_codice_conto(testo: str) -> bool:
+    """Vero se la prima parola del testo e' un codice di conto (solo cifre, punti, slash,
+    asterischi): lo stesso test del vecchio parser
+    (situazione_contabile_parser.py, righe 3161/3452/3521) per distinguere un mastro vero da
+    una didascalia di contesto."""
+    return bool(_CODICE_CONTO.match(_prima_parola(testo)))
+
+
+def riclassifica_ignote(foglie, diag: dict) -> None:
+    """Una foglia marcata 'X' da Qwen, o rimasta senza percorso anche al secondo giro, il cui
+    testo comincia con un codice di conto ('40/00000 DEBITI V/FORNITORI'), e' massa vera che
+    il modello ha rinunciato a instradare - non una riga di controllo. Si riprova coi
+    classificatori a parole del vecchio importatore
+    (situazione_contabile_parser.classify_attivo/classify_passivo per lo SP,
+    classify_costi/classify_ricavi + _resolve_ce_field per il CE), mai reinventati qui: si
+    prova sia l'ipotesi attivo sia quella passivo (o costi/ricavi) sulla stessa descrizione, e
+    si usa il risultato solo quando UNA sola delle due e' specifica (non il ripiego generico
+    del classificatore: sp06/ce12/ce04) e non e' un campo TIER0 (immobilizzazioni nette,
+    patrimonio netto, banche, ce09) - se sono specifiche entrambe, o nessuna, la foglia resta
+    X/non mappata come oggi (nessuna scommessa quando la descrizione da sola non decide).
+
+    Muta ``f.percorso`` sul posto con un marcatore ``'#<campo>'`` che ``campo_da_percorso``
+    non traduce: ``da_foglie`` lo riconosce all'inizio del proprio giro e la foglia entra nel
+    voto di famiglia esistente come una qualunque foglia gia' classificata - e' cosi', non con
+    un nuovo calcolo di segno, che il netto Dare/Avere di uno stesso mastro si ottiene
+    (FORMETAL, banco 2026-09-26: '40/00000 DEBITI V/FORNITORI' 13.542,00 e 348.578,85 su lati
+    opposti -> sp16d netto 335.036,85, lo stesso voto che gia' decide gli altri debiti del
+    foglio)."""
+    from importers.situazione_contabile_parser import (
+        TIER0_FIELDS, _resolve_ce_field, classify_attivo, classify_costi, classify_passivo,
+        classify_ricavi)
+
+    for f in foglie:
+        if f.percorso not in ("X", None) or not f.testo or not _ha_codice_conto(f.testo):
+            continue
+        desc = " ".join(f.testo.split()[1:]).upper().strip()
+        if not desc:
+            continue
+        candidati: set = set()
+        if f.sezione == "ce":
+            for direzione, classify in (("costi", classify_costi), ("ricavi", classify_ricavi)):
+                c, specifico = classify(desc)
+                # classify_costi/classify_ricavi arriva a un campo piu' fine (es. 'ce08b'), che
+                # _resolve_ce_field non conosce (la sua allowlist di direzione vede solo gli
+                # aggregati: 'ce08'): tenerlo come prima fonte, l'albero solo di ripiego quando
+                # la tabella a parole non e' specifica.
+                campo = c if specifico else _resolve_ce_field(desc, direzione)
+                if campo is not None and campo not in TIER0_FIELDS:
+                    candidati.add(campo)
+        else:
+            for classify in (classify_attivo, classify_passivo):
+                campo, specifico = classify(desc)
+                if specifico and campo not in TIER0_FIELDS:
+                    candidati.add(campo)
+        if len(candidati) == 1:
+            campo = candidati.pop()
+            diag["riclassificati_vecchio_parser"].append(
+                [f.id, f.testo[:60], campo, str(f.valore.quantize(_C))])
+            f.percorso = f"#{campo}"
+
+
 def da_foglie(foglie):
     """Percorsi di legge -> campi, con una regola in piu' per il risultato d'esercizio (modo
     "conti", Task 14 2026-09-26): il corrente non entra MAI dalle righe stampate, sp13 e'
@@ -126,8 +196,10 @@ def da_foglie(foglie):
     finisce piu' per questa via."""
     diag = {"non_mappati": [], "escluse": [], "risultato_stampato": None, "lato_corretti": 0,
             "lato_irrisolti": [], "risultato_duplicato": [], "padri_esclusi": [],
-            "risultato_precedente": [], "risultato_escluso": [], "risultato_ambiguo": None}
+            "risultato_precedente": [], "risultato_escluso": [], "risultato_ambiguo": None,
+            "riclassificati_vecchio_parser": []}
     diag["lato_corretti"] = applica_lato(foglie, diag["lato_irrisolti"])
+    riclassifica_ignote(foglie, diag)
     irrisolti_ids = {r[0] for r in diag["lato_irrisolti"]}
     due_lati = len({f.lato for f in foglie} & {"L", "R"}) == 2
     # Un percorso stampato ACCANTO a un percorso piu' specifico che lo prolunga (es. "SPP.D"
@@ -139,6 +211,12 @@ def da_foglie(foglie):
     ambigue: list = []
     pregresso = Decimal(0)
     for f in foglie:
+        if f.percorso and f.percorso.startswith("#"):
+            # marcatore di riclassifica_ignote: gia' un campo corto valido (mai un percorso di
+            # legge), entra nel voto di famiglia come una qualunque foglia classificata.
+            codice = f.percorso[1:]
+            per_famiglia[famiglia(codice)].append((f, codice))
+            continue
         if f.percorso and e_risultato(f.percorso):
             diag["risultato_stampato"] = str(abs(f.valore).quantize(_C))
             continue

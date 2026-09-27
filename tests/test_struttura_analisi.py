@@ -185,6 +185,33 @@ def test_vision_limite_due_pagine_di_continuazione(tmp_path):
     assert [m["continuazione"] for m in out] == [False, True, True, False]
 
 
+def test_vision_assorbimento_riscrive_lo_schema_col_blocco(tmp_path):
+    # Fix round 1, gap 2: una pagina assorbita come continuazione teneva il proprio `schema`
+    # stantio (quello che la vision le aveva dato prima di essere assorbita, o il default della
+    # pagina mai vista), che continuava a votare in `modo_da_mappe` come se fosse una pagina
+    # indipendente. Un CE vero (iv_cee_di_legge) con una pagina di continuazione "elenco_piatto"
+    # (schema di conti) dava un voto 1 a 1 — vicino alla parita' — e con l'indizio TRIAL_BALANCE
+    # sceglieva "conti" per errore. Dopo il fix lo schema della continuazione e' quello del
+    # blocco, il voto e' 2 a 0 per "legge" e l'indizio non ha piu' potere di ribaltarlo.
+    doc = fitz.open()
+    doc.new_page(width=595, height=842).insert_text((30, 30), "voce 1  100,00", fontname="helv", fontsize=8)
+    p2 = doc.new_page(width=595, height=842)
+    for i, riga in enumerate(["voce a  10,00  9,00", "voce b  20,00  19,00", "voce c  30,00  29,00"]):
+        p2.insert_text((30, 30 + i * 14), riga, fontname="helv", fontsize=8)
+    path = str(tmp_path / "v4.pdf")
+    doc.save(path)
+
+    mappe = [
+        {"pagina": 1, "tipo_pagina": "prospetto_ce", "schema": "iv_cee_di_legge",
+         "sezioni": [{"posizione": "unica", "contenuto": "misto", "colonne": []}], "continuazione": False},
+        {"pagina": 2, "tipo_pagina": "nota_o_testo", "schema": "elenco_piatto", "sezioni": [], "continuazione": False},
+    ]
+    out = _assorbi_continuazioni_perse(mappe, path)
+    assert out[1]["tipo_pagina"] == "prospetto_ce" and out[1]["continuazione"] is True
+    assert out[1]["schema"] == "iv_cee_di_legge"
+    assert modo_da_mappe(out, route_hint=ROUTE_TRIAL) == "legge"
+
+
 def test_analizza_struttura_passa_route_hint_a_modo_da_mappe(tmp_path, monkeypatch):
     catturato = {}
     from importers.struttura_documento import analisi as A

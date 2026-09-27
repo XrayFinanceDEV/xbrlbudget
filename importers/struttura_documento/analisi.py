@@ -149,13 +149,19 @@ def _assorbi_continuazioni_perse(mappe: list[dict], pdf: str) -> list[dict]:
         while i < n:
             if out[i].get("tipo_pagina") in TIPI_SP | TIPI_CE:
                 tipo = out[i]["tipo_pagina"]
+                schema = out[i].get("schema")
                 j, assorbite = i + 1, 0
                 while (j < n and assorbite < MAX_PAGINE_CONTINUAZIONE and j < len(pagine)
                        and out[j].get("tipo_pagina") == "nota_o_testo"
                        and _importi_pagina(pagine[j]) >= MIN_IMPORTI
                        and not _apre_sezione_nuova(pagine[j])):
+                    # Lo schema della pagina assorbita e' quello del blocco, non quello stantio
+                    # che portava da "nota_o_testo" (il default di una pagina mai vista dalla
+                    # vision, o una classificazione ormai superata): altrimenti voterebbe ancora
+                    # in modo_da_mappe come se fosse una pagina indipendente (fix round 1, gap 2;
+                    # stesso comportamento gia' in mappa_xbrl per il ramo xbrl).
                     out[j] = {**out[j], "tipo_pagina": tipo, "continuazione": True,
-                              "sezioni": out[i].get("sezioni", [])}
+                              "sezioni": out[i].get("sezioni", []), "schema": schema}
                     assorbite += 1
                     j += 1
                 i = j if assorbite else i + 1

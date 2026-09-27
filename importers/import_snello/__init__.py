@@ -212,6 +212,20 @@ def importa(file_path: str, *, ocr_text: str | None = None, analizza=None, leggi
             righe_documento = collect_source_rows(file_path, ocr_text=ocr_text)
             letture = {"sp": 1, "ce": 1}
 
+            # Ruling (c) addendum, Task 18 (owner, dopo la diagnosi AMBIENTA §7-8): un
+            # "riclassificato con codici IVCEE" che e' ANCHE schema di legge coi totali
+            # stampati non e' un piano dei conti piatto - le sue macro-voci possono stare
+            # INTERAMENTE su una pagina che la vision ha classificato "dettaglio_conti" per
+            # il solo cambio pagina fisico (AMBIENTA: "8) per godimento di beni di terzi" e
+            # "9) per il personale" stanno solo a pag.5, "5)-14) Debiti..." solo a pag.3).
+            # Solo per questo stesso segnale (`struttura.macro_include_dettaglio`, mai per un
+            # "legge" qualunque: le sue pagine_dettaglio sono tabelle di nota integrativa
+            # vere, non macro-voci) le pagine_dettaglio entrano anche nel prompt macro, non
+            # solo nel recupero dettaglio a valle (enrich_pdf_details).
+            if getattr(struttura, "macro_include_dettaglio", False):
+                pagine_sp = sorted(set(pagine_sp) | set(struttura.pagine_dettaglio))
+                pagine_ce = sorted(set(pagine_ce) | set(struttura.pagine_dettaglio))
+
             # Le pagine "prospetto_sp_e_ce" (SP e CE sulla stessa pagina fisica) entrano in
             # ENTRAMBE pagine_sp e pagine_ce: se ce ne sono, non le leggiamo due volte (fix 8).
             pagine_condivise = {m["pagina"] for m in struttura.mappe if m.get("tipo_pagina") == "prospetto_sp_e_ce"}

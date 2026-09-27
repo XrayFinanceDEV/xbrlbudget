@@ -313,3 +313,18 @@ def test_struttura_porta_colonne_e_pagine_senza_testo(tmp_path):
     assert s.modo in ("conti", "legge")
     assert s.colonne_sp and all(isinstance(r, str) for r in s.colonne_sp)
     assert s.pagine_senza_testo == []
+
+
+def test_analizza_struttura_riclassificato_con_captions_legali_e_legge_con_macro_dettaglio(tmp_path):
+    # Task 18, ruling (c) (owner, dopo la diagnosi AMBIENTA §7-8): `pdf_colonna_unica` e'
+    # esattamente la forma AMBIENTA in miniatura - "riclassificato con codici IVCEE" +
+    # colonne comparative "Importo corrente | Importo comparato" con totali stampati.
+    # analizza_struttura deve sceglierlo "legge" (non "conti") E accendere
+    # macro_include_dettaglio, cosi' che import_snello includa le pagine_dettaglio anche nel
+    # prompt macro di SP/CE.
+    from importers.struttura_documento.analisi import analizza_struttura
+    from tests._struttura_fixtures import pdf_colonna_unica, MAPPA_COLONNA_UNICA
+    pdf = pdf_colonna_unica(str(tmp_path / "c.pdf"))
+    s = analizza_struttura(pdf, mappa_pagina_fn=lambda client, png: MAPPA_COLONNA_UNICA)
+    assert s.modo == "legge"
+    assert s.macro_include_dettaglio is True

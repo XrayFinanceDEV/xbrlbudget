@@ -57,6 +57,13 @@ class Struttura:
     intestazioni_sp: list[str] = field(default_factory=list)
     intestazioni_ce: list[str] = field(default_factory=list)
     pagine_senza_testo: list[int] = field(default_factory=list)
+    # Task 18, ruling (c) addendum: vero solo per un "riclassificato con codici IVCEE" che e'
+    # ANCHE schema di legge coi totali stampati (owner, dopo la diagnosi AMBIENTA §7-8) - le
+    # sue macro-voci possono stare INTERAMENTE su una pagina classificata "dettaglio_conti"
+    # per il solo cambio pagina fisico. Default False: ogni "legge" precedente a questo
+    # ruling ha pagine_dettaglio che sono tabelle di nota integrativa vere, non macro-voci, e
+    # non deve vederle nel prompt macro di import_snello.
+    macro_include_dettaglio: bool = False
 
     def pagine_macro(self) -> set[int] | None:
         pagine = set(self.pagine_sp) | set(self.pagine_ce)
@@ -90,6 +97,19 @@ def _porta_captions_legali_con_totali(pdf: str | None) -> bool:
     return has_comparative_ivcee_columns(pdf)
 
 
+def _riclassificato_con_captions_legali(prospetti: list[dict], pdf: str | None) -> bool:
+    """Vero quando almeno un prospetto e' schema "riclassificato_con_codici_ivcee" E il
+    documento porta le colonne comparative dello schema di legge coi totali stampati: il
+    segnale unico che decide sia il modo (Task 18, ruling c) sia se le pagine_dettaglio
+    entrano anche nel prompt macro di import_snello invece che nel solo recupero dettaglio a
+    valle (``Struttura.macro_include_dettaglio``, owner dopo la diagnosi AMBIENTA §7-8: "9)
+    per il personale" e "8) per godimento di beni di terzi" stanno INTERAMENTE su una pagina
+    dettaglio_conti, non un piano dei conti piatto)."""
+    if not any(m.get("schema") == "riclassificato_con_codici_ivcee" for m in prospetti):
+        return False
+    return _porta_captions_legali_con_totali(pdf)
+
+
 def modo_da_mappe(mappe: list[dict], *, route_hint: str | None = None, pdf: str | None = None) -> str:
     """"conti" quando lo schema prevalente e' un elenco di conti (compreso il "riclassificato
     con codici IVCEE": un elenco analitico per mastro, non uno schema di legge sintetico), o
@@ -115,8 +135,7 @@ def modo_da_mappe(mappe: list[dict], *, route_hint: str | None = None, pdf: str 
         return "legge"
     n = len(prospetti)
     schemi_conti_modo = SCHEMI_CONTI_MODO
-    if (any(m.get("schema") == "riclassificato_con_codici_ivcee" for m in prospetti)
-            and _porta_captions_legali_con_totali(pdf)):
+    if _riclassificato_con_captions_legali(prospetti, pdf):
         schemi_conti_modo = SCHEMI_CONTI_MODO - {"riclassificato_con_codici_ivcee"}
     conti = sum(1 for m in prospetti if m.get("schema") in schemi_conti_modo)
     if conti * 2 > n:
@@ -218,6 +237,13 @@ def analizza_struttura(pdf: str, *, mappa_pagina_fn=None, route_hint: str | None
     dettaglio = {m["pagina"] for m in mappe if m.get("tipo_pagina") == "dettaglio_conti"}
     dettaglio |= set(pagine_tabelle_nota(pdf))
     modo = modo_da_mappe(mappe, route_hint=route_hint, pdf=pdf)
+    # Stesso segnale che ha scelto "legge" sopra (Task 18, ruling c addendum): un
+    # "riclassificato con codici IVCEE" che e' anche schema di legge coi totali stampati non
+    # e' un piano dei conti piatto, e le sue pagine_dettaglio possono portare macro-voci
+    # intere (owner, dopo la diagnosi AMBIENTA §7-8) - import_snello le include allora anche
+    # nel prompt macro, non solo nel recupero dettaglio a valle.
+    prospetti_mappe = [m for m in mappe if m.get("tipo_pagina") in TIPI_SP | TIPI_CE]
+    macro_include_dettaglio = _riclassificato_con_captions_legali(prospetti_mappe, pdf)
     colonne_sp, intestazioni_sp = _colonne_di(mappe, TIPI_SP)
     colonne_ce, intestazioni_ce = _colonne_di(mappe, TIPI_CE)
     import fitz
@@ -228,4 +254,5 @@ def analizza_struttura(pdf: str, *, mappa_pagina_fn=None, route_hint: str | None
                      secondi=time.monotonic() - inizio, mappe=mappe, modo=modo,
                      colonne_sp=colonne_sp, colonne_ce=colonne_ce,
                      intestazioni_sp=intestazioni_sp, intestazioni_ce=intestazioni_ce,
-                     pagine_senza_testo=pagine_senza_testo)
+                     pagine_senza_testo=pagine_senza_testo,
+                     macro_include_dettaglio=macro_include_dettaglio)

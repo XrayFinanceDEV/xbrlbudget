@@ -50,6 +50,60 @@ def _voci_quadrate(testo, intestazioni, nota=""):
             "precedente": [], "totali": {"totale_attivo": D("1000"), "totale_passivo": D("1000"), "utile": D("100")}}
 
 
+def test_legge_macro_include_dettaglio_aggiunge_pagine_dettaglio_al_prompt(tmp_path):
+    """Task 18, ruling (c) addendum (owner, dopo la diagnosi AMBIENTA §7-8): quando
+    struttura.macro_include_dettaglio e' vero, le pagine_dettaglio entrano ANCHE nel
+    prompt macro di SP/CE, non solo nel recupero dettaglio a valle - un "riclassificato
+    con codici IVCEE" che e' anche schema di legge coi totali stampati non e' un piano
+    dei conti piatto: le sue macro-voci possono stare INTERAMENTE su una pagina che la
+    vision ha classificato "dettaglio_conti" per il solo cambio pagina fisico (AMBIENTA:
+    "9) per il personale" sta solo a pag.5, mai su una pagina di prospetto_ce)."""
+    doc = fitz.open()
+    doc.new_page().insert_text((50, 50), "7) per servizi 100,00")
+    doc.new_page().insert_text((50, 50), "9) per il personale 900,00")
+    pdf = str(tmp_path / "due-pagine.pdf")
+    doc.save(pdf)
+    doc.close()
+
+    testo_visto = []
+
+    def voci(testo, intestazioni, nota=""):
+        testo_visto.append(testo)
+        return {"corrente": [("CE.B.7", D("100"))], "precedente": [], "totali": {}}
+
+    struttura = lambda p: _struttura("legge", pagine_sp=[], pagine_ce=[1], pagine_dettaglio=[2],
+                                     macro_include_dettaglio=True, intestazioni_ce=["CE-2025"])
+    with pytest.raises(S.SnelloNonRiuscito):
+        # Il fake "voci" non produce un attivo/passivo bilanciato (non e' cio' che
+        # interessa qui): quel che conta e' il testo che ha visto, non l'esito finale.
+        S.importa(pdf, analizza=struttura, leggi_voci=voci)
+    assert any("personale" in t for t in testo_visto)
+
+
+def test_legge_senza_macro_include_dettaglio_non_aggiunge_pagine_dettaglio(tmp_path):
+    """Simmetrico: senza il segnale (il comportamento di ogni "legge" precedente a
+    questo ruling - `_struttura` di default non lo imposta), le pagine_dettaglio restano
+    fuori dal prompt macro."""
+    doc = fitz.open()
+    doc.new_page().insert_text((50, 50), "7) per servizi 100,00")
+    doc.new_page().insert_text((50, 50), "9) per il personale 900,00")
+    pdf = str(tmp_path / "due-pagine-no-flag.pdf")
+    doc.save(pdf)
+    doc.close()
+
+    testo_visto = []
+
+    def voci(testo, intestazioni, nota=""):
+        testo_visto.append(testo)
+        return {"corrente": [("CE.B.7", D("100"))], "precedente": [], "totali": {}}
+
+    struttura = lambda p: _struttura("legge", pagine_sp=[], pagine_ce=[1], pagine_dettaglio=[2],
+                                     intestazioni_ce=["CE-2025"])
+    with pytest.raises(S.SnelloNonRiuscito):
+        S.importa(pdf, analizza=struttura, leggi_voci=voci)
+    assert not any("personale" in t for t in testo_visto)
+
+
 def test_legge_che_quadra(tmp_path):
     pdf = _pdf_vuoto(str(tmp_path / "c.pdf"))
     r = S.importa(pdf, analizza=lambda p: _struttura("legge"), leggi_voci=_voci_quadrate)

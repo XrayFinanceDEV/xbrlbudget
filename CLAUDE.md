@@ -218,7 +218,11 @@ ciò che non si può non sapere. Ogni voce dice la regola e **cosa si rompe** a 
 - **Percorso snello (`IMPORT_MOTORE=snello`)**: il modello nomina il percorso di legge e, sugli
   schemi di legge, restituisce l'importo; il codice verifica con soglia `max(100 €, 0,1%
   dell'attivo)` e chiude lo scarto entro soglia con un tappo dichiarato su `sp06g`, `sp16g`, `ce06`
-  (decisione del proprietario, 2026-09-26); oltre soglia una rilettura, poi l'importatore attuale.
+  (decisione del proprietario, 2026-09-26); oltre soglia una rilettura, poi si salva con lo
+  sbilancio dichiarato (esito `"squadrato"`, nessun tappo — decisione del proprietario, Task 17,
+  2026-09-27: «se il bilancio non è quadrato deve essere comunque importato con avviso, l'utente
+  lo correggerà nella tab rettifiche»). Il ripiego sull'importatore attuale resta solo per
+  un'estrazione vuota, una struttura non riconosciuta o un'eccezione imprevista.
   Il divieto di plug e il contratto "riferimenti, non importi" valgono per l'importatore attuale.
 
 ### Quadratura, diagnostica e verdetti

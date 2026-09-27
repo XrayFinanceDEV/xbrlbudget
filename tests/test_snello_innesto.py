@@ -407,3 +407,98 @@ def test_successo_snello_non_rilegge_la_fonte_con_ledger_evidence(tmp_path, monk
     assert result["extraction_method"] == "import_snello"
     assert result["validation_report"]["import_snello"]["esito"] == "ok"
     assert chiamate == []
+
+
+def _risultato_squadrato(scarto=D("300")):
+    """Un esito 'squadrato' con un vero sbilancio attivo/passivo persistito (Task 17): nessun
+    tappo, la diagnostica dichiara lo scarto misurato dal percorso snello."""
+    bs = {"sp09_disponibilita_liquide": D("1000"), "sp11_capitale": D("1000") - scarto,
+          "_plug_residual": D("0"), "_unclassified_mass": D("0")}
+    ce = {}
+    misura = {"attivo": "1000.00", "passivo": str((D("1000") - scarto).quantize(D("0.01"))),
+             "utile_ce": "0.00", "sp13": "0.00", "forma": "bilancio",
+             "scarto_sp": str(scarto.quantize(D("0.01"))), "scarto_ce": "0.00",
+             "scarto_stampati": "0.00"}
+    report = {"esito": "squadrato", "modo": "legge", "struttura": {},
+             "misura": {"corrente": misura}, "tappo": {"corrente": None},
+             "letture": {"sp": 2, "ce": 1}, "diag": {"lato_irrisolti": []},
+             "anomalie": [], "secondi": 0.1}
+    return Risultato(bs=bs, ce=ce, prior_bs=None, prior_ce=None, report=report,
+                     struttura=_struttura())
+
+
+def _risultato_squadrato_scarto_stampati():
+    """Un esito 'squadrato' dove il foglio ricostruito QUADRA da solo (attivo=passivo, CE=sp13):
+    lo scarto sta solo nel confronto coi totali STAMPATI dal documento (scarto_stampati). Un
+    mapper.validate_balance ordinario passerebbe qui senza dire nulla - e' esattamente il caso
+    per cui l'avviso va dichiarato esplicitamente dal percorso snello (Task 17)."""
+    bs = {"sp09_disponibilita_liquide": D("1000"), "sp11_capitale": D("1000"),
+          "_plug_residual": D("0"), "_unclassified_mass": D("0")}
+    ce = {}
+    misura = {"attivo": "1000.00", "passivo": "1000.00", "utile_ce": "0.00", "sp13": "0.00",
+             "forma": "bilancio", "scarto_sp": "0.00", "scarto_ce": "0.00",
+             "scarto_stampati": "150.00"}
+    report = {"esito": "squadrato", "modo": "legge", "struttura": {},
+             "misura": {"corrente": misura}, "tappo": {"corrente": None},
+             "letture": {"sp": 2, "ce": 1}, "diag": {"lato_irrisolti": []},
+             "anomalie": [], "secondi": 0.1}
+    return Risultato(bs=bs, ce=ce, prior_bs=None, prior_ce=None, report=report,
+                     struttura=_struttura())
+
+
+def test_squadrato_si_salva_con_avviso_e_blocca_il_previsionale(tmp_path, monkeypatch):
+    """Task 17 (decisione del proprietario, 2026-09-27): un esito 'squadrato' non ripiega piu'
+    sull'estrattore di oggi. Si adotta con un avviso "BILANCIO SBILANCIATO" che rimanda alle
+    Rettifiche, uno stato di validazione 'unbalanced' (mai 'verified') e un previsionale
+    bloccato dal verdetto ESISTENTE (check_quadratura sul foglio persistito) - nessun nuovo
+    cancello."""
+    monkeypatch.setenv("IMPORT_MOTORE", "snello")
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    _vieta_estrattori_di_oggi(monkeypatch)
+    monkeypatch.setattr(import_snello, "importa", lambda file_path, **_: _risultato_squadrato())
+    session_factory = _db_in_memoria(monkeypatch)
+
+    result = pdf_importer.import_pdf_balance_sheet(
+        file_path=_pdf(tmp_path, RIGHE_PAREGGIO), fiscal_year=2025,
+        company_name="Squadrato con avviso", create_company=True, sector=1,
+        user_id="snello-squadrato", period_months=12,
+    )
+    assert result["success"] is True
+    assert result["extraction_method"] == "import_snello"
+    assert result["validation_report"]["import_snello"]["esito"] == "squadrato"
+    assert result["validation_status"] == "unbalanced"
+    assert result["forecastable"] is False
+    assert any(w.startswith(pdf_importer._UNBALANCED_WARNING_PREFIX) for w in result["warnings"])
+    assert any("Rettifiche" in w for w in result["warnings"])
+
+    persistito = _validation_report_persistito(session_factory, result["company_id"], 2025)
+    assert persistito["import_snello"]["esito"] == "squadrato"
+
+    from database.models import FinancialYear
+    with session_factory() as db:
+        fy = db.query(FinancialYear).filter_by(
+            company_id=result["company_id"], year=2025).one()
+        assert fy.validation_status == "unbalanced"
+        assert fy.forecastable is False
+
+
+def test_squadrato_sui_soli_totali_stampati_dichiara_comunque_l_avviso(tmp_path, monkeypatch):
+    """Lo scarto puo' venire dai totali stampati dal documento, non dallo sbilancio del foglio
+    ricostruito: l'avviso resta dichiarato anche quando mapper.validate_balance da solo
+    tacerebbe (Task 17)."""
+    monkeypatch.setenv("IMPORT_MOTORE", "snello")
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    _vieta_estrattori_di_oggi(monkeypatch)
+    monkeypatch.setattr(import_snello, "importa",
+                        lambda file_path, **_: _risultato_squadrato_scarto_stampati())
+    _db_in_memoria(monkeypatch)
+
+    result = pdf_importer.import_pdf_balance_sheet(
+        file_path=_pdf(tmp_path, RIGHE_PAREGGIO), fiscal_year=2025,
+        company_name="Squadrato solo su stampati", create_company=True, sector=1,
+        user_id="snello-squadrato-stampati", period_months=12,
+    )
+    assert result["success"] is True
+    assert result["validation_report"]["import_snello"]["esito"] == "squadrato"
+    assert result["validation_status"] == "unbalanced"
+    assert any(w.startswith(pdf_importer._UNBALANCED_WARNING_PREFIX) for w in result["warnings"])

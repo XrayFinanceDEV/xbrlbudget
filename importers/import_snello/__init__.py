@@ -229,7 +229,9 @@ def importa(file_path: str, *, ocr_text: str | None = None, analizza=None, leggi
             fase = "verifica"
             bs, ce, tappo, esito, m, s = _verifica(bs, ce, stampati)
 
-        if esito in ("oltre_soglia", "vuoto"):
+        if esito == "vuoto":
+            # Un'estrazione vuota non ha nulla di sensato da salvare: resta un ripiego,
+            # sempre (anche dopo l'unica rilettura in modo "legge").
             report = {
                 "esito": "ripiego", "fase": "verifica", "errore": esito, "modo": modo,
                 "struttura": struttura.report(),
@@ -238,6 +240,17 @@ def importa(file_path: str, *, ocr_text: str | None = None, analizza=None, leggi
                 "anomalie": _anomalie(bs, diag), "secondi": round(time.monotonic() - t0, 1),
             }
             raise SnelloNonRiuscito(report)
+
+        if esito == "oltre_soglia":
+            # Task 17 (decisione del proprietario, 2026-09-27): «se il bilancio non e'
+            # quadrato deve essere comunque importato con avviso, l'utente lo correggera'
+            # nella tab rettifiche». Oltre soglia dopo l'unica rilettura (modo "legge") o
+            # direttamente (modo "conti", che non rilegge) non e' piu' un ripiego: si
+            # adotta il risultato con lo sbilancio dichiarato. Nessun tappo si applica -
+            # bs/ce restano quelli restituiti da tappa() (invariati), e gli scarti
+            # misurati (scarto_sp/scarto_ce/scarto_stampati) restano in "misura", letti
+            # da pdf_importer per costruire l'avviso mostrato all'utente.
+            esito = "squadrato"
 
         prior_bs = prior_ce = prior_diag = None
         m_prec = tappo_prec = None

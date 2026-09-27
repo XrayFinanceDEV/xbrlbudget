@@ -563,12 +563,21 @@ legge nel report → [REGOLE-IMPORT-04-QUADRATURE.md §12](REGOLE-IMPORT-04-QUAD
 
 **La rilettura, unica — solo nel modo `"legge"`.** `"vuoto"` e `"oltre_soglia"` innescano, **solo
 in modo `"legge"`**, una sola rilettura mirata della sola sezione (SP o CE, quella con lo scarto
-maggiore) in `forma="bilancio"` esplicita; il modo `"conti"` non rilegge mai. Se l'esito resta
-`"vuoto"`/`"oltre_soglia"` (dopo la rilettura in modo `"legge"`, o subito in modo `"conti"`),
-l'orchestratore (`importers/import_snello/__init__.py`, `importa()`) solleva
-`SnelloNonRiuscito` e il chiamante **ripiega sull'importatore attuale**, intero e invariato, che
-decide da sé come oggi — compreso l'import squadrato e dichiarato descritto nelle sezioni
-precedenti di questa pagina.
+maggiore) in `forma="bilancio"` esplicita; il modo `"conti"` non rilegge mai.
+
+**Task 17 (decisione del proprietario, 2026-09-27): «se il bilancio non è quadrato deve essere
+comunque importato con avviso, l'utente lo correggerà nella tab rettifiche».** Se l'esito resta
+`"oltre_soglia"` dopo la rilettura in modo `"legge"`, o subito in modo `"conti"` (che non
+rilegge), l'orchestratore **non ripiega più**: adotta il risultato con esito `"squadrato"`, senza
+applicare alcun tappo — `bs`/`ce` restano quelli letti, invariati — con gli scarti misurati
+(`scarto_sp`, `scarto_ce`, `scarto_stampati`) dichiarati in `misura`, letti da `pdf_importer.py`
+per costruire l'avviso "BILANCIO SBILANCIATO" mostrato all'utente (→
+[REGOLE-IMPORT-04-QUADRATURE.md §12](REGOLE-IMPORT-04-QUADRATURE.md)). Il ripiego resta l'unico
+esito per **`"vuoto"`** (un'estrazione vuota non ha nulla di sensato da salvare), per una
+struttura non riuscita e per un'eccezione imprevista: solo in questi casi l'orchestratore
+(`importers/import_snello/__init__.py`, `importa()`) solleva `SnelloNonRiuscito` e il chiamante
+**ripiega sull'importatore attuale**, intero e invariato, che decide da sé come oggi — compreso
+l'import squadrato e dichiarato descritto nelle sezioni precedenti di questa pagina.
 
 **Gli esiti nel report** (`validation_report["import_snello"]`, scritto da `pdf_importer.py`) sono
 un livello sopra quelli di `tappa()`:
@@ -578,7 +587,13 @@ un livello sopra quelli di `tappa()`:
 | *(chiave assente)* | `IMPORT_MOTORE` spento o su un valore diverso da `"snello"` | — |
 | `"non_applicabile"` | il documento è una scansione o viene da OCR (RapidOCR locale o MinerU): il percorso snello **non si tenta nemmeno**, un testo OCR non è mai un text layer nativo | `motivo`: `"scansione"` \| `"ocr"` (mai `fase`/`errore`) |
 | `"ok"` / `"tappo"` | successo dell'orchestratore | `modo`, `struttura`, `misura`, `tappo`, `letture`, `diag`, `anomalie`, `secondi`, più `precedente` (`"incluso"` \| `"escluso_oltre_soglia"`) quando in modo `"legge"` c'è un anno precedente |
-| `"ripiego"` | fallimento — dichiarato dall'orchestratore o un'eccezione imprevista | `fase` (`"struttura"` \| `"lettura"` \| `"conti"` \| `"verifica"` \| `"eccezione"`), `errore` (il tipo di eccezione, o `"vuoto"`/`"oltre_soglia"` quando la causa è la verifica) |
+| `"squadrato"` | scarto oltre soglia dopo l'unica rilettura (modo `"legge"`) o direttamente (modo `"conti"`): si adotta comunque, `tappo.corrente` resta `None` e `misura` dichiara lo scarto | stesse chiavi di `"ok"`/`"tappo"` |
+| `"ripiego"` | fallimento — dichiarato dall'orchestratore (solo su `"vuoto"`, o su una struttura non riuscita) o un'eccezione imprevista | `fase` (`"struttura"` \| `"lettura"` \| `"conti"` \| `"verifica"` \| `"eccezione"`), `errore` (il tipo di eccezione, o `"vuoto"` quando la causa è la verifica) |
+
+Un esito `"squadrato"` produce un `validation_status` diverso da `"verified"` (lo stesso
+`"unbalanced"` di uno sbilancio letto dall'importatore attuale) e blocca il previsionale con il
+verdetto **esistente** di `check_quadratura` sul foglio persistito — nessun nuovo cancello (→
+[REGOLE-IMPORT-04-QUADRATURE.md §12](REGOLE-IMPORT-04-QUADRATURE.md)).
 
 `diag` porta sempre `lato_irrisolti` (lista, presente anche vuota): i conti SP letti sul lato
 sbagliato e senza contropartita nota (`percorsi.CONTROPARTE`, applicata da `conti.applica_lato` in

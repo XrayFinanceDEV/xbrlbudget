@@ -10,14 +10,25 @@ import time
 from dataclasses import dataclass, field
 
 from importers.bilancio_classifier import ROUTE_IVCEE, ROUTE_TRIAL
-from importers.struttura_documento.mappa import (MIN_IMPORTI, NOTA_INTEGRATIVA, _importi_pagina,
-                                                 _testo_di_testa, e_xbrl_di_legge, mappa_documento,
-                                                 mappa_xbrl)
+from importers.struttura_documento.mappa import (MAX_PAGINE_CONTINUAZIONE, MIN_IMPORTI, NOTA_INTEGRATIVA,
+                                                 _apre_sezione_nuova, _importi_pagina, _testo_di_testa,
+                                                 e_xbrl_di_legge, mappa_documento, mappa_xbrl)
 
 SCHEMI_CONTI = {"piano_dei_conti_gerarchico", "elenco_piatto"}
 SCHEMI_LEGGE = {"iv_cee_di_legge", "riclassificato_con_codici_ivcee"}
 TIPI_SP = {"prospetto_sp", "prospetto_sp_e_ce"}
 TIPI_CE = {"prospetto_ce", "prospetto_sp_e_ce"}
+
+# Schemi che il "modo" tratta come un elenco di conti da leggere in modo "conti": un documento
+# "riclassificato con codici IVCEE" e' un elenco analitico per mastro (centinaia di righe per
+# pagina), non uno schema di legge sintetico — leggerlo come "legge" sotto-conta gli aggregati
+# quando manca anche un solo figlio di un totale (8 file del banco 26/09, Task lotto-b, fix 9).
+SCHEMI_CONTI_MODO = {"piano_dei_conti_gerarchico", "elenco_piatto", "riclassificato_con_codici_ivcee"}
+
+# Un voto vicino alla parita' (al massimo questo scarto di pagine fra "conti" e "legge") con
+# l'indizio del classificatore (route TRIAL_BALANCE) sceglie "conti": budget_313 aveva un voto in
+# parita' e nessun indizio, ed e' caduto sul lato sbagliato.
+MARGINE_PAREGGIO_MODO = 1
 
 # Titoli fissi delle tabelle di nota integrativa (schema OIC / tassonomia itcc) che portano
 # natura e scadenza di crediti e debiti e la composizione delle rimanenze.
@@ -28,8 +39,6 @@ TITOLI_TABELLE_NOTA = re.compile(
     r"|debiti assistiti da garanzie reali"
     r"|finanziamenti effettuati da soci"
     r"|analisi delle variazioni delle rimanenze", re.I)
-
-SCHEMI_CONTI_MODO = {"piano_dei_conti_gerarchico", "elenco_piatto"}
 
 
 @dataclass
@@ -67,10 +76,23 @@ class Struttura:
                 "pagine_senza_testo": self.pagine_senza_testo}
 
 
-def modo_da_mappe(mappe: list[dict]) -> str:
+def modo_da_mappe(mappe: list[dict], *, route_hint: str | None = None) -> str:
+    """"conti" quando lo schema prevalente e' un elenco di conti (compreso il "riclassificato
+    con codici IVCEE": un elenco analitico per mastro, non uno schema di legge sintetico), o
+    quando il voto e' vicino alla parita' (scarto <= MARGINE_PAREGGIO_MODO pagine) e il
+    classificatore ha gia' segnalato una situazione contabile (`route_hint == ROUTE_TRIAL`) —
+    l'indizio pesa solo li', mai contro una maggioranza netta per lo schema di legge."""
     prospetti = [m for m in mappe if m.get("tipo_pagina") in TIPI_SP | TIPI_CE]
+    if not prospetti:
+        return "legge"
+    n = len(prospetti)
     conti = sum(1 for m in prospetti if m.get("schema") in SCHEMI_CONTI_MODO)
-    return "conti" if prospetti and conti * 2 > len(prospetti) else "legge"
+    if conti * 2 > n:
+        return "conti"
+    margine = n - conti * 2
+    if route_hint == ROUTE_TRIAL and margine <= MARGINE_PAREGGIO_MODO:
+        return "conti"
+    return "legge"
 
 
 def _colonne_di(mappe: list[dict], tipi: set[str]) -> tuple[list[str], list[str]]:
@@ -111,20 +133,52 @@ def pagine_tabelle_nota(pdf: str) -> list[int]:
     return sorted(out)
 
 
-def analizza_struttura(pdf: str, *, mappa_pagina_fn=None) -> Struttura:
+def _assorbi_continuazioni_perse(mappe: list[dict], pdf: str) -> list[dict]:
+    """Una pagina che la vision ha lasciato "nota_o_testo" (mai vista perche' filtrata per pochi
+    importi, o vista e classificata cosi') e' la continuazione del prospetto aperto se ha importi
+    veri, segue subito una o piu' pagine dello stesso prospetto (SP o CE) e il suo testo non apre
+    una sezione diversa — stesso meccanismo di `mappa_xbrl` per il ramo xbrl (Task lotto-b, fix 6b,
+    diagnosi budget_972/614/158: pagine di continuazione del CE con importi veri, mai incluse).
+    Al massimo MAX_PAGINE_CONTINUAZIONE pagine di fila."""
+    import fitz
+    out = list(mappe)
+    with fitz.open(pdf) as doc:
+        pagine = list(doc)
+        n = len(out)
+        i = 0
+        while i < n:
+            if out[i].get("tipo_pagina") in TIPI_SP | TIPI_CE:
+                tipo = out[i]["tipo_pagina"]
+                j, assorbite = i + 1, 0
+                while (j < n and assorbite < MAX_PAGINE_CONTINUAZIONE and j < len(pagine)
+                       and out[j].get("tipo_pagina") == "nota_o_testo"
+                       and _importi_pagina(pagine[j]) >= MIN_IMPORTI
+                       and not _apre_sezione_nuova(pagine[j])):
+                    out[j] = {**out[j], "tipo_pagina": tipo, "continuazione": True,
+                              "sezioni": out[i].get("sezioni", [])}
+                    assorbite += 1
+                    j += 1
+                i = j if assorbite else i + 1
+            else:
+                i += 1
+    return out
+
+
+def analizza_struttura(pdf: str, *, mappa_pagina_fn=None, route_hint: str | None = None) -> Struttura:
     inizio = time.monotonic()
     if e_xbrl_di_legge(pdf):
         mappe, fonte, chiamate = mappa_xbrl(pdf), "xbrl_titoli", 0
     else:
         mappe = mappa_documento(pdf, mappa_pagina_fn=mappa_pagina_fn)
         fonte, chiamate = "vision", int(mappe[0].get("_chiamate", 0)) if mappe else 0
+        mappe = _assorbi_continuazioni_perse(mappe, pdf)
     route = ROUTE_IVCEE if fonte == "xbrl_titoli" else route_da_mappe(mappe)
     pagine_sp = [m["pagina"] for m in mappe if m.get("tipo_pagina") in TIPI_SP]
     pagine_ce = [m["pagina"] for m in mappe if m.get("tipo_pagina") in TIPI_CE]
     prospetti = set(pagine_sp) | set(pagine_ce)
     dettaglio = {m["pagina"] for m in mappe if m.get("tipo_pagina") == "dettaglio_conti"}
     dettaglio |= set(pagine_tabelle_nota(pdf))
-    modo = modo_da_mappe(mappe)
+    modo = modo_da_mappe(mappe, route_hint=route_hint)
     colonne_sp, intestazioni_sp = _colonne_di(mappe, TIPI_SP)
     colonne_ce, intestazioni_ce = _colonne_di(mappe, TIPI_CE)
     import fitz

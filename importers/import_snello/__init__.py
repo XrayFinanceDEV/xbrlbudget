@@ -253,10 +253,9 @@ def importa(file_path: str, *, ocr_text: str | None = None, analizza=None, leggi
                 "tappo": {"corrente": tappo}, "letture": letture, "diag": diag,
                 "anomalie": _anomalie(bs, diag), "secondi": round(time.monotonic() - t0, 1),
             }
-            if esito == "oltre_soglia" and _causa_stampati(m, s):
-                report["causa"] = "stampati"
             raise SnelloNonRiuscito(report)
 
+        causa = None
         if esito == "oltre_soglia":
             # Task 17 (decisione del proprietario, 2026-09-27): «se il bilancio non e'
             # quadrato deve essere comunque importato con avviso, l'utente lo correggera'
@@ -267,6 +266,7 @@ def importa(file_path: str, *, ocr_text: str | None = None, analizza=None, leggi
             # misurati (scarto_sp/scarto_ce/scarto_stampati) restano in "misura", letti
             # da pdf_importer per costruire l'avviso mostrato all'utente.
             esito = "squadrato"
+            causa = "stampati" if _causa_stampati(m, s) else None
 
         prior_bs = prior_ce = prior_diag = None
         m_prec = tappo_prec = None
@@ -301,5 +301,8 @@ def importa(file_path: str, *, ocr_text: str | None = None, analizza=None, leggi
     }
     if modo == "legge" and precedente_stato is not None:
         report["precedente"] = precedente_stato
+    if causa:
+        # Squadrato solo contro il totale stampato (SP e CE interni entro soglia).
+        report["causa"] = causa
 
     return Risultato(bs=bs, ce=ce, prior_bs=prior_bs, prior_ce=prior_ce, report=report, struttura=struttura)

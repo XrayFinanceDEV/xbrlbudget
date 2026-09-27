@@ -390,10 +390,10 @@ def test_rilettura_per_soli_totali_stampati_dichiara_la_causa(tmp_path):
         return {"corrente": [("SPA.C.IV.1", D("1000")), ("SPP.A.I", D("1000"))],
                 "precedente": [], "totali": {}}
 
-    with pytest.raises(S.SnelloNonRiuscito) as exc:
-        S.importa(pdf, analizza=lambda p: _struttura("legge"), leggi_voci=voci)
-    assert exc.value.report["errore"] == "oltre_soglia"
-    assert exc.value.report["causa"] == "stampati"
+    # Task 17: oltre soglia si salva con avviso (esito "squadrato"), la causa resta dichiarata.
+    r = S.importa(pdf, analizza=lambda p: _struttura("legge"), leggi_voci=voci)
+    assert r.report["esito"] == "squadrato"
+    assert r.report["causa"] == "stampati"
     rilettura = [n for n in note_viste if n]
     assert len(rilettura) == 1   # solo SP: scarto_stampati>soglia sceglie sempre quella sezione
     assert "stampat" in rilettura[0].lower()

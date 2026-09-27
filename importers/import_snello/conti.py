@@ -110,11 +110,16 @@ def da_foglie(foglie):
 
       1. una didascalia di ESERCIZI PRECEDENTI (qualunque percorso Qwen le abbia dato: 'IX' per
          un errore del modello conta comunque) va a sp12g, col segno della didascalia;
-      2. un percorso "R" o "SPP.A.IX" la cui didascalia non parla chiaro (ne' precedente ne'
-         di controllo) e' ambiguo: due ipotesi si confrontano DOPO aver costruito il resto del
-         foglio - corrente (esclusa) o precedente (in sp12g) - e vince quella che quadra meglio;
-      3. una riga di pareggio/controllo dichiarata (TOTALE A PAREGGIO, DIFFERENZA, SBILANCIO,
-         o lo stesso risultato corrente scritto altrove) si esclude e basta, mai sommata.
+      2. un percorso "R" o "SPP.A.IX" con una didascalia di pareggio/controllo dichiarata
+         (TOTALE A PAREGGIO, DIFFERENZA insieme ad ATTIVO/PASSIVO/DARE/AVERE, SBILANCIO da
+         solo, o lo stesso risultato corrente ristampato) si esclude e basta, mai sommata -
+         MAI su un percorso gia' risolto a un campo normale (fix round 1, review 2026-09-26:
+         "Differenza cambi attivi"/CE.C.17-bis e "Totale rimanenze iniziali" sono conti veri,
+         non righe di pareggio, e la didascalia non deve mai scavalcare un percorso classificato);
+      3. un percorso "R" o "SPP.A.IX" la cui didascalia non e' ne' precedente ne' di
+         pareggio/controllo e' ambiguo: due ipotesi si confrontano DOPO aver costruito il resto
+         del foglio - corrente (esclusa) o precedente (in sp12g) - e vince quella che quadra
+         meglio.
 
     ``risultato_duplicato`` resta dichiarato (sempre vuoto in modo "conti"): il vecchio
     dedup-per-valore riguardava solo le righe che finivano sommate in sp13, e nessuna ci
@@ -163,10 +168,15 @@ def da_foglie(foglie):
             diag["risultato_precedente"].append([f.id, f.percorso, str(f.valore.quantize(_C))])
             continue
         if f.percorso in ("R", "SPP.A.IX"):
-            ambigue.append(f)
-            continue
-        if control_caption(f.testo):
-            diag["risultato_escluso"].append([f.id, f.percorso, str(f.valore.quantize(_C))])
+            # control_caption e' un test sulla didascalia: si applica SOLO qui, su un percorso
+            # gia' non classificato come conto vero (fix round 1, review 2026-09-26). Non deve
+            # mai girare su un percorso risolto a un campo normale, o "Differenza cambi attivi"
+            # (CE.C.17-bis, un conto vero) e "Totale rimanenze iniziali" sparirebbero solo
+            # perche' la didascalia somiglia a un rigo di pareggio.
+            if control_caption(f.testo):
+                diag["risultato_escluso"].append([f.id, f.percorso, str(f.valore.quantize(_C))])
+            else:
+                ambigue.append(f)
             continue
 
         codice = campo_da_percorso(f.percorso)

@@ -272,27 +272,32 @@ def test_scadenza_non_fa_di_un_conto_il_padre_di_un_altro():
 
 def test_formetal_utile_stampato_uguale_al_ce_si_conta_una_volta():
     """Bilancio di verifica a due colonne (FORMETAL): 'UTILE DI ESERCIZIO' e' la riga di
-    pareggio (percorso 'R'), il cui importo coincide con l'utile del CE. L'ipotesi 'corrente'
-    (esclusa, sp13 dal CE) chiude il foglio a zero; l'ipotesi 'precedente' lo sbilancerebbe
-    sommando la stessa massa una seconda volta in sp12g."""
+    pareggio (percorso 'R'). Dal fix round 1 (review, 2026-09-26) una didascalia cosi' - la
+    stessa frase corrente che il vecchio parser usa per isolare il risultato - si esclude
+    direttamente (risultato_escluso), senza passare dall'ipotesi ambigua: sp13 resta l'utile
+    del CE e il foglio chiude."""
     foglie = [_f(1, "L", "1000", "SPA.C.IV.1"), _f(2, "R", "800", "SPP.A.I"),
               _f(3, "R", "200", "R", testo="UTILE DI ESERCIZIO"),
               _f(4, "R", "500", "CE.A.1"), _f(5, "L", "300", "CE.B.7")]
     bs, ce, diag = da_foglie(foglie)
     assert bs["sp13_utile_perdita"] == D("200.00")
-    assert diag["risultato_ambiguo"]["ipotesi"] == "corrente"
+    assert diag["risultato_escluso"] == [["3", "R", "200.00"]]
+    assert diag["risultato_ambiguo"] is None
     att = bs["sp09_disponibilita_liquide"]
     pas = bs["sp11_capitale"] + bs["sp13_utile_perdita"]
     assert att == pas == D("1000.00")
 
 
 def test_risultato_esercizio_ambiguo_risulta_precedente_se_chiude_il_bilancio():
-    """Una riga 'Risultato esercizio' (didascalia generica, ne' 'precedente' ne' di controllo)
-    il cui importo NON coincide con l'utile del CE: il foglio chiude solo se quella massa e' in
-    realta' il risultato dell'anno prima, gia' confluito nel patrimonio netto. L'ipotesi
-    'precedente' (sp12g) vince perche' e' l'unica che azzera lo scarto."""
+    """Una riga con percorso 'SPP.A.IX' e didascalia GENERICA (ne' precedente ne' di pareggio/
+    controllo dichiarato) il cui importo NON coincide con l'utile del CE: il foglio chiude solo
+    se quella massa e' in realta' il risultato dell'anno prima, gia' confluito nel patrimonio
+    netto. L'ipotesi 'precedente' (sp12g) vince perche' e' l'unica che azzera lo scarto. Una
+    didascalia esplicita tipo 'Risultato esercizio' non arriva piu' qui dal fix round 1: quella
+    frase e' la stessa che il vecchio parser usa per il risultato CORRENTE (ESERCIZIO+RISULTATO)
+    e si esclude direttamente - la vera ambiguita' e' quando la didascalia non dice nulla."""
     foglie = [_f(1, "L", "1350", "SPA.C.IV.1"), _f(2, "R", "1000", "SPP.A.I"),
-              _f(3, "R", "300", "SPP.A.IX", testo="RISULTATO ESERCIZIO"),
+              _f(3, "R", "300", "SPP.A.IX"),
               _f(4, "R", "550", "CE.A.1"), _f(5, "L", "500", "CE.B.7")]
     bs, ce, diag = da_foglie(foglie)
     assert bs["sp13_utile_perdita"] == D("50.00")
@@ -329,19 +334,53 @@ def test_prior_caption_vince_anche_se_qwen_ha_dato_percorso_ix():
 
 
 def test_riga_di_controllo_totale_a_pareggio_esclusa_mai_sommata():
+    """Fix round 1: la didascalia esclude solo un percorso 'R'/'SPP.A.IX' (non classificato
+    come conto vero), mai un percorso gia' risolto a un campo normale."""
     foglie = [_f(1, "L", "1000", "SPA.C.IV.1"), _f(2, "R", "1000", "SPP.A.I"),
-              _f(3, "R", "1000", "SPP.D.14", testo="TOTALE A PAREGGIO")]
+              _f(3, "R", "1000", "R", testo="TOTALE A PAREGGIO")]
     bs, ce, diag = da_foglie(foglie)
-    assert diag["risultato_escluso"] == [["3", "SPP.D.14", "1000.00"]]
+    assert diag["risultato_escluso"] == [["3", "R", "1000.00"]]
     assert bs.get("sp16g_altri_debiti_breve", D("0")) == D("0")
     assert bs["sp13_utile_perdita"] == D("0.00")
 
 
-def test_riga_differenza_attivo_passivo_esclusa():
+def test_riga_differenza_attivo_passivo_su_percorso_r_esclusa():
     foglie = [_f(1, "L", "1000", "SPA.C.IV.1"), _f(2, "R", "800", "SPP.A.I"),
-              _f(3, "R", "200", "SPP.D.14", testo="DIFFERENZA ATTIVO PASSIVO")]
+              _f(3, "R", "200", "R", testo="DIFFERENZA ATTIVO PASSIVO")]
     bs, ce, diag = da_foglie(foglie)
-    assert diag["risultato_escluso"] == [["3", "SPP.D.14", "200.00"]]
+    assert diag["risultato_escluso"] == [["3", "R", "200.00"]]
+    assert diag["risultato_ambiguo"] is None
+
+
+def test_riga_sbilancio_su_percorso_r_esclusa():
+    foglie = [_f(1, "L", "1000", "SPA.C.IV.1"), _f(2, "R", "850", "SPP.A.I"),
+              _f(3, "R", "150", "R", testo="Sbilancio")]
+    bs, ce, diag = da_foglie(foglie)
+    assert diag["risultato_escluso"] == [["3", "R", "150.00"]]
+    assert diag["risultato_ambiguo"] is None
+
+
+def test_differenza_cambi_attivi_conto_vero_non_escluso_dalla_didascalia():
+    """Rilievo round 1: 'DIFFERENZA' nella didascalia di un conto vero (differenza cambi,
+    CE.C.17-bis -> ce16) non deve escluderlo - il test di pareggio/controllo vale solo sui
+    percorsi non classificati ('R', 'SPP.A.IX'), mai su un percorso gia' risolto a un campo
+    normale."""
+    foglie = [_f(1, "L", "1000", "SPA.C.IV.1"), _f(2, "R", "1000", "SPP.A.I"),
+              _f(3, "R", "300", "CE.C.17-bis", testo="Differenza cambi attivi")]
+    bs, ce, diag = da_foglie(foglie)
+    assert ce["ce16_utili_perdite_cambi"] == D("300.00")
+    assert diag["risultato_escluso"] == []
+
+
+def test_totale_rimanenze_iniziali_conto_vero_non_escluso_dalla_didascalia():
+    """Rilievo round 1: 'TOTALE' nella didascalia di un conto vero (rimanenze materie prime,
+    SPA.C.I.1 -> sp05a) non deve escluderlo - percorso classificato, mai una didascalia a
+    scavalcarlo."""
+    foglie = [_f(1, "R", "1000", "SPP.D.7"),
+              _f(2, "L", "500", "SPA.C.I.1", testo="Totale rimanenze iniziali")]
+    bs, ce, diag = da_foglie(foglie)
+    assert bs["sp05a_materie_prime"] == D("500.00")
+    assert diag["risultato_escluso"] == []
 
 
 def test_623_perdita_pregressa_e_corrente_entrambe_in_dare_chiudono_il_bilancio():
@@ -361,7 +400,10 @@ def test_623_perdita_pregressa_e_corrente_entrambe_in_dare_chiudono_il_bilancio(
     bs, ce, diag = da_foglie(foglie)
     assert bs["sp12g_utili_perdite_portati"] == D("-209356.57")
     assert bs["sp13_utile_perdita"] == D("-34590.25")
-    assert diag["risultato_ambiguo"]["ipotesi"] == "corrente"
+    # Dal fix round 1 "PERDITA D'ESERCIZIO" (ESERCIZIO+PERDITA) e' la stessa frase del vecchio
+    # parser per il risultato CORRENTE: si esclude direttamente, non passa dall'ipotesi ambigua.
+    assert diag["risultato_escluso"] == [["4", "SPP.A.IX", "34590.25"]]
+    assert diag["risultato_ambiguo"] is None
     assert bs.get("sp06g_crediti_altri_breve", D("0")) == D("0")
     assert bs.get("sp16g_altri_debiti_breve", D("0")) == D("0")
     att = bs["sp09_disponibilita_liquide"]

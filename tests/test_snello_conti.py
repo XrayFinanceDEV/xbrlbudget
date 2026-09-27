@@ -420,6 +420,119 @@ def test_623_perdita_pregressa_e_corrente_entrambe_in_dare_chiudono_il_bilancio(
     assert att == pas == D("56053.18")
 
 
+# --- Task 15 (2026-09-27): una foglia 'X' con codice conto si riclassifica coi ------------
+# --- classificatori a parole del vecchio parser, mai reinventati qui -----------------------
+
+
+def test_formetal_x_con_codice_conto_si_riclassifica_col_vecchio_parser():
+    """FORMETAL, banco 26/09: due mastri '40/00000 DEBITI V/FORNITORI' marcati X da Qwen, uno
+    in Dare (13.542,00) uno in Avere (348.578,85) - massa vera che il modello ha rinunciato a
+    instradare, non una riga di controllo. classify_passivo riconosce 'FORNITOR' (specifico,
+    sp16d); classify_attivo su una descrizione di debito non trova nulla di specifico (sp06
+    generico, scartato): un solo candidato, si forza. Il segno lo decide poi lo stesso voto di
+    famiglia che gia' governa gli altri debiti del foglio (Avere = normale qui, Dare = contro),
+    non un calcolo nuovo: netto 335.036,85 (Avere - Dare)."""
+    foglie = [
+        _f(1, "L", "1000", "SPA.C.IV.1"),
+        _f(2, "R", "800", "SPP.A.I"),
+        _f(3, "R", "200", "SPP.D.9"),
+        _f(4, "L", "13542.00", "X", testo="40/00000 DEBITI V/FORNITORI"),
+        _f(5, "R", "348578.85", "X", testo="40/00000 DEBITI V/FORNITORI"),
+    ]
+    bs, ce, diag = da_foglie(foglie)
+    assert bs["sp16d_debiti_fornitori_breve"] == D("335036.85")
+    assert diag["riclassificati_vecchio_parser"] == [
+        ["4", "40/00000 DEBITI V/FORNITORI", "sp16d", "13542.00"],
+        ["5", "40/00000 DEBITI V/FORNITORI", "sp16d", "348578.85"],
+    ]
+    assert diag["escluse"] == []
+
+
+def test_senza_percorso_con_codice_conto_si_riclassifica_anche_lei():
+    """Non solo 'X': una foglia rimasta senza percorso anche al secondo giro (percorso None)
+    ma con un codice di conto in testa al testo e' la stessa massa vera, e si riprova con gli
+    stessi classificatori."""
+    foglie = [
+        _f(1, "L", "1000", "SPA.C.IV.1"), _f(2, "R", "800", "SPP.A.I"), _f(3, "R", "200", "SPP.D.9"),
+        _f(4, "R", "300", None, testo="50/00010 DEBITI V/FORNITORI DIVERSI"),
+    ]
+    bs, ce, diag = da_foglie(foglie)
+    assert bs["sp16d_debiti_fornitori_breve"] == D("300.00")
+    assert diag["non_mappati"] == []
+    assert diag["riclassificati_vecchio_parser"] == [
+        ["4", "50/00010 DEBITI V/FORNITORI DIVERSI", "sp16d", "300.00"],
+    ]
+
+
+def test_x_senza_codice_conto_non_si_riclassifica():
+    """Una riga 'X' il cui testo NON comincia con un codice di conto (una didascalia di
+    contesto, non un mastro) resta esclusa come oggi: il test del codice e' condizione
+    necessaria, non solo la presenza del percorso 'X'."""
+    foglie = [_f(1, "L", "1000", "SPA.C.IV.1"), _f(2, "R", "1000", "SPP.A.I"),
+              _f(3, "R", "50", "X", testo="RIGA DI SERVIZIO SENZA CODICE")]
+    bs, ce, diag = da_foglie(foglie)
+    assert diag["riclassificati_vecchio_parser"] == []
+    assert diag["escluse"] == [["3", "X", "50.00"]]
+
+
+def test_x_senza_parole_chiave_non_specifiche_resta_escluso():
+    """Se la descrizione non da' un risultato specifico ne' come attivo ne' come passivo
+    (nessun classificatore la riconosce: entrambi cadono sul ripiego generico), non si
+    sceglie a caso: la foglia resta X/esclusa come oggi (nessuna scommessa)."""
+    foglie = [_f(1, "L", "1000", "SPA.C.IV.1"), _f(2, "R", "1000", "SPP.A.I"),
+              _f(3, "R", "50", "X", testo="90/00000 RIGA GENERICA SENZA PAROLE CHIAVE")]
+    bs, ce, diag = da_foglie(foglie)
+    assert diag["riclassificati_vecchio_parser"] == []
+    assert diag["escluse"] == [["3", "X", "50.00"]]
+
+
+def test_ce_x_con_codice_conto_si_riclassifica_lato_costi():
+    """Una foglia CE marcata 'X' con codice di conto e descrizione di costo del personale
+    inequivocabile ('SALARI'): classify_costi la riconosce (specifico, ce08b); sul lato
+    ricavi nessuna regola matcha (ce04 generico, scartato) - un solo candidato, si forza."""
+    from importers.import_snello.righe import Riga
+
+    foglie = [
+        _f(1, "T", "1000", "CE.A.1"),
+        Riga(id="2", pagina=1, lato="T", testo="70/000 SALARI E STIPENDI", valore=D("450.00"),
+            sezione="ce", percorso="X"),
+    ]
+    bs, ce, diag = da_foglie(foglie)
+    assert ce["ce08b_salari_stipendi"] == D("450.00")
+    assert diag["riclassificati_vecchio_parser"] == [["2", "70/000 SALARI E STIPENDI", "ce08b", "450.00"]]
+
+
+def test_x_su_campo_tier0_non_si_forza_mai():
+    """Anche se la descrizione fosse specifica su un campo TIER0 (patrimonio netto), la foglia
+    non si forza mai su quel campo: resta X/esclusa, come il vecchio importatore (TIER0_FIELDS
+    non e' mai una destinazione di ripiego)."""
+    foglie = [_f(1, "L", "1000", "SPA.C.IV.1"), _f(2, "R", "700", "SPP.A.I"),
+              _f(3, "R", "300", "X", testo="60/00000 CAPITALE SOCIALE VERSATO")]
+    bs, ce, diag = da_foglie(foglie)
+    assert diag["riclassificati_vecchio_parser"] == []
+    assert diag["escluse"] == [["3", "X", "300.00"]]
+
+
+# --- Task 15 (2026-09-27): un'immobilizzazione netta ancora negativa si azzera, mai -------
+# --- lasciata negativa ne' spostata su un altro campo (stessa regola del vecchio ----------
+# --- importatore, build_sp_from_vision) ----------------------------------------------------
+
+
+def test_immobilizzazione_netta_ancora_negativa_si_azzera_e_si_dichiara():
+    """Un fondo che eccede il lordo anche a livello di aggregato (non solo di dettaglio, gia'
+    coperto da _netta_fondi_negativi) si azzera - mai lasciato negativo - e l'eccedenza si
+    dichiara in diag, cosi' che il chiamante la riporti in report['anomalie']."""
+    bs, ce, diag = da_coppie([("SPA.B.II", D("1000")), ("SPA.B.II.F", D("1050")), ("SPP.D.7", D("1050"))])
+    assert bs["sp03_immob_materiali"] == D("0.00")
+    assert diag["immobilizzazioni_negative_tagliate"] == [["sp03_immob_materiali", "50.00"]]
+
+
+def test_immobilizzazione_netta_positiva_non_dichiara_nulla():
+    bs, ce, diag = da_coppie([("SPA.B.II", D("1000")), ("SPA.B.II.F", D("400")), ("SPP.D.7", D("600"))])
+    assert bs["sp03_immob_materiali"] == D("600.00")
+    assert diag["immobilizzazioni_negative_tagliate"] == []
+
+
 def test_gap_reale_non_si_maschera_dietro_l_utile_ce():
     """Riproduce budget_330 (gap reale in un bilancio di verifica, qui -2.505,51): senza alcuna
     riga di risultato in mezzo, sp13 e' comunque l'utile del CE e lo scarto vero resta

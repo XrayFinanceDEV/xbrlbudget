@@ -18,11 +18,52 @@ def soglia(totale_attivo: Decimal) -> Decimal:
     return max(minimo, abs(Decimal(totale_attivo)) * pct / 100).quantize(_C)
 
 
+def totali_stampati(file_path: str) -> dict:
+    """I totali che il documento stampa da solo (regex sul testo grezzo, nessuna chiamata
+    modello): ancora indipendente dall'estrattore, riusata dal vecchio importatore
+    (``pdf_extractor_llm._declared_control_totals``) per dare a ``misura()``/``tappa()`` un
+    contraddittorio reale - oggi assente in modo "conti" (``stampati=None`` sempre) e solo
+    apparente in modo "legge" (i "totali stampati" vengono dalla stessa chiamata LLM che
+    legge le voci, non da una lettura indipendente)."""
+    try:
+        from importers.pdf_extractor_llm import _declared_control_totals
+        letti = _declared_control_totals(file_path)
+    except Exception:
+        letti = {}
+    return {"totale_attivo": letti.get("attivo"), "totale_passivo": letti.get("passivo")}
+
+
+def _fold_utile_in_passivo(stampati: dict | None, utile: Decimal) -> dict | None:
+    """Il 'Totale Passivo' di una situazione contabile a sezioni contrapposte puo' non
+    includere il risultato d'esercizio (stampato a parte, accanto al pareggio): senza
+    correggerlo apparirebbe uno scarto quanto l'utile che non e' una sotto-estrazione, e'
+    solo una convenzione di stampa. Riusa la regola del vecchio importatore
+    (``pdf_extractor_llm._reconcile_utile_in_passivo``): ripiega il risultato dentro il
+    totale passivo SOLO quando il gap coincide col risultato entro tolleranza - un gap
+    diverso e' massa vera mancante, e resta com'e'."""
+    if not stampati:
+        return stampati
+    ta, tp = stampati.get("totale_attivo"), stampati.get("totale_passivo")
+    if ta is None or tp is None:
+        return stampati
+    from importers.pdf_extractor_llm import _reconcile_utile_in_passivo
+    corretto = _reconcile_utile_in_passivo(
+        {"totale_attivo": Decimal(ta), "totale_passivo": Decimal(tp), "sp13_utile_perdita": utile},
+        "snello")
+    nuovo_tp = corretto["totale_passivo"]
+    if nuovo_tp == Decimal(tp):
+        return stampati
+    nuovo = dict(stampati)
+    nuovo["totale_passivo"] = nuovo_tp
+    return nuovo
+
+
 def misura(bs: dict, ce: dict, stampati: dict | None = None, forma: str | None = None) -> dict:
     att = sum((Decimal(bs.get(k, 0)) for k in _ATTIVO_FIELDS), Decimal(0))
     pas = sum((Decimal(bs.get(k, 0)) for k in _PASSIVO_FIELDS), Decimal(0))
     sp13 = Decimal(bs.get("sp13_utile_perdita", 0))
     utile = calculate_ce_result(ce).net_profit
+    stampati = _fold_utile_in_passivo(stampati, utile)
     bilancio = (att - pas, utile - sp13)                     # sp13 e' il risultato corrente
     verifica = (att - pas - utile, Decimal(0))               # sp13 e' l'anno prima (resta nel netto); il corrente e' l'utile CE
     if forma is None:

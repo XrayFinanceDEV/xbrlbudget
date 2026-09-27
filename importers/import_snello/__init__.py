@@ -48,8 +48,12 @@ def _unisci_totali(a: dict, b: dict) -> dict:
     return out
 
 
-def _anomalie(bs: dict) -> list:
-    return [[campo, str(bs[campo])] for campo in _IMMOBILIZZAZIONI_CAMPI if campo in bs and bs[campo] < 0]
+def _anomalie(bs: dict, diag: dict) -> list:
+    # Un'immobilizzazione negativa non sopravvive oltre conti.py (_clamp_immobilizzazioni_negative
+    # la azzera sempre): il controllo diretto su bs resta solo come rete di sicurezza, mai la
+    # fonte primaria - l'eccedenza tagliata la dichiara diag.
+    dirette = [[campo, str(bs[campo])] for campo in _IMMOBILIZZAZIONI_CAMPI if campo in bs and bs[campo] < 0]
+    return dirette + diag.get("immobilizzazioni_negative_tagliate", [])
 
 
 def _unclassified_mass(diag: dict) -> Decimal:
@@ -77,7 +81,12 @@ def importa(file_path: str, *, ocr_text: str | None = None, analizza=None, leggi
     modo = struttura.modo
     forma = "bilancio" if modo == "legge" else None
 
-    from importers.import_snello.verifica import misura, normalizza_forma, soglia, tappa
+    from importers.import_snello.verifica import misura, normalizza_forma, soglia, tappa, totali_stampati
+
+    # Ancora indipendente dall'estrattore, letta una sola volta (nessuna chiamata modello):
+    # in modo "conti" e' l'unico contraddittorio possibile (oggi None sempre); in modo "legge"
+    # vince sui totali riportati dall'LLM quando esiste (li' sotto, in _combina).
+    deterministici = totali_stampati(file_path)
 
     def _verifica(bs: dict, ce: dict, stampati: dict | None):
         if modo == "conti":
@@ -117,7 +126,7 @@ def importa(file_path: str, *, ocr_text: str | None = None, analizza=None, leggi
 
             fase = "conti"
             bs, ce, diag = da_foglie(fo)
-            prior, stampati = None, None
+            prior, stampati = None, deterministici
         else:
             from importers.detail_enrichment import collect_source_rows
             from importers.import_snello.lettura import trascrivi_pagine, voci_di_legge
@@ -165,6 +174,13 @@ def importa(file_path: str, *, ocr_text: str | None = None, analizza=None, leggi
                     coppie_corrente = sp_res["corrente"] + ce_res["corrente"]
                     coppie_precedente = sp_res["precedente"] + ce_res["precedente"]
                     stampati = _unisci_totali(sp_res["totali"], ce_res["totali"])
+                # I totali dichiarati dal documento (lettura deterministica, nessuna chiamata
+                # modello) vincono su quelli riportati dall'LLM quando esistono entrambi: quelli
+                # dell'LLM vengono dalla STESSA chiamata che ha letto le voci, quindi una
+                # sotto-estrazione sistematica non troverebbe mai un contraddittorio reale.
+                for chiave in ("totale_attivo", "totale_passivo"):
+                    if deterministici.get(chiave) is not None:
+                        stampati[chiave] = deterministici[chiave]
                 bs, ce, diag = da_coppie(coppie_corrente)
                 prior = da_coppie(coppie_precedente) if coppie_precedente else None
                 return bs, ce, diag, prior, stampati
@@ -219,7 +235,7 @@ def importa(file_path: str, *, ocr_text: str | None = None, analizza=None, leggi
                 "struttura": struttura.report(),
                 "misura": {"corrente": {k: str(v) for k, v in m.items()}},
                 "tappo": {"corrente": tappo}, "letture": letture, "diag": diag,
-                "anomalie": _anomalie(bs), "secondi": round(time.monotonic() - t0, 1),
+                "anomalie": _anomalie(bs, diag), "secondi": round(time.monotonic() - t0, 1),
             }
             raise SnelloNonRiuscito(report)
 
@@ -252,7 +268,7 @@ def importa(file_path: str, *, ocr_text: str | None = None, analizza=None, leggi
     report = {
         "esito": esito, "modo": modo, "struttura": struttura.report(),
         "misura": misura_report, "tappo": tappo_report, "letture": letture, "diag": diag,
-        "anomalie": _anomalie(bs), "secondi": round(time.monotonic() - t0, 1),
+        "anomalie": _anomalie(bs, diag), "secondi": round(time.monotonic() - t0, 1),
     }
     if modo == "legge" and precedente_stato is not None:
         report["precedente"] = precedente_stato

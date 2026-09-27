@@ -8,9 +8,9 @@ from importers.iv_cee_hierarchy import detail_fields
 _TIER0 = ("sp02", "sp03", "sp04", "sp11", "sp12", "sp13", "sp16a", "sp17a")
 
 
-def _f(i, lato, valore, percorso, testo=None):
+def _f(i, lato, valore, percorso, testo=None, sezione=""):
     return Riga(id=str(i), pagina=1, lato=lato, testo=testo if testo is not None else f"c{i}",
-               valore=D(valore), percorso=percorso)
+               valore=D(valore), percorso=percorso, sezione=sezione)
 
 
 def test_contrapposte_fondo_a_destra_e_cc_passivo():
@@ -487,19 +487,18 @@ def test_x_senza_parole_chiave_non_specifiche_resta_escluso():
 
 
 def test_ce_x_con_codice_conto_si_riclassifica_lato_costi():
-    """Una foglia CE marcata 'X' con codice di conto e descrizione di costo del personale
-    inequivocabile ('SALARI'): classify_costi la riconosce (specifico, ce08b); sul lato
-    ricavi nessuna regola matcha (ce04 generico, scartato) - un solo candidato, si forza."""
-    from importers.import_snello.righe import Riga
-
+    """Una foglia CE marcata 'X' con codice di conto, sulla stessa corsia fisica dei costi
+    gia' classificati (ancora sp/ce.B.6=costi a sinistra, CE.A.1=ricavi a destra: il voto di
+    direzione, stesso principio del voto di lato SP), e descrizione di costo del personale
+    inequivocabile ('SALARI'): classify_costi la riconosce (specifico, ce08b)."""
     foglie = [
-        _f(1, "T", "1000", "CE.A.1"),
-        Riga(id="2", pagina=1, lato="T", testo="70/000 SALARI E STIPENDI", valore=D("450.00"),
-            sezione="ce", percorso="X"),
+        _f(1, "L", "300", "CE.B.6", sezione="ce"),
+        _f(2, "R", "1000", "CE.A.1", sezione="ce"),
+        _f(3, "L", "450", "X", testo="70/000 SALARI E STIPENDI", sezione="ce"),
     ]
     bs, ce, diag = da_foglie(foglie)
     assert ce["ce08b_salari_stipendi"] == D("450.00")
-    assert diag["riclassificati_vecchio_parser"] == [["2", "70/000 SALARI E STIPENDI", "ce08b", "450.00"]]
+    assert diag["riclassificati_vecchio_parser"] == [["3", "70/000 SALARI E STIPENDI", "ce08b", "450.00"]]
 
 
 def test_x_su_campo_tier0_non_si_forza_mai():
@@ -511,6 +510,125 @@ def test_x_su_campo_tier0_non_si_forza_mai():
     bs, ce, diag = da_foglie(foglie)
     assert diag["riclassificati_vecchio_parser"] == []
     assert diag["escluse"] == [["3", "X", "300.00"]]
+
+
+def test_x_con_tag_interno_sconosciuto_non_si_forza():
+    """'F.DO SVAL CREDITI' e' specifico per classify_passivo ma sul tag interno 'deduct_crediti'
+    (mai un nome di campo, non e' ne' uno dei quattro tradotti ne' un campo vero): il cancello
+    generale (accettare solo un codice presente in percorsi.NOMI) lo rifiuta - resta X/esclusa,
+    mai forzata su un campo inventato."""
+    foglie = [_f(1, "L", "1000", "SPA.C.IV.1"), _f(2, "R", "1000", "SPP.A.I"),
+              _f(3, "R", "50", "X", testo="33/00000 F.DO SVAL CREDITI")]
+    bs, ce, diag = da_foglie(foglie)
+    assert diag["riclassificati_vecchio_parser"] == []
+    assert diag["escluse"] == [["3", "X", "50.00"]]
+
+
+# --- Fix round 1 (review 2026-09-27) --------------------------------------------------------
+# --- Critical: classify_costi/classify_ricavi possono restituire tag interni che non sono ---
+# --- nomi di campo (ce01_return, ce08a_tfr, ce13_cost, ce10_close): vanno tradotti come fa ---
+# --- il vecchio chiamante (situazione_contabile_parser.py ~L1199-1237/1500-1502), mai usati ---
+# --- verbatim - altrimenti completa() li scarta in silenzio mentre diag dichiara un recupero -
+# --- che non c'e' mai stato. La direzione (costi/ricavi) ora si vota sulla corsia fisica -----
+# --- (stesso principio del voto di lato SP), non si provano piu' entrambe alla cieca: una ----
+# --- parola di ricavo letta fra i costi (RICAVI, PROVENTI+PARTECIP) altrimenti darebbe due ---
+# --- candidati (il tag interno E il campo diretto) e la foglia resterebbe sempre esclusa. -----
+
+
+def test_ce_riclassifica_tag_ce01_return_riduce_i_ricavi():
+    """classify_costi su una resa/sconto letta fra i costi restituisce il tag interno
+    'ce01_return' (~L1199-1200/1500: 'ce01_total - ce01_returns'), non un nome di campo: va
+    tradotto in 'ce01' e la foglia - letta sulla corsia dei costi, mentre il campo tradotto e'
+    di famiglia 'ric' - risulta "contro" nel voto di famiglia che gia' esiste (corsia in
+    disaccordo con l'ancora ricavi): la sottrae, non la somma, esattamente come il vecchio
+    importatore."""
+    foglie = [
+        _f(1, "L", "300", "CE.B.6", sezione="ce"),
+        _f(2, "R", "1000", "CE.A.1", sezione="ce"),
+        _f(3, "L", "50", "X", testo="60/00000 RESI SU RICAVI", sezione="ce"),
+    ]
+    bs, ce, diag = da_foglie(foglie)
+    assert ce["ce01_ricavi_vendite"] == D("950.00")
+    assert diag["riclassificati_vecchio_parser"] == [["3", "60/00000 RESI SU RICAVI", "ce01", "50.00"]]
+
+
+def test_ce_riclassifica_tag_ce13_cost_riduce_i_proventi_partecipazioni():
+    """classify_costi su 'proventi da partecipazioni' letti fra i costi restituisce il tag
+    interno 'ce13_cost' (~L1221-1222: 'ce13 = ce13 - entry.amount'), non un nome di campo: va
+    tradotto in 'ce13' con lo stesso esito - il voto di famiglia lo tratta come contro (corsia
+    dei costi contro l'ancora ricavi) e lo sottrae."""
+    foglie = [
+        _f(1, "L", "300", "CE.B.6", sezione="ce"),
+        _f(2, "R", "1000", "CE.A.1", sezione="ce"),
+        _f(3, "L", "40", "X", testo="80/00000 PROVENTI DA PARTECIPAZIONI", sezione="ce"),
+    ]
+    bs, ce, diag = da_foglie(foglie)
+    assert ce["ce13_proventi_partecipazioni"] == D("-40.00")
+    assert diag["riclassificati_vecchio_parser"] == [
+        ["3", "80/00000 PROVENTI DA PARTECIPAZIONI", "ce13", "40.00"]]
+
+
+def test_ce_riclassifica_tag_ce10_close_sottrae_le_rimanenze_finali():
+    """classify_ricavi su 'rimanenze finali' restituisce il tag interno 'ce10_close'
+    (~L1237-1238/1501: 'ce10 = ce10_opening - ce10_closing'), non un nome di campo: va tradotto
+    in 'ce10' - letto sulla corsia dei ricavi mentre il campo tradotto e' di famiglia 'cos', il
+    voto di famiglia lo tratta come contro (corsia dei ricavi contro l'ancora costi) e lo
+    sottrae."""
+    foglie = [
+        _f(1, "L", "300", "CE.B.6", sezione="ce"),
+        _f(2, "R", "1000", "CE.A.1", sezione="ce"),
+        _f(3, "R", "40", "X", testo="90/00000 RIM.FIN MAGAZZINO", sezione="ce"),
+    ]
+    bs, ce, diag = da_foglie(foglie)
+    assert ce["ce10_var_rimanenze_mat_prime"] == D("-40.00")
+    assert diag["riclassificati_vecchio_parser"] == [["3", "90/00000 RIM.FIN MAGAZZINO", "ce10", "40.00"]]
+
+
+def test_ce_riclassifica_tag_ce08a_tfr_va_al_dettaglio_vero():
+    """Caso reale della review: '55/01000 ACCANTONAMENTO TFR' 300 spariva. classify_costi
+    restituisce il tag interno 'ce08a_tfr' (~L1209-1211/1502), non un nome di campo: va tradotto
+    in 'ce08a' (il dettaglio vero, ce08a_tfr_accrual) - letto sulla stessa corsia dei costi
+    della sua famiglia, il voto non lo tratta come contro e lo somma normalmente."""
+    foglie = [
+        _f(1, "L", "700", "CE.B.6", sezione="ce"),
+        _f(2, "R", "1000", "CE.A.1", sezione="ce"),
+        _f(3, "L", "300", "X", testo="55/01000 ACCANTONAMENTO TFR", sezione="ce"),
+    ]
+    bs, ce, diag = da_foglie(foglie)
+    assert ce["ce08a_tfr_accrual"] == D("300.00")
+    assert diag["riclassificati_vecchio_parser"] == [["3", "55/01000 ACCANTONAMENTO TFR", "ce08a", "300.00"]]
+
+
+def test_ce_senza_ancora_su_entrambe_le_direzioni_non_si_riclassifica():
+    """Senza un'ancora classificata su ENTRAMBE le direzioni (qui solo ricavi: CE.A.1), il
+    voto di direzione non sa quale corsia sia costi: nessuna scommessa, la foglia resta X."""
+    foglie = [_f(1, "R", "1000", "CE.A.1", sezione="ce"),
+              _f(2, "L", "450", "X", testo="70/000 SALARI E STIPENDI", sezione="ce")]
+    bs, ce, diag = da_foglie(foglie)
+    assert diag["riclassificati_vecchio_parser"] == []
+    assert diag["escluse"] == [["2", "X", "450.00"]]
+
+
+# --- Important: una didascalia di controllo/subtotale (TOTALE, PAREGGIO, SALDO FINALE/ -----
+# --- GENERALE - le stesse parole che il vecchio parser usa per riconoscere una riga di ------
+# --- controllo, is_control in _be_collect_side_facts ~L3120-3122) non e' un conto, anche -----
+# --- con un codice conto davanti: non si riclassifica mai, o raddoppia la massa che i conti --
+# --- veri gia' spiegano. --------------------------------------------------------------------
+
+
+def test_x_totale_di_controllo_con_codice_non_si_riclassifica():
+    """Due mastri fornitori veri (600+400=1000) e un pseudo-conto 'TOTALE DEBITI V/FORNITORI'
+    marcato X con lo stesso importo (1000): riclassificarlo raddoppierebbe la massa a 2000."""
+    foglie = [
+        _f(1, "L", "1000", "SPA.C.IV.1"),
+        _f(2, "R", "600", "SPP.D.7"),
+        _f(3, "R", "400", "SPP.D.7"),
+        _f(4, "R", "1000", "X", testo="40/99999 TOTALE DEBITI V/FORNITORI"),
+    ]
+    bs, ce, diag = da_foglie(foglie)
+    assert bs["sp16d_debiti_fornitori_breve"] == D("1000.00")
+    assert diag["riclassificati_vecchio_parser"] == []
+    assert diag["escluse"] == [["4", "X", "1000.00"]]
 
 
 # --- Task 15 (2026-09-27): un'immobilizzazione netta ancora negativa si azzera, mai -------

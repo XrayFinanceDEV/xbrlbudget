@@ -377,6 +377,29 @@ def test_legge_preferisce_i_totali_stampati_deterministici_ai_llm(tmp_path):
     assert D(r.report["misura"]["corrente"]["scarto_stampati"]) > 0
 
 
+def test_rilettura_per_soli_totali_stampati_dichiara_la_causa(tmp_path):
+    """Round 1 (review, 2026-09-27): quando lo scarto interno (SP e CE) e' entro soglia ma il
+    totale stampato dal documento non concorda con le voci lette, la nota della rilettura deve
+    parlare del totale stampato (non 'voci mancanti, doppie...', un messaggio pensato per un
+    vero sbilancio interno) e il report finale deve dichiarare causa='stampati'."""
+    pdf = _pdf_con_totali(str(tmp_path / "c.pdf"), "5.000,00", "5.000,00")
+    note_viste = []
+
+    def voci(testo, intestazioni, nota=""):
+        note_viste.append(nota)
+        return {"corrente": [("SPA.C.IV.1", D("1000")), ("SPP.A.I", D("1000"))],
+                "precedente": [], "totali": {}}
+
+    with pytest.raises(S.SnelloNonRiuscito) as exc:
+        S.importa(pdf, analizza=lambda p: _struttura("legge"), leggi_voci=voci)
+    assert exc.value.report["errore"] == "oltre_soglia"
+    assert exc.value.report["causa"] == "stampati"
+    rilettura = [n for n in note_viste if n]
+    assert len(rilettura) == 1   # solo SP: scarto_stampati>soglia sceglie sempre quella sezione
+    assert "stampat" in rilettura[0].lower()
+    assert "voci mancanti" not in rilettura[0].lower()
+
+
 def test_legge_usa_i_totali_llm_quando_il_documento_non_ne_stampa(tmp_path):
     """Senza un totale stampato deterministico (pagina vuota), i totali riportati
     dall'LLM restano l'unica ancora, come prima di questo task."""

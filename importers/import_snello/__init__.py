@@ -60,6 +60,15 @@ def _unclassified_mass(diag: dict) -> Decimal:
     return sum((Decimal(v) for _, _, v in diag.get("lato_irrisolti", [])), Decimal(0))
 
 
+def _causa_stampati(m: dict, s) -> bool:
+    """Vero quando lo scarto interno (SP e CE) e' entro soglia ma il totale che il documento
+    stampa da solo non concorda con le voci lette: la causa e' il contraddittorio del totale
+    stampato, non un vero sbilancio interno - la nota della rilettura e il report finale non
+    devono dire "voci mancanti, doppie...", un messaggio pensato per l'altro caso (review
+    round 1, 2026-09-27)."""
+    return abs(m["scarto_sp"]) <= s and abs(m["scarto_ce"]) <= s and m["scarto_stampati"] > s
+
+
 def importa(file_path: str, *, ocr_text: str | None = None, analizza=None, leggi_conti=None,
             leggi_voci=None, trascrivi=None, route_hint: str | None = None) -> Risultato:
     t0 = time.monotonic()
@@ -203,6 +212,11 @@ def importa(file_path: str, *, ocr_text: str | None = None, analizza=None, leggi
                 nota = ("Una lettura precedente non ha dato alcuna voce: attivo e passivo sono "
                         "risultati entrambi zero. Controlla se il prospetto e' stato individuato "
                         "correttamente.")
+            elif _causa_stampati(m, s):
+                nota = (f"Una lettura precedente dava un totale stampato dal documento (Totale "
+                        f"Attivo/Totale Passivo) in disaccordo con le voci lette, per "
+                        f"{m['scarto_stampati']} euro: controlla se manca o si e' duplicata una "
+                        f"voce, o se il totale stampato dal documento e' quello giusto.")
             else:
                 scarto = max(abs(m["scarto_sp"]), m["scarto_stampati"])
                 nota = (f"Una lettura precedente dava uno scarto di {scarto} euro fra attivo e "
@@ -239,6 +253,8 @@ def importa(file_path: str, *, ocr_text: str | None = None, analizza=None, leggi
                 "tappo": {"corrente": tappo}, "letture": letture, "diag": diag,
                 "anomalie": _anomalie(bs, diag), "secondi": round(time.monotonic() - t0, 1),
             }
+            if esito == "oltre_soglia" and _causa_stampati(m, s):
+                report["causa"] = "stampati"
             raise SnelloNonRiuscito(report)
 
         if esito == "oltre_soglia":

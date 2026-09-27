@@ -143,57 +143,147 @@ def _ha_codice_conto(testo: str) -> bool:
     return bool(_CODICE_CONTO.match(_prima_parola(testo)))
 
 
+# Le stesse parole che il vecchio parser usa per riconoscere una riga di controllo/subtotale
+# (is_control in _be_collect_side_facts, situazione_contabile_parser.py ~L3120-3122: 'TOTALE',
+# 'PAREGGIO'), estese a SALDO FINALE/GENERALE: un totale stampato con un pseudo-codice davanti
+# ('40/99999 TOTALE DEBITI V/FORNITORI') non e' un conto, anche se il codice lo fa sembrare
+# tale - riclassificarlo raddoppierebbe la massa che i conti veri gia' spiegano (review
+# round 1, 2026-09-27).
+_PAROLE_CONTROLLO = ("TOTALE", "PAREGGIO", "SALDO FINALE", "SALDO GENERALE")
+
+
+def _e_riga_di_controllo(testo: str) -> bool:
+    d = (testo or "").upper()
+    return any(p in d for p in _PAROLE_CONTROLLO)
+
+
+# Tag interni del vecchio classificatore CE che NON sono nomi di campo (situazione_contabile_
+# parser.py ~L1199-1237, chiamante di _classify_ce_costi/_classify_ce_ricavi; l'assegnazione
+# finale e' a ~L1500-1502): usarli verbatim come percorso forzato fa scartare la foglia in
+# silenzio da completa() (NOMI non conosce questi nomi), mentre diag dichiarerebbe un recupero
+# che non c'e' mai stato (review round 1, 2026-09-27: "55/01000 ACCANTONAMENTO TFR" 300
+# spariva). Si traduce nel campo VERO che il vecchio chiamante scrive alla fine:
+#   - 'ce01_return' (resa/sconto letta fra i costi) -> 'ce01' (ce01_total - ce01_returns)
+#   - 'ce13_cost'   (proventi da partecip. letti fra i costi) -> 'ce13' (ce13 - entry.amount)
+#   - 'ce10_close'  (rimanenze finali lette fra i ricavi) -> 'ce10' (opening - closing)
+#   - 'ce08a_tfr'   (e' gia' il dettaglio vero, solo rinominato) -> 'ce08a' (ce08a_tfr_accrual)
+# Non serve un segno esplicito: i primi tre finiscono in una famiglia (ric/cos) OPPOSTA alla
+# corsia fisica su cui la foglia e' stata letta (una voce di ricavo letta fra i costi, o
+# viceversa), quindi il voto di famiglia che gia' esiste la tratta come "contro" e la sottrae
+# da solo - lo stesso meccanismo che gia' risolve un conto stampato dal lato sbagliato in SP.
+_TAG_CE_INTERNI = {"ce01_return": "ce01", "ce13_cost": "ce13", "ce10_close": "ce10",
+                   "ce08a_tfr": "ce08a"}
+
+
+def _voto_direzione_ce(foglie) -> tuple[dict, bool]:
+    """Vota, sulle sole foglie CE gia' classificate a un campo reale, quale corsia fisica e'
+    normalmente 'cos' (costi), quale 'ric' (ricavi) - stesso principio del voto di lato usato
+    per attivo/passivo in applica_lato: l'ordine testuale delle intestazioni non e' la verita'
+    (budget_405), la maggioranza dei conti gia' letti lo e'. Serve a scegliere IL
+    classificatore giusto (classify_costi o classify_ricavi) per una foglia non instradata, mai
+    a provare entrambi alla cieca - una parola di ricavo letta fra i costi (RICAVI, PROVENTI+
+    PARTECIP) darebbe uno specifico su entrambi i lati, e la foglia resterebbe sempre esclusa."""
+    ce = [f for f in foglie if f.percorso and lato_di(f.percorso) == "ce"]
+    due_lati = len({f.lato for f in ce} & {"L", "R"}) == 2
+    peso = Counter()
+    for f in ce:
+        codice = campo_da_percorso(f.percorso)
+        if codice is None:
+            continue
+        peso[(famiglia(codice), _corsia(f, due_lati))] += abs(f.valore)
+    normale = {}
+    for sez in ("cos", "ric"):
+        candidati = [(v, k) for (s, k), v in peso.items() if s == sez]
+        if candidati:
+            normale[sez] = max(candidati)[1]
+    return normale, due_lati
+
+
+def _direzione_ce(f, normale: dict, due_lati: bool) -> str | None:
+    if len(normale) < 2 or len(set(normale.values())) < 2:
+        return None
+    corsia = _corsia(f, due_lati)
+    for direzione, sezione in (("costi", "cos"), ("ricavi", "ric")):
+        if normale.get(sezione) == corsia:
+            return direzione
+    return None
+
+
 def riclassifica_ignote(foglie, diag: dict) -> None:
     """Una foglia marcata 'X' da Qwen, o rimasta senza percorso anche al secondo giro, il cui
-    testo comincia con un codice di conto ('40/00000 DEBITI V/FORNITORI'), e' massa vera che
-    il modello ha rinunciato a instradare - non una riga di controllo. Si riprova coi
-    classificatori a parole del vecchio importatore
+    testo comincia con un codice di conto ('40/00000 DEBITI V/FORNITORI') e non e' una riga di
+    controllo/subtotale, e' massa vera che il modello ha rinunciato a instradare. Si riprova
+    coi classificatori a parole del vecchio importatore
     (situazione_contabile_parser.classify_attivo/classify_passivo per lo SP,
-    classify_costi/classify_ricavi + _resolve_ce_field per il CE), mai reinventati qui: si
-    prova sia l'ipotesi attivo sia quella passivo (o costi/ricavi) sulla stessa descrizione, e
-    si usa il risultato solo quando UNA sola delle due e' specifica (non il ripiego generico
-    del classificatore: sp06/ce12/ce04) e non e' un campo TIER0 (immobilizzazioni nette,
-    patrimonio netto, banche, ce09) - se sono specifiche entrambe, o nessuna, la foglia resta
-    X/non mappata come oggi (nessuna scommessa quando la descrizione da sola non decide).
+    classify_costi/classify_ricavi + _resolve_ce_field per il CE), mai reinventati qui.
+
+    Per lo SP si prova sia l'ipotesi attivo sia quella passivo sulla stessa descrizione, e si
+    usa il risultato solo quando UNA sola delle due e' specifica (non il ripiego generico del
+    classificatore: sp06) - non c'e' collisione strutturale fra le due tabelle. Per il CE la
+    direzione si vota sulla corsia fisica (``_voto_direzione_ce``/``_direzione_ce``: stesso
+    principio del voto di lato SP) e si chiama SOLO il classificatore di quella direzione, mai
+    entrambi: una parola di ricavo letta fra i costi (RICAVI, PROVENTI+PARTECIP) matcherebbe
+    specificamente su tutte e due le tabelle, e "provarle entrambe" lascerebbe sempre due
+    candidati. Senza un'ancora votata su entrambe le direzioni, nessuna scommessa.
+
+    Il campo trovato passa da ``_TAG_CE_INTERNI`` quando e' un tag interno del vecchio
+    classificatore CE (mai un nome di campo: ce01_return/ce13_cost/ce10_close/ce08a_tfr) e,
+    in ogni caso, deve comparire in ``percorsi.NOMI`` - altrimenti resta X/non mappata (mai un
+    campo inventato: catture anche gli altri tag interni non tradotti, es. 'depr_sp02',
+    'deduct_crediti', che classify_passivo puo' restituire come "specifico").
 
     Muta ``f.percorso`` sul posto con un marcatore ``'#<campo>'`` che ``campo_da_percorso``
     non traduce: ``da_foglie`` lo riconosce all'inizio del proprio giro e la foglia entra nel
     voto di famiglia esistente come una qualunque foglia gia' classificata - e' cosi', non con
     un nuovo calcolo di segno, che il netto Dare/Avere di uno stesso mastro si ottiene
     (FORMETAL, banco 2026-09-26: '40/00000 DEBITI V/FORNITORI' 13.542,00 e 348.578,85 su lati
-    opposti -> sp16d netto 335.036,85, lo stesso voto che gia' decide gli altri debiti del
-    foglio)."""
+    opposti -> sp16d netto 335.036,85), e che un tag interno tradotto in un campo della
+    famiglia OPPOSTA alla propria corsia fisica finisce sottratto invece che sommato (lo
+    stesso voto che gia' risolve un conto stampato dal lato sbagliato in SP)."""
     from importers.situazione_contabile_parser import (
         TIER0_FIELDS, _resolve_ce_field, classify_attivo, classify_costi, classify_passivo,
         classify_ricavi)
 
+    normale_ce, due_lati_ce = _voto_direzione_ce(foglie)
+
     for f in foglie:
         if f.percorso not in ("X", None) or not f.testo or not _ha_codice_conto(f.testo):
+            continue
+        if _e_riga_di_controllo(f.testo):
             continue
         desc = " ".join(f.testo.split()[1:]).upper().strip()
         if not desc:
             continue
-        candidati: set = set()
         if f.sezione == "ce":
-            for direzione, classify in (("costi", classify_costi), ("ricavi", classify_ricavi)):
-                c, specifico = classify(desc)
-                # classify_costi/classify_ricavi arriva a un campo piu' fine (es. 'ce08b'), che
-                # _resolve_ce_field non conosce (la sua allowlist di direzione vede solo gli
-                # aggregati: 'ce08'): tenerlo come prima fonte, l'albero solo di ripiego quando
-                # la tabella a parole non e' specifica.
-                campo = c if specifico else _resolve_ce_field(desc, direzione)
-                if campo is not None and campo not in TIER0_FIELDS:
-                    candidati.add(campo)
-        else:
-            for classify in (classify_attivo, classify_passivo):
-                campo, specifico = classify(desc)
-                if specifico and campo not in TIER0_FIELDS:
-                    candidati.add(campo)
-        if len(candidati) == 1:
-            campo = candidati.pop()
+            direzione = _direzione_ce(f, normale_ce, due_lati_ce)
+            if direzione is None:
+                continue
+            classify = classify_costi if direzione == "costi" else classify_ricavi
+            c, specifico = classify(desc)
+            # classify_costi/classify_ricavi arriva a un campo piu' fine (es. 'ce08b'), che
+            # _resolve_ce_field non conosce (la sua allowlist di direzione vede solo gli
+            # aggregati: 'ce08'): tenerlo come prima fonte, l'albero solo di ripiego quando la
+            # tabella a parole non e' specifica.
+            campo = c if specifico else _resolve_ce_field(desc, direzione)
+            if campo is None:
+                continue
+            campo = _TAG_CE_INTERNI.get(campo, campo)
+            if campo in TIER0_FIELDS or campo not in NOMI:
+                continue
             diag["riclassificati_vecchio_parser"].append(
                 [f.id, f.testo[:60], campo, str(f.valore.quantize(_C))])
             f.percorso = f"#{campo}"
+        else:
+            candidati: set = set()
+            for classify in (classify_attivo, classify_passivo):
+                campo, specifico = classify(desc)
+                if specifico and campo not in TIER0_FIELDS and campo in NOMI:
+                    candidati.add(campo)
+            if len(candidati) == 1:
+                campo = candidati.pop()
+                diag["riclassificati_vecchio_parser"].append(
+                    [f.id, f.testo[:60], campo, str(f.valore.quantize(_C))])
+                f.percorso = f"#{campo}"
 
 
 def da_foglie(foglie):

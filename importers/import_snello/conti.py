@@ -6,7 +6,7 @@ from collections import Counter, defaultdict
 from decimal import Decimal
 
 from importers.import_snello.percorsi import (CONTROPARTE, NOMI, campo_da_percorso, completa,
-                                              e_fondo, e_risultato, famiglia, lato_di)
+                                              e_fondo, e_netto, e_risultato, famiglia, lato_di)
 from importers.iv_cee_hierarchy import detail_fields
 
 _C = Decimal("0.01")
@@ -59,6 +59,11 @@ def applica_lato(foglie, irrisolti: list | None = None) -> int:
         return 0
     n = 0
     for f in sp:
+        if e_netto(f.percorso):
+            # capitale/riserve/risultato: contano per stabilire il lato normale delle altre
+            # voci della sezione, ma non sono mai loro stessi un bersaglio di correzione - non
+            # esiste una contropartita per un conto che cambia lato col proprio segno.
+            continue
         if _corsia(f, due_lati) == lato_normale[lato_di(f.percorso)]:
             continue
         corretto = False
@@ -80,33 +85,69 @@ def applica_lato(foglie, irrisolti: list | None = None) -> int:
 
 def da_foglie(foglie):
     diag = {"non_mappati": [], "escluse": [], "risultato_stampato": None, "lato_corretti": 0,
-            "lato_irrisolti": []}
+            "lato_irrisolti": [], "risultato_duplicato": [], "padri_esclusi": []}
     diag["lato_corretti"] = applica_lato(foglie, diag["lato_irrisolti"])
     irrisolti_ids = {r[0] for r in diag["lato_irrisolti"]}
     due_lati = len({f.lato for f in foglie} & {"L", "R"}) == 2
+    # Un percorso stampato ACCANTO a un percorso piu' specifico che lo prolunga (es. "SPP.D"
+    # bare insieme a "SPP.D.4") e' lo stesso totale gia' spiegato dai figli: va escluso, mai
+    # sommato di nuovo (come gia' fa da_coppie in modo "legge"). Un fondo (.F) non conta mai
+    # come figlio ai fini di questa regola: netta il lordo, non lo spiega.
+    tutti_percorsi = [f.percorso for f in foglie if f.percorso]
+    visti_risultato: dict[Decimal, str] = {}
     per_famiglia = defaultdict(list)
     for f in foglie:
         if f.percorso == "R" or (f.percorso and e_risultato(f.percorso)):
             diag["risultato_stampato"] = str(abs(f.valore).quantize(_C))
             continue
-        if not f.percorso or f.percorso == "X":
-            diag["escluse"].append([f.id, f.percorso or "", str(f.valore.quantize(_C))])
+        if f.percorso == "X":
+            diag["escluse"].append([f.id, f.percorso, str(f.valore.quantize(_C))])
+            continue
+        if not f.percorso:
+            # mai classificata (nemmeno al secondo giro di lettura): massa reale non
+            # classificata, non una riga dichiarata non contabile - non va confusa con 'X'.
+            diag["non_mappati"].append([f.id, "", str(f.valore.quantize(_C))])
+            continue
+        if any(q != f.percorso and q.startswith(f.percorso + ".") and not e_fondo(q) for q in tutti_percorsi):
+            diag["padri_esclusi"].append([f.id, f.percorso, str(f.valore.quantize(_C))])
             continue
         codice = campo_da_percorso(f.percorso)
         if codice is None:
             diag["non_mappati"].append([f.id, f.percorso, str(f.valore.quantize(_C))])
             continue
+        if codice == "sp13":
+            # un riepilogo del gestionale puo' ristampare "risultato di esercizio" su una
+            # pagina diversa, stesso conto stesso importo: un duplicato esatto si conta una
+            # sola volta (un importo diverso e' invece una voce vera, non un duplicato).
+            v = f.valore.quantize(_C)
+            if v in visti_risultato:
+                diag["risultato_duplicato"].append([f.id, f.percorso, str(v)])
+                continue
+            visti_risultato[v] = f.id
         per_famiglia[famiglia(codice)].append((f, codice))
     importi = defaultdict(Decimal)
     for elementi in per_famiglia.values():
         peso_corsia, peso_segno = Counter(), Counter()
         for f, _ in elementi:
-            if not e_fondo(f.percorso) and f.id not in irrisolti_ids:
-                peso_corsia[_corsia(f, True) if due_lati else 0] += abs(f.valore)
-                peso_segno[f.valore >= 0] += abs(f.valore)
+            if e_fondo(f.percorso) or f.id in irrisolti_ids:
+                continue
+            if due_lati and e_netto(f.percorso):
+                # su un prospetto Dare/Avere il capitale/riserve/risultato non deve pesare sul
+                # voto delle altre voci passive: un utile grande, stampato Avere per natura,
+                # sposterebbe il "lato normale" della famiglia e farebbe girare di segno un
+                # debito vero. A colonna unica (senza Dare/Avere) resta nel voto come sempre.
+                continue
+            peso_corsia[_corsia(f, True) if due_lati else 0] += abs(f.valore)
+            peso_segno[f.valore >= 0] += abs(f.valore)
         corsia_n = peso_corsia.most_common(1)[0][0] if peso_corsia else 0
         positivo_n = peso_segno.most_common(1)[0][0] if peso_segno else True
         for f, codice in elementi:
+            if due_lati and e_netto(f.percorso):
+                # colonna=lato NON vale per capitale/riserve/risultato: un utile e una perdita
+                # hanno naturalmente lato invertito. Nessuna contropartita per ribaltarli: il
+                # valore letto porta gia' il segno giusto (una perdita e' negativa).
+                importi[codice] += f.valore
+                continue
             v = abs(f.valore)
             if e_fondo(f.percorso):
                 contro = True
@@ -126,7 +167,7 @@ def da_coppie(coppie):
     """Schema di legge: coppie (percorso, importo) come stampate. Un percorso che ha un discendente
     fra le coppie e' un totale e cade; una voce ripetuta conta una volta; un fondo si sottrae."""
     diag = {"non_mappati": [], "escluse": [], "risultato_stampato": None, "lato_corretti": 0,
-            "lato_irrisolti": []}
+            "lato_irrisolti": [], "risultato_duplicato": [], "padri_esclusi": []}
     viste, uniche = set(), []
     for p, v in coppie:
         if p not in viste:

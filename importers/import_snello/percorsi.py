@@ -46,6 +46,14 @@ def e_fondo(p: str) -> bool:
     return p.endswith(".F")
 
 
+def e_netto(p: str) -> bool:
+    """Capitale, riserve, risultati (SPP.A.*): cambiano lato col segno per natura (un utile
+    e una perdita hanno naturalmente lato invertito), e non esiste una contropartita per
+    ribaltarli. La colonna non decide il loro segno: lo decide il valore letto."""
+    t = p.split(".")
+    return len(t) >= 2 and t[0] == "SPP" and t[1] == "A"
+
+
 def e_risultato(p: str) -> bool:
     return p in ("CE.21", "CE.D.21")
 
@@ -92,13 +100,18 @@ def campo_da_percorso(p: str) -> str | None:
         if t[0] == "SPP" and len(t) >= 2:
             if t[1] == "A" and len(t) >= 3:
                 return _PN.get(t[2])
-            if t[1] == "B" and len(t) >= 3:
-                return "sp14" + "abcd"[int(t[2]) - 1]
+            if t[1] == "B":
+                # fondi per rischi e oneri: un fondo unico indistinto (nessun sotto-indice
+                # arabo) va sull'aggregato, non perso in non_mappati.
+                return "sp14" + "abcd"[int(t[2]) - 1] if len(t) >= 3 else "sp14"
             if t[1] == "C":
                 return "sp15"
             if t[1] == "D":
                 base = "sp17" if scad == "O" else "sp16"
-                return base + _DEB[t[2]] if len(t) > 2 else (base if scad else None)
+                # debito senza scadenza dichiarata, nemmeno a livello di lettera (scad=None e
+                # nessun sotto-indice arabo): a breve per prudenza, come SPP.D.E - mai perso in
+                # non_mappati.
+                return base + _DEB[t[2]] if len(t) > 2 else base
             if t[1] == "E":
                 return "sp18"
         if t[0] == "CE":

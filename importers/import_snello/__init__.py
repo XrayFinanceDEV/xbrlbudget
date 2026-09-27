@@ -70,7 +70,11 @@ def importa(file_path: str, *, ocr_text: str | None = None, analizza=None, leggi
         m = misura(bs, ce, stampati, forma=forma)
         s = soglia(m["attivo"])
         bs = normalizza_forma(bs, ce, m)
-        m = misura(bs, ce, stampati, forma=forma)
+        # normalizza_forma ha gia' commesso il foglio alla semantica bilancio (no-op se lo
+        # era gia'): riautorilevare qui (forma=forma, che per modo="conti" e' None) puo'
+        # tornare su "verifica" e sottrarre l'utile una seconda volta, mascherando un vero
+        # sbilancio (budget_330).
+        m = misura(bs, ce, stampati, forma="bilancio")
         bs, ce, tappo, esito = tappa(bs, ce, m, s)
         return bs, ce, tappo, esito, m, s
 

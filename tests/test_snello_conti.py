@@ -121,3 +121,110 @@ def test_lato_irrisolti_sempre_presente_anche_vuoto():
     assert diag["lato_irrisolti"] == []
     _, _, diag2 = da_coppie([("SPP.D.7", D("9"))])
     assert diag2["lato_irrisolti"] == []
+
+
+# --- Fix lotto A: patrimonio netto/risultato non passano da applica_lato -------------------
+
+
+def test_applica_lato_non_tocca_il_patrimonio_netto():
+    """SPP.A.* (capitale, riserve, risultati) cambia lato col segno per natura: applica_lato
+    non deve toccarlo ne' contarlo, con o senza contropartita nota. Il passivo vota in
+    maggioranza Avere (R, 80.000 su due voci) mentre l'utile e' stampato Dare (L, 7.035,31):
+    senza l'esclusione l'utile finirebbe corretto/spostato dal voto di maggioranza."""
+    foglie = [_f(1, "L", "1000", "SPA.C.IV.3"), _f(2, "R", "50000", "SPP.D.7"),
+              _f(3, "R", "30000", "SPP.D.4"), _f(4, "L", "7035.31", "SPP.A.IX")]
+    n = applica_lato(foglie, [])
+    assert n == 0
+    assert foglie[3].percorso == "SPP.A.IX"
+
+
+def test_risultato_di_esercizio_lato_invertito_non_duplica_massa():
+    """Riproduce FORMETAL/623: un utile (SPP.A.IX) stampato sul lato Dare (L) mentre il resto
+    del passivo vota in maggioranza Avere (R, 80.000 su due voci) non deve finire nel fallback
+    (che duplicherebbe la massa, come oggi) ne' cambiare segno: resta il valore letto, positivo,
+    in sp13, e i debiti veri restano positivi (non ribaltati dal peso dell'utile)."""
+    foglie = [_f(1, "L", "1000", "SPA.C.IV.3"),
+              _f(2, "R", "50000", "SPP.D.7"), _f(3, "R", "30000", "SPP.D.4"),
+              _f(4, "L", "7035.31", "SPP.A.IX")]
+    bs, ce, diag = da_foglie(foglie)
+    assert bs["sp13_utile_perdita"] == D("7035.31")
+    assert bs["sp16d_debiti_fornitori_breve"] == D("50000.00")
+    assert bs["sp16a_debiti_banche_breve"] == D("30000.00")
+    assert bs["sp16_debiti_breve"] == D("80000.00")
+    assert diag["lato_irrisolti"] == []
+    assert diag["lato_corretti"] == 0
+    assert bs.get("sp06g_crediti_altri_breve", D("0")) == D("0")
+    assert bs.get("sp16g_altri_debiti_breve", D("0")) == D("0")
+
+
+def test_perdita_portata_a_nuovo_resta_negativa():
+    """Una perdita portata a nuovo (SPP.A.VIII) letta col segno gia' corretto (negativo) non
+    deve diventare positiva ne' finire fra i crediti: e' patrimonio netto negativo."""
+    foglie = [_f(1, "L", "1000", "SPA.C.IV.3"), _f(2, "R", "500", "SPP.D.7"),
+              _f(3, "R", "-209356.57", "SPP.A.VIII")]
+    bs, ce, diag = da_foglie(foglie)
+    assert bs["sp12g_utili_perdite_portati"] == D("-209356.57")
+    assert diag["lato_irrisolti"] == []
+    assert diag["lato_corretti"] == 0
+
+
+# --- Fix round 1 (review): un padre con figli non deve raddoppiare la massa in da_foglie ---
+
+
+def test_padre_con_figli_non_raddoppia_la_massa():
+    """Riscontrato in review: un totale di lettera (SPP.D bare) stampato ACCANTO a righe piu'
+    specifiche dello stesso gruppo (SPP.D.4, SPP.D.7) e' la stessa massa gia' spiegata dai
+    figli: va escluso, mai sommato di nuovo - come gia' fa da_coppie in modo 'legge'. Prima
+    del fix: sp16 finiva 10.000 (3.000+2.000 dai figli PIU' 5.000 dal padre bare, che
+    campo_da_percorso mappa gia' sull'aggregato sp16 stesso)."""
+    foglie = [_f(1, "L", "5000", "SPA.C.IV.3"), _f(2, "R", "3000", "SPP.D.4"),
+              _f(3, "R", "2000", "SPP.D.7"), _f(4, "R", "5000", "SPP.D")]
+    bs, ce, diag = da_foglie(foglie)
+    assert bs["sp16_debiti_breve"] == D("5000.00")
+    assert diag["padri_esclusi"] == [["4", "SPP.D", "5000.00"]]
+
+
+def test_padre_con_figlio_fondo_non_conta_come_figlio():
+    """Un fondo (.F) non e' un figlio ai fini di questa regola, ne' in da_coppie ne' qui: un
+    lordo (SPA.B.II) con solo il proprio fondo (SPA.B.II.2.F) fra le altre foglie non va
+    escluso come "padre con figli" - resta il caso normale di netting del fondo."""
+    foglie = [_f(1, "L", "1000", "SPA.B.II"), _f(2, "R", "400", "SPA.B.II.2.F"),
+              _f(3, "R", "600", "SPP.D.7")]
+    bs, ce, diag = da_foglie(foglie)
+    assert bs["sp03_immob_materiali"] == D("600.00")
+    assert diag["padri_esclusi"] == []
+
+
+# --- Fix lotto A: riga di risultato stampata due volte, contata una sola volta -------------
+
+
+def test_risultato_stampato_due_volte_si_conta_una_sola_volta():
+    """budget_132: 'RISULTATO DI ESERCIZIO' compare due volte (pagine diverse), stesso importo,
+    entrambe classificate SPP.A.IX (un riepilogo ripetuto dal gestionale): la seconda e' un
+    duplicato esatto e non deve raddoppiare sp13."""
+    foglie = [_f(1, "L", "1000", "SPA.C.IV.3"), _f(2, "R", "500", "SPP.D.7"),
+              _f(3, "R", "500", "SPP.A.IX"), _f(4, "R", "500", "SPP.A.IX")]
+    bs, ce, diag = da_foglie(foglie)
+    assert bs["sp13_utile_perdita"] == D("500.00")
+    assert diag["risultato_duplicato"] == [["4", "SPP.A.IX", "500.00"]]
+
+
+def test_percorso_mai_assegnato_va_a_non_mappati_non_a_escluse():
+    """Una foglia senza percorso (mai classificata, nemmeno al secondo giro di lettura) e'
+    massa reale non classificata: va in non_mappati, mai confusa con 'X' (riga dichiarata
+    esplicitamente non contabile dal modello) in escluse."""
+    foglie = [_f(1, "L", "1000", "SPA.C.IV.3"), _f(2, "R", "500", "SPP.D.7"),
+              _f(3, "L", "5", "X"), _f(4, "L", "12.34", None)]
+    bs, ce, diag = da_foglie(foglie)
+    assert diag["escluse"] == [["3", "X", "5.00"]]
+    assert diag["non_mappati"] == [["4", "", "12.34"]]
+
+
+def test_risultato_diverso_non_si_deduplica():
+    """Due percorsi SPP.A.IX con importo DIVERSO non sono un duplicato: sono due voci vere
+    (per esempio l'anno corrente e un pregresso mal classificato) e si sommano entrambe."""
+    foglie = [_f(1, "L", "1000", "SPA.C.IV.3"), _f(2, "R", "1300", "SPP.D.7"),
+              _f(3, "R", "500", "SPP.A.IX"), _f(4, "R", "300", "SPP.A.IX")]
+    bs, ce, diag = da_foglie(foglie)
+    assert bs["sp13_utile_perdita"] == D("800.00")
+    assert diag["risultato_duplicato"] == []

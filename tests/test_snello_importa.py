@@ -132,6 +132,35 @@ def test_eccezione_in_lettura_diventa_ripiego(tmp_path):
     assert exc.value.report["errore"] == "ContestoEccessivo"
 
 
+def test_conti_seconda_misura_non_sottrae_l_utile_due_volte(tmp_path, monkeypatch):
+    """Riproduce budget_330: dopo normalizza_forma() il foglio e' gia' in forma bilancio (sp13
+    = utile CE); la seconda misura() deve verificarlo con quella forma, non riautorilevare
+    'verifica' e sottrarre l'utile una seconda volta. Con la doppia sottrazione (bug) un vero
+    sbilancio di -250 (oltre soglia 100) viene mascherato in +50 (entro soglia) e la lettura
+    esce come falso 'tappo'; corretto, esce come 'oltre_soglia' sul vero -250."""
+    from importers.import_snello import righe as R
+
+    pdf = pdf_colonna_unica(str(tmp_path / "c.pdf"))
+    righe_finte = [
+        R.Riga(id="p1r1", pagina=1, lato="L", testo="BANCA C/C", valore=D("250")),
+        R.Riga(id="p1r2", pagina=1, lato="R", testo="FORNITORI ITALIA", valore=D("800")),
+        R.Riga(id="p1r3", pagina=1, lato="R", testo="RICAVI VENDITE", valore=D("100")),
+        R.Riga(id="p1r4", pagina=1, lato="L", testo="COSTI SERVIZI", valore=D("400")),
+    ]
+    monkeypatch.setattr(R, "righe_da_pdf", lambda *a, **k: righe_finte)
+
+    def leggi_conti(righe, foglie):
+        percorsi = {"p1r1": "SPA.C.IV", "p1r2": "SPP.D.7", "p1r3": "CE.A.1", "p1r4": "CE.B.7"}
+        for f in foglie:
+            f.percorso = percorsi[f.id]
+        return {"chiamate": 1, "saltate_prima": 0, "senza_percorso": 0}
+
+    with pytest.raises(S.SnelloNonRiuscito) as exc:
+        S.importa(pdf, analizza=lambda p: _struttura("conti"), leggi_conti=leggi_conti)
+    assert exc.value.report["esito"] == "ripiego" and exc.value.report["fase"] == "verifica"
+    assert exc.value.report["errore"] == "oltre_soglia"
+
+
 def test_anomalie_immobilizzazioni_negative(tmp_path):
     """report['anomalie'] dichiara un'immobilizzazione netta negativa, senza correggerla."""
     pdf = pdf_colonna_unica(str(tmp_path / "c.pdf"))

@@ -646,3 +646,54 @@ def pdf_xbrl_rendiconto_dopo_ce(path: str) -> str:
         y += 14
     doc.save(path)
     return path
+
+
+def pdf_xbrl_rendiconto_con_intestazione_ripetuta(path: str) -> str:
+    """Come `pdf_xbrl_rendiconto_dopo_ce`, ma il Rendiconto Finanziario ha un'intestazione
+    aziendale ripetuta (riga corta, un running header) PRIMA del titolo di sezione: "Rendiconto
+    finanziario" e' sulla SECONDA riga di testa, non sulla prima (fix round 1, gap 1: controllare
+    solo la riga 0 lasciava passare esattamente questo caso)."""
+    doc = fitz.open()
+    intest = [(380, "31-12-2025", True), (480, "31-12-2024", True)]
+
+    sp = doc.new_page(width=595, height=842)
+    sp.insert_text((30, 40), "Stato patrimoniale", fontname=FONT, fontsize=10)
+    _riga(sp, 60, intest)
+    righe_sp = [(30, "B) Immobilizzazioni", "900,00", "950,00"),
+                (30, "C) Attivo circolante", "300,00", "200,00"),
+                (30, "Totale attivo", "1.200,00", "1.150,00")]
+    y = 80
+    for x, testo, a, b in righe_sp:
+        _riga(sp, y, [(x, testo, False), (380, a, True), (480, b, True)])
+        y += 14
+
+    ce = doc.new_page(width=595, height=842)
+    ce.insert_text((30, 40), "Conto economico", fontname=FONT, fontsize=10)
+    _riga(ce, 60, intest)
+    righe_ce = [(30, "A) Valore della produzione", "2.000,00", "1.800,00"),
+                (30, "B) Costi della produzione", "1.500,00", "1.350,00"),
+                (30, "21) Utile (perdita) dell'esercizio", "500,00", "450,00")]
+    y = 80
+    for x, testo, a, b in righe_ce:
+        _riga(ce, y, [(x, testo, False), (380, a, True), (480, b, True)])
+        y += 14
+
+    rendiconto = doc.new_page(width=595, height=842)
+    righe = [
+        "ACME SRL - Bilancio al 31-12-2025",
+        "Rendiconto finanziario, metodo indiretto",
+        "A. Flussi finanziari derivanti dall'attivita' operativa (metodo indiretto)",
+        "Utile (perdita) dell'esercizio                       500,00      450,00",
+        "Ammortamenti                                         100,00       90,00",
+        "B. Flussi finanziari derivanti dall'attivita' di investimento",
+        "Investimenti in immobilizzazioni materiali          -200,00     -150,00",
+        "C. Flussi finanziari derivanti dall'attivita' di finanziamento",
+        "Rimborso finanziamenti                              -100,00      -80,00",
+        "Disponibilita' liquide a fine esercizio               300,00      200,00",
+    ]
+    y = 40
+    for riga in righe:
+        rendiconto.insert_text((30, y), riga, fontname=FONT, fontsize=8)
+        y += 14
+    doc.save(path)
+    return path

@@ -6,7 +6,8 @@ from tests._struttura_fixtures import (MAPPA_COLONNA_UNICA, MAPPA_CONTRAPPOSTE, 
                                         pdf_intestazione_lunga_ce, pdf_prospetto_ires_costi_indeducibili,
                                         pdf_prospetto_irap_rideterminazione, pdf_titoli_spaziati,
                                         pdf_titolo_ce_contrapposte_stessa_riga, pdf_titolo_ce_semplice,
-                                        pdf_xbrl_legge, pdf_xbrl_rendiconto_dopo_ce,
+                                        pdf_xbrl_legge, pdf_xbrl_rendiconto_con_intestazione_ripetuta,
+                                        pdf_xbrl_rendiconto_dopo_ce,
                                         pdf_xbrl_sp_continuazione_oltre_il_limite,
                                         pdf_xbrl_sp_continuazione_senza_date)
 
@@ -200,6 +201,16 @@ def test_mappa_xbrl_non_assorbe_il_rendiconto_dopo_il_ce(tmp_path):
     mappe = mappa_xbrl(path)
     assert mappe[0]["tipo_pagina"] == "prospetto_sp"
     assert mappe[1]["tipo_pagina"] == "prospetto_ce"
+    assert mappe[2]["tipo_pagina"] == "nota_o_testo"
+    assert mappe[2]["continuazione"] is False
+
+
+def test_mappa_xbrl_non_assorbe_il_rendiconto_dietro_un_intestazione_ripetuta(tmp_path):
+    # Fix round 1, gap 1: il vecchio `_apre_sezione_nuova` guardava solo la riga 0. Una pagina
+    # con un running header ("ACME SRL - Bilancio al 31-12-2025") come prima riga e "Rendiconto
+    # finanziario" come seconda passava indisturbata e veniva assorbita come continuazione del CE.
+    path = pdf_xbrl_rendiconto_con_intestazione_ripetuta(str(tmp_path / "rend2.pdf"))
+    mappe = mappa_xbrl(path)
     assert mappe[2]["tipo_pagina"] == "nota_o_testo"
     assert mappe[2]["continuazione"] is False
 

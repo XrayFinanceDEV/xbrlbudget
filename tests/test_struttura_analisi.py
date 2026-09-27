@@ -141,6 +141,29 @@ def test_vision_non_assorbe_oltre_una_nota_integrativa(tmp_path):
     assert out[1]["continuazione"] is False
 
 
+def test_vision_non_assorbe_oltre_un_rendiconto_dietro_un_intestazione_ripetuta(tmp_path):
+    # Fix round 1, gap 1: un running header ("ACME SRL - Bilancio al 31-12-2025") come prima riga
+    # di testa, con "Rendiconto finanziario" solo sulla seconda, non deve far passare la pagina.
+    doc = fitz.open()
+    doc.new_page(width=595, height=842).insert_text((30, 30), "voce 1  100,00", fontname="helv", fontsize=8)
+    p2 = doc.new_page(width=595, height=842)
+    p2.insert_text((30, 30), "ACME SRL - Bilancio al 31-12-2025", fontname="helv", fontsize=8)
+    p2.insert_text((30, 44), "Rendiconto finanziario", fontname="helv", fontsize=10)
+    for i, riga in enumerate(["voce a  10,00  9,00", "voce b  20,00  19,00", "voce c  30,00  29,00"]):
+        p2.insert_text((30, 64 + i * 14), riga, fontname="helv", fontsize=8)
+    path = str(tmp_path / "v2b.pdf")
+    doc.save(path)
+
+    mappe = [
+        {"pagina": 1, "tipo_pagina": "prospetto_ce", "schema": "iv_cee_di_legge",
+         "sezioni": [{"posizione": "unica", "contenuto": "misto", "colonne": []}], "continuazione": False},
+        {"pagina": 2, "tipo_pagina": "nota_o_testo", "schema": "elenco_piatto", "sezioni": [], "continuazione": False},
+    ]
+    out = _assorbi_continuazioni_perse(mappe, path)
+    assert out[1]["tipo_pagina"] == "nota_o_testo"
+    assert out[1]["continuazione"] is False
+
+
 def test_vision_limite_due_pagine_di_continuazione(tmp_path):
     # Stesso bound di mappa_xbrl (fix 6a): al massimo due pagine di continuazione di fila.
     doc = fitz.open()

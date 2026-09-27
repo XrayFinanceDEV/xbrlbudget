@@ -121,15 +121,26 @@ _SEZIONI_CONFINE = ("nota integrativa", "rendiconto finanziario", "relazione", "
 MAX_PAGINE_CONTINUAZIONE = 2
 
 
+# Quante righe di testa si guardano per un titolo di sezione confine: non solo la riga 0, perche'
+# un running header aziendale ("ACME SRL - Bilancio al 31-12-2025") puo' precederlo, spingendo il
+# vero titolo sulla seconda riga o oltre (fix round 1, gap 1 del collaudo lotto-b).
+MASSIMO_RIGHE_SEZIONE_CONFINE = 4
+MASSIMO_PAROLE_SEZIONE_CONFINE = 8
+
+
 def _apre_sezione_nuova(page) -> bool:
-    """La prima riga di testa della pagina comincia con il titolo di una sezione diversa dal
-    prospetto in corso: non puo' esserne la continuazione, anche se ha importi e nessun titolo
-    di prospetto proprio."""
+    """Una fra le prime righe di testa (non solo la riga 0: un running header aziendale puo'
+    precedere il titolo vero) comincia con il titolo di una sezione diversa dal prospetto in
+    corso: non puo' esserne la continuazione, anche se ha importi e nessun titolo di prospetto
+    proprio. Solo le righe corte (<= 8 parole) contano: un running header o un titolo sono brevi
+    per natura, una riga di prosa lunga non lo e' e non deve far scattare il confine per caso."""
     righe = _righe_di_testa(page, caratteri=200)
-    if not righe:
-        return False
-    prima = righe[0].strip().lower()
-    return any(prima.startswith(s) for s in _SEZIONI_CONFINE)
+    for riga in righe[:MASSIMO_RIGHE_SEZIONE_CONFINE]:
+        pulita = riga.strip().lower()
+        if pulita and len(pulita.split()) <= MASSIMO_PAROLE_SEZIONE_CONFINE:
+            if any(pulita.startswith(s) for s in _SEZIONI_CONFINE):
+                return True
+    return False
 
 
 # Quanti caratteri di testa (dopo la ricompattazione) si guardano per riconoscere un titolo di

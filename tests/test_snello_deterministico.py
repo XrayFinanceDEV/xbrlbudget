@@ -279,6 +279,7 @@ class _StrutturaStub:
         self.modo = modo
         self.pagine_sp = [1]
         self.pagine_ce = [1]
+        self.pagine_dettaglio = []
         self.colonne_sp = ["saldo_corrente"]
         self.colonne_ce = ["saldo_corrente"]
         self.mappe = []
@@ -391,6 +392,40 @@ def test_importa_deterministico_sbilanciato_fa_girare_qwen(tmp_path):
     assert chiamato["conti"] is True
 
 
+def test_importa_deterministico_massa_oltre_soglia_fa_girare_qwen(tmp_path, monkeypatch):
+    # Task 18, ruling (a): un candidato deterministico BILANCIATO ma con una massa non
+    # classificata oltre soglia non si adotta piu' - il chiamante prosegue col percorso Qwen
+    # di oggi, esattamente come per uno sbilanciato (test sopra), e il report dichiara perche'.
+    pdf = str(tmp_path / "verifica-massa-qwen.pdf")
+    _pdf_situazione_contabile(pdf)
+
+    def _fake_extract(file_path, return_prior=False, text_override=None):
+        bs = {"sp09": D("1000.00"), "sp11": D("1000.00"), "_unclassified_mass": D("80000.00")}
+        ce = {f"ce{i:02d}": D("0.00") for i in range(1, 21)}
+        return bs, ce, None, None
+
+    monkeypatch.setattr(
+        "importers.situazione_contabile_parser.extract_situazione_contabile", _fake_extract)
+
+    chiamato = {"conti": False}
+
+    def _leggi_conti_marcato(righe, foglie):
+        chiamato["conti"] = True
+        return {"chiamate": 0, "saltate_prima": 0, "senza_percorso": 0}
+
+    with pytest.raises(import_snello.SnelloNonRiuscito) as exc_info:
+        import_snello.importa(
+            pdf, ocr_text=_TESTO_BILANCIO_DI_VERIFICA,
+            analizza=_analizza_qualsiasi(_StrutturaStub(modo="conti")),
+            leggi_conti=_leggi_conti_marcato,
+        )
+
+    assert chiamato["conti"] is True
+    report = exc_info.value.report
+    assert report["deterministico"]["esito"] == "massa_non_classificata"
+    assert report["deterministico"]["unclassified_mass"] == "80000.00"
+
+
 # --- fix round 1 (review): chiavi diagnostiche con underscore mai scartate -------------
 
 def test_adatta_passa_le_chiavi_con_underscore_senza_scartarle():
@@ -418,9 +453,14 @@ def test_adatta_passa_le_chiavi_con_underscore_senza_scartarle():
 
 def test_tentativo_situazione_contabile_non_scarta_la_massa_non_classificata(tmp_path, monkeypatch):
     # Un bilancio di verifica riconosciuto (il gate is_situazione_contabile passa) il cui
-    # estrattore dichiara una massa non classificata materiale: il candidato quadra
-    # comunque (fallback lecito, gia' contato una volta) e va adottato - ma la massa
-    # dichiarata deve sopravvivere nel bs adottato, mai un hardcoded zero.
+    # estrattore dichiara una massa non classificata materiale (qui 80.000,00, ben oltre la
+    # soglia di verifica.soglia() su un attivo di 1.000,00 = 100,00): il candidato quadra come
+    # foglio (fallback lecito, gia' contato una volta), ma Task 18 (ruling a) NON lo adotta piu'
+    # a occhi chiusi solo perche' quadra - un fallback che assorbe una massa materiale sposta
+    # comunque un aggregato reale (ce05 in ce06, personale in ce08d... diagnosi banco TM 589/590,
+    # 2026-09-27), e va lasciato al percorso Qwen. La massa dichiarata dal parser sottostante
+    # sopravvive comunque nel report (mai un hardcoded zero, mai scartata in silenzio): e'
+    # dichiarata, non nascosta, solo non best-effort-adottata.
     pdf = str(tmp_path / "verifica-massa.pdf")
     _pdf_situazione_contabile(pdf)
 
@@ -438,8 +478,34 @@ def test_tentativo_situazione_contabile_non_scarta_la_massa_non_classificata(tmp
 
     esito = DET.tentativo(pdf, ocr_text=_TESTO_BILANCIO_DI_VERIFICA)
 
+    assert esito["adottato"] is False
+    assert esito["parser"] == "situazione_contabile_parser"
+    assert esito["esito"] == "massa_non_classificata"
+    assert esito["unclassified_mass"] == "80000.00"
+
+
+def test_tentativo_situazione_contabile_adotta_se_la_massa_e_entro_soglia(tmp_path, monkeypatch):
+    # Simmetrico al test sopra (Task 18, ruling a): una massa non classificata piccola, entro
+    # la stessa soglia di verifica.soglia() (max(100, 0,1% dell'attivo) - qui 100,00 su un
+    # attivo di 1.000,00), non blocca l'adozione - la regola guarda la MASSA, non la sua
+    # semplice presenza (dichiarare sempre le proprie chiavi diagnostiche, anche piccole, resta
+    # obbligatorio: CLAUDE.md).
+    pdf = str(tmp_path / "verifica-massa-piccola.pdf")
+    _pdf_situazione_contabile(pdf)
+
+    def _fake_extract(file_path, return_prior=False, text_override=None):
+        bs = {"sp09": D("1000.00"), "sp11": D("1000.00"), "_unclassified_mass": D("50.00")}
+        ce = {f"ce{i:02d}": D("0.00") for i in range(1, 21)}
+        return bs, ce, None, None
+
+    monkeypatch.setattr(
+        "importers.situazione_contabile_parser.extract_situazione_contabile", _fake_extract)
+
+    esito = DET.tentativo(pdf, ocr_text=_TESTO_BILANCIO_DI_VERIFICA)
+
     assert esito["adottato"] is True
-    assert esito["bs"]["_unclassified_mass"] == D("80000.00")
+    assert esito["esito"] in ("ok", "tappo")
+    assert esito["bs"]["_unclassified_mass"] == D("50.00")
 
 
 def test_importa_surfaces_la_massa_non_classificata_del_deterministico(tmp_path, monkeypatch):

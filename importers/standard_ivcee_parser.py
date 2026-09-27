@@ -294,6 +294,55 @@ def _find_re(
     raise ValueError(f"IV-CEE source label not found: {pattern}")
 
 
+def _find_opt(
+    rows: Sequence[_Row], *terms: str, start: int = 0, end: Optional[int] = None
+) -> Optional[int]:
+    """Like ``_find``, but ``None`` (never a raise) when the caption is not there.
+
+    #19 diagnosis: this print layout omits a legal caption ENTIRELY when its
+    amount is zero ("A) Crediti verso soci", "III. Attività finanziarie che non
+    costituiscono immobilizzazioni", "B) Fondi per rischi e oneri", CE items
+    2)/3)/12)/13)/15)/17 bis) and the whole "D) Rettifiche di valore" section
+    are all absent on AMBIENTA, not printed with a 0,00). An absent OPTIONAL
+    caption is zero; a genuinely missing MANDATORY one still raises via
+    ``_find``/``_find_re``.
+    """
+    try:
+        return _find(rows, *terms, start=start, end=end)
+    except ValueError:
+        return None
+
+
+def _find_re_opt(
+    rows: Sequence[_Row], pattern: str, start: int = 0, end: Optional[int] = None
+) -> Optional[int]:
+    try:
+        return _find_re(rows, pattern, start=start, end=end)
+    except ValueError:
+        return None
+
+
+def _find_variant(
+    rows: Sequence[_Row],
+    variants: Sequence[Tuple[str, ...]],
+    start: int = 0,
+    end: Optional[int] = None,
+) -> int:
+    """The first alternative spelling that matches, tried in the given order.
+
+    Different gestionali print the same legal caption in different words (#19
+    diagnosis: "I. Immobilizzazioni Immateriali" spelled out in full, where the
+    already-supported layout abbreviates to "I. Immateriali"). Each alternative
+    is still matched as a whole contiguous phrase — this never loosens matching
+    to independent keywords, only adds known exact phrasings.
+    """
+    for terms in variants:
+        index = _find_opt(rows, *terms, start=start, end=end)
+        if index is not None:
+            return index
+    raise ValueError(f"IV-CEE source label not found (any of): {variants}")
+
+
 def _value_at(rows: Sequence[_Row], index: int, column: int) -> Decimal:
     value = rows[index].value(column)
     if value is None:
@@ -301,23 +350,17 @@ def _value_at(rows: Sequence[_Row], index: int, column: int) -> Decimal:
     return value
 
 
-def _last_unlabelled(
-    rows: Sequence[_Row], start: int, end: int, column: int
-) -> Decimal:
-    candidates = [
-        row.value(column)
-        for row in rows[start + 1:end]
-        if not row.label and row.value(column) is not None
-    ]
-    if not candidates:
-        raise ValueError("IV-CEE source subtotal missing")
-    return candidates[-1]  # printed closing subtotal for the legal section
-
-
 def _block_value(
     rows: Sequence[_Row], start: int, end: int, column: int
 ) -> Decimal:
-    """Displayed item value: closing subtotal, direct row value, or explicit blank."""
+    """Displayed item value: closing subtotal, direct row value, or explicit blank.
+
+    Covers two source styles with the same read: an anonymous subtotal row
+    printed right after the item's detail (``candidates``), or the total
+    printed directly on the caption's own row — "il totale precede" (#19
+    diagnosis: the «bilancio riclassificato UE» never prints a separate
+    "Totale X" row at any level, the caption row always carries it instead).
+    """
     candidates = [
         row.value(column)
         for row in rows[start + 1:end]
@@ -328,10 +371,49 @@ def _block_value(
     return rows[start].value(column) or Decimal("0")
 
 
-def _sum_maturity(
-    rows: Sequence[_Row], start: int, end: int, column: int, maturity: str
+def _section_total_value(
+    rows: Sequence[_Row],
+    caption_index: int,
+    next_index: int,
+    total_terms: Tuple[str, ...],
+    column: int,
+    search_start: Optional[int] = None,
 ) -> Decimal:
-    marker = _normalise(maturity)
+    """A legal section's displayed total.
+
+    Prefers an explicit "Totale X" row (searched by content between the
+    caption and the next section, never by inventing a position) when the
+    source prints one — the layout already supported before #19. Otherwise
+    falls back to ``_block_value`` on the caption itself: "il totale precede"
+    when the caption row carries the amount directly, or an anonymous
+    subtotal row when that is what the source prints instead.
+    """
+    if total_terms:
+        total_i = _find_opt(
+            rows, *total_terms,
+            start=caption_index + 1 if search_start is None else search_start,
+            end=next_index,
+        )
+        if total_i is not None:
+            return _value_at(rows, total_i, column)
+    return _block_value(rows, caption_index, next_index, column)
+
+
+def _sum_maturity(
+    rows: Sequence[_Row], start: int, end: int, column: int, direction: str
+) -> Decimal:
+    """Sum the "- entro/oltre ... esercizio ..." split rows of one direction.
+
+    Tolerant to the optional "l'" article: #19 diagnosis, this document prints
+    "- entro esercizio successivo" (no article) on the receivables side and
+    "- entro l'esercizio successivo" (with article) on the payables side of
+    the very same file. ``direction`` is "entro" or "oltre"; matching the
+    "- <direction> " marker as a SUBSTRING (not just a prefix: the already-
+    supported comparative layout prints it inline, e.g. "Verso clienti -
+    entro l'esercizio successivo") and never requiring "esercizio" too covers
+    both spellings without caring what precedes or follows it.
+    """
+    marker = f"- {direction} "
     return sum(
         (
             row.value(column)
@@ -351,58 +433,116 @@ def _parse_column(rows: Sequence[_Row], column: int) -> Optional[Dict[str, Decim
     try:
         sp_att = _find(rows, "stato patrimoniale attivo")
         sp_pas = _find(rows, "stato patrimoniale passivo", start=sp_att + 1)
-        total_pas_i = _find(rows, "totale passivo", start=sp_pas + 1)
+        # "Totale passivo" as a distinct row does not exist when the source
+        # prints every legal total on its own caption's row ("il totale
+        # precede", #19 diagnosis): fall back to where the CE section starts
+        # (a required marker, see extract_standard_ivcee_balances) to bound
+        # pass_rows instead of inventing a position.
+        total_pas_i = _find_opt(rows, "totale passivo", start=sp_pas + 1)
+        if total_pas_i is None:
+            total_pas_i = _find(rows, "conto economico", start=sp_pas + 1) - 1
         asset_rows = rows[sp_att:sp_pas]
         pass_rows = rows[sp_pas:total_pas_i + 1]
 
-        # --- Attivo ---------------------------------------------------------
+        # --- Attivo: boundaries first, values from consecutive boundaries ---
         b_imm = _find(asset_rows, "b) immobilizzazioni")
-        imm_i = _find(asset_rows, "i. immateriali", start=b_imm + 1)
-        imm_ii = _find(asset_rows, "ii. materiali", start=imm_i + 1)
-        imm_iii = _find(asset_rows, "iii. finanziarie", start=imm_ii + 1)
-        total_imm_i = _find(asset_rows, "totale immobilizzazioni", start=imm_iii + 1)
+        sp01_i = _find_opt(asset_rows, "a) crediti verso soci", start=0, end=b_imm)
+        sp01 = (
+            (asset_rows[sp01_i].value(column) or Decimal("0"))
+            if sp01_i is not None else Decimal("0")
+        )
 
-        c_att = _find(asset_rows, "c) attivo circolante", start=total_imm_i + 1)
+        imm_i = _find_variant(
+            asset_rows,
+            (("i. immateriali",), ("i. immobilizzazioni immateriali",)),
+            start=b_imm + 1,
+        )
+        imm_ii = _find_variant(
+            asset_rows,
+            (("ii. materiali",), ("ii. immobilizzazioni materiali",)),
+            start=imm_i + 1,
+        )
+        imm_iii = _find_variant(
+            asset_rows,
+            (("iii. finanziarie",), ("iii. immobilizzazioni finanziarie",)),
+            start=imm_ii + 1,
+        )
+        c_att = _find(asset_rows, "c) attivo circolante", start=imm_iii + 1)
+
+        sp02 = _block_value(asset_rows, imm_i, imm_ii, column)
+        sp03 = _block_value(asset_rows, imm_ii, imm_iii, column)
+        sp04 = _block_value(asset_rows, imm_iii, c_att, column)
+        total_imm = _section_total_value(
+            asset_rows, b_imm, c_att, ("totale immobilizzazioni",), column,
+            search_start=imm_iii + 1,
+        )
+
         rim_i = _find(asset_rows, "i. rimanenze", start=c_att + 1)
         cred_i = _find(asset_rows, "ii. crediti", start=rim_i + 1)
-        fin_i = _find(asset_rows, "iii. attivita finanziarie", start=cred_i + 1)
-        liq_i = _find(asset_rows, "iv. disponibilita liquide", start=fin_i + 1)
-        total_c_i = _find(asset_rows, "totale attivo circolante", start=liq_i + 1)
-        ratei_att_i = _find(asset_rows, "d) ratei e risconti", start=total_c_i + 1)
-        total_att_i = _find(asset_rows, "totale attivo", start=ratei_att_i + 1)
+        # "III. Attività finanziarie che non costituiscono immobilizzazioni" is
+        # printed only when non-zero (#19 diagnosis): absent, sp08 is zero and
+        # the crediti section's own boundary becomes "IV. Disponibilità liquide".
+        fin_i = _find_opt(asset_rows, "iii. attivita finanziarie", start=cred_i + 1)
+        liq_i = _find_variant(
+            asset_rows,
+            (("iv. disponibilita liquide",), ("iv. disponibilita' liquide",)),
+            start=(fin_i if fin_i is not None else cred_i) + 1,
+        )
+        ratei_att_i = _find(asset_rows, "d) ratei e risconti", start=liq_i + 1)
+        total_att_i = _find_opt(asset_rows, "totale attivo", start=ratei_att_i + 1)
 
-        sp01_i = _find(asset_rows, "a) crediti verso soci", start=0, end=b_imm)
-        sp01 = asset_rows[sp01_i].value(column) or Decimal("0")
-        sp02 = _last_unlabelled(asset_rows, imm_i, imm_ii, column)
-        sp03 = _last_unlabelled(asset_rows, imm_ii, imm_iii, column)
-        sp04 = _last_unlabelled(asset_rows, imm_iii, total_imm_i, column)
-        total_imm = _value_at(asset_rows, total_imm_i, column)
-
-        sp05 = _last_unlabelled(asset_rows, rim_i, cred_i, column)
-        sp06 = _sum_maturity(asset_rows, cred_i, fin_i, column, "- entro l'esercizio")
-        sp07 = _sum_maturity(asset_rows, cred_i, fin_i, column, "- oltre l'esercizio")
-        total_crediti = _last_unlabelled(asset_rows, cred_i, fin_i, column)
-        sp08 = _last_unlabelled(asset_rows, fin_i, liq_i, column)
-        sp09 = _last_unlabelled(asset_rows, liq_i, total_c_i, column)
-        total_c = _value_at(asset_rows, total_c_i, column)
+        cred_end = fin_i if fin_i is not None else liq_i
+        sp05 = _block_value(asset_rows, rim_i, cred_i, column)
+        sp06 = _sum_maturity(asset_rows, cred_i, cred_end, column, "entro")
+        sp07 = _sum_maturity(asset_rows, cred_i, cred_end, column, "oltre")
+        total_crediti = _block_value(asset_rows, cred_i, cred_end, column)
+        sp08 = (
+            _block_value(asset_rows, fin_i, liq_i, column)
+            if fin_i is not None else Decimal("0")
+        )
+        sp09 = _block_value(asset_rows, liq_i, ratei_att_i, column)
+        total_c = _section_total_value(
+            asset_rows, c_att, ratei_att_i, ("totale attivo circolante",), column,
+            search_start=liq_i + 1,
+        )
         sp10 = _value_at(asset_rows, ratei_att_i, column)
-        total_att = _value_at(asset_rows, total_att_i, column)
+        total_att = (
+            _value_at(asset_rows, total_att_i, column)
+            if total_att_i is not None
+            else _value_at(asset_rows, 0, column)  # "Stato patrimoniale attivo" itself
+        )
 
-        # --- Passivo --------------------------------------------------------
+        # --- Passivo: same pattern -------------------------------------------
         pn_i = _find(pass_rows, "a) patrimonio netto")
-        capitale_i = _find(pass_rows, "i. capitale", start=pn_i + 1)
+        capitale_i = _find_variant(
+            pass_rows, (("i. capitale",), ("i) capitale",)), start=pn_i + 1
+        )
         utile_i = _find(pass_rows, "ix. utile", start=capitale_i + 1)
         try:
             perdita_i = _find(pass_rows, "ix. perdita", start=utile_i + 1)
         except ValueError:
             perdita_i = -1
-        total_pn_i = _find(pass_rows, "totale patrimonio netto", start=utile_i + 1)
-        fondi_i = _find(pass_rows, "totale fondi per rischi e oneri", start=total_pn_i + 1)
-        tfr_i = _find(pass_rows, "c) trattamento di fine rapporto", start=fondi_i + 1)
+        total_pn_i = _find_opt(pass_rows, "totale patrimonio netto", start=utile_i + 1)
+        # "B) Fondi per rischi e oneri" is printed only when non-zero, its own
+        # explicit "Totale ..." row when it is (#19 diagnosis: entirely absent
+        # on AMBIENTA, not a 0,00 row) — "C) Trattamento di fine rapporto"
+        # always follows it (or A) Patrimonio netto when it is missing too).
+        pn_end = total_pn_i if total_pn_i is not None else utile_i
+        tfr_i = _find(pass_rows, "c) trattamento di fine rapporto", start=pn_end + 1)
+        fondi_total_i = _find_opt(
+            pass_rows, "totale fondi per rischi e oneri", start=pn_end + 1, end=tfr_i
+        )
+        if fondi_total_i is not None:
+            sp14 = _value_at(pass_rows, fondi_total_i, column)
+        else:
+            fondi_i = _find_opt(pass_rows, "b) fondi per rischi", start=pn_end + 1, end=tfr_i)
+            sp14 = (
+                _block_value(pass_rows, fondi_i, tfr_i, column)
+                if fondi_i is not None else Decimal("0")
+            )
         debiti_i = _find(pass_rows, "d) debiti", start=tfr_i + 1)
         ratei_pas_i = _find(pass_rows, "e) ratei e risconti", start=debiti_i + 1)
-        total_deb_i = _find(pass_rows, "totale debiti", start=debiti_i + 1, end=ratei_pas_i)
-        total_pass_i = _find(pass_rows, "totale passivo", start=ratei_pas_i + 1)
+        total_pass_i = _find_opt(pass_rows, "totale passivo", start=ratei_pas_i + 1)
 
         sp11 = _value_at(pass_rows, capitale_i, column)
         utile = pass_rows[utile_i].value(column) or Decimal("0")
@@ -412,17 +552,25 @@ def _parse_column(rows: Sequence[_Row], column: int) -> Optional[Dict[str, Decim
             else Decimal("0")
         )
         sp13 = utile - perdita
-        total_pn = _value_at(pass_rows, total_pn_i, column)
+        total_pn = _section_total_value(
+            pass_rows, pn_i, tfr_i, ("totale patrimonio netto",), column,
+            search_start=utile_i + 1,
+        )
         # Source definition A.II..VIII/X: the displayed PN total less the two
         # separately printed legal fields, capitale and current-year result.
         sp12 = total_pn - sp11 - sp13
-        sp14 = _value_at(pass_rows, fondi_i, column)
         sp15 = _value_at(pass_rows, tfr_i, column)
-        sp16 = _sum_maturity(pass_rows, debiti_i, ratei_pas_i, column, "- entro l'esercizio")
-        sp17 = _sum_maturity(pass_rows, debiti_i, ratei_pas_i, column, "- oltre l'esercizio")
-        total_deb = _value_at(pass_rows, total_deb_i, column)
+        sp16 = _sum_maturity(pass_rows, debiti_i, ratei_pas_i, column, "entro")
+        sp17 = _sum_maturity(pass_rows, debiti_i, ratei_pas_i, column, "oltre")
+        total_deb = _section_total_value(
+            pass_rows, debiti_i, ratei_pas_i, ("totale debiti",), column,
+        )
         sp18 = _value_at(pass_rows, ratei_pas_i, column)
-        total_pass = _value_at(pass_rows, total_pass_i, column)
+        total_pass = (
+            _value_at(pass_rows, total_pass_i, column)
+            if total_pass_i is not None
+            else _value_at(pass_rows, 0, column)  # "Stato patrimoniale passivo" itself
+        )
 
         # Independent source controls.  No balance difference is allocated.
         checks = (
@@ -717,73 +865,109 @@ def _parse_income_column(
         ce_start = _find(rows, "conto economico")
         ce_rows = rows[ce_start:]
 
+        # --- boundaries first: an optional caption contributes zero and never
+        # consumes a position, a mandatory one still raises via _find/_find_re
+        # (#19 diagnosis: A.2/A.3, B.12/B.13, C.15, C.17 bis and the whole "D)
+        # Rettifiche di valore" section are printed only when non-zero).
         a_i = _find_re(ce_rows, r"^a\) valore della produzione")
         a1 = _find_re(ce_rows, r"^1\) ricavi", start=a_i + 1)
-        a2 = _find_re(ce_rows, r"^2\) variazione", start=a1 + 1)
-        a3 = _find_re(ce_rows, r"^3\) variazioni dei lavori", start=a2 + 1)
-        a4 = _find_re(ce_rows, r"^4\) incrementi", start=a3 + 1)
-        a5 = _find_re(ce_rows, r"^5\) altri ricavi", start=a4 + 1)
-        total_a = _find(ce_rows, "totale valore della produzione", start=a5 + 1)
+        a2 = _find_re_opt(ce_rows, r"^2\) variazione", start=a1 + 1)
+        a3 = _find_re_opt(ce_rows, r"^3\) variazioni dei lavori", start=(a2 if a2 is not None else a1) + 1)
+        a4 = _find_re_opt(
+            ce_rows, r"^4\) incrementi",
+            start=(a3 if a3 is not None else (a2 if a2 is not None else a1)) + 1,
+        )
+        a5 = _find_re(ce_rows, r"^5\) altri ricavi", start=(a4 if a4 is not None else (a3 if a3 is not None else (a2 if a2 is not None else a1))) + 1)
 
-        b_i = _find_re(ce_rows, r"^b\) costi della produzione", start=total_a + 1)
+        b_i = _find_re(ce_rows, r"^b\) costi della produzione", start=a5 + 1)
         b6 = _find_re(ce_rows, r"^6\) per materie", start=b_i + 1)
         b7 = _find_re(ce_rows, r"^7\) per servizi", start=b6 + 1)
         b8 = _find_re(ce_rows, r"^8\) per godimento", start=b7 + 1)
         b9 = _find_re(ce_rows, r"^9\) per il personale", start=b8 + 1)
         b10 = _find_re(ce_rows, r"^10\) ammortamenti", start=b9 + 1)
         b11 = _find_re(ce_rows, r"^11\) variazioni delle rimanenze", start=b10 + 1)
-        b12 = _find_re(ce_rows, r"^12\) accantonamento", start=b11 + 1)
-        b13 = _find_re(ce_rows, r"^13\) altri accantonamenti", start=b12 + 1)
-        b14 = _find_re(ce_rows, r"^14\) oneri diversi", start=b13 + 1)
-        total_b = _find(ce_rows, "totale costi della produzione", start=b14 + 1)
-        difference_i = _find(
-            ce_rows, "differenza tra valore e costi", start=total_b + 1
-        )
+        b12 = _find_re_opt(ce_rows, r"^12\) accantonamento", start=b11 + 1)
+        b13 = _find_re_opt(ce_rows, r"^13\) altri accantonamenti", start=(b12 if b12 is not None else b11) + 1)
+        b14 = _find_re(ce_rows, r"^14\) oneri diversi",
+                        start=(b13 if b13 is not None else (b12 if b12 is not None else b11)) + 1)
+        # Singular "costo" on AMBIENTA, plural "costi" on the already-supported
+        # layout (#19 diagnosis §4): a term missing the final vowel matches both.
+        difference_i = _find(ce_rows, "differenza tra valore e cost", start=b14 + 1)
 
         c_i = _find_re(ce_rows, r"^c\) proventi e oneri finanziari", start=difference_i + 1)
-        c15 = _find_re(ce_rows, r"^15\) proventi da partecipazioni", start=c_i + 1)
-        c16 = _find_re(ce_rows, r"^16\) altri proventi finanziari", start=c15 + 1)
+        c15 = _find_re_opt(ce_rows, r"^15\) proventi da partecipazioni", start=c_i + 1)
+        c16 = _find_re(ce_rows, r"^16\) altri proventi finanziari", start=(c15 if c15 is not None else c_i) + 1)
         c17 = _find_re(ce_rows, r"^17\) interessi e altri oneri", start=c16 + 1)
-        c17b = _find_re(ce_rows, r"^17 bis\) utili e perdite", start=c17 + 1)
-        total_c = _find(ce_rows, "totale proventi e oneri finanziari", start=c17b + 1)
+        c17b = _find_re_opt(ce_rows, r"^17 bis\) utili e perdite", start=c17 + 1)
 
-        d_i = _find_re(ce_rows, r"^d\) rettifiche di valore", start=total_c + 1)
-        total_d = _find(
-            ce_rows,
-            "totale rettifiche di valore di attivita e passivita finanziarie",
-            start=d_i + 1,
+        d_i = _find_re_opt(ce_rows, r"^d\) rettifiche di valore", start=(c17b if c17b is not None else c17) + 1)
+        pretax_i = _find(
+            ce_rows, "risultato prima delle imposte",
+            start=(d_i if d_i is not None else (c17b if c17b is not None else c17)) + 1,
         )
-        pretax_i = _find(ce_rows, "risultato prima delle imposte", start=total_d + 1)
         tax_i = _find_re(ce_rows, r"^20\) imposte sul reddito", start=pretax_i + 1)
         result_i = _find_re(ce_rows, r"^21\) utile \(perdita\)", start=tax_i + 1)
 
-        ce01 = _block_value(ce_rows, a1, a2, column)
-        ce02 = _block_value(ce_rows, a2, a3, column)
+        # Value of an optional item: a block reaching to the NEXT item actually
+        # present in the chain (never a fixed neighbour that might itself be
+        # absent), or zero when the item itself is absent.
+        def _chain_value(chain: Tuple[Optional[int], ...], item: Optional[int]) -> Decimal:
+            if item is None:
+                return Decimal("0")
+            present = [index for index in chain if index is not None]
+            return _block_value(ce_rows, item, present[present.index(item) + 1], column)
+
+        a_chain = (a1, a2, a3, a4, a5, b_i)
+        ce01 = _chain_value(a_chain, a1)
+        ce02 = _chain_value(a_chain, a2)
         # A.3 is not represented in the application schema; it must be zero for
         # this strict fallback, otherwise declining is safer than losing a value.
-        a3_value = _block_value(ce_rows, a3, a4, column)
-        ce03 = _block_value(ce_rows, a4, a5, column)
-        ce04 = _block_value(ce_rows, a5, total_a, column)
-        declared_a = _value_at(ce_rows, total_a, column)
+        a3_value = _chain_value(a_chain, a3)
+        ce03 = _chain_value(a_chain, a4)
+        ce04 = _block_value(ce_rows, a5, b_i, column)
+        declared_a = _section_total_value(
+            ce_rows, a_i, b_i, ("totale valore della produzione",), column, search_start=a5 + 1
+        )
 
         ce05 = _block_value(ce_rows, b6, b7, column)
         ce06 = _block_value(ce_rows, b7, b8, column)
         ce07 = _block_value(ce_rows, b8, b9, column)
         ce08 = _block_value(ce_rows, b9, b10, column)
         ce09 = _block_value(ce_rows, b10, b11, column)
-        ce10 = _block_value(ce_rows, b11, b12, column)
-        ce11 = _block_value(ce_rows, b12, b13, column)
-        ce11b = _block_value(ce_rows, b13, b14, column)
-        ce12 = _block_value(ce_rows, b14, total_b, column)
-        declared_b = _value_at(ce_rows, total_b, column)
+        b_chain = (b11, b12, b13, b14, difference_i)
+        ce10 = _chain_value(b_chain, b11)
+        ce11 = _chain_value(b_chain, b12)
+        ce11b = _chain_value(b_chain, b13)
+        ce12 = _block_value(ce_rows, b14, difference_i, column)
+        declared_b = _section_total_value(
+            ce_rows, b_i, difference_i, ("totale costi della produzione",), column, search_start=b14 + 1
+        )
         declared_difference = _value_at(ce_rows, difference_i, column)
 
-        ce13 = _block_value(ce_rows, c15, c16, column)
+        d_or_pretax = d_i if d_i is not None else pretax_i
+        c_chain = (c15, c16, c17, c17b, d_or_pretax)
+        ce13 = _chain_value(c_chain, c15)
         ce14 = _block_value(ce_rows, c16, c17, column)
-        ce15 = _block_value(ce_rows, c17, c17b, column)
-        ce16 = _block_value(ce_rows, c17b, total_c, column)
-        declared_c = _value_at(ce_rows, total_c, column)
-        ce17 = ce_rows[total_d].value(column) or Decimal("0")
+        ce15 = _chain_value(c_chain, c17)
+        ce16 = _chain_value(c_chain, c17b)
+        declared_c = _section_total_value(
+            ce_rows, c_i, d_or_pretax, ("totale proventi e oneri finanziari",), column,
+            search_start=(c17b if c17b is not None else c17) + 1,
+        )
+        if d_i is not None:
+            # Unlike the other declared totals this one is tolerant to a blank
+            # printed amount (a genuinely zero "D)" is common and often left
+            # without a value at all, not just without a caption) — the
+            # original behaviour before #19, kept via `_block_value` rather
+            # than the stricter `_section_total_value`/`_value_at`.
+            total_d_i = _find_opt(
+                ce_rows,
+                "totale rettifiche di valore di attivita e passivita finanziarie",
+                start=d_i + 1, end=pretax_i,
+            )
+            ce17 = _block_value(ce_rows, total_d_i if total_d_i is not None else d_i, pretax_i, column)
+        else:
+            ce17 = Decimal("0")
         declared_pretax = _value_at(ce_rows, pretax_i, column)
         ce20 = _block_value(ce_rows, tax_i, result_i, column)
         declared_result = _value_at(ce_rows, result_i, column)
@@ -981,21 +1165,33 @@ def extract_standard_ivcee_balances(
         return None, None
     try:
         text = "\n".join(page.get_text() for page in document).casefold()
-        required = (
-            "stato patrimoniale",
-            "attivo",
-            "passivo",
-            "totale attivo",
-            "totale passivo",
-            "conto economico",
-        )
+        # "Totale attivo"/"totale passivo" are NOT required: "il totale
+        # precede" documents (#19 diagnosis, the «bilancio riclassificato UE»)
+        # never print the word "totale" at all, the grand totals sit directly
+        # on "Stato patrimoniale attivo/passivo". The row-level cross-foot
+        # checks in `_parse_column` are what actually decide, not this
+        # early text gate.
+        required = ("stato patrimoniale", "attivo", "passivo", "conto economico")
         if not all(marker in text for marker in required):
             return None, None
         centres = _column_centres(document)
-        if centres is None:
-            return _parse_compact_balance(_single_column_rows(document)), None
-        rows = _physical_rows(document, centres)
-        return _parse_column(rows, 0), _parse_column(rows, 1)
+        if centres is not None:
+            rows = _physical_rows(document, centres)
+            return _parse_column(rows, 0), _parse_column(rows, 1)
+        centres = _labelled_column_centres(document)
+        if centres is not None:
+            # #27 declined reading this layout at all: its anchors are right
+            # edges on a four-column print (corrente | comparato | scostamento
+            # | %), `_physical_rows` only knows two, and the second one ends up
+            # with the variance instead of the prior year. That risk is real
+            # only for the SECOND column: the current-year column sits left of
+            # the mid-point cutoff, clear of scostamento/% (#19 diagnosis,
+            # verified against AMBIENTA's printed totals). Read column 0 only,
+            # and never even attempt column 1 — a declared "no prior" here,
+            # not a cross-foot gamble on a column known to be corrupted.
+            rows = _physical_rows(document, centres)
+            return _parse_column(rows, 0), None
+        return _parse_compact_balance(_single_column_rows(document)), None
     finally:
         document.close()
 
@@ -1010,10 +1206,16 @@ def extract_standard_ivcee_income(
         return None, None
     try:
         centres = _column_centres(document)
-        if centres is None:
-            return _parse_compact_income(_single_column_rows(document)), None
-        rows = _physical_rows(document, centres)
-        return _parse_income_column(rows, 0), _parse_income_column(rows, 1)
+        if centres is not None:
+            rows = _physical_rows(document, centres)
+            return _parse_income_column(rows, 0), _parse_income_column(rows, 1)
+        centres = _labelled_column_centres(document)
+        if centres is not None:
+            # Same restriction as extract_standard_ivcee_balances: only the
+            # current-year column is reliable on this layout (#27, #19).
+            rows = _physical_rows(document, centres)
+            return _parse_income_column(rows, 0), None
+        return _parse_compact_income(_single_column_rows(document)), None
     finally:
         document.close()
 

@@ -1194,3 +1194,175 @@ def test_una_riga_di_prosa_non_e_un_intestazione_di_colonna(tmp_path):
     _write_prose_monocolumn_pdf(pdf)
 
     assert has_comparative_ivcee_columns(str(pdf)) is False
+
+
+# ---------------------------------------------------------------------------
+# Task 19 — "il totale precede": il «bilancio riclassificato UE» (diagnosi
+# AMBIENTA) non stampa mai una riga "Totale X" separata; ogni didascalia porta
+# il proprio totale sulla riga stessa. Stesso layout a colonne intestate a
+# parole di ``_write_labelled_comparative_pdf`` sopra, esteso a un intero
+# SP+CE minimo e coerente, con le due grafie di scadenza osservate nel file
+# vero (crediti senza articolo, debiti con l'articolo) e alcune sezioni
+# facoltative del tutto assenti (A) crediti soci, III. Attività finanziarie,
+# B) Fondi rischi, 2)/3)/12)/13)/15)/17 bis), D) Rettifiche di valore) — la
+# didascalia stampata, mai una dedotta dal prefisso, decide la massa.
+# ---------------------------------------------------------------------------
+
+
+def _write_totale_precede_pdf(path: Path) -> None:
+    def right(page, x_right, y, text):
+        width = fitz.get_text_length(text, fontname=_LABELLED_FONT, fontsize=_LABELLED_SIZE)
+        page.insert_text(
+            (x_right - width, y), text, fontname=_LABELLED_FONT, fontsize=_LABELLED_SIZE
+        )
+
+    def add_rows(page, y, rows):
+        for label, current, comparato in rows:
+            page.insert_text((20, y), label, fontname=_LABELLED_FONT, fontsize=_LABELLED_SIZE)
+            if current is not None:
+                right(page, _LABELLED_COLUMNS[0], y, current)
+            if comparato is not None:
+                right(page, _LABELLED_COLUMNS[1], y, comparato)
+            y += 20
+        return y
+
+    document = fitz.open()
+    bs = document.new_page()
+    bs.insert_text(
+        (30, 40), "BILANCIO RICLASSIFICATO UE dal 01/01/2026 al 30/06/2026", fontsize=11
+    )
+    bs.insert_text((20, 60), "Descrizione", fontsize=_LABELLED_SIZE)
+    for x_right, header in zip(_LABELLED_COLUMNS[:2], ("corrente", "comparato")):
+        right(bs, x_right, 75, header)
+    y = 100
+    y = add_rows(bs, y, [
+        ("Stato patrimoniale attivo", "1.050,00", "0,00"),
+        ("B) Immobilizzazioni", "300,00", "0,00"),
+        ("I. Immobilizzazioni Immateriali", "100,00", "0,00"),
+        ("II. Immobilizzazioni Materiali", "150,00", "0,00"),
+        ("III. Immobilizzazioni Finanziarie", "50,00", "0,00"),
+        ("C) Attivo circolante", "700,00", "0,00"),
+        ("I. Rimanenze", "200,00", "0,00"),
+        ("II. Crediti", "400,00", "0,00"),
+        ("1) verso clienti", "400,00", "0,00"),
+        # Senza l'articolo, come sul lato crediti del file vero (§2 diagnosi).
+        ("- entro esercizio successivo", "400,00", "0,00"),
+        ("IV. Disponibilita' liquide", "100,00", "0,00"),
+        ("D) Ratei e risconti", "50,00", "0,00"),
+        ("Stato patrimoniale passivo", "1.050,00", "0,00"),
+        ("A) Patrimonio netto", "400,00", "0,00"),
+        ("I) Capitale", "300,00", "0,00"),
+        ("IX. Utile (perdita) dell'esercizio", "100,00", "0,00"),
+        ("C) Trattamento di fine rapporto di lavoro subordinato", "50,00", "0,00"),
+        ("D) Debiti", "550,00", "0,00"),
+        ("4) Debiti verso banche", "550,00", "0,00"),
+        # Con l'articolo, come sul lato debiti del file vero (§2 diagnosi).
+        ("- entro l'esercizio successivo", "550,00", "0,00"),
+        ("E) Ratei e risconti", "50,00", "0,00"),
+    ])
+
+    ce = document.new_page()
+    ce.insert_text((20, 60), "Descrizione", fontsize=_LABELLED_SIZE)
+    for x_right, header in zip(_LABELLED_COLUMNS[:2], ("corrente", "comparato")):
+        right(ce, x_right, 75, header)
+    add_rows(ce, 100, [
+        ("Conto economico", None, None),
+        ("A) Valore della produzione", "500,00", "0,00"),
+        ("1) Ricavi delle vendite e delle prestazioni", "450,00", "0,00"),
+        ("5) Altri ricavi e proventi:", "50,00", "0,00"),
+        ("B) Costi della produzione", "300,00", "0,00"),
+        ("6) per materie prime, sussidiarie, di consumo e di merci", "100,00", "0,00"),
+        ("7) per servizi", "50,00", "0,00"),
+        ("8) per godimento di beni di terzi", "20,00", "0,00"),
+        ("9) per il personale", "80,00", "0,00"),
+        ("10) Ammortamenti e svalutazioni", "30,00", "0,00"),
+        ("11) Variazioni delle rimanenze di materie prime, sussidiarie, di consumo e m",
+         "20,00", "0,00"),
+        ("14) Oneri diversi di gestione", "0,00", "0,00"),
+        # Grafia singolare osservata sul file vero (§4 diagnosi), non il
+        # "costi" plurale che il parser cercava finora.
+        ("Differenza tra Valore e Costo della Produzione", "200,00", "0,00"),
+        ("C) Proventi e oneri finanziari", "-20,00", "0,00"),
+        ("16) Altri proventi finanziari", "5,00", "0,00"),
+        ("17) Interessi e altri oneri finanziari", "25,00", "0,00"),
+        ("Risultato prima delle imposte", "180,00", "0,00"),
+        ("20) Imposte sul reddito dell'esercizio", "80,00", "0,00"),
+        ("21) Utile (Perdita) dell'esercizio", "100,00", "0,00"),
+    ])
+    document.save(str(path))
+    document.close()
+
+
+def test_totale_precede_stato_patrimoniale_quadra_senza_riga_totale_separata(tmp_path):
+    """AMBIENTA (diagnosi Task 19): ogni didascalia porta il proprio totale, mai
+    una riga "Totale X" a parte. Il parser deve leggerlo comunque, con le sezioni
+    facoltative assenti (crediti soci, attività finanziarie non immobilizzate,
+    fondi rischi) trattate come zero — mai un buco che fa fallire tutto."""
+    pdf = tmp_path / "totale-precede.pdf"
+    _write_totale_precede_pdf(pdf)
+
+    current, _prior = extract_standard_ivcee_balances(str(pdf))
+
+    assert current is not None
+    assert current["totale_attivo"] == Decimal("1050.00")
+    assert current["totale_passivo"] == Decimal("1050.00")
+    assert current["sp02_immob_immateriali"] == Decimal("100.00")
+    assert current["sp03_immob_materiali"] == Decimal("150.00")
+    assert current["sp04_immob_finanziarie"] == Decimal("50.00")
+    assert current["sp06_crediti_breve"] == Decimal("400.00")
+    assert current["sp07_crediti_lungo"] == Decimal("0.00")
+    assert current["sp13_utile_perdita"] == Decimal("100.00")
+    assert current["sp14_fondi_rischi"] == Decimal("0.00")
+    assert current["sp16_debiti_breve"] == Decimal("550.00")
+    assert current["sp17_debiti_lungo"] == Decimal("0.00")
+
+
+def test_totale_precede_conto_economico_quadra_senza_riga_totale_separata(tmp_path):
+    """Stesso file: il CE ha lo stesso difetto (nessuna "Totale valore della
+    produzione"/"Totale costi della produzione"/"Totale proventi e oneri
+    finanziari"), più la grafia singolare di "Differenza tra Valore e Costo
+    della Produzione" e le voci facoltative 2)/3)/12)/13)/15)/17 bis)/D) del
+    tutto assenti."""
+    pdf = tmp_path / "totale-precede-ce.pdf"
+    _write_totale_precede_pdf(pdf)
+
+    current, _prior = extract_standard_ivcee_income(str(pdf))
+
+    assert current is not None
+    assert current["ce01_ricavi_vendite"] == Decimal("450.00")
+    assert current["ce02_variazioni_rimanenze"] == Decimal("0.00")
+    assert current["ce04_altri_ricavi"] == Decimal("50.00")
+    assert current["ce05_materie_prime"] == Decimal("100.00")
+    assert current["ce11_accantonamenti"] == Decimal("0.00")
+    assert current["ce11b_altri_accantonamenti"] == Decimal("0.00")
+    assert current["ce13_proventi_partecipazioni"] == Decimal("0.00")
+    assert current["ce16_utili_perdite_cambi"] == Decimal("0.00")
+    assert current["ce17_rettifiche_attivita_fin"] == Decimal("0.00")
+    assert current["ce20_imposte"] == Decimal("80.00")
+
+
+PDF_AMBIENTA_VERIFICA = (
+    ROOT / "inbox" / "import-test" / "Bilancio di verifica al 30.06.2026.pdf"
+)
+
+
+@pytest.mark.skipif(not PDF_AMBIENTA_VERIFICA.exists(), reason="local PDF corpus not available")
+def test_ambienta_verifica_source_balances_are_exact_and_self_validating():
+    """Diagnosi Task 19 (diagnosi-ambienta-macro.md): stesso schema di legge di
+    ``_write_totale_precede_pdf`` ma reale, con tutte le sue variazioni di
+    grafia (didascalie estese, apostrofo, scadenza senza articolo sui crediti)
+    e sezioni facoltative assenti. Attivo = Passivo = 2.352.461,64, utile
+    27.887,32 — 0 chiamate al modello."""
+    current, _prior = extract_standard_ivcee_balances(str(PDF_AMBIENTA_VERIFICA))
+    current_ce, _prior_ce = extract_standard_ivcee_income(str(PDF_AMBIENTA_VERIFICA))
+
+    assert current is not None
+    assert current["totale_attivo"] == Decimal("2352461.64")
+    assert current["totale_passivo"] == Decimal("2352461.64")
+    assert current["sp13_utile_perdita"] == Decimal("27887.32")
+    assert IVCEEMapper().validate_balance(current)
+
+    assert current_ce is not None
+    current_q = check_quadratura(current, current_ce, tol=Decimal("2"))
+    assert current_q.quadra
+    assert current_q.utile_ce == Decimal("27887.32")

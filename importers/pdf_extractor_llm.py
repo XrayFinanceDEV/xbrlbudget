@@ -4004,7 +4004,29 @@ _DECL_NUM_RE = re.compile(
 )
 
 
-def _declared_control_totals(file_path: str, text: Optional[str] = None) -> Dict[str, Optional[Decimal]]:
+def _valore_in_colonna(numeri: list, colonna: Optional[Dict[str, int]]) -> Optional[Decimal]:
+    """Sceglie, fra i numeri trovati dopo un marcatore, quello della colonna che ``colonna``
+    indica (stessa regola di risoluzione di ``import_snello.righe.saldo()``: ``{"n": totale
+    colonne, "k": indice della colonna saldo}``). Se il conteggio dei numeri trovati non
+    coincide con ``n`` e ``k`` non e' il primo o l'ultimo, la colonna non si identifica con
+    certezza su QUESTA occorrenza: nessun valore, mai un ripiego sul primo trovato (Task 21,
+    ruling: "se la colonna non si identifica con certezza il totale stampato non entra")."""
+    if not colonna or not numeri:
+        return None
+    n, k = colonna.get("n"), colonna.get("k")
+    if n is None or k is None:
+        return None
+    if len(numeri) == n:
+        return numeri[k]
+    if k == n - 1:
+        return numeri[-1]
+    if k == 0:
+        return numeri[0]
+    return None
+
+
+def _declared_control_totals(file_path: str, text: Optional[str] = None,
+                             colonna: Optional[Dict[str, int]] = None) -> Dict[str, Optional[Decimal]]:
     """Read a trial balance's OWN declared control totals from the printed footer.
 
     GENERAL anti-masking anchor (level L2): every situazione contabile / bilancio di
@@ -4018,6 +4040,14 @@ def _declared_control_totals(file_path: str, text: Optional[str] = None) -> Dict
     variant of the text, and to Italian number formatting. Returns the LARGEST amount
     found per label (detail lines repeat small partials; the control total is the max).
     All keys may be None when the document does not print that line.
+
+    ``colonna`` (Task 21, import_snello "conti" only): when a control-total line prints
+    SEVERAL amounts per side (e.g. "Saldo non rettificato | Rettifiche | Saldo finale"),
+    the default behaviour below (unchanged, every existing caller) keeps taking the FIRST
+    number after the marker. Passing ``colonna`` (``{"n": ..., "k": ...}``, same shape as
+    ``import_snello.righe.regola_colonna()``) instead picks the column the caller has
+    identified as the balance; an occurrence whose column cannot be resolved with
+    certainty contributes nothing (never a fallback to the first number).
     """
     out: Dict[str, Optional[Decimal]] = {
         "attivo": None, "passivo": None, "pareggio": None, "utile": None, "perdita": None,
@@ -4037,25 +4067,45 @@ def _declared_control_totals(file_path: str, text: Optional[str] = None) -> Dict
     low = "".join(c for c in unicodedata.normalize("NFKD", low) if not unicodedata.combining(c))
     nos = re.sub(r"[ \t]+", "", low)  # collapse intra-line spacing (keep newlines)
 
-    def _largest_after(markers, hays=None) -> Optional[Decimal]:
+    def _largest_after(markers, hays=None, colonna=None) -> Optional[Decimal]:
         """Largest Italian-number amount occurring within ~80 chars after any marker.
         `hays` = [(text, is_nospaces), ...]; defaults to the full normal + no-spaces
-        text. The no-spaces flag decides which form of the marker to search."""
+        text. The no-spaces flag decides which form of the marker to search.
+
+        Without ``colonna`` (every existing caller): exactly the old behaviour, only the
+        FIRST parseable number after the marker enters the largest-across-occurrences
+        comparison. With ``colonna``: every number in the window is collected first, and
+        ``_valore_in_colonna`` picks the one the caller's column rule identifies - an
+        occurrence whose count of numbers doesn't resolve contributes nothing."""
         best: Optional[Decimal] = None
         for hay, is_nos in (hays or ((low, False), (nos, True))):
             for mk in markers:
                 pat = re.escape(mk.replace(" ", "")) if is_nos else re.escape(mk)
                 for hit in re.finditer(pat, hay):
                     window = hay[hit.end(): hit.end() + 80]
+                    if colonna is not None:
+                        # Le colonne di UN rigo di controllo stanno tutte sulla sua stessa
+                        # riga stampata: senza questo taglio, un'etichetta corta lascia la
+                        # finestra di 80 caratteri sconfinare nella riga stampata SUCCESSIVA
+                        # (un altro totale, altri importi), e la colonna scelta finirebbe
+                        # per leggere un numero che non e' nemmeno di questo rigo. Il
+                        # comportamento di sempre (colonna=None, un numero solo) non aveva
+                        # questo rischio - ne' questo taglio, per non toccarlo.
+                        window = window.split("\n", 1)[0]
+                    numeri = []
                     for nm in _DECL_NUM_RE.finditer(window):
                         try:
-                            v = Decimal(nm.group(0).replace(".", "").replace(",", "."))
+                            numeri.append(Decimal(nm.group(0).replace(".", "").replace(",", ".")))
                         except Exception:
                             continue
-                        av = abs(v)
-                        if av > 0 and (best is None or av > best):
-                            best = av
-                        break  # first number after the marker is the total
+                        if colonna is None:
+                            break  # comportamento di sempre: solo il primo numero dopo il marcatore
+                    v = _valore_in_colonna(numeri, colonna) if colonna else (numeri[0] if numeri else None)
+                    if v is None:
+                        continue
+                    av = abs(v)
+                    if av > 0 and (best is None or av > best):
+                        best = av
         return best
 
     # "Totale a pareggio" (and its synonym "totale a quadratura") is printed for BOTH
@@ -4070,17 +4120,17 @@ def _declared_control_totals(file_path: str, text: Optional[str] = None) -> Dict
     _sp_hays = ((low[:_ce_pos_low] if _ce_pos_low > 0 else low, False),
                 (nos[:_ce_pos_nos] if _ce_pos_nos > 0 else nos, True))
     _pareggio_markers = ["totale a pareggio", "totale a quadratura"]
-    out["pareggio"] = (_largest_after(_pareggio_markers, hays=_sp_hays)
-                       or _largest_after(_pareggio_markers))
+    out["pareggio"] = (_largest_after(_pareggio_markers, hays=_sp_hays, colonna=colonna)
+                       or _largest_after(_pareggio_markers, colonna=colonna))
     out["attivo"] = _largest_after([
         "totale attivo", "totale attivita", "totale dell'attivo",
         "totale stato patrimoniale attivo", "totale stato patrimoniale - attivo",
-    ])
+    ], colonna=colonna)
     out["passivo"] = _largest_after([
         "totale passivo", "totale passivita", "totale a pareggio passivo",
         "totale passivo e patrimonio netto", "totale passivita e netto",
         "totale stato patrimoniale passivo", "totale stato patrimoniale - passivo",
-    ])
+    ], colonna=colonna)
 
     # Some detailed reclassified exports print the top-level section total directly
     # below ``Stato patrimoniale attivo/passivo`` without the word ``Totale``
@@ -4110,11 +4160,11 @@ def _declared_control_totals(file_path: str, text: Optional[str] = None) -> Dict
         "utile d'esercizio", "utile dell'esercizio", "utile di esercizio",
         "utile del periodo", "utile in corso di formazione", "utile (perdita) dell'esercizio",
         "risultato d'esercizio", "risultato dell'esercizio",
-    ])
+    ], colonna=colonna)
     out["perdita"] = _largest_after([
         "perdita d'esercizio", "perdita dell'esercizio", "perdita di esercizio",
         "perdita del periodo", "perdita in corso di formazione",
-    ])
+    ], colonna=colonna)
 
     # Ancore della sezione economica. Servono al riscatto vision, che misura un CE
     # ricostruito contro il totale che il documento stampa: senza queste il CE non ha

@@ -141,13 +141,34 @@ def importa(file_path: str, *, ocr_text: str | None = None, analizza=None, leggi
         return Risultato(bs=_bs_det, ce=dict(_det["ce"]), prior_bs=None, prior_ce=None,
                          report=report, struttura=struttura)
     _report_deterministico = {"parser": _det["parser"], "esito": _det["esito"]}
+    if "unclassified_mass" in _det:
+        # Ruling (a), Task 18: la massa che ha impedito l'adozione resta dichiarata nel
+        # report anche quando si prosegue col percorso Qwen - mai un silenzio che
+        # sembrerebbe "nessun problema" (CLAUDE.md, chiavi diagnostiche sempre dichiarate).
+        _report_deterministico["unclassified_mass"] = _det["unclassified_mass"]
 
     from importers.import_snello.verifica import misura, normalizza_forma, soglia, tappa, totali_stampati
 
     # Ancora indipendente dall'estrattore, letta una sola volta (nessuna chiamata modello):
-    # in modo "conti" e' l'unico contraddittorio possibile (oggi None sempre); in modo "legge"
-    # vince sui totali riportati dall'LLM quando esiste (li' sotto, in _combina).
-    deterministici = totali_stampati(file_path)
+    # in modo "legge" vince sui totali riportati dall'LLM quando esiste (li' sotto, in
+    # _combina). In modo "conti" il totale stampato entra SOLO sulla colonna che la
+    # struttura identifica come saldo (Ruling Task 21, diagnosi TM 589/590): senza una
+    # colonna certa (``regola_colonna`` vuota - "saldo_corrente"/"saldo_finale" non
+    # dichiarati) non c'e' alcuna ancora, mai un falso squadrato preso dalla prima colonna
+    # che il testo grezzo incontra (era "Saldo non rettificato", non "Saldo finale").
+    if modo == "conti":
+        from importers.import_snello.righe import regola_colonna
+        _regola_stampati = regola_colonna(struttura.colonne_sp or struttura.colonne_ce)
+        deterministici = (totali_stampati(file_path, regola=_regola_stampati) if _regola_stampati
+                          else {"totale_attivo": None, "totale_passivo": None})
+    else:
+        deterministici = totali_stampati(file_path)
+
+    # Task 21: la massa grezza per lato (SP, prima di applica_lato/netting dei fondi), sola
+    # base di confronto valida per lo stampato quando il prospetto e' a sezioni
+    # contrapposte (due lati fisici distinti) - assegnata dopo aver letto le foglie, sotto.
+    # None (nessun grezzo) e' il comportamento di sempre: misura() ripiega su att/pas netti.
+    _grezzo_sp: dict | None = None
 
     def _verifica(bs: dict, ce: dict, stampati: dict | None):
         if modo == "conti":
@@ -158,7 +179,7 @@ def importa(file_path: str, *, ocr_text: str | None = None, analizza=None, leggi
             # tornare su "verifica" e sottrarre l'utile una seconda volta, mascherando un vero
             # sbilancio (budget_330) - lo stesso guasto che il doppio passaggio sotto evita per
             # modo "legge".
-            m = misura(bs, ce, stampati, forma="bilancio")
+            m = misura(bs, ce, stampati, forma="bilancio", grezzo=_grezzo_sp)
             s = soglia(m["attivo"])
             bs, ce, tappo, esito = tappa(bs, ce, m, s)
             return bs, ce, tappo, esito, m, s
@@ -181,8 +202,31 @@ def importa(file_path: str, *, ocr_text: str | None = None, analizza=None, leggi
 
             leggi_conti_fn = leggi_conti or percorsi_dei_conti
             ruoli = struttura.colonne_sp or struttura.colonne_ce
-            righe = righe_da_pdf(file_path, set(pagine_sp) | set(pagine_ce), ruoli, ocr_text)
+            # Ruling (b), Task 18 (2026-09-27): anche le pagine_dettaglio entrano nella
+            # lettura, non solo pagine_sp ∪ pagine_ce - modo "legge" le legge gia' da sempre
+            # (pagine_dettagli(), per enrich_pdf_details): una pagina di continuazione del
+            # prospetto (debiti/servizi che sconfinano oltre le pagine SP/CE gia' individuate)
+            # restava altrimenti invisibile e la sua massa persa (diagnosi AMBIENTA
+            # 2026-09-26, causa radice #1). Un insieme di pagine piu' ampio non duplica nulla:
+            # marca_totali/da_foglie continuano a decidere mastri-o-foglie sul totale stampato,
+            # mai sul prefisso o sulla pagina di provenienza.
+            pagine_lettura = set(pagine_sp) | set(pagine_ce) | set(struttura.pagine_dettaglio)
+            righe = righe_da_pdf(file_path, pagine_lettura, ruoli, ocr_text)
             fo = foglie(righe)
+            # Task 21: la massa grezza per lato SOLO quando il prospetto SP e' a sezioni
+            # contrapposte (entrambi i lati fisici presenti fra le foglie di SP - "bs"): un
+            # elenco a colonna unica non oppone alcuna colonna attivo/passivo fisica, e
+            # att/pas netti (il ramo None di misura()) restano l'unica base valida, come
+            # sempre. "L"/"R" sono attivo/passivo per costruzione di ``collect_source_rows``
+            # (sezioni contrapposte: attivo sempre a sinistra, passivo sempre a destra - lo
+            # stesso convenzione che ``applica_lato``/CLAUDE.md presumono altrove), mai
+            # ridefiniti qui per singolo documento.
+            _fo_sp = [r for r in fo if r.sezione == "bs"]
+            if {"L", "R"} <= {r.lato for r in _fo_sp}:
+                _grezzo_sp = {
+                    "attivo": sum((r.valore for r in _fo_sp if r.lato == "L"), Decimal(0)),
+                    "passivo": sum((r.valore for r in _fo_sp if r.lato == "R"), Decimal(0)),
+                }
             letture = leggi_conti_fn(righe, fo)
 
             fase = "conti"
@@ -197,6 +241,20 @@ def importa(file_path: str, *, ocr_text: str | None = None, analizza=None, leggi
             trascrivi_fn = trascrivi or trascrivi_pagine
             righe_documento = collect_source_rows(file_path, ocr_text=ocr_text)
             letture = {"sp": 1, "ce": 1}
+
+            # Ruling (c) addendum, Task 18 (owner, dopo la diagnosi AMBIENTA §7-8): un
+            # "riclassificato con codici IVCEE" che e' ANCHE schema di legge coi totali
+            # stampati non e' un piano dei conti piatto - le sue macro-voci possono stare
+            # INTERAMENTE su una pagina che la vision ha classificato "dettaglio_conti" per
+            # il solo cambio pagina fisico (AMBIENTA: "8) per godimento di beni di terzi" e
+            # "9) per il personale" stanno solo a pag.5, "5)-14) Debiti..." solo a pag.3).
+            # Solo per questo stesso segnale (`struttura.macro_include_dettaglio`, mai per un
+            # "legge" qualunque: le sue pagine_dettaglio sono tabelle di nota integrativa
+            # vere, non macro-voci) le pagine_dettaglio entrano anche nel prompt macro, non
+            # solo nel recupero dettaglio a valle (enrich_pdf_details).
+            if getattr(struttura, "macro_include_dettaglio", False):
+                pagine_sp = sorted(set(pagine_sp) | set(struttura.pagine_dettaglio))
+                pagine_ce = sorted(set(pagine_ce) | set(struttura.pagine_dettaglio))
 
             # Le pagine "prospetto_sp_e_ce" (SP e CE sulla stessa pagina fisica) entrano in
             # ENTRAMBE pagine_sp e pagine_ce: se ce ne sono, non le leggiamo due volte (fix 8).

@@ -19,6 +19,19 @@ def _pdf_con_totali(path: str, totale_attivo: str, totale_passivo: str) -> str:
     return path
 
 
+def _pdf_totali_a_colonne(path: str, riga_attivo: str, riga_passivo: str) -> str:
+    """Un PDF con un rigo di controllo a PIU' importi per lato (situazione contabile a
+    sezioni contrapposte, come TM 589/590: 'Saldo non rettificato | Rettifiche | Saldo
+    finale'): ``riga_attivo``/``riga_passivo`` sono le righe intere (etichetta + importi)
+    come le stamperebbe il documento."""
+    doc = fitz.open()
+    page = doc.new_page()
+    page.insert_text((50, 50), riga_attivo)
+    page.insert_text((50, 70), riga_passivo)
+    doc.save(path)
+    return path
+
+
 def _pdf_vuoto(path: str) -> str:
     """Una pagina senza testo: ogni test di questo file forza `analizza` (e spesso anche
     `righe_da_pdf`/`leggi_voci`/`leggi_conti`), quindi il contenuto reale del PDF non conta
@@ -48,6 +61,60 @@ def _voci_quadrate(testo, intestazioni, nota=""):
     return {"corrente": [("SPA.C.IV.1", D("1000")), ("SPP.A.I", D("900")), ("SPP.A.IX", D("100")),
                          ("CE.A.1", D("500")), ("CE.B.7", D("400")), ("CE.21", D("100"))],
             "precedente": [], "totali": {"totale_attivo": D("1000"), "totale_passivo": D("1000"), "utile": D("100")}}
+
+
+def test_legge_macro_include_dettaglio_aggiunge_pagine_dettaglio_al_prompt(tmp_path):
+    """Task 18, ruling (c) addendum (owner, dopo la diagnosi AMBIENTA §7-8): quando
+    struttura.macro_include_dettaglio e' vero, le pagine_dettaglio entrano ANCHE nel
+    prompt macro di SP/CE, non solo nel recupero dettaglio a valle - un "riclassificato
+    con codici IVCEE" che e' anche schema di legge coi totali stampati non e' un piano
+    dei conti piatto: le sue macro-voci possono stare INTERAMENTE su una pagina che la
+    vision ha classificato "dettaglio_conti" per il solo cambio pagina fisico (AMBIENTA:
+    "9) per il personale" sta solo a pag.5, mai su una pagina di prospetto_ce)."""
+    doc = fitz.open()
+    doc.new_page().insert_text((50, 50), "7) per servizi 100,00")
+    doc.new_page().insert_text((50, 50), "9) per il personale 900,00")
+    pdf = str(tmp_path / "due-pagine.pdf")
+    doc.save(pdf)
+    doc.close()
+
+    testo_visto = []
+
+    def voci(testo, intestazioni, nota=""):
+        testo_visto.append(testo)
+        return {"corrente": [("CE.B.7", D("100"))], "precedente": [], "totali": {}}
+
+    struttura = lambda p: _struttura("legge", pagine_sp=[], pagine_ce=[1], pagine_dettaglio=[2],
+                                     macro_include_dettaglio=True, intestazioni_ce=["CE-2025"])
+    with pytest.raises(S.SnelloNonRiuscito):
+        # Il fake "voci" non produce un attivo/passivo bilanciato (non e' cio' che
+        # interessa qui): quel che conta e' il testo che ha visto, non l'esito finale.
+        S.importa(pdf, analizza=struttura, leggi_voci=voci)
+    assert any("personale" in t for t in testo_visto)
+
+
+def test_legge_senza_macro_include_dettaglio_non_aggiunge_pagine_dettaglio(tmp_path):
+    """Simmetrico: senza il segnale (il comportamento di ogni "legge" precedente a
+    questo ruling - `_struttura` di default non lo imposta), le pagine_dettaglio restano
+    fuori dal prompt macro."""
+    doc = fitz.open()
+    doc.new_page().insert_text((50, 50), "7) per servizi 100,00")
+    doc.new_page().insert_text((50, 50), "9) per il personale 900,00")
+    pdf = str(tmp_path / "due-pagine-no-flag.pdf")
+    doc.save(pdf)
+    doc.close()
+
+    testo_visto = []
+
+    def voci(testo, intestazioni, nota=""):
+        testo_visto.append(testo)
+        return {"corrente": [("CE.B.7", D("100"))], "precedente": [], "totali": {}}
+
+    struttura = lambda p: _struttura("legge", pagine_sp=[], pagine_ce=[1], pagine_dettaglio=[2],
+                                     intestazioni_ce=["CE-2025"])
+    with pytest.raises(S.SnelloNonRiuscito):
+        S.importa(pdf, analizza=struttura, leggi_voci=voci)
+    assert not any("personale" in t for t in testo_visto)
 
 
 def test_legge_che_quadra(tmp_path):
@@ -207,6 +274,35 @@ def test_legge_tappo_entro_soglia_plug_residual(tmp_path):
     assert r.report["esito"] == "tappo"
     assert r.report["tappo"]["corrente"]["campo"] == "sp16g_altri_debiti_breve"
     assert r.bs["_plug_residual"] == D("50.00")
+
+
+def test_conti_legge_anche_le_pagine_dettaglio(tmp_path, monkeypatch):
+    """Task 18, ruling (b): in modo 'conti' si leggono anche struttura.pagine_dettaglio, non
+    solo pagine_sp ∪ pagine_ce - altrimenti una pagina di continuazione del prospetto (debiti/
+    servizi che sconfinano oltre le pagine SP/CE gia' individuate, come AMBIENTA pag.3/5)
+    resta invisibile e la sua massa e' persa (diagnosi AMBIENTA 2026-09-26, causa radice #1;
+    modo 'legge' lo fa gia' da sempre via pagine_dettagli() per enrich_pdf_details)."""
+    from importers.import_snello import righe as R
+
+    pdf = _pdf_vuoto(str(tmp_path / "c.pdf"))
+    catturato = {}
+
+    def righe_da_pdf_spia(file_path, pagine, ruoli, ocr_text=None):
+        catturato["pagine"] = pagine
+        return []
+
+    monkeypatch.setattr(R, "righe_da_pdf", righe_da_pdf_spia)
+
+    def leggi_conti(righe, foglie):
+        return {"chiamate": 0, "saltate_prima": 0, "senza_percorso": 0}
+
+    struttura = lambda p: _struttura("conti", pagine_sp=[1, 2], pagine_ce=[2], pagine_dettaglio=[3])
+    with pytest.raises(S.SnelloNonRiuscito):
+        # foglie vuote (righe_da_pdf finto non ne produce) -> attivo=passivo=0 -> esito
+        # "vuoto": qui interessa solo l'insieme di pagine passato a righe_da_pdf, non l'esito.
+        S.importa(pdf, analizza=struttura, leggi_conti=leggi_conti)
+
+    assert catturato["pagine"] == {1, 2, 3}
 
 
 def test_conti_percorso_finto_bilancio_quadra(tmp_path, monkeypatch):
@@ -411,3 +507,101 @@ def test_legge_usa_i_totali_llm_quando_il_documento_non_ne_stampa(tmp_path):
 
     r = S.importa(pdf, analizza=lambda p: _struttura("legge"), leggi_voci=voci)
     assert r.report["esito"] == "ok"
+
+
+# --- Task 21 (2026-09-27): il totale stampato, in modo "conti", sulla colonna giusta e -------
+# --- contro la massa grezza per lato, mai contro l'attivo/passivo gia' nettato (diagnosi -----
+# --- TM 589/590: una situazione contabile a sezioni contrapposte con fondi stampati nel ------
+# --- lato passivo, nettati contro l'attivo in classificazione) -------------------------------
+
+
+def _righe_conti_finte(R):
+    """5 foglie di SP a sezioni contrapposte: un fondo (FONDO AMM.TO IMPIANTI) stampato nel
+    lato passivo (R) ma nettato contro l'attivo (sp03) in classificazione. Massa grezza per
+    lato: attivo 1.400,00 (1.200+200), passivo 1.400,00 (300+900+200) - il documento stampa
+    esattamente questi due totali, perche' e' cosi' che una situazione contabile vera
+    quadra (per colonna, prima di qualunque netting). Netto (dopo applica_lato/netting del
+    fondo): sp03=900, sp09=200, sp11=900, sp16d=200 -> attivo=passivo=1.100,00."""
+    return [
+        R.Riga(id="p1r1", pagina=1, lato="L", sezione="bs", testo="IMPIANTI", valore=D("1200")),
+        R.Riga(id="p1r2", pagina=1, lato="L", sezione="bs", testo="BANCA C/C", valore=D("200")),
+        R.Riga(id="p1r3", pagina=1, lato="R", sezione="bs", testo="FONDO AMM.TO IMPIANTI", valore=D("300")),
+        R.Riga(id="p1r4", pagina=1, lato="R", sezione="bs", testo="CAPITALE SOCIALE", valore=D("900")),
+        R.Riga(id="p1r5", pagina=1, lato="R", sezione="bs", testo="FORNITORI ITALIA", valore=D("200")),
+    ]
+
+
+def _leggi_conti_finti(righe, foglie):
+    percorsi = {"p1r1": "SPA.B.II", "p1r2": "SPA.C.IV", "p1r3": "SPA.B.II.F",
+                "p1r4": "SPP.A.I", "p1r5": "SPP.D.7"}
+    for f in foglie:
+        f.percorso = percorsi[f.id]
+    return {"chiamate": 1, "saltate_prima": 0, "senza_percorso": 0}
+
+
+def test_conti_stampati_colonna_saldo_finale_non_e_un_falso_squadrato(tmp_path, monkeypatch):
+    """Ruling Task 21: con una colonna di saldo certa (struttura a 3 colonne, saldo_finale
+    ultima) il totale stampato si legge sulla colonna giusta (1.400,00, non 1.000,00 "Saldo
+    non rettificato") E si confronta contro la massa grezza per lato (1.400,00), non contro
+    l'attivo/passivo gia' nettato dal fondo (1.100,00) - prima di questa correzione la
+    combinazione dei due difetti (colonna sbagliata + confronto sul netto) dava un falso
+    'squadrato' anche quando attivo=passivo e l'utile sono esatti."""
+    from importers.import_snello import righe as R
+
+    pdf = _pdf_totali_a_colonne(
+        str(tmp_path / "c.pdf"),
+        "Totale Attivita' 1.000,00 400,00 1.400,00",
+        "Totale Passivita' 1.400,00 1.400,00",
+    )
+    monkeypatch.setattr(R, "righe_da_pdf", lambda *a, **k: _righe_conti_finte(R))
+
+    struttura = lambda p: _struttura("conti", colonne_sp=["saldo_non_rettificato", "rettifiche", "saldo_finale"],
+                                     intestazioni_sp=["Saldo non rettificato", "Rettifiche", "Saldo finale"])
+    r = S.importa(pdf, analizza=struttura, leggi_conti=_leggi_conti_finti)
+    assert r.report["esito"] == "ok"
+    assert r.report["misura"]["corrente"]["scarto_stampati"] == "0.00"
+    assert r.bs["sp03_immob_materiali"] == D("900.00")
+
+
+def test_conti_stampati_colonna_saldo_finale_rileva_ancora_un_vero_scarto(tmp_path, monkeypatch):
+    """Stesso layout a 3 colonne per lato, ma il documento dichiara davvero un totale
+    diverso dalla massa grezza che le righe lette spiegano (una riga mancante, o
+    un'anomalia vera dell'estrazione): leggere la colonna giusta e confrontarla sul grezzo
+    non deve spegnere un contraddittorio VERO, solo quello falso del netting - 'diagnose,
+    never fabricate': un divario si dichiara, la colonna corretta non lo maschera."""
+    from importers.import_snello import righe as R
+
+    pdf = _pdf_totali_a_colonne(
+        str(tmp_path / "c.pdf"),
+        "Totale Attivita' 1.250,00 400,00 1.650,00",   # il documento dichiara 1.650, non 1.400
+        "Totale Passivita' 1.400,00 1.400,00",
+    )
+    monkeypatch.setattr(R, "righe_da_pdf", lambda *a, **k: _righe_conti_finte(R))
+
+    struttura = lambda p: _struttura("conti", colonne_sp=["saldo_non_rettificato", "rettifiche", "saldo_finale"],
+                                     intestazioni_sp=["Saldo non rettificato", "Rettifiche", "Saldo finale"])
+    r = S.importa(pdf, analizza=struttura, leggi_conti=_leggi_conti_finti)
+    assert r.report["esito"] == "squadrato"
+    assert r.report["misura"]["corrente"]["scarto_stampati"] == "250.00"
+
+
+def test_conti_colonna_ambigua_non_da_ancora(tmp_path, monkeypatch):
+    """Senza 'saldo_corrente'/'saldo_finale' fra i ruoli dichiarati (colonne 'dare'/'avere':
+    ``regola_colonna`` torna {}, la colonna non si identifica con certezza), il totale
+    stampato non entra affatto - nessuna ancora, anche se il documento stampa un Totale
+    Attivo/Passivo ben diverso dalle voci lette. Mai un ripiego sulla prima colonna
+    trovata: 'se la colonna non si identifica con certezza il totale stampato non entra'."""
+    from importers.import_snello import righe as R
+
+    pdf = _pdf_totali_a_colonne(
+        str(tmp_path / "c.pdf"),
+        "Totale Attivo 999.999,00",
+        "Totale Passivo 999.999,00",
+    )
+    monkeypatch.setattr(R, "righe_da_pdf", lambda *a, **k: _righe_conti_finte(R))
+
+    struttura = lambda p: _struttura("conti", colonne_sp=["dare", "avere"], colonne_ce=["dare", "avere"],
+                                     intestazioni_sp=["Dare", "Avere"])
+    r = S.importa(pdf, analizza=struttura, leggi_conti=_leggi_conti_finti)
+    assert r.report["esito"] == "ok"
+    assert r.report["misura"]["corrente"]["scarto_stampati"] == "0.00"

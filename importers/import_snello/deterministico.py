@@ -63,10 +63,25 @@ def _esito(nome: str, bs_raw: dict, ce_raw: dict, stampati_raw: dict | None) -> 
         return {"adottato": False, "parser": nome, "esito": "oltre_soglia"}
     stampati = {k: v for k, v in (stampati_raw or {}).items() if v is not None} or None
     bs, ce, tappo, esito, m = _verifica_bilancio(bs, ce, stampati)
-    if esito in ("ok", "tappo"):
-        return {"adottato": True, "parser": nome, "esito": esito, "bs": bs, "ce": ce,
-                "tappo": tappo, "misura": m}
-    return {"adottato": False, "parser": nome, "esito": "oltre_soglia"}
+    if esito not in ("ok", "tappo"):
+        return {"adottato": False, "parser": nome, "esito": "oltre_soglia"}
+    # Ruling (a), Task 18 (2026-09-27): quadrare da solo non basta piu'. Un candidato
+    # bilanciato la cui massa non classificata (dichiarata dal parser sottostante, mai un
+    # hardcoded zero) supera la STESSA soglia che verifica.tappa() usa per lo scarto
+    # (max(100 euro, 0,1% dell'attivo)) non si adotta: e' un fallback che ha gia' contato la
+    # massa una volta (il foglio quadra), ma quella massa puo' comunque attraversare un
+    # aggregato (ce05 finito in ce06, personale in ce08d, sp03 in sp03d, ce02/ce03 in ce10 -
+    # banco TM-BUSINESS 589/590, 2026-09-27: Qwen li classificava bene in ~23s, il
+    # deterministico invece li dichiarava "puliti" a zero chiamate). La massa resta
+    # dichiarata (mai scartata), solo non best-effort-adottata: il chiamante prosegue col
+    # percorso Qwen di oggi, invariato.
+    massa = Decimal(bs.get("_unclassified_mass", 0) or 0)
+    s = soglia(m["attivo"])
+    if massa > s:
+        return {"adottato": False, "parser": nome, "esito": "massa_non_classificata",
+                "unclassified_mass": str(massa.quantize(_C))}
+    return {"adottato": True, "parser": nome, "esito": esito, "bs": bs, "ce": ce,
+            "tappo": tappo, "misura": m}
 
 
 def _prova_standard_ivcee(file_path: str) -> dict | None:
@@ -122,8 +137,10 @@ def tentativo(file_path: str, ocr_text: str | None = None) -> dict:
     """Prova, in ordine, un solo parser deterministico applicabile: il primo che si
     applica decide (mai i due sommati, mai un secondo tentativo dopo il primo). Ritorna
     sempre un dict con almeno ``adottato``/``parser``/``esito``; ``esito`` pubblico e'
-    uno tra "ok"/"tappo" (adottato) o "non_applicabile"/"errore"/"oltre_soglia" (non
-    adottato) - mai una terza via."""
+    uno tra "ok"/"tappo" (adottato) o "non_applicabile"/"errore"/"oltre_soglia"/
+    "massa_non_classificata" (non adottato) - mai una terza via. Su "massa_non_classificata"
+    il dict porta anche ``unclassified_mass`` (stringa Decimal): la massa non scompare, solo
+    non basta a se stessa per l'adozione (ruling a, Task 18)."""
     for nome, prova in (
         ("standard_ivcee_parser", lambda: _prova_standard_ivcee(file_path)),
         ("situazione_contabile_parser", lambda: _prova_situazione_contabile(file_path, ocr_text)),

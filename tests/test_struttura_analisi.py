@@ -79,6 +79,52 @@ def test_modo_conti_o_legge():
     assert modo_da_mappe([_p(1, "prospetto_sp", "riclassificato_con_codici_ivcee", ["saldo_corrente"], ["x"])]) == "conti"
 
 
+def test_modo_legge_quando_riclassificato_porta_captions_legali_con_totali(tmp_path, monkeypatch):
+    # Task 18, ruling (c) (owner, dopo la diagnosi AMBIENTA §7-8): un "riclassificato con
+    # codici IVCEE" che e' ANCHE uno schema di legge puro (captions B)/C)/D), I/II/III,
+    # colonne comparative con TOTALI stampati - has_comparative_ivcee_columns) va letto come
+    # "legge": i totali di livello superiore si leggono DIRETTAMENTE dalla riga stampata, non
+    # si ricostruiscono sommando le foglie (il limite strutturale di marca_totali su una
+    # gerarchia a 5 livelli, diagnosi AMBIENTA causa radice #2). Senza `pdf` il comportamento
+    # di sempre (fix round 1, Task lotto-b) resta intatto - vedi test sopra.
+    monkeypatch.setattr(
+        "importers.standard_ivcee_parser.has_comparative_ivcee_columns", lambda pdf: True)
+    mappe = [_p(1, "prospetto_sp", "riclassificato_con_codici_ivcee", ["saldo_corrente"], ["x"])]
+    assert modo_da_mappe(mappe, pdf=str(tmp_path / "qualsiasi.pdf")) == "legge"
+
+
+def test_modo_conti_quando_riclassificato_non_porta_captions_legali(tmp_path, monkeypatch):
+    # Simmetrico: senza le colonne comparative (un elenco analitico per mastro senza schema
+    # di legge, gli 8 file del banco 26/09 che hanno motivato la regola "riclassificato ->
+    # conti" di fix round 1), il documento resta "conti" anche passando `pdf`.
+    monkeypatch.setattr(
+        "importers.standard_ivcee_parser.has_comparative_ivcee_columns", lambda pdf: False)
+    mappe = [_p(1, "prospetto_sp", "riclassificato_con_codici_ivcee", ["saldo_corrente"], ["x"])]
+    assert modo_da_mappe(mappe, pdf=str(tmp_path / "qualsiasi.pdf")) == "conti"
+
+
+def test_modo_conti_riclassificato_senza_pdf_non_chiama_has_comparative(tmp_path, monkeypatch):
+    # Nessun `pdf` (il default): non si deve nemmeno provare ad aprirlo - ogni chiamante che
+    # non lo passa (ad es. i test unitari di questo file) resta sul comportamento di sempre a
+    # costo zero, mai un tentativo di apertura file su un percorso finto.
+    def _esplode(pdf):
+        raise AssertionError("has_comparative_ivcee_columns chiamata senza pdf")
+    monkeypatch.setattr("importers.standard_ivcee_parser.has_comparative_ivcee_columns", _esplode)
+    mappe = [_p(1, "prospetto_sp", "riclassificato_con_codici_ivcee", ["saldo_corrente"], ["x"])]
+    assert modo_da_mappe(mappe) == "conti"
+
+
+def test_modo_da_mappe_ignora_pdf_quando_nessuno_schema_e_riclassificato(tmp_path, monkeypatch):
+    # Il controllo costa un'apertura file: si prova SOLO quando almeno una pagina e' davvero
+    # schema "riclassificato_con_codici_ivcee" - un documento di puro schema di legge
+    # (iv_cee_di_legge) non deve nemmeno sfiorare has_comparative_ivcee_columns.
+    def _esplode(pdf):
+        raise AssertionError("has_comparative_ivcee_columns chiamata senza motivo")
+    monkeypatch.setattr("importers.standard_ivcee_parser.has_comparative_ivcee_columns", _esplode)
+    mappe = [_p(1, "prospetto_sp", "iv_cee_di_legge", ["saldo_corrente"], ["x"])]
+    assert modo_da_mappe(mappe, pdf=str(tmp_path / "qualsiasi.pdf")) == "legge"
+
+
 def test_modo_conti_per_pareggio_con_indizio_trial_balance():
     # Diagnosi budget_313 (lotto-b, fix 9): un voto in parita' fra schema conti e schema legge,
     # accompagnato dall'indizio del classificatore (route TRIAL_BALANCE), sceglie "conti" — senza
@@ -244,13 +290,19 @@ def test_analizza_struttura_passa_route_hint_a_modo_da_mappe(tmp_path, monkeypat
 
     originale = A.modo_da_mappe
 
-    def spia(mappe, *, route_hint=None):
+    def spia(mappe, *, route_hint=None, pdf=None):
         catturato["route_hint"] = route_hint
-        return originale(mappe, route_hint=route_hint)
+        catturato["pdf"] = pdf
+        return originale(mappe, route_hint=route_hint, pdf=pdf)
 
     monkeypatch.setattr(A, "modo_da_mappe", spia)
-    analizza_struttura(pdf_xbrl_legge(str(tmp_path / "x.pdf")), route_hint=ROUTE_TRIAL)
+    pdf_path = pdf_xbrl_legge(str(tmp_path / "x.pdf"))
+    analizza_struttura(pdf_path, route_hint=ROUTE_TRIAL)
     assert catturato["route_hint"] == ROUTE_TRIAL
+    # Task 18, ruling (c): analizza_struttura deve passare il PROPRIO file a modo_da_mappe,
+    # non solo route_hint - senza il file, il segnale delle captions legali con totali
+    # stampati (has_comparative_ivcee_columns) non e' disponibile a chi decide il modo.
+    assert catturato["pdf"] == pdf_path
 
 
 def test_struttura_porta_colonne_e_pagine_senza_testo(tmp_path):
@@ -261,3 +313,18 @@ def test_struttura_porta_colonne_e_pagine_senza_testo(tmp_path):
     assert s.modo in ("conti", "legge")
     assert s.colonne_sp and all(isinstance(r, str) for r in s.colonne_sp)
     assert s.pagine_senza_testo == []
+
+
+def test_analizza_struttura_riclassificato_con_captions_legali_e_legge_con_macro_dettaglio(tmp_path):
+    # Task 18, ruling (c) (owner, dopo la diagnosi AMBIENTA §7-8): `pdf_colonna_unica` e'
+    # esattamente la forma AMBIENTA in miniatura - "riclassificato con codici IVCEE" +
+    # colonne comparative "Importo corrente | Importo comparato" con totali stampati.
+    # analizza_struttura deve sceglierlo "legge" (non "conti") E accendere
+    # macro_include_dettaglio, cosi' che import_snello includa le pagine_dettaglio anche nel
+    # prompt macro di SP/CE.
+    from importers.struttura_documento.analisi import analizza_struttura
+    from tests._struttura_fixtures import pdf_colonna_unica, MAPPA_COLONNA_UNICA
+    pdf = pdf_colonna_unica(str(tmp_path / "c.pdf"))
+    s = analizza_struttura(pdf, mappa_pagina_fn=lambda client, png: MAPPA_COLONNA_UNICA)
+    assert s.modo == "legge"
+    assert s.macro_include_dettaglio is True

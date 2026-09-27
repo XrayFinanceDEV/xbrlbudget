@@ -77,6 +77,35 @@ def importa(file_path: str, *, ocr_text: str | None = None, analizza=None, leggi
     modo = struttura.modo
     forma = "bilancio" if modo == "legge" else None
 
+    # Task 16 (b): deterministico prima di Qwen. Nessuna lettura del modello finora (la
+    # struttura e' un altro fornitore, non gx10): se un parser deterministico del vecchio
+    # importatore riconosce il documento e il suo risultato quadra con le regole di
+    # questo percorso, si adotta a zero chiamate a Qwen — mai un secondo tentativo
+    # dopo, mai i due sommati. Se non si applica, solleva o non quadra, non si tocca
+    # nulla: il percorso Qwen di oggi resta l'unico che segue, invariato.
+    from importers.import_snello.deterministico import tentativo as _tenta_deterministico
+    _det = _tenta_deterministico(file_path, ocr_text)
+    if _det["adottato"]:
+        _bs_det = dict(_det["bs"])
+        _bs_det["_plug_residual"] = (Decimal(_det["tappo"]["importo"])
+                                     if _det["tappo"] and "importo" in _det["tappo"] else Decimal(0))
+        _bs_det["_unclassified_mass"] = Decimal(0)
+        report = {
+            "esito": _det["esito"], "modo": modo, "fonte": f"deterministico:{_det['parser']}",
+            "struttura": struttura.report(),
+            "misura": {"corrente": {k: str(v) for k, v in _det["misura"].items()}},
+            "tappo": {"corrente": _det["tappo"]},
+            "letture": {"chiamate": 0, "saltate_prima": 0, "senza_percorso": 0},
+            "diag": {"non_mappati": [], "escluse": [], "risultato_stampato": None,
+                    "lato_corretti": 0, "lato_irrisolti": [], "risultato_duplicato": [],
+                    "padri_esclusi": []},
+            "deterministico": {"parser": _det["parser"], "esito": _det["esito"]},
+            "anomalie": _anomalie(_bs_det), "secondi": round(time.monotonic() - t0, 1),
+        }
+        return Risultato(bs=_bs_det, ce=dict(_det["ce"]), prior_bs=None, prior_ce=None,
+                         report=report, struttura=struttura)
+    _report_deterministico = {"parser": _det["parser"], "esito": _det["esito"]}
+
     from importers.import_snello.verifica import misura, normalizza_forma, soglia, tappa
 
     def _verifica(bs: dict, ce: dict, stampati: dict | None):
@@ -205,10 +234,11 @@ def importa(file_path: str, *, ocr_text: str | None = None, analizza=None, leggi
         if esito in ("oltre_soglia", "vuoto"):
             report = {
                 "esito": "ripiego", "fase": "verifica", "errore": esito, "modo": modo,
-                "struttura": struttura.report(),
+                "struttura": struttura.report(), "fonte": "qwen",
                 "misura": {"corrente": {k: str(v) for k, v in m.items()}},
                 "tappo": {"corrente": tappo}, "letture": letture, "diag": diag,
                 "anomalie": _anomalie(bs), "secondi": round(time.monotonic() - t0, 1),
+                "deterministico": _report_deterministico,
             }
             raise SnelloNonRiuscito(report)
 
@@ -239,9 +269,10 @@ def importa(file_path: str, *, ocr_text: str | None = None, analizza=None, leggi
         tappo_report["precedente"] = tappo_prec
 
     report = {
-        "esito": esito, "modo": modo, "struttura": struttura.report(),
+        "esito": esito, "modo": modo, "struttura": struttura.report(), "fonte": "qwen",
         "misura": misura_report, "tappo": tappo_report, "letture": letture, "diag": diag,
         "anomalie": _anomalie(bs), "secondi": round(time.monotonic() - t0, 1),
+        "deterministico": _report_deterministico,
     }
     if modo == "legge" and precedente_stato is not None:
         report["precedente"] = precedente_stato

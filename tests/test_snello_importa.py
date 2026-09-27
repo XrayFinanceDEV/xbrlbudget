@@ -235,12 +235,18 @@ def test_conti_seconda_misura_non_sottrae_l_utile_due_volte(tmp_path, monkeypatc
 
 
 def test_anomalie_immobilizzazioni_negative(tmp_path):
-    """report['anomalie'] dichiara un'immobilizzazione netta negativa, senza correggerla."""
+    """Un'immobilizzazione netta ancora negativa (sp02/sp03/sp04) si azzera - mai spostata su
+    un altro campo, mai lasciata negativa - e l'eccedenza tagliata si dichiara in
+    report['anomalie']: stessa regola del vecchio importatore
+    (situazione_contabile_parser.build_sp_from_vision, ~L5177-5185)."""
     pdf = pdf_colonna_unica(str(tmp_path / "c.pdf"))
 
     def voci(testo, intestazioni, nota=""):
         if intestazioni and intestazioni[0].startswith("SP"):
-            return {"corrente": [("SPA.B.II", D("-50")), ("SPA.C.IV", D("1050")),
+            # dopo il clamp sp03 diventa 0: 0 + sp04(1000) = sp11(1000) + sp13(0), quadra da solo -
+            # cosi' il test isola la sola dichiarazione dell'anomalia, senza il tappo che
+            # scatterebbe se il clamp lasciasse un vero scarto residuo.
+            return {"corrente": [("SPA.B.II", D("-80")), ("SPA.C.IV", D("1000")),
                                  ("SPP.A.I", D("1000")), ("SPP.A.IX", D("0"))],
                     "precedente": [], "totali": {}}
         return {"corrente": [], "precedente": [], "totali": {}}
@@ -248,5 +254,5 @@ def test_anomalie_immobilizzazioni_negative(tmp_path):
     struttura = lambda p: _struttura("legge", intestazioni_sp=["SP-2025"], intestazioni_ce=["CE-2025"])
     r = S.importa(pdf, analizza=struttura, leggi_voci=voci)
     assert r.report["esito"] == "ok"
-    assert r.report["anomalie"] == [["sp03_immob_materiali", "-50.00"]]
-    assert r.bs["sp03_immob_materiali"] == D("-50.00")
+    assert r.report["anomalie"] == [["sp03_immob_materiali", "80.00"]]
+    assert r.bs["sp03_immob_materiali"] == D("0.00")

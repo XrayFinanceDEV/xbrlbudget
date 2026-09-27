@@ -48,8 +48,12 @@ def _unisci_totali(a: dict, b: dict) -> dict:
     return out
 
 
-def _anomalie(bs: dict) -> list:
-    return [[campo, str(bs[campo])] for campo in _IMMOBILIZZAZIONI_CAMPI if campo in bs and bs[campo] < 0]
+def _anomalie(bs: dict, diag: dict) -> list:
+    # Un'immobilizzazione negativa non sopravvive oltre conti.py (_clamp_immobilizzazioni_negative
+    # la azzera sempre): il controllo diretto su bs resta solo come rete di sicurezza, mai la
+    # fonte primaria - l'eccedenza tagliata la dichiara diag.
+    dirette = [[campo, str(bs[campo])] for campo in _IMMOBILIZZAZIONI_CAMPI if campo in bs and bs[campo] < 0]
+    return dirette + diag.get("immobilizzazioni_negative_tagliate", [])
 
 
 def _unclassified_mass(diag: dict) -> Decimal:
@@ -219,7 +223,7 @@ def importa(file_path: str, *, ocr_text: str | None = None, analizza=None, leggi
                 "struttura": struttura.report(),
                 "misura": {"corrente": {k: str(v) for k, v in m.items()}},
                 "tappo": {"corrente": tappo}, "letture": letture, "diag": diag,
-                "anomalie": _anomalie(bs), "secondi": round(time.monotonic() - t0, 1),
+                "anomalie": _anomalie(bs, diag), "secondi": round(time.monotonic() - t0, 1),
             }
             raise SnelloNonRiuscito(report)
 
@@ -252,7 +256,7 @@ def importa(file_path: str, *, ocr_text: str | None = None, analizza=None, leggi
     report = {
         "esito": esito, "modo": modo, "struttura": struttura.report(),
         "misura": misura_report, "tappo": tappo_report, "letture": letture, "diag": diag,
-        "anomalie": _anomalie(bs), "secondi": round(time.monotonic() - t0, 1),
+        "anomalie": _anomalie(bs, diag), "secondi": round(time.monotonic() - t0, 1),
     }
     if modo == "legge" and precedente_stato is not None:
         report["precedente"] = precedente_stato

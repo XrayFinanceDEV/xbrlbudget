@@ -504,6 +504,26 @@ def test_x_su_campo_tier0_non_si_forza_mai():
     assert diag["escluse"] == [["3", "X", "300.00"]]
 
 
+# --- Task 15 (2026-09-27): un'immobilizzazione netta ancora negativa si azzera, mai -------
+# --- lasciata negativa ne' spostata su un altro campo (stessa regola del vecchio ----------
+# --- importatore, build_sp_from_vision) ----------------------------------------------------
+
+
+def test_immobilizzazione_netta_ancora_negativa_si_azzera_e_si_dichiara():
+    """Un fondo che eccede il lordo anche a livello di aggregato (non solo di dettaglio, gia'
+    coperto da _netta_fondi_negativi) si azzera - mai lasciato negativo - e l'eccedenza si
+    dichiara in diag, cosi' che il chiamante la riporti in report['anomalie']."""
+    bs, ce, diag = da_coppie([("SPA.B.II", D("1000")), ("SPA.B.II.F", D("1050")), ("SPP.D.7", D("1050"))])
+    assert bs["sp03_immob_materiali"] == D("0.00")
+    assert diag["immobilizzazioni_negative_tagliate"] == [["sp03_immob_materiali", "50.00"]]
+
+
+def test_immobilizzazione_netta_positiva_non_dichiara_nulla():
+    bs, ce, diag = da_coppie([("SPA.B.II", D("1000")), ("SPA.B.II.F", D("400")), ("SPP.D.7", D("600"))])
+    assert bs["sp03_immob_materiali"] == D("600.00")
+    assert diag["immobilizzazioni_negative_tagliate"] == []
+
+
 def test_gap_reale_non_si_maschera_dietro_l_utile_ce():
     """Riproduce budget_330 (gap reale in un bilancio di verifica, qui -2.505,51): senza alcuna
     riga di risultato in mezzo, sp13 e' comunque l'utile del CE e lo scarto vero resta

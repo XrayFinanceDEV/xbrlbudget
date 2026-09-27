@@ -58,6 +58,24 @@ def _netta_fondi_negativi(importi: dict) -> dict:
     return importi
 
 
+def _clamp_immobilizzazioni_negative(bs: dict) -> list:
+    """Un fondo non puo' mai superare il proprio cespite lordo: un'immobilizzazione netta
+    ancora negativa a livello di AGGREGATO (dopo ``_netta_fondi_negativi``, che copre solo il
+    dettaglio) e' sempre una misclassificazione, mai un valore IV-CEE valido. Si azzera - mai
+    spostata su un altro campo, ne' lasciata negativa - e l'eccedenza tagliata si dichiara:
+    stessa regola del vecchio importatore
+    (situazione_contabile_parser.build_sp_from_vision, ~L5177-5185: "un fondo non puo' mai
+    superare il proprio cespite lordo ... l'eccedenza tagliata e' massa che non si e' saputa
+    collocare, quindi va nello stesso canale del resto")."""
+    tagliate = []
+    for breve in _IMMOBILIZZAZIONI:
+        pieno = NOMI.get(breve)
+        if pieno and bs.get(pieno, Decimal(0)) < 0:
+            tagliate.append([pieno, str((-bs[pieno]).quantize(_C))])
+            bs[pieno] = Decimal(0)
+    return tagliate
+
+
 def applica_lato(foglie, irrisolti: list | None = None) -> int:
     """Un conto il cui percorso sta dall'altra parte rispetto a dove e' stampato passa alla voce
     corrispondente del lato giusto (c/c fra le passivita' -> debiti verso banche). La colonna e' la
@@ -299,6 +317,7 @@ def da_foglie(foglie):
     if pregresso:
         importi["sp12g"] += pregresso.quantize(_C)
     bs, ce = completa(_netta_fondi_negativi(dict(importi)))
+    diag["immobilizzazioni_negative_tagliate"] = _clamp_immobilizzazioni_negative(bs)
 
     # Il risultato corrente non e' mai una somma di righe stampate: e' sempre l'utile del CE
     # gia' costruito sopra (diagnose, never fabricate - la memoria/CLAUDE.md: "The RISULTATO
@@ -361,4 +380,5 @@ def da_coppie(coppie):
             continue
         importi[codice] += -abs(v) if e_fondo(p) else v
     bs, ce = completa(_netta_fondi_negativi(dict(importi)))
+    diag["immobilizzazioni_negative_tagliate"] = _clamp_immobilizzazioni_negative(bs)
     return bs, ce, diag

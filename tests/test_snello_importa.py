@@ -1,10 +1,36 @@
 from decimal import Decimal as D
 
+import fitz
 import pytest
 
 from importers import import_snello as S
 from importers.struttura_documento.analisi import Struttura
-from tests._struttura_fixtures import pdf_colonna_unica
+
+
+def _pdf_con_totali(path: str, totale_attivo: str, totale_passivo: str) -> str:
+    """Un PDF che stampa 'Totale Attivo'/'Totale Passivo' come li leggerebbe
+    _declared_control_totals (nessuna chiamata modello): serve solo a dare ai test
+    un'ancora deterministica indipendente dalle righe/voci finte usate altrove."""
+    doc = fitz.open()
+    page = doc.new_page()
+    page.insert_text((50, 50), f"Totale Attivo {totale_attivo}")
+    page.insert_text((50, 70), f"Totale Passivo {totale_passivo}")
+    doc.save(path)
+    return path
+
+
+def _pdf_vuoto(path: str) -> str:
+    """Una pagina senza testo: ogni test di questo file forza `analizza` (e spesso anche
+    `righe_da_pdf`/`leggi_voci`/`leggi_conti`), quindi il contenuto reale del PDF non conta
+    per la struttura - ma da Task 15 conta comunque per `totali_stampati()`, che legge il
+    file vero indipendentemente da `analizza`. `pdf_colonna_unica` stampa per conto suo
+    "STATO PATRIMONIALE ATTIVO/PASSIVO" con un importo sulla stessa riga (1.700,00): un
+    dettaglio del fixture pensato per i test di struttura, che qui diventerebbe un'ancora
+    deterministica indesiderata e in conflitto con gli importi finti usati in questo file."""
+    doc = fitz.open()
+    doc.new_page()
+    doc.save(path)
+    return path
 
 
 def _struttura(modo, **kw):
@@ -25,31 +51,50 @@ def _voci_quadrate(testo, intestazioni, nota=""):
 
 
 def test_legge_che_quadra(tmp_path):
-    pdf = pdf_colonna_unica(str(tmp_path / "c.pdf"))
+    pdf = _pdf_vuoto(str(tmp_path / "c.pdf"))
     r = S.importa(pdf, analizza=lambda p: _struttura("legge"), leggi_voci=_voci_quadrate)
     assert r.bs["sp09_disponibilita_liquide"] == D("1000.00") and r.ce["ce06_servizi"] == D("400.00")
     assert r.report["esito"] == "ok" and r.prior_bs is None
     assert r.bs["_plug_residual"] == 0
 
 
-def test_legge_oltre_soglia_rilegge_una_volta_poi_ripiega(tmp_path):
-    pdf = pdf_colonna_unica(str(tmp_path / "c.pdf"))
+def test_legge_oltre_soglia_rilegge_una_volta_poi_squadrato(tmp_path):
+    """Task 17 (decisione del proprietario, 2026-09-27): oltre soglia dopo l'unica rilettura
+    non ripiega piu' sull'importatore attuale. Si salva il risultato snello con lo sbilancio
+    dichiarato (esito 'squadrato'), senza alcun tappo: l'utente lo corregge in Rettifiche."""
+    pdf = _pdf_vuoto(str(tmp_path / "c.pdf"))
     chiamate = []
     def voci(testo, intestazioni, nota=""):
         chiamate.append(nota)
         return {"corrente": [("SPA.C.IV.1", D("5000")), ("SPP.A.I", D("900")), ("CE.A.1", D("500")), ("CE.B.7", D("400"))],
                 "precedente": [], "totali": {}}
-    with pytest.raises(S.SnelloNonRiuscito) as exc:
-        S.importa(pdf, analizza=lambda p: _struttura("legge"), leggi_voci=voci)
-    assert exc.value.report["esito"] == "ripiego" and exc.value.report["fase"] == "verifica"
+    r = S.importa(pdf, analizza=lambda p: _struttura("legge"), leggi_voci=voci)
     assert len(chiamate) == 3 and any("scarto" in n for n in chiamate)     # SP, CE, una rilettura
+    assert r.report["esito"] == "squadrato"
+    assert r.report["tappo"]["corrente"] is None
+    assert r.report["misura"]["corrente"]["scarto_sp"] == "4100.00"
+    assert r.bs["_plug_residual"] == D("0")
+    # I dati restano quelli letti (nessun tappo applicato): l'attivo squadrato resta 5000.
+    assert r.bs["sp09_disponibilita_liquide"] == D("5000.00")
+
+
+def test_legge_squadrato_non_e_unrisultato_ok_ne_tappo(tmp_path):
+    """Lo sbilancio dichiarato non deve confondersi con un tappo entro soglia: il campo
+    'tappo' resta assente (None) e l'esito e' un terzo valore distinto."""
+    pdf = _pdf_vuoto(str(tmp_path / "c.pdf"))
+    def voci(testo, intestazioni, nota=""):
+        return {"corrente": [("SPA.C.IV.1", D("5000")), ("SPP.A.I", D("900")), ("CE.A.1", D("500")), ("CE.B.7", D("400"))],
+                "precedente": [], "totali": {}}
+    r = S.importa(pdf, analizza=lambda p: _struttura("legge"), leggi_voci=voci)
+    assert r.report["esito"] not in ("ok", "tappo")
+    assert r.report["esito"] == "squadrato"
 
 
 def test_route_hint_si_inoltra_alla_struttura(tmp_path):
     # Task lotto-b, fix 9: route_hint arriva dal chiamante (pdf_importer.py, la route del
     # classificatore) fino ad analizza_struttura, che lo passa a modo_da_mappe. Il default None
     # non cambia la firma che i test esistenti usano (`analizza=lambda p: ...`).
-    pdf = pdf_colonna_unica(str(tmp_path / "c.pdf"))
+    pdf = _pdf_vuoto(str(tmp_path / "c.pdf"))
     visti = {}
 
     def analizza(p, *, route_hint=None):
@@ -64,13 +109,13 @@ def test_route_hint_si_inoltra_alla_struttura(tmp_path):
 def test_route_hint_assente_non_rompe_una_analizza_senza_quel_parametro(tmp_path):
     # Senza route_hint (default None) la chiamata resta quella di sempre, posizionale sola:
     # una `analizza` finta che non accetta affatto quel parametro non deve rompersi.
-    pdf = pdf_colonna_unica(str(tmp_path / "c.pdf"))
+    pdf = _pdf_vuoto(str(tmp_path / "c.pdf"))
     r = S.importa(pdf, analizza=lambda p: _struttura("legge"), leggi_voci=_voci_quadrate)
     assert r.report["esito"] == "ok"
 
 
 def test_struttura_in_errore_ripiega(tmp_path):
-    pdf = pdf_colonna_unica(str(tmp_path / "c.pdf"))
+    pdf = _pdf_vuoto(str(tmp_path / "c.pdf"))
     def rotta(p):
         raise RuntimeError("sonnet giu'")
     with pytest.raises(S.SnelloNonRiuscito) as exc:
@@ -85,7 +130,7 @@ def test_pagina_condivisa_sp_e_ce_si_legge_una_sola_volta(tmp_path):
     diversi (come budget_397: la stessa riga di debito letta 'SPP.D.O' dalla chiamata SP e
     'SPP.D.E' dalla chiamata CE) e la contano due volte, perche' da_coppie deduplica solo per
     percorso esatto. Una pagina cosi' si legge una volta sola."""
-    pdf = pdf_colonna_unica(str(tmp_path / "c.pdf"))
+    pdf = _pdf_vuoto(str(tmp_path / "c.pdf"))
     chiamate = []
 
     def voci(testo, intestazioni, nota=""):
@@ -108,7 +153,7 @@ def test_pagina_condivisa_rilettura_dichiara_entrambe_le_sezioni(tmp_path):
     rilegge SP e CE insieme (`_leggi_sp_e_ce`), ma la diagnostica `letture` incrementava solo la
     sezione scelta dall'euristica (`sezione`), lasciando l'altra ferma a 1 anche se era stata
     riletta anch'essa. Ora entrambe le sezioni dichiarano la rilettura."""
-    pdf = pdf_colonna_unica(str(tmp_path / "c.pdf"))
+    pdf = _pdf_vuoto(str(tmp_path / "c.pdf"))
     chiamate = []
 
     def voci(testo, intestazioni, nota=""):
@@ -133,7 +178,7 @@ def test_pagina_condivisa_rilettura_dichiara_entrambe_le_sezioni(tmp_path):
 def test_legge_vuoto_rilegge_poi_ripiega(tmp_path):
     """esito 'vuoto' (attivo e passivo entrambi zero) si tratta come oltre_soglia: una sola
     rilettura, poi SnelloNonRiuscito con errore 'vuoto' dichiarato."""
-    pdf = pdf_colonna_unica(str(tmp_path / "c.pdf"))
+    pdf = _pdf_vuoto(str(tmp_path / "c.pdf"))
     chiamate = []
     def voci(testo, intestazioni, nota=""):
         chiamate.append(nota)
@@ -148,7 +193,7 @@ def test_legge_vuoto_rilegge_poi_ripiega(tmp_path):
 def test_legge_tappo_entro_soglia_plug_residual(tmp_path):
     """Uno scarto SP entro soglia si tampona (sp16g altri debiti): _plug_residual riporta
     esattamente l'importo del tappo e il report dichiara esito 'tappo'."""
-    pdf = pdf_colonna_unica(str(tmp_path / "c.pdf"))
+    pdf = _pdf_vuoto(str(tmp_path / "c.pdf"))
 
     def voci(testo, intestazioni, nota=""):
         if intestazioni and intestazioni[0].startswith("SP"):
@@ -169,7 +214,7 @@ def test_conti_percorso_finto_bilancio_quadra(tmp_path, monkeypatch):
     (righe_da_pdf monkeypatchato): risultato in bilancio, `_unclassified_mass` sempre presente."""
     from importers.import_snello import righe as R
 
-    pdf = pdf_colonna_unica(str(tmp_path / "c.pdf"))
+    pdf = _pdf_vuoto(str(tmp_path / "c.pdf"))
     righe_finte = [
         R.Riga(id="p1r1", pagina=1, lato="L", testo="IMPIANTI", valore=D("1000")),
         R.Riga(id="p1r2", pagina=1, lato="L", testo="BANCA C/C", valore=D("500")),
@@ -196,7 +241,7 @@ def test_eccezione_in_lettura_diventa_ripiego(tmp_path):
     SnelloNonRiuscito con fase e classe dichiarate."""
     from importers.llm_provider import ContestoEccessivo
 
-    pdf = pdf_colonna_unica(str(tmp_path / "c.pdf"))
+    pdf = _pdf_vuoto(str(tmp_path / "c.pdf"))
     def voci(testo, intestazioni, nota=""):
         raise ContestoEccessivo("troppo grande")
     with pytest.raises(S.SnelloNonRiuscito) as exc:
@@ -213,7 +258,7 @@ def test_conti_seconda_misura_non_sottrae_l_utile_due_volte(tmp_path, monkeypatc
     esce come falso 'tappo'; corretto, esce come 'oltre_soglia' sul vero -250."""
     from importers.import_snello import righe as R
 
-    pdf = pdf_colonna_unica(str(tmp_path / "c.pdf"))
+    pdf = _pdf_vuoto(str(tmp_path / "c.pdf"))
     righe_finte = [
         R.Riga(id="p1r1", pagina=1, lato="L", testo="BANCA C/C", valore=D("250")),
         R.Riga(id="p1r2", pagina=1, lato="R", testo="FORNITORI ITALIA", valore=D("800")),
@@ -228,19 +273,29 @@ def test_conti_seconda_misura_non_sottrae_l_utile_due_volte(tmp_path, monkeypatc
             f.percorso = percorsi[f.id]
         return {"chiamate": 1, "saltate_prima": 0, "senza_percorso": 0}
 
-    with pytest.raises(S.SnelloNonRiuscito) as exc:
-        S.importa(pdf, analizza=lambda p: _struttura("conti"), leggi_conti=leggi_conti)
-    assert exc.value.report["esito"] == "ripiego" and exc.value.report["fase"] == "verifica"
-    assert exc.value.report["errore"] == "oltre_soglia"
+    # Modo "conti" non rilegge (nessuna rilettura prevista in questo modo): l'esito
+    # oltre soglia si vede direttamente, sul vero -250 (Task 17: si salva con lo
+    # sbilancio dichiarato invece di ripiegare).
+    r = S.importa(pdf, analizza=lambda p: _struttura("conti"), leggi_conti=leggi_conti)
+    assert r.report["esito"] == "squadrato"
+    assert r.report["misura"]["corrente"]["scarto_sp"] == "-250.00"
+    assert r.report["tappo"]["corrente"] is None
+    assert r.bs["_plug_residual"] == D("0")
 
 
 def test_anomalie_immobilizzazioni_negative(tmp_path):
-    """report['anomalie'] dichiara un'immobilizzazione netta negativa, senza correggerla."""
-    pdf = pdf_colonna_unica(str(tmp_path / "c.pdf"))
+    """Un'immobilizzazione netta ancora negativa (sp02/sp03/sp04) si azzera - mai spostata su
+    un altro campo, mai lasciata negativa - e l'eccedenza tagliata si dichiara in
+    report['anomalie']: stessa regola del vecchio importatore
+    (situazione_contabile_parser.build_sp_from_vision, ~L5177-5185)."""
+    pdf = _pdf_vuoto(str(tmp_path / "c.pdf"))
 
     def voci(testo, intestazioni, nota=""):
         if intestazioni and intestazioni[0].startswith("SP"):
-            return {"corrente": [("SPA.B.II", D("-50")), ("SPA.C.IV", D("1050")),
+            # dopo il clamp sp03 diventa 0: 0 + sp04(1000) = sp11(1000) + sp13(0), quadra da solo -
+            # cosi' il test isola la sola dichiarazione dell'anomalia, senza il tappo che
+            # scatterebbe se il clamp lasciasse un vero scarto residuo.
+            return {"corrente": [("SPA.B.II", D("-80")), ("SPA.C.IV", D("1000")),
                                  ("SPP.A.I", D("1000")), ("SPP.A.IX", D("0"))],
                     "precedente": [], "totali": {}}
         return {"corrente": [], "precedente": [], "totali": {}}
@@ -248,5 +303,111 @@ def test_anomalie_immobilizzazioni_negative(tmp_path):
     struttura = lambda p: _struttura("legge", intestazioni_sp=["SP-2025"], intestazioni_ce=["CE-2025"])
     r = S.importa(pdf, analizza=struttura, leggi_voci=voci)
     assert r.report["esito"] == "ok"
-    assert r.report["anomalie"] == [["sp03_immob_materiali", "-50.00"]]
-    assert r.bs["sp03_immob_materiali"] == D("-50.00")
+    assert r.report["anomalie"] == [["sp03_immob_materiali", "80.00"]]
+    assert r.bs["sp03_immob_materiali"] == D("0.00")
+
+
+# --- Task 15 (2026-09-27): i totali stampati dal documento come ancora indipendente ----------
+
+
+def test_conti_totali_stampati_deterministici_come_ancora(tmp_path, monkeypatch):
+    """In modo 'conti' oggi stampati=None sempre: un documento che stampa un Totale Attivo
+    ben diverso dalla somma classificata (500 contro 5.000,00 dichiarati) deve uscire oltre
+    soglia, anche se lo SP interno pareggia da solo (attivo=passivo=500) - senza l'ancora
+    deterministica quella sotto-estrazione passerebbe per un bilancio pulito."""
+    from importers.import_snello import righe as R
+
+    pdf = _pdf_con_totali(str(tmp_path / "c.pdf"), "5.000,00", "5.000,00")
+    righe_finte = [
+        R.Riga(id="p1r1", pagina=1, lato="L", testo="BANCA C/C", valore=D("500")),
+        R.Riga(id="p1r2", pagina=1, lato="R", testo="CAPITALE SOCIALE", valore=D("500")),
+    ]
+    monkeypatch.setattr(R, "righe_da_pdf", lambda *a, **k: righe_finte)
+
+    def leggi_conti(righe, foglie):
+        percorsi = {"p1r1": "SPA.C.IV", "p1r2": "SPP.A.I"}
+        for f in foglie:
+            f.percorso = percorsi[f.id]
+        return {"chiamate": 1, "saltate_prima": 0, "senza_percorso": 0}
+
+    # Task 17: oltre soglia si salva con lo sbilancio dichiarato (esito "squadrato").
+    r = S.importa(pdf, analizza=lambda p: _struttura("conti"), leggi_conti=leggi_conti)
+    assert r.report["esito"] == "squadrato"
+    assert D(r.report["misura"]["corrente"]["scarto_stampati"]) > 0
+
+
+def test_conti_senza_totali_stampati_si_comporta_come_prima(tmp_path, monkeypatch):
+    """Un documento che non stampa alcun totale (pagina vuota) non cambia comportamento:
+    _declared_control_totals torna None su entrambe le chiavi, come lo stampati=None di
+    prima."""
+    from importers.import_snello import righe as R
+
+    pdf = _pdf_vuoto(str(tmp_path / "c.pdf"))
+    righe_finte = [
+        R.Riga(id="p1r1", pagina=1, lato="L", testo="IMPIANTI", valore=D("1000")),
+        R.Riga(id="p1r2", pagina=1, lato="R", testo="CAPITALE SOCIALE", valore=D("1000")),
+    ]
+    monkeypatch.setattr(R, "righe_da_pdf", lambda *a, **k: righe_finte)
+
+    def leggi_conti(righe, foglie):
+        percorsi = {"p1r1": "SPA.B.II", "p1r2": "SPP.A.I"}
+        for f in foglie:
+            f.percorso = percorsi[f.id]
+        return {"chiamate": 1, "saltate_prima": 0, "senza_percorso": 0}
+
+    r = S.importa(pdf, analizza=lambda p: _struttura("conti"), leggi_conti=leggi_conti)
+    assert r.report["esito"] == "ok"
+
+
+def test_legge_preferisce_i_totali_stampati_deterministici_ai_llm(tmp_path):
+    """Il PDF stampa Totale Attivo/Passivo 5.000,00 (letti deterministicamente); l'LLM
+    dichiara invece, nello stesso campo 'totali', 1.000,00/1.000,00 - gli stessi importi
+    delle voci che ha letto: un contraddittorio apparente che, preso per buono,
+    nasconderebbe la vera sotto-estrazione. I totali deterministici vincono su quelli
+    riportati dall'LLM: lo scarto reale (4.000,00) emerge, oltre soglia."""
+    pdf = _pdf_con_totali(str(tmp_path / "c.pdf"), "5.000,00", "5.000,00")
+
+    def voci(testo, intestazioni, nota=""):
+        return {"corrente": [("SPA.C.IV.1", D("1000")), ("SPP.A.I", D("1000"))],
+                "precedente": [], "totali": {"totale_attivo": D("1000"), "totale_passivo": D("1000")}}
+
+    # Task 17: oltre soglia si salva con lo sbilancio dichiarato (esito "squadrato").
+    r = S.importa(pdf, analizza=lambda p: _struttura("legge"), leggi_voci=voci)
+    assert r.report["esito"] == "squadrato"
+    assert D(r.report["misura"]["corrente"]["scarto_stampati"]) > 0
+
+
+def test_rilettura_per_soli_totali_stampati_dichiara_la_causa(tmp_path):
+    """Round 1 (review, 2026-09-27): quando lo scarto interno (SP e CE) e' entro soglia ma il
+    totale stampato dal documento non concorda con le voci lette, la nota della rilettura deve
+    parlare del totale stampato (non 'voci mancanti, doppie...', un messaggio pensato per un
+    vero sbilancio interno) e il report finale deve dichiarare causa='stampati'."""
+    pdf = _pdf_con_totali(str(tmp_path / "c.pdf"), "5.000,00", "5.000,00")
+    note_viste = []
+
+    def voci(testo, intestazioni, nota=""):
+        note_viste.append(nota)
+        return {"corrente": [("SPA.C.IV.1", D("1000")), ("SPP.A.I", D("1000"))],
+                "precedente": [], "totali": {}}
+
+    # Task 17: oltre soglia si salva con avviso (esito "squadrato"), la causa resta dichiarata.
+    r = S.importa(pdf, analizza=lambda p: _struttura("legge"), leggi_voci=voci)
+    assert r.report["esito"] == "squadrato"
+    assert r.report["causa"] == "stampati"
+    rilettura = [n for n in note_viste if n]
+    assert len(rilettura) == 1   # solo SP: scarto_stampati>soglia sceglie sempre quella sezione
+    assert "stampat" in rilettura[0].lower()
+    assert "voci mancanti" not in rilettura[0].lower()
+
+
+def test_legge_usa_i_totali_llm_quando_il_documento_non_ne_stampa(tmp_path):
+    """Senza un totale stampato deterministico (pagina vuota), i totali riportati
+    dall'LLM restano l'unica ancora, come prima di questo task."""
+    pdf = _pdf_vuoto(str(tmp_path / "c.pdf"))
+
+    def voci(testo, intestazioni, nota=""):
+        return {"corrente": [("SPA.C.IV.1", D("1000")), ("SPP.A.I", D("1000"))],
+                "precedente": [], "totali": {"totale_attivo": D("1000"), "totale_passivo": D("1000")}}
+
+    r = S.importa(pdf, analizza=lambda p: _struttura("legge"), leggi_voci=voci)
+    assert r.report["esito"] == "ok"

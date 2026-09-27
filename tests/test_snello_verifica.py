@@ -1,8 +1,9 @@
 from decimal import Decimal as D
 
+import fitz
 import pytest
 
-from importers.import_snello.verifica import misura, normalizza_forma, soglia, tappa
+from importers.import_snello.verifica import misura, normalizza_forma, soglia, tappa, totali_stampati
 
 
 def _bs(**kw):
@@ -89,3 +90,46 @@ def test_tappo_ce_negativo_si_rifiuta():
 def test_forma_invalida_solleva():
     with pytest.raises(ValueError):
         misura(_bs(), CE, forma="xyz")
+
+
+# --- Task 15 (2026-09-27): i totali che il documento stampa da solo, ancora deterministica ---
+# --- indipendente dall'estrattore (nessuna chiamata modello) --------------------------------
+
+
+def test_totali_stampati_legge_i_totali_dichiarati_dal_documento(tmp_path):
+    doc = fitz.open()
+    page = doc.new_page()
+    page.insert_text((50, 50), "Totale Attivo 5.000,00")
+    page.insert_text((50, 70), "Totale Passivo 5.000,00")
+    pdf = str(tmp_path / "c.pdf")
+    doc.save(pdf)
+    assert totali_stampati(pdf) == {"totale_attivo": D("5000"), "totale_passivo": D("5000")}
+
+
+def test_totali_stampati_assenti_sono_none(tmp_path):
+    doc = fitz.open()
+    doc.new_page()
+    pdf = str(tmp_path / "c.pdf")
+    doc.save(pdf)
+    assert totali_stampati(pdf) == {"totale_attivo": None, "totale_passivo": None}
+
+
+def test_stampati_passivo_netto_del_risultato_si_corregge_come_il_vecchio_importatore():
+    """Un 'Totale Passivo' stampato NETTO del risultato d'esercizio (comune nelle situazioni
+    contabili a sezioni contrapposte, dove il risultato sta su una riga a parte accanto al
+    pareggio) non deve apparire come uno scarto quanto l'utile: misura() lo corregge con la
+    stessa regola del vecchio importatore (_reconcile_utile_in_passivo), prima di calcolare
+    scarto_stampati."""
+    bs = _bs()  # att=1500, pas=1500 (sp13=100 gia' incluso)
+    stampati = {"totale_attivo": D("1500"), "totale_passivo": D("1400")}   # netto dell'utile 100
+    m = misura(bs, CE, stampati, forma="bilancio")
+    assert m["scarto_stampati"] == D("0.00")
+
+
+def test_stampati_gap_non_coincidente_col_risultato_non_si_corregge():
+    """Un gap che NON coincide col risultato (una vera sotto-estrazione, non una convenzione
+    di stampa) non si tocca: la correzione e' condizionata, non un pareggio forzato."""
+    bs = _bs()
+    stampati = {"totale_attivo": D("1500"), "totale_passivo": D("1000")}  # gap 500, non 100
+    m = misura(bs, CE, stampati, forma="bilancio")
+    assert m["scarto_stampati"] == D("500.00")

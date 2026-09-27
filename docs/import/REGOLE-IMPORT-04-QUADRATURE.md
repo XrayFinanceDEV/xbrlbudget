@@ -98,27 +98,35 @@ legittimamente i soli aggregati non deve fallire.
 
 Questo gate **non** controlla il CE: quel pezzo lo aggiunge la quadratura subito dopo.
 
-## 5. I messaggi di rifiuto, in ordine di precedenza
+## 5. I messaggi di avviso e di rifiuto, in ordine di precedenza
 
 Quando il gate strutturale fallisce, si sceglie **la diagnosi più utile**, non la prima
 disponibile. L'ordine è studiato: l'evidenza stampata dal documento batte la diagnosi di
 formato.
 
-| # | Condizione | Messaggio |
-|---|---|---|
-| 1 | il documento è una scansione | "*Il documento è una scansione contabile, ma l'OCR non ha ricostruito in modo affidabile colonne, gerarchie e totali…*" — il file **non** viene dichiarato sbilanciato |
-| 2 | i due totali **stampati** differiscono oltre €2 | "***Il bilancio sorgente non quadra prima dell'importazione**: Totale Attivo … != Totale Passivo … (scarto …). Correggere il documento contabile originale.*" |
-| 3 | riepilogo aggregato **che contraddice se stesso** | "***Il documento sorgente è internamente incoerente**: le componenti del Conto Economico non ricostruiscono il risultato netto dichiarato (scarto …) e le componenti dell'Attivo non coincidono con il totale stampato (scarto …). Correggere il documento contabile originale.*" |
-| 4 | riepilogo aggregato la cui stampa è coerente (`_is_aggregated_summary`: nessun sotto-item in numero romano, nessun "esigibili entro/oltre", nessun codice conto) | "***Formato non supportato**: il documento è un riepilogo aggregato per macro-voci, non uno schema di bilancio IV-CEE (art. 2424/2425) importabile…*" |
-| 5 | totali stampati coincidenti, ma componenti che non li ricostruiscono | "*Documento non importabile automaticamente: i totali Attivo e Passivo stampati coincidono, ma le componenti… non li ricostruiscono.*" |
-| 6 | nessuna delle precedenti | messaggio generico |
+**Task 17 (decisione del proprietario, 2026-09-27): «se il bilancio non è quadrato deve essere
+comunque importato con avviso, l'utente lo correggerà nella tab rettifiche».** Le righe #2 e #3
+erano rifiuti duri (`PDFImportError`) fino a questa decisione: un documento che contraddice i
+propri stessi totali stampati non si scarta più, si importa con lo stesso testo diagnostico come
+avviso. Solo #1 (scansione/OCR inaffidabile) e #4 (riepilogo davvero troppo aggregato, senza uno
+schema IV-CEE da cui ripartire) restano errori duri: non c'è nulla che l'utente possa correggere
+in Rettifiche su un file che non ha uno stato patrimoniale leggibile.
+
+| # | Condizione | Messaggio | Duro o avviso |
+|---|---|---|---|
+| 1 | il documento è una scansione | "*Il documento è una scansione contabile, ma l'OCR non ha ricostruito in modo affidabile colonne, gerarchie e totali…*" — il file **non** viene dichiarato sbilanciato | duro |
+| 2 | i due totali **stampati** differiscono oltre €2 | "***BILANCIO SBILANCIATO: il bilancio sorgente non quadra prima dell'importazione**: Totale Attivo … != Totale Passivo … (scarto …). Il bilancio è stato importato così com'è: correggilo in Rettifiche prima di calcolare la proiezione.*" | avviso — rilevato **prima** di scegliere un estrattore (`_declared_totals_contradiction` in `pdf_importer.py`, chiamato prima ancora del ramo IV-CEE/route C), ma l'estrazione prosegue comunque e l'avviso resta in testa a `warnings` qualunque cosa dica poi `mapper.validate_balance` sul foglio ricostruito |
+| 3 | riepilogo aggregato **che contraddice se stesso** | "***BILANCIO SBILANCIATO: il documento sorgente è internamente incoerente**: le componenti del Conto Economico non ricostruiscono il risultato netto dichiarato (scarto …) e le componenti dell'Attivo non coincidono con il totale stampato (scarto …). Il bilancio è stato importato così com'è: correggilo in Rettifiche prima di calcolare la proiezione.*" | avviso — da `_classify_balance_failure`, dopo che `mapper.validate_balance` è già fallito |
+| 4 | riepilogo aggregato la cui stampa è coerente (`_is_aggregated_summary`: nessun sotto-item in numero romano, nessun "esigibili entro/oltre", nessun codice conto) | "***Formato non supportato**: il documento è un riepilogo aggregato per macro-voci, non uno schema di bilancio IV-CEE (art. 2424/2425) importabile…*" | duro |
+| 5 | totali stampati coincidenti, ma componenti che non li ricostruiscono | "*Documento non importabile automaticamente: i totali Attivo e Passivo stampati coincidono, ma le componenti… non li ricostruiscono.*" | avviso |
+| 6 | nessuna delle precedenti | messaggio generico | avviso |
 
 Sono tutte **regole generiche**, non legate a file specifici: la #2 colpisce indifferentemente
 il LUGS di prova e un Greco Servizi reale, perché legge i totali che ciascun documento stampa.
 
-### Perché la #3 sta prima della #4
+### Perché la #3 viene prima della #4
 Un riepilogo che pareggia **solo perché una cifra è stata gonfiata** non è "troppo aggregato":
-è **auto-contraddittorio**, e questo è il difetto che il mittente deve correggere.
+è **auto-contraddittorio**, e questo è il difetto che l'avviso deve nominare per primo.
 
 Il caso che ha originato la regola (2026-07-16, budget_137) è istruttivo. Lo stesso documento
 esiste in tre versioni:
@@ -136,8 +144,10 @@ risultato stampato di −266.938,57 (scarto **61.350,89**).
 
 La diagnosi #3 legge **solo gli importi che il documento stampa**, riporta i due scarti, e **non
 pubblica mai un totale "corretto"** che il documento non contiene. Tace quando la stampa è
-coerente o troppo scarna per giudicare: il silenzio è la risposta sicura, il file viene comunque
-rifiutato per le sue ragioni.
+coerente o troppo scarna per giudicare: il silenzio è la risposta sicura, e da Task 17 il file
+si importa comunque con quel silenzio (nessun avviso di questo tipo) o con l'avviso dichiarato,
+mai più rifiutato per queste sue ragioni — #4 resta l'unico rifiuto duro di questo gruppo, e solo
+perché lì non c'è nemmeno uno schema da cui ripartire.
 
 Il controllo del CE viene **saltato del tutto se il documento stampa una riga imposte**: fra la
 differenza A−B e il risultato netto ci starebbero le imposte, e non sarebbe ricostruibile.
@@ -180,8 +190,8 @@ disattivati in tre punti: selezione dei candidati, ancoraggio del risultato, arb
 | Identità CE↔SP | `max(€2; 0,1% del totale attivo)` | — |
 | Identità CE↔SP nell'arbitro | `max(€2; 0,1% di \|sp13\|)` | ancorata al risultato, non al totale |
 | Gate strutturale | €1 per ciascuno dei test | — |
-| Rifiuto "sorgente non quadra" | scarto stampato > €2 | — |
-| Incoerenza interna | scarto CE > €2; scarto Attivo > €2 | — |
+| Avviso "sorgente non quadra" (dal Task 17 non è più un rifiuto) | scarto stampato > €2 | — |
+| Incoerenza interna (dal Task 17 non è più un rifiuto) | scarto CE > €2; scarto Attivo > €2 | — |
 | Gap di completezza route C | ignorato sotto il 2% | — |
 | Severità warning route C | 20% → "prevalentemente stimata" | **non rifiuta**, vedi indice §5 D2 |
 | Emissione del warning residuo | > €1 | — |
@@ -287,22 +297,38 @@ esplicito — `sp06g_crediti_altri_breve` o `sp16g_altri_debiti_breve` sullo SP,
 CE e SP — mai su un campo `TIER0`. Un tappo che porterebbe `ce06_servizi` sotto zero **non si
 applica**: l'esito diventa "oltre soglia" invece di un tappo negativo.
 
+**Oltre soglia, si salva con lo sbilancio dichiarato — decisione del proprietario (Task 17,
+2026-09-27): «se il bilancio non è quadrato deve essere comunque importato con avviso, l'utente
+lo correggerà nella tab rettifiche».** Nessun tappo si applica in questo caso (lo SP/CE restano
+quelli letti, invariati): l'esito diventato `"squadrato"` porta comunque `misura` con lo scarto
+misurato, e `pdf_importer.py` ne deriva un `unbalanced_reason` esplicito
+(`_snello_squadrato_reason`) quando nessun altro avviso lo ha già dichiarato — necessario perché
+uno scarto sui soli totali **stampati** dal documento (`scarto_stampati`) può lasciare lo SP
+ricostruito internamente quadrato, e `mapper.validate_balance` da solo non lo vedrebbe. Ne segue
+un `validation_status` `"unbalanced"` (mai `"verified"`) e un previsionale bloccato dal verdetto
+**esistente** di `check_quadratura` sul foglio persistito, non da un cancello nuovo.
+
 **Dove si legge.** Nel `validation_report["import_snello"]` del foglio: `misura` porta lo scarto
 SP/CE misurato prima del tappo (per esercizio: `corrente` e, in modo `"legge"`, `precedente`),
-`tappo` il campo/importo scelto. Gli esiti realmente emessi sono **`"ok"` / `"tappo"` /
-`"ripiego"` / `"non_applicabile"`** (mai `"squadrato"`) — la tabella completa, con le chiavi
-proprie di ciascuno, è in
+`tappo` il campo/importo scelto (`None` su `"squadrato"`). Gli esiti realmente emessi sono
+**`"ok"` / `"tappo"` / `"squadrato"` / `"ripiego"` / `"non_applicabile"`** — la tabella completa,
+con le chiavi proprie di ciascuno, è in
 [REGOLE-IMPORT-02-ESTRAZIONE.md §10](REGOLE-IMPORT-02-ESTRAZIONE.md). Le chiavi diagnostiche
 generali restano quelle di sempre, sul `BalanceSheet` finale: `_plug_residual` = l'importo del
-tappo sullo SP (0 se nessun tappo), `_unclassified_mass` = la massa in `diag["lato_irrisolti"]`,
-per un conto sul lato sbagliato senza contropartita — mai zero per omissione, sempre dichiarate.
+tappo sullo SP (0 se nessun tappo, quindi anche su `"squadrato"`), `_unclassified_mass` = la massa
+in `diag["lato_irrisolti"]`, per un conto sul lato sbagliato senza contropartita — mai zero per
+omissione, sempre dichiarate.
 
-**Oltre soglia, una rilettura mirata (solo in modo `"legge"`); ancora oltre, ripiego.** Il ripiego
-è l'importatore attuale, intero e invariato: da lì in avanti valgono **tutte** le regole di questa
-pagina, comprese quelle che qui sopra il percorso snello supera (nessun plug, chiusura solo
-diagnostica). Il ripiego si dichiara con `validation_report["import_snello"]["esito"] =
-"ripiego"` (`fase`/`errore` accanto). Un documento scansionato o letto da OCR non tenta nemmeno il
-percorso snello: `"non_applicabile"`, con `motivo`, deciso prima di leggere una sola riga.
+**Una rilettura mirata (solo in modo `"legge"`); il ripiego resta solo per `"vuoto"` e per gli
+insuccessi a monte.** Il ripiego è l'importatore attuale, intero e invariato: da lì in avanti
+valgono **tutte** le regole di questa pagina, comprese quelle che qui sopra il percorso snello
+supera (nessun plug, chiusura solo diagnostica). Si ripiega solo quando l'esito resta `"vuoto"`
+dopo la rilettura (un'estrazione vuota non ha nulla di sensato da salvare), quando la struttura
+del documento non si riconosce, o su un'eccezione imprevista — mai più su `"oltre_soglia"`, che
+diventa `"squadrato"` (sopra). Il ripiego si dichiara con
+`validation_report["import_snello"]["esito"] = "ripiego"` (`fase`/`errore` accanto). Un documento
+scansionato o letto da OCR non tenta nemmeno il percorso snello: `"non_applicabile"`, con
+`motivo`, deciso prima di leggere una sola riga.
 
 **La chiusura al centesimo resta la regola dell'importatore attuale.** La soglia relativa e il
 tappo governano solo il **percorso snello** (F3, prima del punto di convergenza): non toccano

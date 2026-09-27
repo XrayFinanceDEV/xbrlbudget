@@ -176,6 +176,33 @@ def test_forma_ambienta_totali_lettera_e_stato_patrimoniale():
     assert sum(r.valore for r in R.foglie(righe)) == D("2352461.64")
 
 
+def test_mastro_a_figlio_unico_non_raddoppia_dentro_un_totale_di_livello_superiore():
+    # Forma reale (diagnosi TM 589/590, Task 20): "09 RIMANENZE" precede i suoi due membri
+    # "09.01" (due figli propri, risolvibile a k=2) e "09.03" (un solo figlio, risolvibile
+    # solo a k=1). Prima del fix, il cammino k>=2 di "09" consumava "09.03" come membro
+    # grezzo prima che la passata k=1 lo risolvesse: "09.03" e il suo unico figlio restavano
+    # ENTRAMBI foglie con lo stesso importo (40.000,00), raddoppiando la massa.
+    righe = [
+        _r("09", "231250.00", testo="09 RIMANENZE"),
+        _r("0901", "191250.00", testo="09.01 RIMANENZE DI MAGAZZINO"),
+        _r("090101", "100000.00"),
+        _r("090102", "91250.00"),
+        _r("0903", "40000.00", testo="09.03 LAVORI IN CORSO"),
+        _r("090301", "40000.00", testo="09.03.01 Lavori in corso su ordinazione"),
+    ]
+    R.marca_totali(righe)
+    tot = {r.id for r in righe if r.totale}
+    assert tot == {"09", "0901", "0903"}
+    foglie = {r.id for r in R.foglie(righe)}
+    assert foglie == {"090101", "090102", "090301"}
+    assert sum(r.valore for r in R.foglie(righe)) == D("231250.00")
+    # "09.03" resta un mastro dichiarato (mastro del proprio figlio) anche se e' a sua volta
+    # consumato come membro di "09": le due cose coesistono, come per ogni totale intermedio.
+    by_id = {r.id: r for r in righe}
+    assert by_id["090301"].mastro == "09.03 LAVORI IN CORSO"
+    assert by_id["0903"].mastro == "09 RIMANENZE"
+
+
 def test_totale_di_terzo_livello_non_scavalca_un_totale_intermedio_non_ancora_risolto():
     # Ogni gruppo di primo livello ha piu' foglie del tetto di 80 membri per candidato (90 in
     # tutto per I+II+III): "B" non puo' essere raggiunto sommando le 90 foglie grezze in una

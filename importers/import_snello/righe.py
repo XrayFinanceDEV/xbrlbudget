@@ -144,6 +144,40 @@ def _trova_totali(valori: list[Decimal], vivo: list[bool], direzione: int, kmin:
     return trovati
 
 
+def _cerca_membri(valori: list[Decimal], passo: list[int], i: int, kmin: int) -> list[int] | None:
+    """Cammina da ``passo[i]`` accumulando membri vivi finche' la somma non tocca
+    ``valori[i]`` (con almeno ``kmin`` membri) o il cammino finisce/eccede il tetto. Non muta
+    nulla: solo lettura di ``valori``/``passo``, cosi' si puo' usare sia per il candidato
+    principale sia per un tentativo di risoluzione su un suo membro, senza intrecciare gli
+    effetti collaterali dei due."""
+    n = len(valori)
+    s, j, membri = Decimal(0), passo[i], []
+    while j != -1 and j != n and len(membri) < 80:
+        s += valori[j]
+        membri.append(j)
+        if len(membri) >= kmin and s == valori[i]:
+            return membri
+        j = passo[j]
+    return None
+
+
+def _marca_come_totale(seq: list["Riga"], vivo: list[bool], candidabile: list[bool],
+                       passo: list[int], i: int, membri: list[int]) -> None:
+    """Applica un match gia' trovato: ``i`` resta vivo come addendo per il livello sopra, i
+    suoi membri escono dalla lista viva per sempre. Isolata da ``_cerca_membri`` cosi' la
+    stessa mutazione serve sia per il candidato principale di ``_risolvi_totali`` sia per la
+    risoluzione on-demand di un suo membro."""
+    seq[i].totale = True
+    candidabile[i] = False
+    for mi in membri:
+        seq[mi].mastro = seq[mi].mastro or seq[i].testo
+        vivo[mi] = False
+    # i resta vivo (non si tocca): il suo passo salta oltre i membri appena spesi, cosi' un
+    # candidato successivo nella stessa scansione che attraversa i lo trova come un unico
+    # addendo, mai come i suoi vecchi membri.
+    passo[i] = passo[membri[-1]]
+
+
 def _risolvi_totali(seq: list["Riga"], valori: list[Decimal], vivo: list[bool],
                     candidabile: list[bool], direzione: int, kmin: int) -> int:
     """Come ``_trova_totali``, ma marca SUBITO ogni candidato trovato, nella stessa passata:
@@ -156,7 +190,21 @@ def _risolvi_totali(seq: list["Riga"], valori: list[Decimal], vivo: list[bool],
     che il livello intermedio si risolvesse per primo - lasciando il livello intermedio
     (``.totale`` mai marcato) a contare due volte la propria massa. ``candidabile`` impedisce
     di ri-marcare un totale gia' risolto (mai il bersaglio di un nuovo match), ma non lo
-    esclude come addendo: e' li' apposta perche' resti disponibile."""
+    esclude come addendo: e' li' apposta perche' resti disponibile.
+
+    Un pericolo simmetrico e distinto (diagnosi TM 589/590, Task 20): un membro ``mi`` di un
+    match k>=2 puo' essere a sua volta un mastro a figlio unico, risolvibile solo a k=1 - una
+    passata che qui non e' ancora partita (parte solo dopo, e solo se ``marca_totali`` ha
+    gia' visto un gruppo vero). Se lo si consuma cosi' com'e', ``mi`` non passa mai per
+    ``.totale = True`` e il suo stesso figlio, mai reclamato, resta una foglia gemella con lo
+    stesso importo: la massa raddoppia. Prima di accettare il match trovato per ``i``, ogni
+    membro ancora ``candidabile`` (mai risolto) ha quindi diritto a un tentativo di
+    risoluzione k=1 sul posto, con lo stesso ``passo``: se risolve, ``mi`` diventa esso
+    stesso un totale (mastro del proprio figlio) PRIMA di essere marcato come membro di
+    ``i`` - le due cose coesistono, come per ogni totale intermedio a piu' livelli. Il
+    tentativo usa solo membri gia' vivi in quel momento (mai ``i`` o gli altri membri dello
+    stesso match, che sono fisicamente dall'altra parte rispetto ai figli di ``mi``), e non
+    scavalca nulla: se ``mi`` non risolve, resta un membro grezzo esattamente come oggi."""
     n = len(valori)
     nxt, prv = _lista_concatenata(vivo)
     passo = prv if direzione == -1 else nxt
@@ -165,23 +213,17 @@ def _risolvi_totali(seq: list["Riga"], valori: list[Decimal], vivo: list[bool],
     for i in ordine:
         if not vivo[i] or not candidabile[i] or not valori[i]:
             continue
-        s, j, membri = Decimal(0), passo[i], []
-        while j != -1 and j != n and len(membri) < 80:
-            s += valori[j]
-            membri.append(j)
-            if len(membri) >= kmin and s == valori[i]:
-                seq[i].totale = True
-                candidabile[i] = False
-                for mi in membri:
-                    seq[mi].mastro = seq[mi].mastro or seq[i].testo
-                    vivo[mi] = False
-                # i resta vivo (non si tocca): il suo passo salta oltre i membri appena
-                # spesi, cosi' un candidato successivo nella stessa scansione che attraversa
-                # i lo trova come un unico addendo, mai come i suoi vecchi membri.
-                passo[i] = passo[membri[-1]]
-                marcati += 1
-                break
-            j = passo[j]
+        membri = _cerca_membri(valori, passo, i, kmin)
+        if membri is None:
+            continue
+        for mi in membri:
+            if candidabile[mi]:
+                sotto = _cerca_membri(valori, passo, mi, 1)
+                if sotto is not None:
+                    _marca_come_totale(seq, vivo, candidabile, passo, mi, sotto)
+                    marcati += 1
+        _marca_come_totale(seq, vivo, candidabile, passo, i, membri)
+        marcati += 1
     return marcati
 
 

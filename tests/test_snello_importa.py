@@ -32,17 +32,36 @@ def test_legge_che_quadra(tmp_path):
     assert r.bs["_plug_residual"] == 0
 
 
-def test_legge_oltre_soglia_rilegge_una_volta_poi_ripiega(tmp_path):
+def test_legge_oltre_soglia_rilegge_una_volta_poi_squadrato(tmp_path):
+    """Task 17 (decisione del proprietario, 2026-09-27): oltre soglia dopo l'unica rilettura
+    non ripiega piu' sull'importatore attuale. Si salva il risultato snello con lo sbilancio
+    dichiarato (esito 'squadrato'), senza alcun tappo: l'utente lo corregge in Rettifiche."""
     pdf = pdf_colonna_unica(str(tmp_path / "c.pdf"))
     chiamate = []
     def voci(testo, intestazioni, nota=""):
         chiamate.append(nota)
         return {"corrente": [("SPA.C.IV.1", D("5000")), ("SPP.A.I", D("900")), ("CE.A.1", D("500")), ("CE.B.7", D("400"))],
                 "precedente": [], "totali": {}}
-    with pytest.raises(S.SnelloNonRiuscito) as exc:
-        S.importa(pdf, analizza=lambda p: _struttura("legge"), leggi_voci=voci)
-    assert exc.value.report["esito"] == "ripiego" and exc.value.report["fase"] == "verifica"
+    r = S.importa(pdf, analizza=lambda p: _struttura("legge"), leggi_voci=voci)
     assert len(chiamate) == 3 and any("scarto" in n for n in chiamate)     # SP, CE, una rilettura
+    assert r.report["esito"] == "squadrato"
+    assert r.report["tappo"]["corrente"] is None
+    assert r.report["misura"]["corrente"]["scarto_sp"] == "4100.00"
+    assert r.bs["_plug_residual"] == D("0")
+    # I dati restano quelli letti (nessun tappo applicato): l'attivo squadrato resta 5000.
+    assert r.bs["sp09_disponibilita_liquide"] == D("5000.00")
+
+
+def test_legge_squadrato_non_e_unrisultato_ok_ne_tappo(tmp_path):
+    """Lo sbilancio dichiarato non deve confondersi con un tappo entro soglia: il campo
+    'tappo' resta assente (None) e l'esito e' un terzo valore distinto."""
+    pdf = pdf_colonna_unica(str(tmp_path / "c.pdf"))
+    def voci(testo, intestazioni, nota=""):
+        return {"corrente": [("SPA.C.IV.1", D("5000")), ("SPP.A.I", D("900")), ("CE.A.1", D("500")), ("CE.B.7", D("400"))],
+                "precedente": [], "totali": {}}
+    r = S.importa(pdf, analizza=lambda p: _struttura("legge"), leggi_voci=voci)
+    assert r.report["esito"] not in ("ok", "tappo")
+    assert r.report["esito"] == "squadrato"
 
 
 def test_route_hint_si_inoltra_alla_struttura(tmp_path):
@@ -228,10 +247,14 @@ def test_conti_seconda_misura_non_sottrae_l_utile_due_volte(tmp_path, monkeypatc
             f.percorso = percorsi[f.id]
         return {"chiamate": 1, "saltate_prima": 0, "senza_percorso": 0}
 
-    with pytest.raises(S.SnelloNonRiuscito) as exc:
-        S.importa(pdf, analizza=lambda p: _struttura("conti"), leggi_conti=leggi_conti)
-    assert exc.value.report["esito"] == "ripiego" and exc.value.report["fase"] == "verifica"
-    assert exc.value.report["errore"] == "oltre_soglia"
+    # Modo "conti" non rilegge (nessuna rilettura prevista in questo modo): l'esito
+    # oltre soglia si vede direttamente, sul vero -250 (Task 17: si salva con lo
+    # sbilancio dichiarato invece di ripiegare).
+    r = S.importa(pdf, analizza=lambda p: _struttura("conti"), leggi_conti=leggi_conti)
+    assert r.report["esito"] == "squadrato"
+    assert r.report["misura"]["corrente"]["scarto_sp"] == "-250.00"
+    assert r.report["tappo"]["corrente"] is None
+    assert r.bs["_plug_residual"] == D("0")
 
 
 def test_anomalie_immobilizzazioni_negative(tmp_path):

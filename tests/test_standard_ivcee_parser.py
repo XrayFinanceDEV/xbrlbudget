@@ -822,11 +822,29 @@ def test_full_workflow_matrix_partial_gap_equals_declared_amount(
     assert abs(gap - sbilancio) < Decimal("0.01")
 
 
-def test_contradictory_source_is_rejected_before_api_key_fallback(
-    tmp_path, monkeypatch
-):
-    """A printed Attivo/Passivo mismatch is a source error, not an AI-key error."""
-    from importers import pdf_importer
+def test_contradictory_source_is_saved_with_warning(tmp_path, monkeypatch):
+    """Task 17 (decisione del proprietario, 2026-09-27): un mismatch Attivo/Passivo
+    dichiarato dal documento non blocca piu' l'import — 'importa con avviso, l'utente lo
+    correggera' in Rettifiche'. Prima di questa decisione questo stesso scenario sollevava
+    un PDFImportError qui, PRIMA di scegliere un estrattore (era il gate immutabile dei
+    'controlli di fonte'); ora il gate resta come DIAGNOSI (l'avviso e' identico) ma non
+    come rifiuto: l'estrazione prosegue con le regole di sempre. L'estrazione LLM vera
+    e' sostituita da una finta (nessuna rete, nessuna chiave reale) che restituisce esattamente
+    quello che il parser deterministico legge dalla stessa fixture SENZA il mismatch — cioe'
+    quello che un vero estrattore, leggendo voce per voce, ricostruirebbe comunque
+    correttamente nonostante il totale stampato sbagliato (lo stesso meccanismo osservato sui
+    file reali budget_289/133/672: lo snello/LLM quadra da solo, il documento sorgente no)."""
+    from sqlalchemy import create_engine
+    from sqlalchemy.orm import sessionmaker
+
+    from database.db import Base
+    from importers import pdf_extractor_llm, pdf_importer
+
+    clean_pdf = tmp_path / "clean-source.pdf"
+    _write_compact_infrannual_pdf(clean_pdf, period_months=6)
+    clean_bs, _clean_prior_bs = extract_standard_ivcee_balances(str(clean_pdf))
+    clean_ce, _clean_prior_ce = extract_standard_ivcee_income(str(clean_pdf))
+    assert clean_bs is not None and clean_ce is not None  # sanity: la fixture pulita si legge da sola
 
     pdf = tmp_path / "contradictory-source.pdf"
     _write_compact_infrannual_pdf(
@@ -834,23 +852,36 @@ def test_contradictory_source_is_rejected_before_api_key_fallback(
         period_months=6,
         passivo_total_delta=Decimal("100"),
     )
-    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key-not-real")
+    monkeypatch.setattr(
+        pdf_extractor_llm, "extract_pdf_with_llm",
+        lambda *a, **k: (dict(clean_bs), dict(clean_ce)),
+    )
 
-    with pytest.raises(pdf_importer.PDFImportError) as raised:
-        pdf_importer.import_pdf_balance_sheet(
-            file_path=str(pdf),
-            fiscal_year=2026,
-            company_name="CONTRADICTORY SOURCE",
-            create_company=True,
-            sector=1,
-            period_months=6,
-            user_id="workflow-matrix",
-        )
+    engine = create_engine("sqlite:///:memory:")
+    Base.metadata.create_all(engine)
+    sessions = sessionmaker(bind=engine)
+    monkeypatch.setattr(pdf_importer, "SessionLocal", sessions)
 
-    message = str(raised.value)
-    assert "non quadra prima dell'importazione" in message
-    assert "scarto €100,00" in message
-    assert "ANTHROPIC_API_KEY" not in message
+    result = pdf_importer.import_pdf_balance_sheet(
+        file_path=str(pdf),
+        fiscal_year=2026,
+        company_name="CONTRADICTORY SOURCE",
+        create_company=True,
+        sector=1,
+        period_months=6,
+        user_id="workflow-matrix",
+    )
+
+    assert result["success"] is True
+    assert result["validation_status"] == "unbalanced"
+    warning = next(
+        (w for w in result["warnings"] if "non quadra prima dell'importazione" in w), None
+    )
+    assert warning is not None
+    assert "scarto €100,00" in warning
+    assert "ANTHROPIC_API_KEY" not in warning
+    assert "Rettifiche" in warning
 
 
 def test_infrannual_macro_analysis_does_not_request_absent_prior_column(

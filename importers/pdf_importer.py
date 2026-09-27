@@ -79,6 +79,66 @@ def _it_amount(value: Decimal) -> str:
     return f"{value:,.2f}".replace(',', '#').replace('.', ',').replace('#', '.')
 
 
+def _declared_totals_contradiction(file_path: str, text: Optional[str]) -> Optional[str]:
+    """Diagnosi pura: il documento sorgente contraddice se stesso, Attivo dichiarato !=
+    Passivo dichiarato (oltre 2 euro). Legge solo i totali che il documento stampa
+    (``_declared_control_totals``), non tocca alcun valore contabile e non impedisce
+    l'estrazione: e' il chiamante che decide come proseguire (Task 17, decisione del
+    proprietario 2026-09-27 — «se il bilancio non e' quadrato deve essere comunque
+    importato con avviso»: questi documenti non si scartano piu' prima di scegliere un
+    estrattore, si importano con questo avviso). None quando i totali dichiarati
+    mancano, non sono leggibili o coincidono.
+    """
+    try:
+        from importers.pdf_extractor_llm import _declared_control_totals
+        source_controls = _declared_control_totals(file_path, text=text)
+    except Exception as source_control_error:
+        # Controllo best-effort: totali non leggibili non bloccano ne' dichiarano nulla.
+        logger.info(
+            "IV-CEE source preflight unavailable (%s: %s)",
+            type(source_control_error).__name__, source_control_error,
+        )
+        return None
+    source_attivo = source_controls.get("attivo")
+    source_passivo = source_controls.get("passivo")
+    if source_attivo is None or source_passivo is None:
+        return None
+    source_difference = abs(source_attivo - source_passivo)
+    if source_difference <= Decimal("2"):
+        return None
+    return (
+        f"{_UNBALANCED_WARNING_PREFIX}: il bilancio sorgente non quadra prima "
+        f"dell'importazione: Totale Attivo €{_euro_it(source_attivo)} != Totale "
+        f"Passivo €{_euro_it(source_passivo)} (scarto €{_euro_it(source_difference)}). "
+        f"{_UNBALANCED_WARNING_SUFFIX}"
+    )
+
+
+def _snello_squadrato_reason(report: Dict[str, Any]) -> str:
+    """Avviso per un risultato del percorso snello con esito 'squadrato' (Task 17): lo
+    scarto e' quello MISURATO dal percorso snello stesso (``report['misura']['corrente']``),
+    mai ricalcolato qui — puo' venire dall'attivo/passivo del foglio ricostruito, dal
+    confronto CE/SP, o dal confronto coi totali stampati dal documento (quest'ultimo non
+    e' visto da ``mapper.validate_balance``, che guarda solo gli aggregati del foglio)."""
+    misura = (report.get("misura") or {}).get("corrente") or {}
+
+    def _fmt(chiave: str) -> str:
+        valore = misura.get(chiave)
+        if valore is None:
+            return "n/d"
+        try:
+            return f"€{_euro_it(Decimal(str(valore)))}"
+        except Exception:
+            return str(valore)
+
+    return (
+        f"{_UNBALANCED_WARNING_PREFIX}: il percorso snello resta oltre soglia dopo "
+        f"l'unica rilettura (scarto Attivo/Passivo {_fmt('scarto_sp')}, scarto CE/SP "
+        f"{_fmt('scarto_ce')}, scarto sui totali stampati dal documento "
+        f"{_fmt('scarto_stampati')}). {_UNBALANCED_WARNING_SUFFIX}"
+    )
+
+
 def _classify_balance_failure(
     balance_sheet_data: Dict[str, Decimal],
     *,
@@ -118,7 +178,14 @@ def _classify_balance_failure(
     if not is_trial_balance and _is_aggregated_summary(sample_text):
         contradiction = _summary_internal_contradiction(sample_text)
         if contradiction:
-            return BalanceFailureVerdict(contradiction, None)
+            # Task 17 (decisione del proprietario, 2026-09-27): un documento internamente
+            # incoerente con i propri totali stampati non e' piu' un errore duro — si
+            # importa comunque, con questo stesso testo diagnostico come avviso, e
+            # l'utente lo corregge in Rettifiche.
+            return BalanceFailureVerdict(
+                None,
+                f"{_UNBALANCED_WARNING_PREFIX}: {contradiction} {_UNBALANCED_WARNING_SUFFIX}",
+            )
         return BalanceFailureVerdict(
             "Formato non supportato: il documento è un riepilogo aggregato per "
             "macro-voci, non uno schema di bilancio IV-CEE (art. 2424/2425) "
@@ -943,41 +1010,23 @@ def import_pdf_balance_sheet(
                     logger.warning("Import snello non riuscito (%s): importatore attuale", type(exc).__name__)
                     _snello_report = {"esito": "ripiego", "fase": "eccezione", "errore": type(exc).__name__}
 
-        # Reject an explicitly contradictory legal statement before choosing an
-        # extractor.  Previously this check ran only *after* extraction failed:
-        # on a clean text PDF without an API key, a printed Attivo/Passivo mismatch
-        # therefore surfaced as the unrelated "ANTHROPIC_API_KEY is required"
-        # error.  These are immutable source controls, so no extractor or plug is
-        # allowed to hide the contradiction.
+        # Detect an explicitly contradictory legal statement before choosing an
+        # extractor — but never reject it. Task 17 (decisione del proprietario,
+        # 2026-09-27): «se il bilancio non e' quadrato deve essere comunque importato
+        # con avviso, l'utente lo correggera' nella tab rettifiche», e questo vale
+        # anche per un documento che contraddice i propri stessi totali stampati.
+        # Prima di questa decisione un mismatch Attivo/Passivo dichiarato bloccava
+        # l'import qui (PDFImportError, prima ancora di scegliere un estrattore); ora
+        # il controllo resta (le stesse "immutable source controls" del commento
+        # originale: nessun estrattore o plug puo' nascondere la contraddizione), ma
+        # produce solo un avviso dichiarato — l'estrazione prosegue con le regole di
+        # sempre e, se produce un bilancio importabile, si salva con questo avviso in
+        # testa (vedi piu' sotto, dove ``unbalanced_reason`` viene costruito).
+        _declared_totals_warning: Optional[str] = None
         if classification.route == ROUTE_IVCEE and not is_scanned and not _ocr_source:
-            try:
-                from importers.pdf_extractor_llm import _declared_control_totals
-
-                source_controls = _declared_control_totals(
-                    file_path, text=sample_text
-                )
-                source_attivo = source_controls.get("attivo")
-                source_passivo = source_controls.get("passivo")
-                if source_attivo is not None and source_passivo is not None:
-                    source_difference = abs(source_attivo - source_passivo)
-                    if source_difference > Decimal("2"):
-                        raise PDFImportError(
-                            "Il bilancio sorgente non quadra prima dell'importazione: "
-                            f"Totale Attivo €{_euro_it(source_attivo)} != Totale "
-                            f"Passivo €{_euro_it(source_passivo)} (scarto "
-                            f"€{_euro_it(source_difference)}). "
-                            "Correggere il documento contabile originale."
-                        )
-            except PDFImportError:
-                raise
-            except Exception as source_control_error:
-                # Control discovery is best effort.  If totals are not legible,
-                # continue with the existing extraction and semantic gates.
-                logger.info(
-                    "IV-CEE source preflight unavailable (%s: %s)",
-                    type(source_control_error).__name__,
-                    source_control_error,
-                )
+            _declared_totals_warning = _declared_totals_contradiction(file_path, sample_text)
+            if _declared_totals_warning:
+                logger.warning(_declared_totals_warning)
 
         _macro_report = {}
 
@@ -1700,7 +1749,20 @@ def import_pdf_balance_sheet(
 
         # Step 2: Validate balance sheet (both paths)
         logger.info("Validating balance sheet...")
-        unbalanced_reason: Optional[str] = None
+        # Un documento che contraddice i propri totali stampati (gate sopra, prima della
+        # scelta dell'estrattore) resta dichiarato anche se cio' che si e' riusciti a
+        # estrarre poi quadra da solo: e' un difetto della fonte, non dell'estrazione, e
+        # nessun estrattore o plug lo deve nascondere (Task 17).
+        unbalanced_reason: Optional[str] = _declared_totals_warning
+        # Un risultato snello 'squadrato' (Task 17) puo' restare oltre soglia solo sul
+        # confronto coi totali STAMPATI dal documento (scarto_stampati), che
+        # mapper.validate_balance non vede (guarda solo gli aggregati del foglio, non i
+        # totali stampati): l'avviso va dichiarato qui, esplicitamente, prima di quel
+        # controllo — non e' un nuovo cancello di quadratura, e' la stessa diagnostica
+        # gia' misurata dal percorso snello.
+        if unbalanced_reason is None and _snello is not None and _snello.report.get("esito") == "squadrato":
+            unbalanced_reason = _snello_squadrato_reason(_snello.report)
+            logger.warning(unbalanced_reason)
         if not mapper.validate_balance(balance_sheet_data):
             _verdict = _classify_balance_failure(
                 balance_sheet_data,
@@ -1716,7 +1778,10 @@ def import_pdf_balance_sheet(
             # Sbilancio: si importa e si corregge in Rettifiche. forecastable
             # restera' False da solo (semantic_valid include la quadratura),
             # e _validate_forecast_source blocca comunque la proiezione.
-            unbalanced_reason = _verdict.warning
+            if unbalanced_reason is None:
+                unbalanced_reason = _verdict.warning
+            logger.warning(_verdict.warning)
+        elif unbalanced_reason:
             logger.warning(unbalanced_reason)
 
         # Unified quadratura diagnostic across ALL routes (shared IV-CEE engine):

@@ -5,8 +5,11 @@ from __future__ import annotations
 from collections import Counter, defaultdict
 from decimal import Decimal
 
+from calculations.ce_result import calculate_ce_result
 from importers.import_snello.percorsi import (CONTROPARTE, NOMI, campo_da_percorso, completa,
                                               e_fondo, e_netto, e_risultato, famiglia, lato_di)
+from importers.import_snello.risultato import control_caption, prior_caption, sign_by_caption
+from importers.import_snello.verifica import misura, soglia
 from importers.iv_cee_hierarchy import detail_fields
 
 _C = Decimal("0.01")
@@ -99,20 +102,39 @@ def applica_lato(foglie, irrisolti: list | None = None) -> int:
 
 
 def da_foglie(foglie):
+    """Percorsi di legge -> campi, con una regola in piu' per il risultato d'esercizio (modo
+    "conti", Task 14 2026-09-26): il corrente non entra MAI dalle righe stampate, sp13 e'
+    sempre l'utile del CE (``calculate_ce_result``). Riusa le regole del vecchio parser
+    best-effort (``importers.import_snello.risultato``, adattatori di
+    ``situazione_contabile_parser``) invece di reinventarle:
+
+      1. una didascalia di ESERCIZI PRECEDENTI (qualunque percorso Qwen le abbia dato: 'IX' per
+         un errore del modello conta comunque) va a sp12g, col segno della didascalia;
+      2. un percorso "R" o "SPP.A.IX" la cui didascalia non parla chiaro (ne' precedente ne'
+         di controllo) e' ambiguo: due ipotesi si confrontano DOPO aver costruito il resto del
+         foglio - corrente (esclusa) o precedente (in sp12g) - e vince quella che quadra meglio;
+      3. una riga di pareggio/controllo dichiarata (TOTALE A PAREGGIO, DIFFERENZA, SBILANCIO,
+         o lo stesso risultato corrente scritto altrove) si esclude e basta, mai sommata.
+
+    ``risultato_duplicato`` resta dichiarato (sempre vuoto in modo "conti"): il vecchio
+    dedup-per-valore riguardava solo le righe che finivano sommate in sp13, e nessuna ci
+    finisce piu' per questa via."""
     diag = {"non_mappati": [], "escluse": [], "risultato_stampato": None, "lato_corretti": 0,
-            "lato_irrisolti": [], "risultato_duplicato": [], "padri_esclusi": []}
+            "lato_irrisolti": [], "risultato_duplicato": [], "padri_esclusi": [],
+            "risultato_precedente": [], "risultato_escluso": [], "risultato_ambiguo": None}
     diag["lato_corretti"] = applica_lato(foglie, diag["lato_irrisolti"])
     irrisolti_ids = {r[0] for r in diag["lato_irrisolti"]}
     due_lati = len({f.lato for f in foglie} & {"L", "R"}) == 2
     # Un percorso stampato ACCANTO a un percorso piu' specifico che lo prolunga (es. "SPP.D"
     # bare insieme a "SPP.D.4") e' lo stesso totale gia' spiegato dai figli: va escluso, mai
-    # sommato di nuovo (come gia' fa da_coppie in modo "legge"). Un fondo (.F) non conta mai
-    # come figlio ai fini di questa regola: netta il lordo, non lo spiega.
+    # sommato di nuovo (come gia' fa da_coppie in modo "legge"). Un fondo o una scadenza da
+    # sole (.F/.E/.O) non contano mai come figlio ai fini di questa regola (_e_discendente_vero).
     tutti_percorsi = [f.percorso for f in foglie if f.percorso]
-    visti_risultato: dict[Decimal, str] = {}
     per_famiglia = defaultdict(list)
+    ambigue: list = []
+    pregresso = Decimal(0)
     for f in foglie:
-        if f.percorso == "R" or (f.percorso and e_risultato(f.percorso)):
+        if f.percorso and e_risultato(f.percorso):
             diag["risultato_stampato"] = str(abs(f.valore).quantize(_C))
             continue
         if f.percorso == "X":
@@ -126,19 +148,31 @@ def da_foglie(foglie):
         if any(_e_discendente_vero(f.percorso, q) for q in tutti_percorsi):
             diag["padri_esclusi"].append([f.id, f.percorso, str(f.valore.quantize(_C))])
             continue
+
+        # --- risultato d'esercizio: mai dalle righe stampate (regole del vecchio parser) ---
+        if prior_caption(f.testo):
+            v = sign_by_caption(f.testo, f.valore)
+            pregresso += v
+            diag["risultato_precedente"].append([f.id, f.percorso, str(v.quantize(_C))])
+            continue
+        if f.percorso == "SPP.A.VIII":
+            # Qwen riserva VIII al portato a nuovo: una didascalia non riconosciuta (generica,
+            # o mancante) non toglie fiducia al percorso esplicito, e il segno resta quello
+            # letto (nessuna contropartita per un conto di netto, come applica_lato).
+            pregresso += f.valore
+            diag["risultato_precedente"].append([f.id, f.percorso, str(f.valore.quantize(_C))])
+            continue
+        if f.percorso in ("R", "SPP.A.IX"):
+            ambigue.append(f)
+            continue
+        if control_caption(f.testo):
+            diag["risultato_escluso"].append([f.id, f.percorso, str(f.valore.quantize(_C))])
+            continue
+
         codice = campo_da_percorso(f.percorso)
         if codice is None:
             diag["non_mappati"].append([f.id, f.percorso, str(f.valore.quantize(_C))])
             continue
-        if codice == "sp13":
-            # un riepilogo del gestionale puo' ristampare "risultato di esercizio" su una
-            # pagina diversa, stesso conto stesso importo: un duplicato esatto si conta una
-            # sola volta (un importo diverso e' invece una voce vera, non un duplicato).
-            v = f.valore.quantize(_C)
-            if v in visti_risultato:
-                diag["risultato_duplicato"].append([f.id, f.percorso, str(v)])
-                continue
-            visti_risultato[v] = f.id
         per_famiglia[famiglia(codice)].append((f, codice))
     importi = defaultdict(Decimal)
     for elementi in per_famiglia.values():
@@ -174,7 +208,44 @@ def da_foglie(foglie):
                 corsia = _corsia(f, True) if due_lati else 0
                 contro = (corsia != corsia_n) ^ ((f.valore >= 0) != positivo_n)
             importi[codice] += -v if contro else v
+    if pregresso:
+        importi["sp12g"] += pregresso.quantize(_C)
     bs, ce = completa(_netta_fondi_negativi(dict(importi)))
+
+    # Il risultato corrente non e' mai una somma di righe stampate: e' sempre l'utile del CE
+    # gia' costruito sopra (diagnose, never fabricate - la memoria/CLAUDE.md: "The RISULTATO
+    # e' la balancing figure ... derive il risultato dal CE"). Una foglia ambigua (percorso "R"
+    # o "SPP.A.IX", didascalia che non dice ne' precedente ne' controllo) puo' pero' essere in
+    # realta' un pregresso non riconosciuto come tale (didascalia generica tipo "Risultato
+    # esercizio" senza "precedente"): si sceglie l'ipotesi che fa quadrare meglio il foglio,
+    # mai quella che quadra peggio, e se nessuna delle due chiude entro soglia si tiene
+    # l'ipotesi "corrente" (esclusa) e si lascia che la verifica dichiari lo scarto vero (non
+    # e' un risultato piu' grande da inventare, e' massa mancante da recuperare altrove).
+    utile_ce = calculate_ce_result(ce).net_profit.quantize(_C)
+    if ambigue:
+        somma = sum((f.valore for f in ambigue), Decimal(0))
+        bs_corrente = dict(bs)
+        bs_corrente["sp13_utile_perdita"] = utile_ce
+        bs_precedente = dict(bs)
+        bs_precedente["sp12g_utili_perdite_portati"] = (
+            Decimal(bs_precedente.get("sp12g_utili_perdite_portati", 0)) + somma).quantize(_C)
+        bs_precedente["sp12_riserve"] = (
+            Decimal(bs_precedente.get("sp12_riserve", 0)) + somma).quantize(_C)
+        bs_precedente["sp13_utile_perdita"] = utile_ce
+        m_corrente = misura(bs_corrente, ce, None, forma="bilancio")
+        m_precedente = misura(bs_precedente, ce, None, forma="bilancio")
+        s = soglia(m_corrente["attivo"])
+        candidati = [[f.id, f.percorso, str(f.valore.quantize(_C))] for f in ambigue]
+        if abs(m_precedente["scarto_sp"]) < abs(m_corrente["scarto_sp"]) and abs(m_precedente["scarto_sp"]) <= s:
+            bs = bs_precedente
+            diag["risultato_ambiguo"] = {"ipotesi": "precedente", "importo": str(somma.quantize(_C)),
+                                         "candidati": candidati}
+        else:
+            bs = bs_corrente
+            diag["risultato_ambiguo"] = {"ipotesi": "corrente", "importo": str(somma.quantize(_C)),
+                                         "candidati": candidati}
+    else:
+        bs["sp13_utile_perdita"] = utile_ce
     return bs, ce, diag
 
 

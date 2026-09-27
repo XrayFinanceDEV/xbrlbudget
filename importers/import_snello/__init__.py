@@ -80,13 +80,24 @@ def importa(file_path: str, *, ocr_text: str | None = None, analizza=None, leggi
     from importers.import_snello.verifica import misura, normalizza_forma, soglia, tappa
 
     def _verifica(bs: dict, ce: dict, stampati: dict | None):
+        if modo == "conti":
+            # Task 14 (2026-09-26): in modo "conti" il costruttore (da_foglie) ha gia' portato
+            # sp13 all'utile del CE per costruzione - non c'e' piu' un'euristica bilancio/
+            # verifica da rilevare, ne' un normalizza_forma da applicare (sarebbe un no-op:
+            # m["forma"] e' sempre "bilancio"). Rilevarla comunque (forma=None) rischierebbe di
+            # tornare su "verifica" e sottrarre l'utile una seconda volta, mascherando un vero
+            # sbilancio (budget_330) - lo stesso guasto che il doppio passaggio sotto evita per
+            # modo "legge".
+            m = misura(bs, ce, stampati, forma="bilancio")
+            s = soglia(m["attivo"])
+            bs, ce, tappo, esito = tappa(bs, ce, m, s)
+            return bs, ce, tappo, esito, m, s
         m = misura(bs, ce, stampati, forma=forma)
         s = soglia(m["attivo"])
         bs = normalizza_forma(bs, ce, m)
         # normalizza_forma ha gia' commesso il foglio alla semantica bilancio (no-op se lo
-        # era gia'): riautorilevare qui (forma=forma, che per modo="conti" e' None) puo'
-        # tornare su "verifica" e sottrarre l'utile una seconda volta, mascherando un vero
-        # sbilancio (budget_330).
+        # era gia'): riautorilevare qui (forma=forma) puo' tornare su "verifica" e sottrarre
+        # l'utile una seconda volta, mascherando un vero sbilancio (budget_330).
         m = misura(bs, ce, stampati, forma="bilancio")
         bs, ce, tappo, esito = tappa(bs, ce, m, s)
         return bs, ce, tappo, esito, m, s

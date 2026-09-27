@@ -228,3 +228,17 @@ def test_risultato_diverso_non_si_deduplica():
     bs, ce, diag = da_foglie(foglie)
     assert bs["sp13_utile_perdita"] == D("800.00")
     assert diag["risultato_duplicato"] == []
+
+# --- Banco 2026-09-26: una scadenza (.E/.O) non fa di un conto il padre di un altro ----------
+
+
+def test_scadenza_non_fa_di_un_conto_il_padre_di_un_altro():
+    """'SPA.C.II.5-quater.E' non e' un totale che spiega 'SPA.C.II.5-quater' (stesso sotto-conto,
+    solo annotato entro l'esercizio): prima del fix il secondo veniva escluso come "padre con
+    figli" e 1.751,05 di massa vera sparivano. Entrambi vanno sommati."""
+    foglie = [_f(1, "T", "1000", "SPP.D.7"), _f(2, "T", "1751.05", "SPA.C.II.5-quater"),
+              _f(3, "T", "500", "SPA.C.II.5-quater.E")]
+    bs, ce, diag = da_foglie(foglie)
+    assert bs["sp06g_crediti_altri_breve"] == D("2251.05")
+    assert diag["padri_esclusi"] == []
+

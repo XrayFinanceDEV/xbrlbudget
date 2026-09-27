@@ -15,6 +15,21 @@ _IMMOBILIZZAZIONI = ("sp02", "sp03", "sp04")
 # esplicito di quel lato (credito se stampato fra gli attivi, debito se fra i passivi) - mai
 # lasciato a rovesciare il segno di un campo TIER0 per un voto di famiglia.
 _FALLBACK = {"att": "SPA.C.II.5-quater", "pas": "SPP.D.14"}
+# Una scadenza (.E/.O) o un fondo (.F) non fa di un conto il padre di un altro: e' lo stesso
+# sotto-conto, solo annotato entro/oltre l'esercizio o al netto del fondo - non un totale che i
+# figli spiegherebbero. "SPA.C.II.5-quater.E" non e' figlio di "SPA.C.II.5-quater" (banco,
+# 2026-09-26: 14.863,84 di massa vera persi perche' il primo veniva escluso come "padre con
+# figli"); "SPP.D.4" resta figlio di "SPP.D", e "SPP.D.4.E" resta figlio di "SPP.D" (la scadenza
+# e' in coda al codice del FIGLIO, non subito dopo il padre).
+_SUFFISSI_SCADENZA = (".E", ".O")
+
+
+def _e_discendente_vero(p: str, q: str) -> bool:
+    if q == p or not q.startswith(p + "."):
+        return False
+    if e_fondo(q):
+        return False
+    return q[len(p):] not in _SUFFISSI_SCADENZA
 
 
 def _corsia(f, due_lati: bool):
@@ -108,7 +123,7 @@ def da_foglie(foglie):
             # classificata, non una riga dichiarata non contabile - non va confusa con 'X'.
             diag["non_mappati"].append([f.id, "", str(f.valore.quantize(_C))])
             continue
-        if any(q != f.percorso and q.startswith(f.percorso + ".") and not e_fondo(q) for q in tutti_percorsi):
+        if any(_e_discendente_vero(f.percorso, q) for q in tutti_percorsi):
             diag["padri_esclusi"].append([f.id, f.percorso, str(f.valore.quantize(_C))])
             continue
         codice = campo_da_percorso(f.percorso)

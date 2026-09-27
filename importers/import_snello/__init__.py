@@ -90,6 +90,58 @@ def importa(file_path: str, *, ocr_text: str | None = None, analizza=None, leggi
     modo = struttura.modo
     forma = "bilancio" if modo == "legge" else None
 
+    # Task 16 (b): deterministico prima di Qwen. Nessuna lettura del modello finora (la
+    # struttura e' un altro fornitore, non gx10): se un parser deterministico del vecchio
+    # importatore riconosce il documento e il suo risultato quadra con le regole di
+    # questo percorso, si adotta a zero chiamate a Qwen — mai un secondo tentativo
+    # dopo, mai i due sommati. Se non si applica, solleva o non quadra, non si tocca
+    # nulla: il percorso Qwen di oggi resta l'unico che segue, invariato. Restato
+    # deliberatamente separato dall'ancora "totali_stampati" del Task 17 sotto (quella
+    # e' un contraddittorio per il percorso Qwen; questa e' un risultato alternativo
+    # che lo scavalca del tutto) — e un candidato deterministico che non quadra e'
+    # SEMPRE rifiutato: non diventa mai "squadrato", solo Qwen puo' importare con
+    # sbilancio dichiarato (decisione del proprietario, Task 17).
+    from importers.import_snello.deterministico import tentativo as _tenta_deterministico
+    _det = _tenta_deterministico(file_path, ocr_text)
+    if _det["adottato"]:
+        _bs_det = dict(_det["bs"])
+        # Il plug del tappo lean si AGGIUNGE alla massa/plug che il parser sottostante
+        # ha gia' dichiarato (mai l'uno al posto dell'altro): quella e' diagnostica
+        # dell'ESTRATTORE (un fallback lecito che ha giа contato la massa una volta),
+        # questo e' il rammendo che il percorso lean applica DOPO — sono due cose
+        # diverse, e sommarle e' l'unico modo di non farne sparire una (review round 1).
+        _plug_parser = Decimal(_det["bs"].get("_plug_residual", 0) or 0)
+        _plug_lean = (Decimal(_det["tappo"]["importo"])
+                      if _det["tappo"] and "importo" in _det["tappo"] else Decimal(0))
+        _bs_det["_plug_residual"] = _plug_parser + _plug_lean
+        # Mai un hardcoded zero: la massa non classificata e' quella che il parser ha
+        # DICHIARATO (anche a zero, quando davvero non ne ha trovata) - un estrattore
+        # dichiara sempre le proprie chiavi diagnostiche, e tacere equivarrebbe a
+        # dichiararsi pulito (CLAUDE.md).
+        _massa_det = Decimal(_det["bs"].get("_unclassified_mass", 0) or 0)
+        _bs_det["_unclassified_mass"] = _massa_det
+        # diag non e' uno scheletro fabbricato che pare pulito: porta le stesse chiavi
+        # di da_foglie/da_coppie (nessun KeyError a valle) e dichiara la fonte - la
+        # massa non classificata vive su bs (sopra), non su diag["lato_irrisolti"],
+        # che qui non si applica per costruzione (nessun voto di lato e' girato).
+        _diag_det = {"non_mappati": [], "escluse": [], "risultato_stampato": None,
+                     "lato_corretti": 0, "lato_irrisolti": [], "risultato_duplicato": [],
+                     "padri_esclusi": [], "fonte": _det["parser"]}
+        report = {
+            "esito": _det["esito"], "modo": modo, "fonte": f"deterministico:{_det['parser']}",
+            "struttura": struttura.report(),
+            "misura": {"corrente": {k: str(v) for k, v in _det["misura"].items()}},
+            "tappo": {"corrente": _det["tappo"]},
+            "letture": {"chiamate": 0, "saltate_prima": 0, "senza_percorso": 0},
+            "diag": _diag_det,
+            "deterministico": {"parser": _det["parser"], "esito": _det["esito"],
+                               "unclassified_mass": str(_massa_det)},
+            "anomalie": _anomalie(_bs_det, _diag_det), "secondi": round(time.monotonic() - t0, 1),
+        }
+        return Risultato(bs=_bs_det, ce=dict(_det["ce"]), prior_bs=None, prior_ce=None,
+                         report=report, struttura=struttura)
+    _report_deterministico = {"parser": _det["parser"], "esito": _det["esito"]}
+
     from importers.import_snello.verifica import misura, normalizza_forma, soglia, tappa, totali_stampati
 
     # Ancora indipendente dall'estrattore, letta una sola volta (nessuna chiamata modello):
@@ -248,10 +300,11 @@ def importa(file_path: str, *, ocr_text: str | None = None, analizza=None, leggi
             # sempre (anche dopo l'unica rilettura in modo "legge").
             report = {
                 "esito": "ripiego", "fase": "verifica", "errore": esito, "modo": modo,
-                "struttura": struttura.report(),
+                "struttura": struttura.report(), "fonte": "qwen",
                 "misura": {"corrente": {k: str(v) for k, v in m.items()}},
                 "tappo": {"corrente": tappo}, "letture": letture, "diag": diag,
                 "anomalie": _anomalie(bs, diag), "secondi": round(time.monotonic() - t0, 1),
+                "deterministico": _report_deterministico,
             }
             raise SnelloNonRiuscito(report)
 
@@ -295,9 +348,10 @@ def importa(file_path: str, *, ocr_text: str | None = None, analizza=None, leggi
         tappo_report["precedente"] = tappo_prec
 
     report = {
-        "esito": esito, "modo": modo, "struttura": struttura.report(),
+        "esito": esito, "modo": modo, "struttura": struttura.report(), "fonte": "qwen",
         "misura": misura_report, "tappo": tappo_report, "letture": letture, "diag": diag,
         "anomalie": _anomalie(bs, diag), "secondi": round(time.monotonic() - t0, 1),
+        "deterministico": _report_deterministico,
     }
     if modo == "legge" and precedente_stato is not None:
         report["precedente"] = precedente_stato

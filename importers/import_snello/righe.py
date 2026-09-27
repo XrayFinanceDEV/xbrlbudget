@@ -114,7 +114,11 @@ def _trova_totali(valori: list[Decimal], vivo: list[bool], direzione: int, kmin:
     passati), discendente per la direzione +1 (simmetrico, i figli sono dopo). Il punto fisso
     e' identico al riavvio-a-ogni-marcatura, perche' la marcatura di un candidato dipende solo
     dalle posizioni gia' visitate in quest'ordine: una lista concatenata rende O(1) la
-    rimozione e il passo al vivo successivo, col tetto di 80 membri per candidato."""
+    rimozione e il passo al vivo successivo, col tetto di 80 membri per candidato.
+
+    Solo conteggio, usa e getta (_conta_forzata): il candidato trovato esce dalla lista viva
+    per sempre, mai riabilitato come addendo - qui basta sapere QUANTO marcherebbe questa sola
+    direzione, non costruire una gerarchia vera. La marcatura reale sta in ``_risolvi_totali``."""
     n = len(valori)
     nxt, prv = _lista_concatenata(vivo)
     passo = prv if direzione == -1 else nxt
@@ -140,18 +144,44 @@ def _trova_totali(valori: list[Decimal], vivo: list[bool], direzione: int, kmin:
     return trovati
 
 
-def _passata(per_lato: dict[str, list[Riga]], direzione: int, kmin: int) -> int:
-    """Marca, in una sola direzione, i totali di almeno kmin figli sulle Riga vere. Ritorna
-    quanti ne marca."""
+def _risolvi_totali(seq: list["Riga"], valori: list[Decimal], vivo: list[bool],
+                    candidabile: list[bool], direzione: int, kmin: int) -> int:
+    """Come ``_trova_totali``, ma marca SUBITO ogni candidato trovato, nella stessa passata:
+    il totale resta al suo posto nella lista concatenata (mai spliciato fuori) - solo i suoi
+    membri escono, per sempre - cosi' un candidato piu' in la' nella stessa scansione (un
+    totale di livello superiore) lo trova gia' pronto come addendo. Senza questo, un totale di
+    terzo livello scansionato nella STESSA chiamata di un totale di secondo livello non ancora
+    risolto poteva "scavalcarlo" sommando le sue foglie grezze rimaste vive per coincidenza
+    (mai spliciate, perche' non erano mai state la CANDIDATA di un match) invece di aspettare
+    che il livello intermedio si risolvesse per primo - lasciando il livello intermedio
+    (``.totale`` mai marcato) a contare due volte la propria massa. ``candidabile`` impedisce
+    di ri-marcare un totale gia' risolto (mai il bersaglio di un nuovo match), ma non lo
+    esclude come addendo: e' li' apposta perche' resti disponibile."""
+    n = len(valori)
+    nxt, prv = _lista_concatenata(vivo)
+    passo = prv if direzione == -1 else nxt
+    ordine = range(n) if direzione == -1 else range(n - 1, -1, -1)
     marcati = 0
-    for seq in per_lato.values():
-        vivo = [not r.totale for r in seq]
-        valori = [r.valore for r in seq]
-        for ti, membri in _trova_totali(valori, vivo, direzione, kmin):
-            seq[ti].totale = True
-            for mi in membri:
-                seq[mi].mastro = seq[mi].mastro or seq[ti].testo
-            marcati += 1
+    for i in ordine:
+        if not vivo[i] or not candidabile[i] or not valori[i]:
+            continue
+        s, j, membri = Decimal(0), passo[i], []
+        while j != -1 and j != n and len(membri) < 80:
+            s += valori[j]
+            membri.append(j)
+            if len(membri) >= kmin and s == valori[i]:
+                seq[i].totale = True
+                candidabile[i] = False
+                for mi in membri:
+                    seq[mi].mastro = seq[mi].mastro or seq[i].testo
+                    vivo[mi] = False
+                # i resta vivo (non si tocca): il suo passo salta oltre i membri appena
+                # spesi, cosi' un candidato successivo nella stessa scansione che attraversa
+                # i lo trova come un unico addendo, mai come i suoi vecchi membri.
+                passo[i] = passo[membri[-1]]
+                marcati += 1
+                break
+            j = passo[j]
     return marcati
 
 
@@ -213,7 +243,21 @@ def marca_totali(righe: list[Riga]) -> Counter:
     (totale dopo i figli). Le catene di un solo figlio (k=1) contano solo se la direzione
     scelta ha trovato almeno un totale vero (k>=2) nel documento: senza un gruppo reale, due
     importi uguali in fila sono spesso una coincidenza, non un mastro (80,80 non e' il totale
-    di 50)."""
+    di 50).
+
+    La marcatura vera e propria e' un punto fisso, e ogni singola passata marca gia' subito
+    (``_risolvi_totali``): un totale appena trovato resta al suo posto nella lista viva come
+    ADDENDO per il livello sopra, mai piu' ri-marcabile - solo i suoi figli ne escono, per
+    sempre. Un totale di livello superiore scansionato piu' avanti nella STESSA passata trova
+    cosi' i totali sotto di lui gia' pronti (una passata sola basta per un documento con
+    livelli coerenti in una direzione: "B) Immobilizzazioni" (= I+II+III) diventa raggiungibile
+    anche se I, II, III sono a loro volta totali dei propri figli, e "Totale attivo" lo e'
+    rispetto a B)+C)+...). Il giro esterno (k>=2 poi k=1, ripetuto finche' non emerge piu'
+    nulla) resta comunque un punto fisso vero per i casi a piu' passate (un livello k=1 che ne
+    sblocca uno k>=2 sopra, o viceversa). Senza tutto questo, un totale marcato usciva dalla
+    lista viva per sempre e non poteva mai fare da addendo per il livello sopra (diagnosi
+    AMBIENTA 2026-09-26: B, C, D e i due totali di stato patrimoniale restavano foglie non
+    riconosciute anche a pagine complete)."""
     piu, meno = _conta_forzata(righe, 1), _conta_forzata(righe, -1)
     if piu != meno:
         direzione = 1 if piu > meno else -1
@@ -222,10 +266,28 @@ def marca_totali(righe: list[Riga]) -> Counter:
         direzione = voti.most_common(1)[0][0] if voti else -1
 
     per_lato = _per_lato(righe)
-    trovati = _passata(per_lato, direzione, 2)
-    if trovati:
-        _passata(per_lato, direzione, 1)
-    return Counter({direzione: trovati}) if trovati else Counter()
+    valori = {lato: [r.valore for r in seq] for lato, seq in per_lato.items()}
+    vivo = {lato: [True] * len(seq) for lato, seq in per_lato.items()}
+    candidabile = {lato: [True] * len(seq) for lato, seq in per_lato.items()}
+
+    trovati_totale = 0
+    gruppo_visto = False
+    cambiato = True
+    while cambiato:
+        cambiato = False
+        for lato, seq in per_lato.items():
+            n2 = _risolvi_totali(seq, valori[lato], vivo[lato], candidabile[lato], direzione, 2)
+            if n2:
+                gruppo_visto = True
+                trovati_totale += n2
+                cambiato = True
+        if gruppo_visto:
+            for lato, seq in per_lato.items():
+                n1 = _risolvi_totali(seq, valori[lato], vivo[lato], candidabile[lato], direzione, 1)
+                if n1:
+                    trovati_totale += n1
+                    cambiato = True
+    return Counter({direzione: trovati_totale}) if trovati_totale else Counter()
 
 
 def righe_da_pdf(file_path: str, pagine: set[int] | None, ruoli: list[str],

@@ -112,3 +112,100 @@ def test_prestazioni_duemila_righe():
     assert durata < 1.0, f"marca_totali troppo lento su 2000 righe: {durata:.2f}s"
     attesi = {f"{g}tot" for g in range(666)} | {"c2"}
     assert {r.id for r in righe if r.totale} == attesi
+
+
+def test_gerarchia_a_tre_livelli_totali_dopo_i_figli():
+    # foglie -> I/II/III (livello 1) -> B (livello 2, = I+II+III) -> Totale (livello 3, = B+C):
+    # un totale appena marcato deve restare disponibile come addendo per il livello sopra, o
+    # B e Totale restano foglie non riconosciute (diagnosi AMBIENTA, marca_totali a 2 livelli).
+    # Importi su scale ben separate: nessuna somma parziale di un gruppo deve poter collidere
+    # per caso col valore di un altro (il rischio di un test con numeri tondi ripetuti).
+    righe = [
+        _r("i1", "11"), _r("i2", "22"), _r("I", "33", testo="I"),
+        _r("ii1", "101"), _r("ii2", "202"), _r("II", "303", testo="II"),
+        _r("iii1", "1009"), _r("iii2", "2018"), _r("III", "3027", testo="III"),
+        _r("B", "3363", testo="B"),
+        _r("C", "50000"),
+        _r("Totale", "53363", testo="Totale attivo"),
+    ]
+    direzioni = R.marca_totali(righe)
+    assert direzioni.most_common(1)[0][0] == -1
+    tot = {r.id for r in righe if r.totale}
+    assert tot == {"I", "II", "III", "B", "Totale"}
+    assert sum(r.valore for r in R.foglie(righe)) == D("53363")
+
+
+def test_gerarchia_a_tre_livelli_totali_prima_dei_figli():
+    # stessa gerarchia, ma col totale che PRECEDE i propri figli (come nel documento AMBIENTA
+    # reale: "B) Immobilizzazioni" e' stampato prima di "I.", "II.", "III.").
+    righe = [
+        _r("Totale", "53363", testo="Totale attivo"),
+        _r("B", "3363", testo="B"),
+        _r("I", "33", testo="I"), _r("i1", "11"), _r("i2", "22"),
+        _r("II", "303", testo="II"), _r("ii1", "101"), _r("ii2", "202"),
+        _r("III", "3027", testo="III"), _r("iii1", "1009"), _r("iii2", "2018"),
+        _r("C", "50000"),
+    ]
+    direzioni = R.marca_totali(righe)
+    assert direzioni.most_common(1)[0][0] == 1
+    tot = {r.id for r in righe if r.totale}
+    assert tot == {"I", "II", "III", "B", "Totale"}
+    assert sum(r.valore for r in R.foglie(righe)) == D("53363")
+
+
+def test_forma_ambienta_totali_lettera_e_stato_patrimoniale():
+    # Forma ricostruita dalla diagnosi (diagnosi-ambienta-verifica.md §4): importi e didascalie
+    # reali di AMBIENTA, totale che precede i figli come nel documento vero. Prima del punto
+    # fisso, "B) Immobilizzazioni", "C) Attivo circolante" e "STATO PATRIMONIALE ATTIVO"
+    # restavano foglie non riconosciute anche quando i loro figli erano tutti presenti.
+    righe = [
+        _r("attivo", "2352461.64", testo="STATO PATRIMONIALE ATTIVO"),
+        _r("B", "489671.44", testo="B) Immobilizzazioni"),
+        _r("I", "346304.85", testo="I. Immobilizzazioni Immateriali"),
+        _r("II", "90816.59", testo="II. Immobilizzazioni Materiali"),
+        _r("III", "52550.00", testo="III. Immobilizzazioni Finanziarie"),
+        _r("C", "1646563.90", testo="C) Attivo circolante"),
+        _r("Ci", "287526.55", testo="I. Rimanenze"),
+        _r("Cii", "1337272.64", testo="II. Crediti"),
+        _r("Civ", "21764.71", testo="IV. Disponibilita' liquide"),
+        _r("D", "216226.30", testo="D) Ratei e risconti attivi"),
+    ]
+    R.marca_totali(righe)
+    tot = {r.id for r in righe if r.totale}
+    assert tot == {"attivo", "B", "C"}
+    assert sum(r.valore for r in R.foglie(righe)) == D("2352461.64")
+
+
+def test_totale_di_terzo_livello_non_scavalca_un_totale_intermedio_non_ancora_risolto():
+    # Ogni gruppo di primo livello ha piu' foglie del tetto di 80 membri per candidato (90 in
+    # tutto per I+II+III): "B" non puo' essere raggiunto sommando le 90 foglie grezze in una
+    # volta sola (il tetto lo impedisce), quindi l'unico modo di trovarlo e' che I, II, III
+    # tornino disponibili come addendi DOPO essere stati risolti. Valori come potenze di 2
+    # distinte (nessuna somma parziale puo' mai coincidere per caso con un'altra) cosi' un
+    # totale di livello superiore ("Totale") scandito piu' avanti nella stessa passata non puo'
+    # scavalcare "B" ancora irrisolto sommando le sue foglie rimaste vive per coincidenza.
+    def gruppo(base, n=30):
+        foglie = [2 ** (base + k) for k in range(n)]
+        return foglie, sum(foglie)
+
+    foglie_i, I = gruppo(0)
+    foglie_ii, II = gruppo(30)
+    foglie_iii, III = gruppo(60)
+    C = 2 ** 90
+    B = I + II + III
+    Totale = B + C
+
+    righe = [_r(f"i{k}", str(v)) for k, v in enumerate(foglie_i)]
+    righe.append(_r("I", str(I), testo="I"))
+    righe += [_r(f"ii{k}", str(v)) for k, v in enumerate(foglie_ii)]
+    righe.append(_r("II", str(II), testo="II"))
+    righe += [_r(f"iii{k}", str(v)) for k, v in enumerate(foglie_iii)]
+    righe.append(_r("III", str(III), testo="III"))
+    righe.append(_r("B", str(B), testo="B"))
+    righe.append(_r("C", str(C)))
+    righe.append(_r("Totale", str(Totale), testo="Totale attivo"))
+
+    R.marca_totali(righe)
+    tot = {r.id for r in righe if r.totale}
+    assert tot == {"I", "II", "III", "B", "Totale"}
+    assert sum(r.valore for r in R.foglie(righe)) == D(str(Totale))

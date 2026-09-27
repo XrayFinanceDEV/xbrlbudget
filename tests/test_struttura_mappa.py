@@ -1,12 +1,14 @@
 import fitz
 
-from importers.struttura_documento.mappa import _titolo_pagina, blocchi, mappa_documento
+from importers.struttura_documento.mappa import _titolo_pagina, blocchi, mappa_documento, mappa_xbrl
 from tests._struttura_fixtures import (MAPPA_COLONNA_UNICA, MAPPA_CONTRAPPOSTE, pdf_bilancio_verifica_senza_titoli,
                                         pdf_ce_poi_prospetto_fiscale, pdf_colonna_unica, pdf_contrapposte,
                                         pdf_intestazione_lunga_ce, pdf_prospetto_ires_costi_indeducibili,
                                         pdf_prospetto_irap_rideterminazione, pdf_titoli_spaziati,
                                         pdf_titolo_ce_contrapposte_stessa_riga, pdf_titolo_ce_semplice,
-                                        pdf_xbrl_legge, pdf_xbrl_rendiconto_dopo_ce)
+                                        pdf_xbrl_legge, pdf_xbrl_rendiconto_dopo_ce,
+                                        pdf_xbrl_sp_continuazione_oltre_il_limite,
+                                        pdf_xbrl_sp_continuazione_senza_date)
 
 
 def test_blocchi_filtro_prosa_e_confine_sp_ce(tmp_path):
@@ -170,6 +172,36 @@ def test_titoli_sp_reali_restano_riconosciuti_dopo_la_correzione(tmp_path):
     path2 = pdf_contrapposte(str(tmp_path / "cc.pdf"))
     with fitz.open(path2) as doc2:
         assert _titolo_pagina(doc2[0]) == "stato patrimoniale"       # titolo + "ATTIVITA'"/"PASSIVITA'"
+
+
+def test_mappa_xbrl_continuazione_senza_ripetere_le_date(tmp_path):
+    # Diagnosi budget_671 (lotto-b, fix 6a): il vero passivo su pagina 2 non ripete ne' il
+    # titolo ne' le date della pagina 1, ed era classificato "nota_o_testo" perche' mappa_xbrl
+    # richiedeva l'uguaglianza esatta della tupla di date per riconoscere una continuazione.
+    path = pdf_xbrl_sp_continuazione_senza_date(str(tmp_path / "sp2p.pdf"))
+    mappe = mappa_xbrl(path)
+    assert [m["tipo_pagina"] for m in mappe] == ["prospetto_sp", "prospetto_sp"]
+    assert mappe[0]["continuazione"] is False
+    assert mappe[1]["continuazione"] is True
+
+
+def test_mappa_xbrl_limite_due_pagine_di_continuazione(tmp_path):
+    # Bound del fix 6: al massimo due pagine di continuazione di fila, poi il blocco si chiude.
+    path = pdf_xbrl_sp_continuazione_oltre_il_limite(str(tmp_path / "lim.pdf"))
+    mappe = mappa_xbrl(path)
+    assert [m["tipo_pagina"] for m in mappe] == ["prospetto_sp", "prospetto_sp", "prospetto_sp", "nota_o_testo"]
+    assert [m["continuazione"] for m in mappe] == [False, True, True, False]
+
+
+def test_mappa_xbrl_non_assorbe_il_rendiconto_dopo_il_ce(tmp_path):
+    # Bound del fix 6: una pagina che apre una sezione nuova (Rendiconto finanziario) non
+    # diventa mai una continuazione, anche se non ha titolo di prospetto proprio e ha importi.
+    path = pdf_xbrl_rendiconto_dopo_ce(str(tmp_path / "rend.pdf"))
+    mappe = mappa_xbrl(path)
+    assert mappe[0]["tipo_pagina"] == "prospetto_sp"
+    assert mappe[1]["tipo_pagina"] == "prospetto_ce"
+    assert mappe[2]["tipo_pagina"] == "nota_o_testo"
+    assert mappe[2]["continuazione"] is False
 
 
 def test_mappa_pagina_produce_lo_schema(monkeypatch):

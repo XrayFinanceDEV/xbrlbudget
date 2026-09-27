@@ -8,11 +8,17 @@ from importers.iv_cee_hierarchy import detail_fields
 _TIER0 = ("sp02", "sp03", "sp04", "sp11", "sp12", "sp13", "sp16a", "sp17a")
 
 
-def _f(i, lato, valore, percorso):
-    return Riga(id=str(i), pagina=1, lato=lato, testo=f"c{i}", valore=D(valore), percorso=percorso)
+def _f(i, lato, valore, percorso, testo=None):
+    return Riga(id=str(i), pagina=1, lato=lato, testo=testo if testo is not None else f"c{i}",
+               valore=D(valore), percorso=percorso)
 
 
 def test_contrapposte_fondo_a_destra_e_cc_passivo():
+    """La riga 'R' (20, didascalia generica) e' il risultato corrente scritto come pareggio,
+    uguale all'utile del CE (ricavi 100 - servizi 80): e' il caso FORMETAL/two-column (Task 14,
+    2026-09-26). Non entra piu' da riga stampata (`risultato_stampato` resta None per il
+    percorso 'R': quella chiave serve solo a CE.21/CE.D.21); l'ipotesi "corrente" (esclusa)
+    quadra meglio di "precedente" (che duplicherebbe la massa in sp12g) e vince."""
     foglie = [_f(1, "L", "1000", "SPA.B.II.2"), _f(2, "R", "400", "SPA.B.II.2.F"),
               _f(3, "L", "300", "SPA.C.IV.1"), _f(4, "R", "150", "SPA.C.IV.1"),   # c/c stampato fra le passivita'
               _f(5, "R", "500", "SPP.A.I"), _f(6, "R", "250", "SPP.D.7"),
@@ -24,7 +30,10 @@ def test_contrapposte_fondo_a_destra_e_cc_passivo():
     assert bs["sp16a_debiti_banche_breve"] == D("150.00")
     assert bs["sp16_debiti_breve"] == D("400.00")
     assert ce["ce06_servizi"] == D("80.00") and ce["ce01_ricavi_vendite"] == D("100.00")
-    assert diag["risultato_stampato"] == "20.00" and diag["lato_corretti"] == 1
+    assert bs["sp13_utile_perdita"] == D("20.00")           # utile CE, mai la riga stampata
+    assert diag["risultato_stampato"] is None and diag["lato_corretti"] == 1
+    assert diag["risultato_ambiguo"] == {"ipotesi": "corrente", "importo": "20.00",
+                                         "candidati": [["9", "R", "20.00"]]}
     assert diag["escluse"] == [["10", "X", "5.00"]]
 
 
@@ -139,13 +148,16 @@ def test_applica_lato_non_tocca_il_patrimonio_netto():
 
 
 def test_risultato_di_esercizio_lato_invertito_non_duplica_massa():
-    """Riproduce FORMETAL/623: un utile (SPP.A.IX) stampato sul lato Dare (L) mentre il resto
-    del passivo vota in maggioranza Avere (R, 80.000 su due voci) non deve finire nel fallback
-    (che duplicherebbe la massa, come oggi) ne' cambiare segno: resta il valore letto, positivo,
-    in sp13, e i debiti veri restano positivi (non ribaltati dal peso dell'utile)."""
+    """Riproduce FORMETAL/623: un risultato (percorso ambiguo 'SPP.A.IX') stampato sul lato Dare
+    (L) mentre il resto del passivo vota in maggioranza Avere (R, 80.000 su due voci) non deve
+    finire nel fallback (che duplicherebbe la massa) ne' cambiare segno: i debiti veri restano
+    positivi (non ribaltati dal peso del risultato). Da Task 14 (2026-09-26) sp13 non e' piu' il
+    valore letto ma l'utile del CE: qui la riga stampata e il CE dicono la stessa cifra
+    (7.035,31 di ricavi, nessun costo), quindi l'ipotesi "corrente" (esclusa, sp13 dal CE) e'
+    anche l'unica che non raddoppia la massa - la stessa che sceglie il confronto att-pas."""
     foglie = [_f(1, "L", "1000", "SPA.C.IV.3"),
               _f(2, "R", "50000", "SPP.D.7"), _f(3, "R", "30000", "SPP.D.4"),
-              _f(4, "L", "7035.31", "SPP.A.IX")]
+              _f(4, "L", "7035.31", "SPP.A.IX"), _f(5, "R", "7035.31", "CE.A.1")]
     bs, ce, diag = da_foglie(foglie)
     assert bs["sp13_utile_perdita"] == D("7035.31")
     assert bs["sp16d_debiti_fornitori_breve"] == D("50000.00")
@@ -153,6 +165,7 @@ def test_risultato_di_esercizio_lato_invertito_non_duplica_massa():
     assert bs["sp16_debiti_breve"] == D("80000.00")
     assert diag["lato_irrisolti"] == []
     assert diag["lato_corretti"] == 0
+    assert diag["risultato_ambiguo"]["ipotesi"] == "corrente"
     assert bs.get("sp06g_crediti_altri_breve", D("0")) == D("0")
     assert bs.get("sp16g_altri_debiti_breve", D("0")) == D("0")
 
@@ -199,14 +212,25 @@ def test_padre_con_figlio_fondo_non_conta_come_figlio():
 
 
 def test_risultato_stampato_due_volte_si_conta_una_sola_volta():
-    """budget_132: 'RISULTATO DI ESERCIZIO' compare due volte (pagine diverse), stesso importo,
-    entrambe classificate SPP.A.IX (un riepilogo ripetuto dal gestionale): la seconda e' un
-    duplicato esatto e non deve raddoppiare sp13."""
+    """budget_132: 'RISULTATO DI ESERCIZIO' compare due volte (pagine diverse), STESSA
+    didascalia, stesso importo, entrambe classificate SPP.A.IX, nessun codice conto davanti -
+    e' lo stesso risultato ristampato, non due conti distinti. Round 3 (review): le due foglie
+    ambigue identiche si collassano in UN solo gruppo prima della ricerca combinatoria (mai una
+    si' e una no - spaccarle inventerebbe una riserva che per caso quadra il foglio); la seconda
+    si dichiara in `risultato_duplicato` e il gruppo pesa per l'intera somma (1.000,00) se
+    l'ipotesi fosse 'precedente'. Qui ne' 'corrente' ne' 'precedente' chiudono meglio del
+    pareggio (scarto 500 in entrambi i casi): a parita' vince 'corrente', sp13 resta l'utile
+    del CE (0, nessuna voce di CE qui) e nessuna riserva fittizia entra in sp12g."""
     foglie = [_f(1, "L", "1000", "SPA.C.IV.3"), _f(2, "R", "500", "SPP.D.7"),
-              _f(3, "R", "500", "SPP.A.IX"), _f(4, "R", "500", "SPP.A.IX")]
+              _f(3, "R", "500", "SPP.A.IX", testo="RISULTATO DI ESERCIZIO"),
+              _f(4, "R", "500", "SPP.A.IX", testo="RISULTATO DI ESERCIZIO")]
     bs, ce, diag = da_foglie(foglie)
-    assert bs["sp13_utile_perdita"] == D("500.00")
+    assert bs["sp13_utile_perdita"] == D("0.00")
+    assert "sp12g_utili_perdite_portati" not in bs
     assert diag["risultato_duplicato"] == [["4", "SPP.A.IX", "500.00"]]
+    assert diag["risultato_ambiguo"] == {"ipotesi": "corrente", "importo": "1000.00",
+                                         "candidati": [["3", "SPP.A.IX", "500.00"],
+                                                       ["4", "SPP.A.IX", "500.00"]]}
 
 
 def test_percorso_mai_assegnato_va_a_non_mappati_non_a_escluse():
@@ -221,10 +245,221 @@ def test_percorso_mai_assegnato_va_a_non_mappati_non_a_escluse():
 
 
 def test_risultato_diverso_non_si_deduplica():
-    """Due percorsi SPP.A.IX con importo DIVERSO non sono un duplicato: sono due voci vere
-    (per esempio l'anno corrente e un pregresso mal classificato) e si sommano entrambe."""
+    """Due percorsi SPP.A.IX con importo DIVERSO (Task 14: da_foglie non li dedup-a mai per
+    valore, li tiene entrambi come candidati ambigui indipendenti): sp13 resta l'utile del CE
+    (0, nessuna voce di CE qui), scelto perche' l'ipotesi "corrente" quadra meglio di quella che
+    sommerebbe le due righe in sp12g."""
     foglie = [_f(1, "L", "1000", "SPA.C.IV.3"), _f(2, "R", "1300", "SPP.D.7"),
               _f(3, "R", "500", "SPP.A.IX"), _f(4, "R", "300", "SPP.A.IX")]
     bs, ce, diag = da_foglie(foglie)
-    assert bs["sp13_utile_perdita"] == D("800.00")
+    assert bs["sp13_utile_perdita"] == D("0.00")
     assert diag["risultato_duplicato"] == []
+    assert diag["risultato_ambiguo"]["ipotesi"] == "corrente"
+    assert diag["risultato_ambiguo"]["candidati"] == [["3", "SPP.A.IX", "500.00"],
+                                                       ["4", "SPP.A.IX", "300.00"]]
+
+
+# --- Task 14 (2026-09-26): il risultato d'esercizio in modo "conti" riusa le regole del ------
+# --- vecchio parser best-effort invece di sommare le righe stampate --------------------------
+
+
+def test_scadenza_non_fa_di_un_conto_il_padre_di_un_altro():
+    """Banco 2026-09-26: 'SPA.C.II.5-quater.E' non e' un totale che spiega 'SPA.C.II.5-quater'
+    (stesso sotto-conto, solo annotato entro l'esercizio): prima del fix il secondo veniva
+    escluso come "padre con figli" e 1.751,05 di massa vera sparivano. Entrambi vanno sommati."""
+    foglie = [_f(1, "T", "1000", "SPP.D.7"), _f(2, "T", "1751.05", "SPA.C.II.5-quater"),
+              _f(3, "T", "500", "SPA.C.II.5-quater.E")]
+    bs, ce, diag = da_foglie(foglie)
+    assert bs["sp06g_crediti_altri_breve"] == D("2251.05")
+    assert diag["padri_esclusi"] == []
+
+
+def test_formetal_utile_stampato_uguale_al_ce_si_conta_una_volta():
+    """Bilancio di verifica a due colonne (FORMETAL): 'UTILE DI ESERCIZIO' e' la riga di
+    pareggio (percorso 'R'), senza codice conto davanti - candidata corrente. Dal round 2
+    (review, 2026-09-26) questa didascalia NON esclude piu' a priori (era il difetto del round
+    1: la stessa frase serve anche a riconoscere un pregresso mal didascalizzato, owner:
+    "a volte c'e' scritto risultato ma e' quello dell'anno precedente"): passa dall'ipotesi
+    ambigua, che sceglie 'corrente' perche' e' l'unica che chiude il foglio a zero (l'importo
+    coincide con l'utile del CE)."""
+    foglie = [_f(1, "L", "1000", "SPA.C.IV.1"), _f(2, "R", "800", "SPP.A.I"),
+              _f(3, "R", "200", "R", testo="UTILE DI ESERCIZIO"),
+              _f(4, "R", "500", "CE.A.1"), _f(5, "L", "300", "CE.B.7")]
+    bs, ce, diag = da_foglie(foglie)
+    assert bs["sp13_utile_perdita"] == D("200.00")
+    assert diag["risultato_escluso"] == []
+    assert diag["risultato_ambiguo"] == {"ipotesi": "corrente", "importo": "200.00",
+                                         "candidati": [["3", "R", "200.00"]]}
+    att = bs["sp09_disponibilita_liquide"]
+    pas = bs["sp11_capitale"] + bs["sp13_utile_perdita"]
+    assert att == pas == D("1000.00")
+
+
+def test_utile_esercizio_ambiguo_risulta_precedente_se_chiude_il_bilancio():
+    """Round 2 (owner: "a volte c'e' scritto risultato ma in realta' e' il risultato dell'anno
+    precedente, mentre quello di quest'anno e' la differenza"): una riga 'Utile d'esercizio'
+    (percorso 'SPP.A.IX', SENZA codice conto davanti) il cui importo NON coincide con l'utile
+    del CE. Dal round 1 questa didascalia non e' piu' una riga di controllo esclusa a priori
+    (era il difetto: la stessa frase serve anche a un pregresso mal didascalizzato): passa
+    dall'ipotesi ambigua, che qui sceglie 'precedente' (sp12g) perche' e' l'unica che azzera lo
+    scarto attivo-passivo."""
+    foglie = [_f(1, "L", "1350", "SPA.C.IV.1"), _f(2, "R", "1000", "SPP.A.I"),
+              _f(3, "R", "300", "SPP.A.IX", testo="Utile d'esercizio"),
+              _f(4, "R", "550", "CE.A.1"), _f(5, "L", "500", "CE.B.7")]
+    bs, ce, diag = da_foglie(foglie)
+    assert bs["sp13_utile_perdita"] == D("50.00")
+    assert bs["sp12g_utili_perdite_portati"] == D("300.00")
+    assert diag["risultato_escluso"] == []
+    assert diag["risultato_ambiguo"] == {"ipotesi": "precedente", "importo": "300.00",
+                                         "candidati": [["3", "SPP.A.IX", "300.00"]]}
+
+
+def test_prior_caption_utile_esercizio_precedente_va_a_sp12g_positivo():
+    foglie = [_f(1, "L", "500", "SPA.C.IV.1"),
+              _f(2, "R", "500", "SPP.A.VIII", testo="UTILE ESERCIZIO PRECEDENTE")]
+    bs, ce, diag = da_foglie(foglie)
+    assert bs["sp12g_utili_perdite_portati"] == D("500.00")
+    assert diag["risultato_precedente"] == [["2", "SPP.A.VIII", "500.00"]]
+
+
+def test_prior_caption_perdite_portate_a_nuovo_va_a_sp12g_negativo():
+    foglie = [_f(1, "L", "500", "SPA.C.IV.1"),
+              _f(2, "L", "500", "SPP.A.VIII", testo="PERDITE PORTATE A NUOVO")]
+    bs, ce, diag = da_foglie(foglie)
+    assert bs["sp12g_utili_perdite_portati"] == D("-500.00")
+    assert diag["risultato_precedente"] == [["2", "SPP.A.VIII", "-500.00"]]
+
+
+def test_prior_caption_vince_anche_se_qwen_ha_dato_percorso_ix():
+    """La didascalia decide, non il percorso che Qwen ha dato (regola del proprietario:
+    'regardless of the path Qwen gave, VIII or IX'): una didascalia di pregresso su un
+    percorso 'SPP.A.IX' non passa mai dall'ipotesi ambigua."""
+    foglie = [_f(1, "L", "500", "SPA.C.IV.1"),
+              _f(2, "R", "500", "SPP.A.IX", testo="UTILI PORTATI A NUOVO")]
+    bs, ce, diag = da_foglie(foglie)
+    assert bs["sp12g_utili_perdite_portati"] == D("500.00")
+    assert diag["risultato_ambiguo"] is None
+
+
+def test_riga_di_controllo_totale_a_pareggio_esclusa_mai_sommata():
+    """Fix round 1: la didascalia esclude solo un percorso 'R'/'SPP.A.IX' (non classificato
+    come conto vero), mai un percorso gia' risolto a un campo normale."""
+    foglie = [_f(1, "L", "1000", "SPA.C.IV.1"), _f(2, "R", "1000", "SPP.A.I"),
+              _f(3, "R", "1000", "R", testo="TOTALE A PAREGGIO")]
+    bs, ce, diag = da_foglie(foglie)
+    assert diag["risultato_escluso"] == [["3", "R", "1000.00"]]
+    assert bs.get("sp16g_altri_debiti_breve", D("0")) == D("0")
+    assert bs["sp13_utile_perdita"] == D("0.00")
+
+
+def test_riga_differenza_attivo_passivo_su_percorso_r_esclusa():
+    foglie = [_f(1, "L", "1000", "SPA.C.IV.1"), _f(2, "R", "800", "SPP.A.I"),
+              _f(3, "R", "200", "R", testo="DIFFERENZA ATTIVO PASSIVO")]
+    bs, ce, diag = da_foglie(foglie)
+    assert diag["risultato_escluso"] == [["3", "R", "200.00"]]
+    assert diag["risultato_ambiguo"] is None
+
+
+def test_riga_sbilancio_su_percorso_r_esclusa():
+    foglie = [_f(1, "L", "1000", "SPA.C.IV.1"), _f(2, "R", "850", "SPP.A.I"),
+              _f(3, "R", "150", "R", testo="Sbilancio")]
+    bs, ce, diag = da_foglie(foglie)
+    assert diag["risultato_escluso"] == [["3", "R", "150.00"]]
+    assert diag["risultato_ambiguo"] is None
+
+
+def test_differenza_cambi_attivi_conto_vero_non_escluso_dalla_didascalia():
+    """Rilievo round 1: 'DIFFERENZA' nella didascalia di un conto vero (differenza cambi,
+    CE.C.17-bis -> ce16) non deve escluderlo - il test di pareggio/controllo vale solo sui
+    percorsi non classificati ('R', 'SPP.A.IX'), mai su un percorso gia' risolto a un campo
+    normale."""
+    foglie = [_f(1, "L", "1000", "SPA.C.IV.1"), _f(2, "R", "1000", "SPP.A.I"),
+              _f(3, "R", "300", "CE.C.17-bis", testo="Differenza cambi attivi")]
+    bs, ce, diag = da_foglie(foglie)
+    assert ce["ce16_utili_perdite_cambi"] == D("300.00")
+    assert diag["risultato_escluso"] == []
+
+
+def test_totale_rimanenze_iniziali_conto_vero_non_escluso_dalla_didascalia():
+    """Rilievo round 1: 'TOTALE' nella didascalia di un conto vero (rimanenze materie prime,
+    SPA.C.I.1 -> sp05a) non deve escluderlo - percorso classificato, mai una didascalia a
+    scavalcarlo."""
+    foglie = [_f(1, "R", "1000", "SPP.D.7"),
+              _f(2, "L", "500", "SPA.C.I.1", testo="Totale rimanenze iniziali")]
+    bs, ce, diag = da_foglie(foglie)
+    assert bs["sp05a_materie_prime"] == D("500.00")
+    assert diag["risultato_escluso"] == []
+
+
+def test_623_perdita_pregressa_e_corrente_entrambe_in_dare_chiudono_il_bilancio():
+    """Riproduce budget_623: una perdita pregressa (209.356,57) e la perdita corrente
+    (34.590,25) sono ENTRAMBE stampate sul lato Dare (attivo), come saldi debitori di conti di
+    patrimonio netto. La pregressa ha didascalia riconoscibile e va a sp12g col segno dato dalla
+    didascalia (negativo), a prescindere dal lato di stampa; la corrente e' ambigua (didascalia
+    generica) e l'ipotesi 'corrente' (esclusa, sp13 dal CE) e' l'unica che chiude il bilancio -
+    nessuna massa finisce in sp06g/sp16g."""
+    foglie = [
+        _f(1, "L", "56053.18", "SPA.C.IV.1"),
+        _f(2, "R", "300000", "SPP.A.I"),
+        _f(3, "L", "209356.57", "SPP.A.VIII", testo="PERDITE PORTATE A NUOVO"),
+        _f(4, "L", "34590.25", "SPP.A.IX", testo="PERDITA D'ESERCIZIO"),
+        _f(5, "L", "34590.25", "CE.B.7"),
+    ]
+    bs, ce, diag = da_foglie(foglie)
+    assert bs["sp12g_utili_perdite_portati"] == D("-209356.57")
+    assert bs["sp13_utile_perdita"] == D("-34590.25")
+    # "PERDITA D'ESERCIZIO" non ha un codice conto davanti: candidata corrente, passa
+    # dall'ipotesi ambigua (round 2) e vince "corrente" perche' e' l'unica che chiude il foglio.
+    assert diag["risultato_escluso"] == []
+    assert diag["risultato_ambiguo"] == {"ipotesi": "corrente", "importo": "34590.25",
+                                         "candidati": [["4", "SPP.A.IX", "34590.25"]]}
+    assert bs.get("sp06g_crediti_altri_breve", D("0")) == D("0")
+    assert bs.get("sp16g_altri_debiti_breve", D("0")) == D("0")
+    att = bs["sp09_disponibilita_liquide"]
+    pas = bs["sp11_capitale"] + bs["sp12g_utili_perdite_portati"] + bs["sp13_utile_perdita"]
+    assert att == pas == D("56053.18")
+
+
+def test_gap_reale_non_si_maschera_dietro_l_utile_ce():
+    """Riproduce budget_330 (gap reale in un bilancio di verifica, qui -2.505,51): senza alcuna
+    riga di risultato in mezzo, sp13 e' comunque l'utile del CE e lo scarto vero resta
+    leggibile - nessun secondo passaggio lo maschera."""
+    foglie = [_f(1, "L", "1000.00", "SPA.C.IV.1"), _f(2, "R", "3505.51", "SPP.D.7")]
+    bs, ce, diag = da_foglie(foglie)
+    assert bs["sp13_utile_perdita"] == D("0.00")
+    att = bs["sp09_disponibilita_liquide"]
+    pas = bs["sp16_debiti_breve"] + bs["sp13_utile_perdita"]
+    assert att - pas == D("-2505.51")
+    assert diag["risultato_ambiguo"] is None
+
+
+# --- Round 2 (banco FORMETAL-TEST): un codice conto davanti al risultato e' sempre pregresso --
+
+
+def test_formetal_test_righe_reali_codice_conto_decide_deterministico():
+    """Righe reali del banco FORMETAL-TEST (2026-09-26):
+    - p1Rr113, 125.543,87, '28/45/090 RISULTATO DI ESERCIZIO' - CON codice conto davanti: e' un
+      vero conto di patrimonio netto (durante l'anno il corrente non e' mai registrato su un
+      conto), quindi l'anno PRECEDENTE, deterministico - mai un candidato dell'ipotesi ambigua.
+    - p2Rr199, 70.353,09, 'UTILE DI ESERCIZIO' - SENZA codice: la riga di quadratura, candidata
+      corrente - e qui coincide esattamente con l'utile del CE.
+    Prima di questo fix le due righe finivano nella STESSA ipotesi di gruppo (round 1): qui,
+    smistate ciascuna per conto proprio, il foglio chiude esattamente - la pregressa in sp12g
+    per il suo codice conto, la corrente esclusa perche' l'ipotesi la conferma (scarto zero)."""
+    foglie = [
+        _f(1, "L", "1195896.96", "SPA.C.IV.1"),
+        _f(2, "R", "1000000.00", "SPP.A.I"),
+        _f("p1Rr113", "R", "125543.87", "SPP.A.IX", testo="28/45/090 RISULTATO DI ESERCIZIO"),
+        _f("p2Rr199", "R", "70353.09", "R", testo="UTILE DI ESERCIZIO"),
+        _f(5, "R", "770353.09", "CE.A.1"),
+        _f(6, "L", "700000.00", "CE.B.7"),
+    ]
+    bs, ce, diag = da_foglie(foglie)
+    assert bs["sp12g_utili_perdite_portati"] == D("125543.87")
+    assert bs["sp13_utile_perdita"] == D("70353.09")
+    assert diag["risultato_precedente"] == [["p1Rr113", "SPP.A.IX", "125543.87"]]
+    assert diag["risultato_ambiguo"] == {"ipotesi": "corrente", "importo": "70353.09",
+                                         "candidati": [["p2Rr199", "R", "70353.09"]]}
+    att = bs["sp09_disponibilita_liquide"]
+    pas = bs["sp11_capitale"] + bs["sp12g_utili_perdite_portati"] + bs["sp13_utile_perdita"]
+    assert att == pas == D("1195896.96")

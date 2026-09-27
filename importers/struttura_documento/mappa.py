@@ -120,6 +120,19 @@ _SEZIONI_CONFINE = ("nota integrativa", "rendiconto finanziario", "relazione", "
 # il resto del documento.
 MAX_PAGINE_CONTINUAZIONE = 2
 
+# Il totale stampato decide anche qui (stesso principio del Task 18/19, "il totale stampato in
+# modo conti"): una pagina di continuazione dello STATO PATRIMONIALE che stampa "Totale passivo"
+# chiude davvero il prospetto - e va sempre inclusa, anche oltre MAX_PAGINE_CONTINUAZIONE pagine
+# "anonime" di fila - a differenza di una pagina di puro riempimento (nessun totale, nessuna voce
+# di chiusura), che il tetto continua a fermare come prima (Task 22, diagnosi budget_671: D)
+# DEBITI + "Totale passivo" su pagina 5, terza pagina di continuazione, esclusa dal solo
+# conteggio). L'eccezione e' bloccata a UNA sola pagina oltre il tetto (mai un secondo giro):
+# scatta solo quando ``continuazioni`` vale esattamente il tetto, mai piu' oltre. Controllato
+# sul testo INTERO della pagina (mai solo la testa, ``_testo_di_testa``/1500 caratteri): "Totale
+# passivo" e' l'ultima riga di un lungo elenco di debiti, spesso ben oltre quella finestra
+# (budget_671: a carattere ~2500 su una pagina di soli debiti).
+TOTALE_PASSIVO = re.compile(r"totale\s+passivo\b", re.I)
+
 
 # Quante righe di testa si guardano per un titolo di sezione confine: non solo la riga 0, perche'
 # un running header aziendale ("ACME SRL - Bilancio al 31-12-2025") puo' precederlo, spingendo il
@@ -200,6 +213,17 @@ def _importi_pagina(page) -> int:
 
 
 def _titolo_pagina(page) -> str | None:
+    # Task 22, G5 (diagnosi budget_671): una pagina che apre una sezione diversa dal prospetto
+    # (Rendiconto finanziario, Nota integrativa, Relazione, Verbale - lo stesso controllo che
+    # _apre_sezione_nuova gia' usa per bloccare una continuazione) non e' mai essa stessa un
+    # titolo di SP/CE, qualunque altra parola contenga in testa. Il fix 7 escludeva solo
+    # "attivita'" preceduta da una preposizione articolata ("dall'", "dell'"); la stessa parola
+    # ricompare in un Rendiconto senza preposizione davanti ("derivanti dalla cessione di
+    # attivita'", 6 parole, mai un titolo) e il vecchio lookbehind non la vedeva. Controllare
+    # prima il titolo VERO della sezione (piu' specifico e deterministico di ogni pattern su
+    # "attivita'") chiude la falla senza restringere ulteriormente quel pattern caso per caso.
+    if _apre_sezione_nuova(page):
+        return None
     righe = _righe_di_testa(page)
     testo = _testo_di_testa(page)
     if TITOLI_CE.search(testo) or any(COSTI_RICAVI_STESSA_RIGA.search(riga) for riga in righe):
@@ -245,7 +269,10 @@ def mappa_xbrl(pdf: str) -> list[dict]:
     non serve che ripeta le stesse date del prospetto appena letto, una vera continuazione spesso
     non le ristampa affatto (Task lotto-b, fix 6a, diagnosi budget_671/247) — al massimo
     MAX_PAGINE_CONTINUAZIONE pagine di fila, e mai oltre una pagina che apre una sezione diversa
-    (nota integrativa, rendiconto finanziario, relazione, verbale)."""
+    (nota integrativa, rendiconto finanziario, relazione, verbale). Oltre quel tetto, una sola
+    pagina in piu' resta ammessa per lo Stato Patrimoniale quando stampa "Totale passivo" (Task 22,
+    diagnosi budget_671): il totale stampato decide anche qui, e una coda di D) DEBITI persa
+    sposterebbe massa vera fuori dallo SP letto."""
     import fitz
     mappe = []
     with fitz.open(pdf) as doc:
@@ -270,7 +297,10 @@ def mappa_xbrl(pdf: str) -> list[dict]:
                 blocco_aperto = (tipo, date)
                 continuazioni = 0
             elif (not oltre_nota and blocco_aperto is not None and not titolo and importi_ok
-                  and continuazioni < MAX_PAGINE_CONTINUAZIONE and not _apre_sezione_nuova(page)):
+                  and not _apre_sezione_nuova(page)
+                  and (continuazioni < MAX_PAGINE_CONTINUAZIONE
+                       or (continuazioni == MAX_PAGINE_CONTINUAZIONE and blocco_aperto[0] == "prospetto_sp"
+                           and TOTALE_PASSIVO.search(page.get_text())))):
                 tipo, date_blocco = blocco_aperto
                 colonne, anno_precedente = _colonne(date_blocco)
                 base.update(tipo_pagina=tipo, continuazione=True,

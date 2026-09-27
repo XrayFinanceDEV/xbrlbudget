@@ -6,10 +6,12 @@ from tests._struttura_fixtures import (MAPPA_COLONNA_UNICA, MAPPA_CONTRAPPOSTE, 
                                         pdf_intestazione_lunga_ce, pdf_prospetto_ires_costi_indeducibili,
                                         pdf_prospetto_irap_rideterminazione, pdf_titoli_spaziati,
                                         pdf_titolo_ce_contrapposte_stessa_riga, pdf_titolo_ce_semplice,
-                                        pdf_xbrl_legge, pdf_xbrl_rendiconto_con_intestazione_ripetuta,
+                                        pdf_xbrl_legge, pdf_xbrl_rendiconto_con_attivita_senza_preposizione,
+                                        pdf_xbrl_rendiconto_con_intestazione_ripetuta,
                                         pdf_xbrl_rendiconto_dopo_ce,
                                         pdf_xbrl_sp_continuazione_oltre_il_limite,
-                                        pdf_xbrl_sp_continuazione_senza_date)
+                                        pdf_xbrl_sp_continuazione_senza_date,
+                                        pdf_xbrl_sp_continuazione_tre_pagine_con_totale_passivo)
 
 
 def test_blocchi_filtro_prosa_e_confine_sp_ce(tmp_path):
@@ -235,3 +237,49 @@ def test_mappa_pagina_produce_lo_schema(monkeypatch):
 
     out = m.mappa_pagina(Client(), b"png")
     assert out["disposizione"] == "sezioni_contrapposte" and out["_token"] == {"in": 3000, "out": 500}
+
+
+# --- Task 22, G5 (diagnosi budget_671): pagina di Rendiconto Finanziario mai una pagina SP; ---
+# --- continuazione dello SP fra due pagine di prospetto sempre inclusa. -----------------------
+
+
+def test_titolo_pagina_non_confonde_attivita_senza_apostrofo_in_un_rendiconto(tmp_path):
+    # Forma reale di budget_671: "(Plusvalenze)/Minusvalenze derivanti dalla cessione di
+    # attivita'" non e' preceduta da un apostrofo ("di attivita'", non "dell'attivita'"): il
+    # lookbehind del fix 7 non la esclude, e la riga (6 parole) supera il controllo per riga.
+    # La pagina apre comunque "Rendiconto finanziario" in testa: non deve mai diventare
+    # "stato patrimoniale".
+    path = pdf_xbrl_rendiconto_con_attivita_senza_preposizione(str(tmp_path / "rend3.pdf"))
+    with fitz.open(path) as doc:
+        assert _titolo_pagina(doc[2]) is None
+
+
+def test_mappa_xbrl_non_scambia_il_rendiconto_per_stato_patrimoniale(tmp_path):
+    # Stessa forma, verificata sull'intera mappa_xbrl (non solo _titolo_pagina): la pagina di
+    # Rendiconto deve restare nota_o_testo, mai prospetto_sp.
+    path = pdf_xbrl_rendiconto_con_attivita_senza_preposizione(str(tmp_path / "rend3.pdf"))
+    mappe = mappa_xbrl(path)
+    assert mappe[0]["tipo_pagina"] == "prospetto_sp"
+    assert mappe[1]["tipo_pagina"] == "prospetto_ce"
+    assert mappe[2]["tipo_pagina"] == "nota_o_testo"
+
+
+def test_mappa_xbrl_continuazione_sp_oltre_il_limite_quando_stampa_totale_passivo(tmp_path):
+    # Diagnosi budget_671: tre pagine di continuazione senza titolo proprio dopo l'Attivo - le
+    # prime due generiche (dentro il tetto di 2), la terza (oltre il tetto) porta D) DEBITI e
+    # "Totale passivo": il totale stampato dal documento decide, e questa pagina non puo'
+    # restare fuori da pagine_sp (perderebbe l'intero blocco debiti, come nel file reale).
+    path = pdf_xbrl_sp_continuazione_tre_pagine_con_totale_passivo(str(tmp_path / "sp3p.pdf"))
+    mappe = mappa_xbrl(path)
+    assert [m["tipo_pagina"] for m in mappe] == ["prospetto_sp"] * 4
+    assert [m["continuazione"] for m in mappe] == [False, True, True, True]
+
+
+def test_mappa_xbrl_limite_due_pagine_di_continuazione_resta_invariato(tmp_path):
+    # Non regressione: senza "Totale passivo" (pura pagina di riempimento, come il test
+    # esistente), il tetto di 2 pagine di continuazione resta quello di sempre - l'eccezione
+    # e' solo per una pagina che chiude davvero lo SP col totale stampato.
+    path = pdf_xbrl_sp_continuazione_oltre_il_limite(str(tmp_path / "lim.pdf"))
+    mappe = mappa_xbrl(path)
+    assert [m["tipo_pagina"] for m in mappe] == ["prospetto_sp", "prospetto_sp", "prospetto_sp", "nota_o_testo"]
+    assert [m["continuazione"] for m in mappe] == [False, True, True, False]

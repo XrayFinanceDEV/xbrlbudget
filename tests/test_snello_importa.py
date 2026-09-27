@@ -103,6 +103,30 @@ def test_pagina_condivisa_sp_e_ce_si_legge_una_sola_volta(tmp_path):
     assert r.report["esito"] == "ok"       # con una lettura sola il debito conta una volta: attivo=passivo=2100
 
 
+def test_pagina_condivisa_rilettura_dichiara_entrambe_le_sezioni(tmp_path):
+    """Fix round 1, minor 4: sulla pagina condivisa la rilettura dopo uno scarto oltre soglia
+    rilegge SP e CE insieme (`_leggi_sp_e_ce`), ma la diagnostica `letture` incrementava solo la
+    sezione scelta dall'euristica (`sezione`), lasciando l'altra ferma a 1 anche se era stata
+    riletta anch'essa. Ora entrambe le sezioni dichiarano la rilettura."""
+    pdf = pdf_colonna_unica(str(tmp_path / "c.pdf"))
+    chiamate = []
+
+    def voci(testo, intestazioni, nota=""):
+        chiamate.append(nota)
+        debito = D("900") if len(chiamate) == 1 else D("1100")   # 1a chiamata: scarto; 2a: quadra
+        return {"corrente": [("SPA.C.IV.1", D("2100")), ("SPP.A.I", D("900")), ("SPP.A.IX", D("100")),
+                             ("SPP.D.E", debito), ("CE.A.1", D("500")), ("CE.B.7", D("400")),
+                             ("CE.21", D("100"))],
+                "precedente": [], "totali": {}}
+
+    struttura = lambda p: _struttura("legge", pagine_sp=[1], pagine_ce=[1],
+                                     mappe=[{"pagina": 1, "tipo_pagina": "prospetto_sp_e_ce"}])
+    r = S.importa(pdf, analizza=struttura, leggi_voci=voci)
+    assert len(chiamate) == 2
+    assert r.report["esito"] == "ok"
+    assert r.report["letture"] == {"sp": 2, "ce": 2}
+
+
 # --- Estensioni Task 8 (rulings del controllo) --------------------------------------------------
 
 

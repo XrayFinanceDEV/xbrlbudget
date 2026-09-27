@@ -177,12 +177,19 @@ def importa(file_path: str, *, ocr_text: str | None = None, analizza=None, leggi
                 nota = (f"Una lettura precedente dava uno scarto di {scarto} euro fra attivo e "
                         f"passivo (o fra risultato CE e SP): controlla voci mancanti, doppie o "
                         f"totali presi come voci.")
-            letture[sezione] = letture.get(sezione, 1) + 1
             if pagine_condivise:
+                # La pagina condivisa si rilegge tutta insieme (SP e CE): entrambe le sezioni
+                # dichiarano la rilettura, non solo quella scelta dall'euristica (minor 4, fix
+                # round 1) — altrimenti la diagnostica mentirebbe su quale sezione e' stata
+                # riletta davvero.
+                letture["sp"] = letture.get("sp", 1) + 1
+                letture["ce"] = letture.get("ce", 1) + 1
                 sp_res, ce_res = _leggi_sp_e_ce(nota_sp=nota, nota_ce=nota)
             elif sezione == "sp":
+                letture[sezione] = letture.get(sezione, 1) + 1
                 sp_res = _leggi_sezione(pagine_sp, struttura.intestazioni_sp, nota=nota)
             else:
+                letture[sezione] = letture.get(sezione, 1) + 1
                 ce_res = _leggi_sezione(pagine_ce, struttura.intestazioni_ce, nota=nota)
 
             fase = "conti"

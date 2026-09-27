@@ -166,3 +166,27 @@ def test_perdita_portata_a_nuovo_resta_negativa():
     assert bs["sp12g_utili_perdite_portati"] == D("-209356.57")
     assert diag["lato_irrisolti"] == []
     assert diag["lato_corretti"] == 0
+
+
+# --- Fix lotto A: riga di risultato stampata due volte, contata una sola volta -------------
+
+
+def test_risultato_stampato_due_volte_si_conta_una_sola_volta():
+    """budget_132: 'RISULTATO DI ESERCIZIO' compare due volte (pagine diverse), stesso importo,
+    entrambe classificate SPP.A.IX (un riepilogo ripetuto dal gestionale): la seconda e' un
+    duplicato esatto e non deve raddoppiare sp13."""
+    foglie = [_f(1, "L", "1000", "SPA.C.IV.3"), _f(2, "R", "500", "SPP.D.7"),
+              _f(3, "R", "500", "SPP.A.IX"), _f(4, "R", "500", "SPP.A.IX")]
+    bs, ce, diag = da_foglie(foglie)
+    assert bs["sp13_utile_perdita"] == D("500.00")
+    assert diag["risultato_duplicato"] == [["4", "SPP.A.IX", "500.00"]]
+
+
+def test_risultato_diverso_non_si_deduplica():
+    """Due percorsi SPP.A.IX con importo DIVERSO non sono un duplicato: sono due voci vere
+    (per esempio l'anno corrente e un pregresso mal classificato) e si sommano entrambe."""
+    foglie = [_f(1, "L", "1000", "SPA.C.IV.3"), _f(2, "R", "1300", "SPP.D.7"),
+              _f(3, "R", "500", "SPP.A.IX"), _f(4, "R", "300", "SPP.A.IX")]
+    bs, ce, diag = da_foglie(foglie)
+    assert bs["sp13_utile_perdita"] == D("800.00")
+    assert diag["risultato_duplicato"] == []

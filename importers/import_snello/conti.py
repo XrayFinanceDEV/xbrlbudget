@@ -85,10 +85,11 @@ def applica_lato(foglie, irrisolti: list | None = None) -> int:
 
 def da_foglie(foglie):
     diag = {"non_mappati": [], "escluse": [], "risultato_stampato": None, "lato_corretti": 0,
-            "lato_irrisolti": []}
+            "lato_irrisolti": [], "risultato_duplicato": []}
     diag["lato_corretti"] = applica_lato(foglie, diag["lato_irrisolti"])
     irrisolti_ids = {r[0] for r in diag["lato_irrisolti"]}
     due_lati = len({f.lato for f in foglie} & {"L", "R"}) == 2
+    visti_risultato: dict[Decimal, str] = {}
     per_famiglia = defaultdict(list)
     for f in foglie:
         if f.percorso == "R" or (f.percorso and e_risultato(f.percorso)):
@@ -101,6 +102,15 @@ def da_foglie(foglie):
         if codice is None:
             diag["non_mappati"].append([f.id, f.percorso, str(f.valore.quantize(_C))])
             continue
+        if codice == "sp13":
+            # un riepilogo del gestionale puo' ristampare "risultato di esercizio" su una
+            # pagina diversa, stesso conto stesso importo: un duplicato esatto si conta una
+            # sola volta (un importo diverso e' invece una voce vera, non un duplicato).
+            v = f.valore.quantize(_C)
+            if v in visti_risultato:
+                diag["risultato_duplicato"].append([f.id, f.percorso, str(v)])
+                continue
+            visti_risultato[v] = f.id
         per_famiglia[famiglia(codice)].append((f, codice))
     importi = defaultdict(Decimal)
     for elementi in per_famiglia.values():
@@ -144,7 +154,7 @@ def da_coppie(coppie):
     """Schema di legge: coppie (percorso, importo) come stampate. Un percorso che ha un discendente
     fra le coppie e' un totale e cade; una voce ripetuta conta una volta; un fondo si sottrae."""
     diag = {"non_mappati": [], "escluse": [], "risultato_stampato": None, "lato_corretti": 0,
-            "lato_irrisolti": []}
+            "lato_irrisolti": [], "risultato_duplicato": []}
     viste, uniche = set(), []
     for p, v in coppie:
         if p not in viste:

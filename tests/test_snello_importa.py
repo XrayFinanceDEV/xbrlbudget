@@ -209,6 +209,35 @@ def test_legge_tappo_entro_soglia_plug_residual(tmp_path):
     assert r.bs["_plug_residual"] == D("50.00")
 
 
+def test_conti_legge_anche_le_pagine_dettaglio(tmp_path, monkeypatch):
+    """Task 18, ruling (b): in modo 'conti' si leggono anche struttura.pagine_dettaglio, non
+    solo pagine_sp ∪ pagine_ce - altrimenti una pagina di continuazione del prospetto (debiti/
+    servizi che sconfinano oltre le pagine SP/CE gia' individuate, come AMBIENTA pag.3/5)
+    resta invisibile e la sua massa e' persa (diagnosi AMBIENTA 2026-09-26, causa radice #1;
+    modo 'legge' lo fa gia' da sempre via pagine_dettagli() per enrich_pdf_details)."""
+    from importers.import_snello import righe as R
+
+    pdf = _pdf_vuoto(str(tmp_path / "c.pdf"))
+    catturato = {}
+
+    def righe_da_pdf_spia(file_path, pagine, ruoli, ocr_text=None):
+        catturato["pagine"] = pagine
+        return []
+
+    monkeypatch.setattr(R, "righe_da_pdf", righe_da_pdf_spia)
+
+    def leggi_conti(righe, foglie):
+        return {"chiamate": 0, "saltate_prima": 0, "senza_percorso": 0}
+
+    struttura = lambda p: _struttura("conti", pagine_sp=[1, 2], pagine_ce=[2], pagine_dettaglio=[3])
+    with pytest.raises(S.SnelloNonRiuscito):
+        # foglie vuote (righe_da_pdf finto non ne produce) -> attivo=passivo=0 -> esito
+        # "vuoto": qui interessa solo l'insieme di pagine passato a righe_da_pdf, non l'esito.
+        S.importa(pdf, analizza=struttura, leggi_conti=leggi_conti)
+
+    assert catturato["pagine"] == {1, 2, 3}
+
+
 def test_conti_percorso_finto_bilancio_quadra(tmp_path, monkeypatch):
     """Modo 'conti' con un `leggi_conti` finto che assegna i percorsi a righe fabbricate a mano
     (righe_da_pdf monkeypatchato): risultato in bilancio, `_unclassified_mass` sempre presente."""

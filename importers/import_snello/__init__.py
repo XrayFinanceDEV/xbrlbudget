@@ -141,6 +141,11 @@ def importa(file_path: str, *, ocr_text: str | None = None, analizza=None, leggi
         return Risultato(bs=_bs_det, ce=dict(_det["ce"]), prior_bs=None, prior_ce=None,
                          report=report, struttura=struttura)
     _report_deterministico = {"parser": _det["parser"], "esito": _det["esito"]}
+    if "unclassified_mass" in _det:
+        # Ruling (a), Task 18: la massa che ha impedito l'adozione resta dichiarata nel
+        # report anche quando si prosegue col percorso Qwen - mai un silenzio che
+        # sembrerebbe "nessun problema" (CLAUDE.md, chiavi diagnostiche sempre dichiarate).
+        _report_deterministico["unclassified_mass"] = _det["unclassified_mass"]
 
     from importers.import_snello.verifica import misura, normalizza_forma, soglia, tappa, totali_stampati
 
@@ -181,7 +186,16 @@ def importa(file_path: str, *, ocr_text: str | None = None, analizza=None, leggi
 
             leggi_conti_fn = leggi_conti or percorsi_dei_conti
             ruoli = struttura.colonne_sp or struttura.colonne_ce
-            righe = righe_da_pdf(file_path, set(pagine_sp) | set(pagine_ce), ruoli, ocr_text)
+            # Ruling (b), Task 18 (2026-09-27): anche le pagine_dettaglio entrano nella
+            # lettura, non solo pagine_sp ∪ pagine_ce - modo "legge" le legge gia' da sempre
+            # (pagine_dettagli(), per enrich_pdf_details): una pagina di continuazione del
+            # prospetto (debiti/servizi che sconfinano oltre le pagine SP/CE gia' individuate)
+            # restava altrimenti invisibile e la sua massa persa (diagnosi AMBIENTA
+            # 2026-09-26, causa radice #1). Un insieme di pagine piu' ampio non duplica nulla:
+            # marca_totali/da_foglie continuano a decidere mastri-o-foglie sul totale stampato,
+            # mai sul prefisso o sulla pagina di provenienza.
+            pagine_lettura = set(pagine_sp) | set(pagine_ce) | set(struttura.pagine_dettaglio)
+            righe = righe_da_pdf(file_path, pagine_lettura, ruoli, ocr_text)
             fo = foglie(righe)
             letture = leggi_conti_fn(righe, fo)
 

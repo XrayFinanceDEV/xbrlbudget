@@ -100,8 +100,10 @@ def campo_da_percorso(p: str) -> str | None:
         if t[0] == "SPP" and len(t) >= 2:
             if t[1] == "A" and len(t) >= 3:
                 return _PN.get(t[2])
-            if t[1] == "B" and len(t) >= 3:
-                return "sp14" + "abcd"[int(t[2]) - 1]
+            if t[1] == "B":
+                # fondi per rischi e oneri: un fondo unico indistinto (nessun sotto-indice
+                # arabo) va sull'aggregato, non perso in non_mappati.
+                return "sp14" + "abcd"[int(t[2]) - 1] if len(t) >= 3 else "sp14"
             if t[1] == "C":
                 return "sp15"
             if t[1] == "D":

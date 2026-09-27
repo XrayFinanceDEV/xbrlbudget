@@ -4,16 +4,22 @@ from __future__ import annotations
 
 from collections import Counter, defaultdict
 from decimal import Decimal
+from itertools import product
 
 from calculations.ce_result import calculate_ce_result
 from importers.import_snello.percorsi import (CONTROPARTE, NOMI, campo_da_percorso, completa,
                                               e_fondo, e_netto, e_risultato, famiglia, lato_di)
-from importers.import_snello.risultato import control_caption, prior_caption, sign_by_caption
+from importers.import_snello.risultato import (control_caption, has_account_code, prior_caption,
+                                               sign_by_caption)
 from importers.import_snello.verifica import misura, soglia
 from importers.iv_cee_hierarchy import detail_fields
 
 _C = Decimal("0.01")
 _IMMOBILIZZAZIONI = ("sp02", "sp03", "sp04")
+# Oltre questo numero di foglie ambigue, provare tutte le 2**n combinazioni non e' piu'
+# proponibile (8 foglie = 256 fogli da ricalcolare): tutte "corrente", dichiarato, mai un
+# tentativo parziale che sembrerebbe piu' sicuro di quanto sia.
+_MAX_AMBIGUE_COMBINATORIE = 3
 # Nessuna contropartita nota: la colonna resta la verita' sul lato, e l'importo va nel secchio
 # esplicito di quel lato (credito se stampato fra gli attivi, debito se fra i passivi) - mai
 # lasciato a rovesciare il segno di un campo TIER0 per un voto di famiglia.
@@ -112,14 +118,23 @@ def da_foglie(foglie):
          un errore del modello conta comunque) va a sp12g, col segno della didascalia;
       2. un percorso "R" o "SPP.A.IX" con una didascalia di pareggio/controllo dichiarata
          (TOTALE A PAREGGIO, DIFFERENZA insieme ad ATTIVO/PASSIVO/DARE/AVERE, SBILANCIO da
-         solo, o lo stesso risultato corrente ristampato) si esclude e basta, mai sommata -
-         MAI su un percorso gia' risolto a un campo normale (fix round 1, review 2026-09-26:
-         "Differenza cambi attivi"/CE.C.17-bis e "Totale rimanenze iniziali" sono conti veri,
-         non righe di pareggio, e la didascalia non deve mai scavalcare un percorso classificato);
-      3. un percorso "R" o "SPP.A.IX" la cui didascalia non e' ne' precedente ne' di
-         pareggio/controllo e' ambiguo: due ipotesi si confrontano DOPO aver costruito il resto
-         del foglio - corrente (esclusa) o precedente (in sp12g) - e vince quella che quadra
-         meglio.
+         solo - MAI la sola frase del risultato, corrente o precedente che sia: quella e'
+         esattamente il caso che il punto 4 deve risolvere, round 2) si esclude e basta, mai
+         sommata - MAI su un percorso gia' risolto a un campo normale (fix round 1, review
+         2026-09-26: "Differenza cambi attivi"/CE.C.17-bis e "Totale rimanenze iniziali" sono
+         conti veri, non righe di pareggio, e la didascalia non deve mai scavalcare un percorso
+         classificato);
+      3. un percorso "R" o "SPP.A.IX" la cui didascalia comincia con un codice di conto
+         (``has_account_code``, round 2, banco FORMETAL-TEST) e' SEMPRE l'anno precedente,
+         deterministico: durante l'anno il risultato corrente non e' mai registrato su un
+         conto, solo il pregresso puo' esserlo ("28/45/090 RISULTATO DI ESERCIZIO" e' un vero
+         conto di patrimonio netto, non la riga di quadratura);
+      4. un percorso "R" o "SPP.A.IX" senza codice conto e la cui didascalia non e' ne'
+         precedente ne' di pareggio/controllo e' ambiguo: si prova ogni combinazione
+         corrente/precedente (fino a 3 foglie ambigue: oltre, tutte "corrente" e si dichiara)
+         DOPO aver costruito il resto del foglio, e vince quella che fa quadrare meglio -
+         owner: "a volte c'e' scritto risultato ma in realta' e' il risultato dell'anno
+         precedente, mentre quello di quest'anno e' la differenza".
 
     ``risultato_duplicato`` resta dichiarato (sempre vuoto in modo "conti"): il vecchio
     dedup-per-valore riguardava solo le righe che finivano sommate in sp13, e nessuna ci
@@ -175,6 +190,14 @@ def da_foglie(foglie):
             # perche' la didascalia somiglia a un rigo di pareggio.
             if control_caption(f.testo):
                 diag["risultato_escluso"].append([f.id, f.percorso, str(f.valore.quantize(_C))])
+            elif has_account_code(f.testo):
+                # Round 2 (banco FORMETAL-TEST): un risultato con un codice conto davanti e' un
+                # vero conto di patrimonio netto - durante l'anno il corrente non e' mai
+                # registrato su un conto - quindi e' SEMPRE l'anno precedente, deterministico,
+                # mai un candidato per l'ipotesi ambigua (che resta per le righe di quadratura
+                # senza codice, "candidate current" per la classificazione del vecchio parser).
+                pregresso += f.valore
+                diag["risultato_precedente"].append([f.id, f.percorso, str(f.valore.quantize(_C))])
             else:
                 ambigue.append(f)
             continue
@@ -225,37 +248,68 @@ def da_foglie(foglie):
     # Il risultato corrente non e' mai una somma di righe stampate: e' sempre l'utile del CE
     # gia' costruito sopra (diagnose, never fabricate - la memoria/CLAUDE.md: "The RISULTATO
     # e' la balancing figure ... derive il risultato dal CE"). Una foglia ambigua (percorso "R"
-    # o "SPP.A.IX", didascalia che non dice ne' precedente ne' controllo) puo' pero' essere in
-    # realta' un pregresso non riconosciuto come tale (didascalia generica tipo "Risultato
-    # esercizio" senza "precedente"): si sceglie l'ipotesi che fa quadrare meglio il foglio,
-    # mai quella che quadra peggio, e se nessuna delle due chiude entro soglia si tiene
-    # l'ipotesi "corrente" (esclusa) e si lascia che la verifica dichiari lo scarto vero (non
-    # e' un risultato piu' grande da inventare, e' massa mancante da recuperare altrove).
+    # o "SPP.A.IX", senza codice conto, didascalia che non dice ne' precedente ne' controllo)
+    # puo' pero' essere in realta' un pregresso non riconosciuto come tale: si sceglie, PER
+    # OGNI FOGLIA AMBIGUA INDIPENDENTEMENTE (round 2, banco FORMETAL-TEST: due righe di
+    # risultato diverse - una con codice conto, gia' instradata sopra, una senza - non sono
+    # la stessa ipotesi), la combinazione corrente/precedente che fa quadrare meglio il resto
+    # del foglio - mai quella che quadra peggio - e se nessuna combinazione chiude entro soglia
+    # si tengono tutte "corrente" (escluse) e si lascia che la verifica dichiari lo scarto vero
+    # (non e' un risultato piu' grande da inventare, e' massa mancante da recuperare altrove).
     utile_ce = calculate_ce_result(ce).net_profit.quantize(_C)
-    if ambigue:
-        somma = sum((f.valore for f in ambigue), Decimal(0))
-        bs_corrente = dict(bs)
-        bs_corrente["sp13_utile_perdita"] = utile_ce
-        bs_precedente = dict(bs)
-        bs_precedente["sp12g_utili_perdite_portati"] = (
-            Decimal(bs_precedente.get("sp12g_utili_perdite_portati", 0)) + somma).quantize(_C)
-        bs_precedente["sp12_riserve"] = (
-            Decimal(bs_precedente.get("sp12_riserve", 0)) + somma).quantize(_C)
-        bs_precedente["sp13_utile_perdita"] = utile_ce
-        m_corrente = misura(bs_corrente, ce, None, forma="bilancio")
-        m_precedente = misura(bs_precedente, ce, None, forma="bilancio")
-        s = soglia(m_corrente["attivo"])
-        candidati = [[f.id, f.percorso, str(f.valore.quantize(_C))] for f in ambigue]
-        if abs(m_precedente["scarto_sp"]) < abs(m_corrente["scarto_sp"]) and abs(m_precedente["scarto_sp"]) <= s:
-            bs = bs_precedente
-            diag["risultato_ambiguo"] = {"ipotesi": "precedente", "importo": str(somma.quantize(_C)),
-                                         "candidati": candidati}
-        else:
-            bs = bs_corrente
-            diag["risultato_ambiguo"] = {"ipotesi": "corrente", "importo": str(somma.quantize(_C)),
-                                         "candidati": candidati}
-    else:
+    if not ambigue:
         bs["sp13_utile_perdita"] = utile_ce
+        return bs, ce, diag
+
+    candidati = [[f.id, f.percorso, str(f.valore.quantize(_C))] for f in ambigue]
+    importo_totale = str(sum((f.valore for f in ambigue), Decimal(0)).quantize(_C))
+    if len(ambigue) > _MAX_AMBIGUE_COMBINATORIE:
+        # Troppe foglie ambigue per provare ogni combinazione (2**n esploderebbe): si tengono
+        # tutte "corrente" e si dichiara il fatto, mai un tentativo parziale non verificato.
+        bs["sp13_utile_perdita"] = utile_ce
+        diag["risultato_ambiguo"] = {"ipotesi": "corrente", "importo": importo_totale,
+                                     "candidati": candidati, "motivo": "troppe_foglie_ambigue"}
+        return bs, ce, diag
+
+    def _foglio_per_assegnazione(precedenti: tuple[bool, ...]) -> tuple[dict, Decimal]:
+        somma = sum((f.valore for f, prec in zip(ambigue, precedenti) if prec), Decimal(0))
+        candidato = dict(bs)
+        if somma:
+            candidato["sp12g_utili_perdite_portati"] = (
+                Decimal(candidato.get("sp12g_utili_perdite_portati", 0)) + somma).quantize(_C)
+            candidato["sp12_riserve"] = (
+                Decimal(candidato.get("sp12_riserve", 0)) + somma).quantize(_C)
+        candidato["sp13_utile_perdita"] = utile_ce
+        return candidato, somma
+
+    tutte_corrente = (False,) * len(ambigue)
+    bs_corrente, _ = _foglio_per_assegnazione(tutte_corrente)
+    m_corrente = misura(bs_corrente, ce, None, forma="bilancio")
+    scarto_corrente = abs(m_corrente["scarto_sp"])
+    s = soglia(m_corrente["attivo"])
+
+    migliore_assegnazione, migliore_bs, migliore_scarto = tutte_corrente, bs_corrente, scarto_corrente
+    for precedenti in product((False, True), repeat=len(ambigue)):
+        if precedenti == tutte_corrente:
+            continue
+        candidato, _ = _foglio_per_assegnazione(precedenti)
+        scarto = abs(misura(candidato, ce, None, forma="bilancio")["scarto_sp"])
+        if scarto < migliore_scarto:
+            migliore_assegnazione, migliore_bs, migliore_scarto = precedenti, candidato, scarto
+
+    if migliore_assegnazione != tutte_corrente and migliore_scarto <= s:
+        bs = migliore_bs
+    else:
+        bs, migliore_assegnazione = bs_corrente, tutte_corrente
+
+    diag["risultato_ambiguo"] = {
+        "ipotesi": "precedente" if any(migliore_assegnazione) else "corrente",
+        "importo": importo_totale,
+        "candidati": candidati,
+    }
+    if len(ambigue) > 1:
+        diag["risultato_ambiguo"]["per_foglia"] = [
+            "precedente" if prec else "corrente" for prec in migliore_assegnazione]
     return bs, ce, diag
 
 

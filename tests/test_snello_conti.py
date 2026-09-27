@@ -211,22 +211,27 @@ def test_padre_con_figlio_fondo_non_conta_come_figlio():
 # --- Fix lotto A: riga di risultato stampata due volte, contata una sola volta -------------
 
 
-def test_risultato_stampato_due_volte_si_conta_una_sola_volta():
+def test_risultato_stampato_due_volte_risolto_per_singola_foglia():
     """budget_132: 'RISULTATO DI ESERCIZIO' compare due volte (pagine diverse), stesso importo,
-    entrambe classificate SPP.A.IX (un riepilogo ripetuto dal gestionale). Da Task 14
-    (2026-09-26) il vecchio dedup-per-valore non serve piu': sp13 non si somma mai dalle righe
-    stampate (e' l'utile del CE, qui 0 perche' non c'e' alcuna voce di CE), quindi due righe
-    ambigue uguali non possono piu' raddoppiarlo - restano entrambe candidate in
-    `risultato_ambiguo`, e vince comunque l'ipotesi "corrente" (esclusa). `risultato_duplicato`
-    resta dichiarato ma vuoto: non e' piu' questo il meccanismo che evita il doppio conteggio."""
+    entrambe classificate SPP.A.IX, nessun codice conto davanti. Da Task 14 (2026-09-26) sp13
+    non si somma mai dalle righe stampate (e' l'utile del CE, qui 0 perche' non c'e' alcuna
+    voce di CE); `risultato_duplicato` resta dichiarato ma vuoto, perche' non e' piu' questo il
+    meccanismo che evita il doppio conteggio. Dal round 2 (banco FORMETAL-TEST) la risoluzione
+    e' per SINGOLA foglia ambigua, non un'unica ipotesi per il gruppo: qui la combinazione che
+    chiude meglio il resto del foglio (scarto zero) mette UNA delle due righe in sp12g e lascia
+    l'altra esclusa - effetto collaterale accettato quando due righe ambigue sono identiche e
+    indistinguibili (nessun codice conto a separarle come pregresso/corrente)."""
     foglie = [_f(1, "L", "1000", "SPA.C.IV.3"), _f(2, "R", "500", "SPP.D.7"),
               _f(3, "R", "500", "SPP.A.IX"), _f(4, "R", "500", "SPP.A.IX")]
     bs, ce, diag = da_foglie(foglie)
     assert bs["sp13_utile_perdita"] == D("0.00")
     assert diag["risultato_duplicato"] == []
-    assert diag["risultato_ambiguo"] == {"ipotesi": "corrente", "importo": "1000.00",
-                                         "candidati": [["3", "SPP.A.IX", "500.00"],
-                                                       ["4", "SPP.A.IX", "500.00"]]}
+    assert bs["sp12g_utili_perdite_portati"] == D("500.00")
+    assert diag["risultato_ambiguo"]["ipotesi"] == "precedente"
+    assert diag["risultato_ambiguo"]["importo"] == "1000.00"
+    assert diag["risultato_ambiguo"]["per_foglia"] == ["corrente", "precedente"]
+    assert diag["risultato_ambiguo"]["candidati"] == [["3", "SPP.A.IX", "500.00"],
+                                                       ["4", "SPP.A.IX", "500.00"]]
 
 
 def test_percorso_mai_assegnato_va_a_non_mappati_non_a_escluse():
@@ -272,36 +277,40 @@ def test_scadenza_non_fa_di_un_conto_il_padre_di_un_altro():
 
 def test_formetal_utile_stampato_uguale_al_ce_si_conta_una_volta():
     """Bilancio di verifica a due colonne (FORMETAL): 'UTILE DI ESERCIZIO' e' la riga di
-    pareggio (percorso 'R'). Dal fix round 1 (review, 2026-09-26) una didascalia cosi' - la
-    stessa frase corrente che il vecchio parser usa per isolare il risultato - si esclude
-    direttamente (risultato_escluso), senza passare dall'ipotesi ambigua: sp13 resta l'utile
-    del CE e il foglio chiude."""
+    pareggio (percorso 'R'), senza codice conto davanti - candidata corrente. Dal round 2
+    (review, 2026-09-26) questa didascalia NON esclude piu' a priori (era il difetto del round
+    1: la stessa frase serve anche a riconoscere un pregresso mal didascalizzato, owner:
+    "a volte c'e' scritto risultato ma e' quello dell'anno precedente"): passa dall'ipotesi
+    ambigua, che sceglie 'corrente' perche' e' l'unica che chiude il foglio a zero (l'importo
+    coincide con l'utile del CE)."""
     foglie = [_f(1, "L", "1000", "SPA.C.IV.1"), _f(2, "R", "800", "SPP.A.I"),
               _f(3, "R", "200", "R", testo="UTILE DI ESERCIZIO"),
               _f(4, "R", "500", "CE.A.1"), _f(5, "L", "300", "CE.B.7")]
     bs, ce, diag = da_foglie(foglie)
     assert bs["sp13_utile_perdita"] == D("200.00")
-    assert diag["risultato_escluso"] == [["3", "R", "200.00"]]
-    assert diag["risultato_ambiguo"] is None
+    assert diag["risultato_escluso"] == []
+    assert diag["risultato_ambiguo"] == {"ipotesi": "corrente", "importo": "200.00",
+                                         "candidati": [["3", "R", "200.00"]]}
     att = bs["sp09_disponibilita_liquide"]
     pas = bs["sp11_capitale"] + bs["sp13_utile_perdita"]
     assert att == pas == D("1000.00")
 
 
-def test_risultato_esercizio_ambiguo_risulta_precedente_se_chiude_il_bilancio():
-    """Una riga con percorso 'SPP.A.IX' e didascalia GENERICA (ne' precedente ne' di pareggio/
-    controllo dichiarato) il cui importo NON coincide con l'utile del CE: il foglio chiude solo
-    se quella massa e' in realta' il risultato dell'anno prima, gia' confluito nel patrimonio
-    netto. L'ipotesi 'precedente' (sp12g) vince perche' e' l'unica che azzera lo scarto. Una
-    didascalia esplicita tipo 'Risultato esercizio' non arriva piu' qui dal fix round 1: quella
-    frase e' la stessa che il vecchio parser usa per il risultato CORRENTE (ESERCIZIO+RISULTATO)
-    e si esclude direttamente - la vera ambiguita' e' quando la didascalia non dice nulla."""
+def test_utile_esercizio_ambiguo_risulta_precedente_se_chiude_il_bilancio():
+    """Round 2 (owner: "a volte c'e' scritto risultato ma in realta' e' il risultato dell'anno
+    precedente, mentre quello di quest'anno e' la differenza"): una riga 'Utile d'esercizio'
+    (percorso 'SPP.A.IX', SENZA codice conto davanti) il cui importo NON coincide con l'utile
+    del CE. Dal round 1 questa didascalia non e' piu' una riga di controllo esclusa a priori
+    (era il difetto: la stessa frase serve anche a un pregresso mal didascalizzato): passa
+    dall'ipotesi ambigua, che qui sceglie 'precedente' (sp12g) perche' e' l'unica che azzera lo
+    scarto attivo-passivo."""
     foglie = [_f(1, "L", "1350", "SPA.C.IV.1"), _f(2, "R", "1000", "SPP.A.I"),
-              _f(3, "R", "300", "SPP.A.IX"),
+              _f(3, "R", "300", "SPP.A.IX", testo="Utile d'esercizio"),
               _f(4, "R", "550", "CE.A.1"), _f(5, "L", "500", "CE.B.7")]
     bs, ce, diag = da_foglie(foglie)
     assert bs["sp13_utile_perdita"] == D("50.00")
     assert bs["sp12g_utili_perdite_portati"] == D("300.00")
+    assert diag["risultato_escluso"] == []
     assert diag["risultato_ambiguo"] == {"ipotesi": "precedente", "importo": "300.00",
                                          "candidati": [["3", "SPP.A.IX", "300.00"]]}
 
@@ -400,10 +409,11 @@ def test_623_perdita_pregressa_e_corrente_entrambe_in_dare_chiudono_il_bilancio(
     bs, ce, diag = da_foglie(foglie)
     assert bs["sp12g_utili_perdite_portati"] == D("-209356.57")
     assert bs["sp13_utile_perdita"] == D("-34590.25")
-    # Dal fix round 1 "PERDITA D'ESERCIZIO" (ESERCIZIO+PERDITA) e' la stessa frase del vecchio
-    # parser per il risultato CORRENTE: si esclude direttamente, non passa dall'ipotesi ambigua.
-    assert diag["risultato_escluso"] == [["4", "SPP.A.IX", "34590.25"]]
-    assert diag["risultato_ambiguo"] is None
+    # "PERDITA D'ESERCIZIO" non ha un codice conto davanti: candidata corrente, passa
+    # dall'ipotesi ambigua (round 2) e vince "corrente" perche' e' l'unica che chiude il foglio.
+    assert diag["risultato_escluso"] == []
+    assert diag["risultato_ambiguo"] == {"ipotesi": "corrente", "importo": "34590.25",
+                                         "candidati": [["4", "SPP.A.IX", "34590.25"]]}
     assert bs.get("sp06g_crediti_altri_breve", D("0")) == D("0")
     assert bs.get("sp16g_altri_debiti_breve", D("0")) == D("0")
     att = bs["sp09_disponibilita_liquide"]
@@ -422,3 +432,35 @@ def test_gap_reale_non_si_maschera_dietro_l_utile_ce():
     pas = bs["sp16_debiti_breve"] + bs["sp13_utile_perdita"]
     assert att - pas == D("-2505.51")
     assert diag["risultato_ambiguo"] is None
+
+
+# --- Round 2 (banco FORMETAL-TEST): un codice conto davanti al risultato e' sempre pregresso --
+
+
+def test_formetal_test_righe_reali_codice_conto_decide_deterministico():
+    """Righe reali del banco FORMETAL-TEST (2026-09-26):
+    - p1Rr113, 125.543,87, '28/45/090 RISULTATO DI ESERCIZIO' - CON codice conto davanti: e' un
+      vero conto di patrimonio netto (durante l'anno il corrente non e' mai registrato su un
+      conto), quindi l'anno PRECEDENTE, deterministico - mai un candidato dell'ipotesi ambigua.
+    - p2Rr199, 70.353,09, 'UTILE DI ESERCIZIO' - SENZA codice: la riga di quadratura, candidata
+      corrente - e qui coincide esattamente con l'utile del CE.
+    Prima di questo fix le due righe finivano nella STESSA ipotesi di gruppo (round 1): qui,
+    smistate ciascuna per conto proprio, il foglio chiude esattamente - la pregressa in sp12g
+    per il suo codice conto, la corrente esclusa perche' l'ipotesi la conferma (scarto zero)."""
+    foglie = [
+        _f(1, "L", "1195896.96", "SPA.C.IV.1"),
+        _f(2, "R", "1000000.00", "SPP.A.I"),
+        _f("p1Rr113", "R", "125543.87", "SPP.A.IX", testo="28/45/090 RISULTATO DI ESERCIZIO"),
+        _f("p2Rr199", "R", "70353.09", "R", testo="UTILE DI ESERCIZIO"),
+        _f(5, "R", "770353.09", "CE.A.1"),
+        _f(6, "L", "700000.00", "CE.B.7"),
+    ]
+    bs, ce, diag = da_foglie(foglie)
+    assert bs["sp12g_utili_perdite_portati"] == D("125543.87")
+    assert bs["sp13_utile_perdita"] == D("70353.09")
+    assert diag["risultato_precedente"] == [["p1Rr113", "SPP.A.IX", "125543.87"]]
+    assert diag["risultato_ambiguo"] == {"ipotesi": "corrente", "importo": "70353.09",
+                                         "candidati": [["p2Rr199", "R", "70353.09"]]}
+    att = bs["sp09_disponibilita_liquide"]
+    pas = bs["sp11_capitale"] + bs["sp12g_utili_perdite_portati"] + bs["sp13_utile_perdita"]
+    assert att == pas == D("1195896.96")

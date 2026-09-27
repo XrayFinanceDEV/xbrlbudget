@@ -19,9 +19,19 @@ o "SPP.A.IX": l'unico punto dove ``conti.py`` lo chiama), mai su un percorso che
 risolto su un campo normale. "Differenza cambi attivi" (CE.C.17-bis, un conto vero) e "Totale
 rimanenze iniziali" contengono le stesse sottostringhe di un rigo di pareggio, ma hanno un
 percorso classificato: la didascalia non li deve mai escludere. Le frasi sono anche state
-ristrette a quelle che il vecchio parser usa davvero: mai il 'TOTALE' nudo (che matcherebbe
-"Totale rimanenze iniziali"), 'DIFFERENZA' solo insieme ad ATTIVO/PASSIVO/DARE/AVERE, e
-'SBILANCIO' solo quando la riga e' essenzialmente quella sola parola."""
+ristrette a quelle che il vecchio parser usa davvero per un rigo di PAREGGIO/CONTROLLO: mai il
+'TOTALE' nudo (che matcherebbe "Totale rimanenze iniziali"), 'DIFFERENZA' solo insieme ad
+ATTIVO/PASSIVO/DARE/AVERE, e 'SBILANCIO' solo quando la riga e' essenzialmente quella sola
+parola.
+
+Fix round 2 (review, 2026-09-26): la frase del risultato CORRENTE (ESERCIZ+UTILE/PERDIT/
+RISULTAT) e' stata tolta da ``control_caption``. Le parole del proprietario: "a volte c'e'
+scritto risultato ma in realta' e' il risultato dell'anno precedente, mentre quello di
+quest'anno e' la differenza" - "Utile d'esercizio"/"Risultato d'esercizio" su un percorso "R"/
+"SPP.A.IX" e' esattamente il caso ambiguo che le due ipotesi di ``conti.da_foglie`` devono
+risolvere confrontando quale chiude meglio il foglio, mai un'esclusione diretta decisa a priori
+dalla sola didascalia. Solo un rigo di pareggio/differenza/sbilancio DICHIARATO (mai il
+risultato, corrente o precedente che sia) si esclude senza passare dall'ipotesi."""
 from __future__ import annotations
 
 import re
@@ -32,6 +42,7 @@ from importers.situazione_contabile_parser import _is_prior_result_caption
 _C = Decimal("0.01")
 _DIFFERENZA_LATI = ('ATTIV', 'PASSIV', 'DARE', 'AVERE')
 _SBILANCIO_RIEMPITIVI = {'SBILANCIO', 'DI', 'DA', 'CONTABILE'}
+_CODICE_CONTO = re.compile(r'^[\d./*]+$')
 
 
 def prior_caption(desc: str) -> bool:
@@ -43,27 +54,29 @@ def prior_caption(desc: str) -> bool:
 
 
 def control_caption(desc: str) -> bool:
-    """Riga di pareggio/controllo o di risultato CORRENTE, mai un conto vero - ma questo lo
-    dice il PERCORSO, non la didascalia: va chiamata solo su una foglia non classificata come
-    conto vero (percorso "R" o "SPP.A.IX"), mai su un percorso gia' risolto su un campo normale
-    (vedi il modulo). Stessa regola del vecchio parser, ristretta (fix round 1, 2026-09-26) a
-    cio' che testa davvero: l'``is_control`` di ``_be_collect_side_facts`` (~L3120: 'PAREGGIO',
-    o 'ESERCIZ' insieme a UTILE/PERDITA/RISULTATO - MAI il 'TOTALE' nudo, che matcherebbe
-    anche "Totale rimanenze iniziali") e lo ``_strip_result`` di
-    ``extract_contrapposte_best_effort`` (~L4896: la stessa coppia ESERCIZ+UTILE/PERDITA/
-    RISULTATO). Nessuna delle due e' una funzione esportata: quella pipeline lavora su
-    colonne fisiche gia' separate (words di PyMuPDF), non sulle Riga di questo pacchetto, e
-    tenerla come adattatore qui evita di duplicarne l'albero delle chiamate. 'DIFFERENZA' conta
-    solo insieme ad ATTIVO/PASSIVO/DARE/AVERE (mai da sola: "Differenza cambi attivi" e' un
-    conto vero), e 'SBILANCIO' solo quando la riga e' essenzialmente quella sola parola (al
-    piu' con 'DI'/'DA'/'CONTABILE': "Sbilancio import/export" non e' una riga di pareggio).
+    """Riga di pareggio/controllo DICHIARATA, mai un conto vero e mai il risultato (corrente o
+    precedente che sia) - ma questo lo dice il PERCORSO, non la didascalia: va chiamata solo su
+    una foglia non classificata come conto vero (percorso "R" o "SPP.A.IX"), mai su un percorso
+    gia' risolto su un campo normale (vedi il modulo). Stessa regola del vecchio parser
+    (l'``is_control`` di ``_be_collect_side_facts``, ~L3120), ristretta due volte:
+
+    - fix round 1 (2026-09-26): mai il 'TOTALE' nudo (che matcherebbe "Totale rimanenze
+      iniziali"), 'DIFFERENZA' solo insieme ad ATTIVO/PASSIVO/DARE/AVERE (mai da sola:
+      "Differenza cambi attivi" e' un conto vero), 'SBILANCIO' solo quando la riga e'
+      essenzialmente quella sola parola (al piu' con 'DI'/'DA'/'CONTABILE': "Sbilancio
+      import/export" non e' una riga di pareggio);
+    - fix round 2 (2026-09-26): tolta la frase del risultato CORRENTE (ESERCIZ+UTILE/PERDITA/
+      RISULTATO, quella di ``_strip_result`` in ``extract_contrapposte_best_effort``
+      ~L4896-4901). Le parole del proprietario: "a volte c'e' scritto risultato ma in realta'
+      e' il risultato dell'anno precedente, mentre quello di quest'anno e' la differenza" -
+      "Utile d'esercizio"/"Risultato d'esercizio" su un percorso "R"/"SPP.A.IX" e' esattamente
+      il caso ambiguo che l'ipotesi di ``conti.da_foglie`` deve risolvere, mai un'esclusione
+      decisa a priori dalla sola didascalia.
 
     Va chiamata SOLO dopo aver escluso ``prior_caption``: una "PERDITA PORTATA A NUOVO"
     contiene sia RISULTATO/PERDITA sia ESERCIZ(I), ma e' un saldo pregresso, non corrente."""
     d = (desc or "").upper()
     if 'PAREGGIO' in d:
-        return True
-    if 'ESERCIZ' in d and any(k in d for k in ('UTILE', 'PERDIT', 'RISULTAT')):
         return True
     if 'DIFFERENZA' in d and any(k in d for k in _DIFFERENZA_LATI):
         return True
@@ -72,6 +85,19 @@ def control_caption(desc: str) -> bool:
         if parole and all(p in _SBILANCIO_RIEMPITIVI for p in parole):
             return True
     return False
+
+
+def has_account_code(desc: str) -> bool:
+    """Vero se la didascalia comincia con un codice di conto (cifre, punti, barre, asterischi -
+    stesso riconoscimento di ``situazione_contabile_parser._hier_prior_result``:
+    ``re.match(r'^[\\d./*]+$', toks[0])``, li' per scartare una riga gia' dentro un mastro).
+    Aggiunta round 2 (banco FORMETAL-TEST, 2026-09-26): un risultato con un codice conto davanti
+    ('28/45/090 RISULTATO DI ESERCIZIO') e' un vero conto di patrimonio netto - durante l'anno il
+    risultato CORRENTE non e' mai registrato su un conto, solo il pregresso puo' esserlo - quindi
+    e' SEMPRE l'anno precedente, deterministico, mai un candidato per l'ipotesi ambigua. Una riga
+    senza codice ('UTILE DI ESERCIZIO') e' la riga di quadratura: resta candidata."""
+    toks = (desc or "").split()
+    return bool(toks) and bool(_CODICE_CONTO.match(toks[0]))
 
 
 def sign_by_caption(desc: str, amount: Decimal) -> Decimal:

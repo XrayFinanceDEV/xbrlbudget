@@ -108,7 +108,10 @@ def campo_da_percorso(p: str) -> str | None:
                 return "sp15"
             if t[1] == "D":
                 base = "sp17" if scad == "O" else "sp16"
-                return base + _DEB[t[2]] if len(t) > 2 else (base if scad else None)
+                # debito senza scadenza dichiarata, nemmeno a livello di lettera (scad=None e
+                # nessun sotto-indice arabo): a breve per prudenza, come SPP.D.E - mai perso in
+                # non_mappati.
+                return base + _DEB[t[2]] if len(t) > 2 else base
             if t[1] == "E":
                 return "sp18"
         if t[0] == "CE":

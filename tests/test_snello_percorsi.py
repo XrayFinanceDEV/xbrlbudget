@@ -22,9 +22,15 @@ from importers.import_snello import percorsi as P
     ("CE.B.11", "ce10"), ("CE.B.12", "ce11"), ("CE.B.13", "ce11b"), ("CE.B.14", "ce12"), ("CE.C.16.d", "ce14"),
     ("CE.C.17", "ce15"), ("CE.C.17-bis", "ce16"), ("CE.D.18", "ce17a"), ("CE.D.19", "ce17b"), ("CE.20", "ce20"),
     ("CE.D.20", "ce20"), ("CE.21", None), ("X", None), ("R", None), ("SPA.Z.9", None), ("", None),
+    # Debito/credito senza scadenza dichiarata, nemmeno a livello di lettera: come SPP.D.E e
+    # SPA.C.II.E, va a breve per prudenza (regola del progetto: "debito senza scadenza -> a
+    # breve"). SPA.C.II bare gia' funzionava (nessun bug, verificato); SPP.D bare tornava
+    # None (bug, corretto qui).
+    ("SPP.D", "sp16"), ("SPA.C.II", "sp06"),
     # Altre voci di sola lettera, senza un aggregato DB che le possa ricevere (a differenza di
-    # SPP.B/sp14 sopra): restano non_mappati di proposito, non un'omissione da correggere.
-    ("SPA.B", None), ("SPP.A", None), ("SPP.D", None),
+    # SPP.B/sp14 sopra, o di SPP.D/sp16 e SPA.C.II/sp06 appena sopra): restano non_mappati di
+    # proposito, non un'omissione da correggere.
+    ("SPA.B", None), ("SPP.A", None),
     ("CE.A", None), ("CE.B", None), ("CE.C", None), ("CE.D", None),
 ])
 def test_campo_da_percorso(p, atteso):

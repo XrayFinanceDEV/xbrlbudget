@@ -211,27 +211,26 @@ def test_padre_con_figlio_fondo_non_conta_come_figlio():
 # --- Fix lotto A: riga di risultato stampata due volte, contata una sola volta -------------
 
 
-def test_risultato_stampato_due_volte_risolto_per_singola_foglia():
-    """budget_132: 'RISULTATO DI ESERCIZIO' compare due volte (pagine diverse), stesso importo,
-    entrambe classificate SPP.A.IX, nessun codice conto davanti. Da Task 14 (2026-09-26) sp13
-    non si somma mai dalle righe stampate (e' l'utile del CE, qui 0 perche' non c'e' alcuna
-    voce di CE); `risultato_duplicato` resta dichiarato ma vuoto, perche' non e' piu' questo il
-    meccanismo che evita il doppio conteggio. Dal round 2 (banco FORMETAL-TEST) la risoluzione
-    e' per SINGOLA foglia ambigua, non un'unica ipotesi per il gruppo: qui la combinazione che
-    chiude meglio il resto del foglio (scarto zero) mette UNA delle due righe in sp12g e lascia
-    l'altra esclusa - effetto collaterale accettato quando due righe ambigue sono identiche e
-    indistinguibili (nessun codice conto a separarle come pregresso/corrente)."""
+def test_risultato_stampato_due_volte_si_conta_una_sola_volta():
+    """budget_132: 'RISULTATO DI ESERCIZIO' compare due volte (pagine diverse), STESSA
+    didascalia, stesso importo, entrambe classificate SPP.A.IX, nessun codice conto davanti -
+    e' lo stesso risultato ristampato, non due conti distinti. Round 3 (review): le due foglie
+    ambigue identiche si collassano in UN solo gruppo prima della ricerca combinatoria (mai una
+    si' e una no - spaccarle inventerebbe una riserva che per caso quadra il foglio); la seconda
+    si dichiara in `risultato_duplicato` e il gruppo pesa per l'intera somma (1.000,00) se
+    l'ipotesi fosse 'precedente'. Qui ne' 'corrente' ne' 'precedente' chiudono meglio del
+    pareggio (scarto 500 in entrambi i casi): a parita' vince 'corrente', sp13 resta l'utile
+    del CE (0, nessuna voce di CE qui) e nessuna riserva fittizia entra in sp12g."""
     foglie = [_f(1, "L", "1000", "SPA.C.IV.3"), _f(2, "R", "500", "SPP.D.7"),
-              _f(3, "R", "500", "SPP.A.IX"), _f(4, "R", "500", "SPP.A.IX")]
+              _f(3, "R", "500", "SPP.A.IX", testo="RISULTATO DI ESERCIZIO"),
+              _f(4, "R", "500", "SPP.A.IX", testo="RISULTATO DI ESERCIZIO")]
     bs, ce, diag = da_foglie(foglie)
     assert bs["sp13_utile_perdita"] == D("0.00")
-    assert diag["risultato_duplicato"] == []
-    assert bs["sp12g_utili_perdite_portati"] == D("500.00")
-    assert diag["risultato_ambiguo"]["ipotesi"] == "precedente"
-    assert diag["risultato_ambiguo"]["importo"] == "1000.00"
-    assert diag["risultato_ambiguo"]["per_foglia"] == ["corrente", "precedente"]
-    assert diag["risultato_ambiguo"]["candidati"] == [["3", "SPP.A.IX", "500.00"],
-                                                       ["4", "SPP.A.IX", "500.00"]]
+    assert "sp12g_utili_perdite_portati" not in bs
+    assert diag["risultato_duplicato"] == [["4", "SPP.A.IX", "500.00"]]
+    assert diag["risultato_ambiguo"] == {"ipotesi": "corrente", "importo": "1000.00",
+                                         "candidati": [["3", "SPP.A.IX", "500.00"],
+                                                       ["4", "SPP.A.IX", "500.00"]]}
 
 
 def test_percorso_mai_assegnato_va_a_non_mappati_non_a_escluse():

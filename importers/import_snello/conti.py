@@ -16,8 +16,9 @@ from importers.iv_cee_hierarchy import detail_fields
 
 _C = Decimal("0.01")
 _IMMOBILIZZAZIONI = ("sp02", "sp03", "sp04")
-# Oltre questo numero di foglie ambigue, provare tutte le 2**n combinazioni non e' piu'
-# proponibile (8 foglie = 256 fogli da ricalcolare): tutte "corrente", dichiarato, mai un
+# Oltre questo numero di GRUPPI ambigui (le foglie identiche - stessa didascalia, stesso
+# importo - contano una volta sola: round 3), provare tutte le 2**n combinazioni non e' piu'
+# proponibile (8 gruppi = 256 fogli da ricalcolare): tutti "corrente", dichiarato, mai un
 # tentativo parziale che sembrerebbe piu' sicuro di quanto sia.
 _MAX_AMBIGUE_COMBINATORIE = 3
 # Nessuna contropartita nota: la colonna resta la verita' sul lato, e l'importo va nel secchio
@@ -131,14 +132,19 @@ def da_foglie(foglie):
          conto di patrimonio netto, non la riga di quadratura);
       4. un percorso "R" o "SPP.A.IX" senza codice conto e la cui didascalia non e' ne'
          precedente ne' di pareggio/controllo e' ambiguo: si prova ogni combinazione
-         corrente/precedente (fino a 3 foglie ambigue: oltre, tutte "corrente" e si dichiara)
+         corrente/precedente (fino a 3 GRUPPI ambigui: oltre, tutti "corrente" e si dichiara)
          DOPO aver costruito il resto del foglio, e vince quella che fa quadrare meglio -
          owner: "a volte c'e' scritto risultato ma in realta' e' il risultato dell'anno
-         precedente, mentre quello di quest'anno e' la differenza".
+         precedente, mentre quello di quest'anno e' la differenza". Due foglie ambigue
+         IDENTICHE (stessa didascalia, stesso importo: lo stesso risultato stampato due volte,
+         budget_132, round 3) formano UN solo gruppo con un solo destino - mai una si' e una
+         no, che spaccherebbe una riga sola in un conto vero e uno escluso a caso.
 
-    ``risultato_duplicato`` resta dichiarato (sempre vuoto in modo "conti"): il vecchio
-    dedup-per-valore riguardava solo le righe che finivano sommate in sp13, e nessuna ci
-    finisce piu' per questa via."""
+    ``risultato_duplicato`` dichiara le foglie ambigue oltre la prima di un gruppo identico
+    (round 3): il vecchio dedup-per-valore (pre-Task 14) riguardava le righe che finivano
+    sommate in sp13 direttamente, e nessuna ci finisce piu' per quella via - ma un duplicato
+    letterale fra le foglie ambigue e' un problema diverso, riapparso quando quelle foglie
+    vengono valutate una per una invece che in blocco (round 2)."""
     diag = {"non_mappati": [], "escluse": [], "risultato_stampato": None, "lato_corretti": 0,
             "lato_irrisolti": [], "risultato_duplicato": [], "padri_esclusi": [],
             "risultato_precedente": [], "risultato_escluso": [], "risultato_ambiguo": None}
@@ -263,16 +269,39 @@ def da_foglie(foglie):
 
     candidati = [[f.id, f.percorso, str(f.valore.quantize(_C))] for f in ambigue]
     importo_totale = str(sum((f.valore for f in ambigue), Decimal(0)).quantize(_C))
-    if len(ambigue) > _MAX_AMBIGUE_COMBINATORIE:
-        # Troppe foglie ambigue per provare ogni combinazione (2**n esploderebbe): si tengono
-        # tutte "corrente" e si dichiara il fatto, mai un tentativo parziale non verificato.
+
+    # Round 3: due foglie ambigue IDENTICHE (stessa didascalia normalizzata, stesso importo,
+    # nessun codice conto - altrimenti sarebbero gia' finite nel ramo deterministico) sono lo
+    # stesso risultato stampato due volte (budget_132), non due conti distinti: condividono UN
+    # solo destino nella ricerca combinatoria, mai una si' e una no (spaccarle inventerebbe una
+    # riserva che per caso quadra il foglio). Le foglie oltre la prima di un gruppo identico si
+    # dichiarano in risultato_duplicato e il gruppo pesa per l'INTERA somma quando l'ipotesi e'
+    # "precedente" - la stessa somma che pooling di gruppo dava prima del round 2, ma solo per i
+    # duplicati veri: due foglie con importo diverso restano due candidati indipendenti.
+    gruppi: dict[tuple, list] = {}
+    ordine_gruppi: list[tuple] = []
+    for f in ambigue:
+        chiave = (f.testo.strip().upper(), f.valore.quantize(_C))
+        if chiave not in gruppi:
+            gruppi[chiave] = []
+            ordine_gruppi.append(chiave)
+        gruppi[chiave].append(f)
+    for membri in gruppi.values():
+        for extra in membri[1:]:
+            diag["risultato_duplicato"].append([extra.id, extra.percorso, str(extra.valore.quantize(_C))])
+    gruppi_ambigui = [gruppi[chiave] for chiave in ordine_gruppi]
+
+    if len(gruppi_ambigui) > _MAX_AMBIGUE_COMBINATORIE:
+        # Troppi gruppi ambigui per provare ogni combinazione (2**n esploderebbe): si tengono
+        # tutti "corrente" e si dichiara il fatto, mai un tentativo parziale non verificato.
         bs["sp13_utile_perdita"] = utile_ce
         diag["risultato_ambiguo"] = {"ipotesi": "corrente", "importo": importo_totale,
                                      "candidati": candidati, "motivo": "troppe_foglie_ambigue"}
         return bs, ce, diag
 
-    def _foglio_per_assegnazione(precedenti: tuple[bool, ...]) -> tuple[dict, Decimal]:
-        somma = sum((f.valore for f, prec in zip(ambigue, precedenti) if prec), Decimal(0))
+    def _foglio_per_assegnazione(precedenti: tuple[bool, ...]) -> dict:
+        somma = sum((sum((f.valore for f in gruppo), Decimal(0))
+                    for gruppo, prec in zip(gruppi_ambigui, precedenti) if prec), Decimal(0))
         candidato = dict(bs)
         if somma:
             candidato["sp12g_utili_perdite_portati"] = (
@@ -280,19 +309,19 @@ def da_foglie(foglie):
             candidato["sp12_riserve"] = (
                 Decimal(candidato.get("sp12_riserve", 0)) + somma).quantize(_C)
         candidato["sp13_utile_perdita"] = utile_ce
-        return candidato, somma
+        return candidato
 
-    tutte_corrente = (False,) * len(ambigue)
-    bs_corrente, _ = _foglio_per_assegnazione(tutte_corrente)
+    tutte_corrente = (False,) * len(gruppi_ambigui)
+    bs_corrente = _foglio_per_assegnazione(tutte_corrente)
     m_corrente = misura(bs_corrente, ce, None, forma="bilancio")
     scarto_corrente = abs(m_corrente["scarto_sp"])
     s = soglia(m_corrente["attivo"])
 
     migliore_assegnazione, migliore_bs, migliore_scarto = tutte_corrente, bs_corrente, scarto_corrente
-    for precedenti in product((False, True), repeat=len(ambigue)):
+    for precedenti in product((False, True), repeat=len(gruppi_ambigui)):
         if precedenti == tutte_corrente:
             continue
-        candidato, _ = _foglio_per_assegnazione(precedenti)
+        candidato = _foglio_per_assegnazione(precedenti)
         scarto = abs(misura(candidato, ce, None, forma="bilancio")["scarto_sp"])
         if scarto < migliore_scarto:
             migliore_assegnazione, migliore_bs, migliore_scarto = precedenti, candidato, scarto
@@ -307,7 +336,7 @@ def da_foglie(foglie):
         "importo": importo_totale,
         "candidati": candidati,
     }
-    if len(ambigue) > 1:
+    if len(gruppi_ambigui) > 1:
         diag["risultato_ambiguo"]["per_foglia"] = [
             "precedente" if prec else "corrente" for prec in migliore_assegnazione]
     return bs, ce, diag

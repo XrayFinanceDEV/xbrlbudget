@@ -5,7 +5,8 @@ from tests._struttura_fixtures import (MAPPA_COLONNA_UNICA, MAPPA_CONTRAPPOSTE, 
                                         pdf_ce_poi_prospetto_fiscale, pdf_colonna_unica, pdf_contrapposte,
                                         pdf_intestazione_lunga_ce, pdf_prospetto_ires_costi_indeducibili,
                                         pdf_prospetto_irap_rideterminazione, pdf_titoli_spaziati,
-                                        pdf_titolo_ce_contrapposte_stessa_riga, pdf_titolo_ce_semplice, pdf_xbrl_legge)
+                                        pdf_titolo_ce_contrapposte_stessa_riga, pdf_titolo_ce_semplice,
+                                        pdf_xbrl_legge, pdf_xbrl_rendiconto_dopo_ce)
 
 
 def test_blocchi_filtro_prosa_e_confine_sp_ce(tmp_path):
@@ -148,6 +149,27 @@ def test_pagina_fiscale_senza_titolo_comincia_un_blocco_suo(tmp_path):
     b = blocchi(path)
     assert [x.pagine for x in b] == [[1], [2]]
     assert b[0].titolo == "conto economico" and b[1].titolo is None
+
+
+def test_titolo_pagina_non_confonde_attivita_di_un_rendiconto(tmp_path):
+    # Diagnosi budget_671 (lotto-b, fix 7): "Flussi finanziari derivanti dall'attivita' operativa"
+    # non e' un titolo di Stato Patrimoniale. Il vecchio TITOLI_SP (`attivit[aà]'?\s`, senza
+    # contesto di titolo) ci cadeva su qualunque pagina di Rendiconto Finanziario.
+    path = pdf_xbrl_rendiconto_dopo_ce(str(tmp_path / "rend.pdf"))
+    with fitz.open(path) as doc:
+        assert _titolo_pagina(doc[2]) is None
+
+
+def test_titoli_sp_reali_restano_riconosciuti_dopo_la_correzione(tmp_path):
+    # La correzione di fix 7 non deve perdere i titoli SP reali: "STATO PATRIMONIALE ATTIVO"
+    # (via "stato patrimoniale") e "ATTIVITA'" da sola su una riga corta (via il nuovo controllo
+    # per riga, senza preposizione articolata davanti).
+    path = pdf_colonna_unica(str(tmp_path / "c.pdf"))
+    with fitz.open(path) as doc:
+        assert _titolo_pagina(doc[0]) == "stato patrimoniale"        # "STATO PATRIMONIALE ATTIVO"
+    path2 = pdf_contrapposte(str(tmp_path / "cc.pdf"))
+    with fitz.open(path2) as doc2:
+        assert _titolo_pagina(doc2[0]) == "stato patrimoniale"       # titolo + "ATTIVITA'"/"PASSIVITA'"
 
 
 def test_mappa_pagina_produce_lo_schema(monkeypatch):

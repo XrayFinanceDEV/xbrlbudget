@@ -531,3 +531,57 @@ def pdf_ce_poi_prospetto_fiscale(path: str) -> str:
     _scrivi_prospetto_irap(doc.new_page(width=595, height=842))
     doc.save(path)
     return path
+
+
+# --- Lotto import-pdf-snello, fix 7 ("attivita'" in prosa) ------------------------------------
+
+
+def pdf_xbrl_rendiconto_dopo_ce(path: str) -> str:
+    """SP e CE regolari (con titolo e date), seguiti da un vero Rendiconto Finanziario: titolo
+    proprio in testa e prosa che contiene "attivita'" dentro preposizioni articolate
+    ("dall'attivita'", "dell'attivita'"), con importi a sufficienza da sembrare un prospetto.
+    Non deve diventare ne' un falso "stato patrimoniale" (vecchio TITOLI_SP, fix 7) ne' una
+    continuazione del CE (fix 6, il testo apre una sezione nuova)."""
+    doc = fitz.open()
+    intest = [(380, "31-12-2025", True), (480, "31-12-2024", True)]
+
+    sp = doc.new_page(width=595, height=842)
+    sp.insert_text((30, 40), "Stato patrimoniale", fontname=FONT, fontsize=10)
+    _riga(sp, 60, intest)
+    righe_sp = [(30, "B) Immobilizzazioni", "900,00", "950,00"),
+                (30, "C) Attivo circolante", "300,00", "200,00"),
+                (30, "Totale attivo", "1.200,00", "1.150,00")]
+    y = 80
+    for x, testo, a, b in righe_sp:
+        _riga(sp, y, [(x, testo, False), (380, a, True), (480, b, True)])
+        y += 14
+
+    ce = doc.new_page(width=595, height=842)
+    ce.insert_text((30, 40), "Conto economico", fontname=FONT, fontsize=10)
+    _riga(ce, 60, intest)
+    righe_ce = [(30, "A) Valore della produzione", "2.000,00", "1.800,00"),
+                (30, "B) Costi della produzione", "1.500,00", "1.350,00"),
+                (30, "21) Utile (perdita) dell'esercizio", "500,00", "450,00")]
+    y = 80
+    for x, testo, a, b in righe_ce:
+        _riga(ce, y, [(x, testo, False), (380, a, True), (480, b, True)])
+        y += 14
+
+    rendiconto = doc.new_page(width=595, height=842)
+    righe = [
+        "Rendiconto finanziario, metodo indiretto",
+        "A. Flussi finanziari derivanti dall'attivita' operativa (metodo indiretto)",
+        "Utile (perdita) dell'esercizio                       500,00      450,00",
+        "Ammortamenti                                         100,00       90,00",
+        "B. Flussi finanziari derivanti dall'attivita' di investimento",
+        "Investimenti in immobilizzazioni materiali          -200,00     -150,00",
+        "C. Flussi finanziari derivanti dall'attivita' di finanziamento",
+        "Rimborso finanziamenti                              -100,00      -80,00",
+        "Disponibilita' liquide a fine esercizio               300,00      200,00",
+    ]
+    y = 40
+    for riga in righe:
+        rendiconto.insert_text((30, y), riga, fontname=FONT, fontsize=8)
+        y += 14
+    doc.save(path)
+    return path

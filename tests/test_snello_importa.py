@@ -78,6 +78,31 @@ def test_struttura_in_errore_ripiega(tmp_path):
     assert exc.value.report["fase"] == "struttura" and exc.value.report["errore"] == "RuntimeError"
 
 
+def test_pagina_condivisa_sp_e_ce_si_legge_una_sola_volta(tmp_path):
+    """Task lotto-b, fix 8: una pagina "prospetto_sp_e_ce" (SP e CE sulla stessa pagina fisica)
+    entra in pagine_sp E pagine_ce (TIPI_SP/TIPI_CE di analisi.py): leggerla due volte manda la
+    stessa riga stampata a due chiamate indipendenti, che possono risolverla con due percorsi
+    diversi (come budget_397: la stessa riga di debito letta 'SPP.D.O' dalla chiamata SP e
+    'SPP.D.E' dalla chiamata CE) e la contano due volte, perche' da_coppie deduplica solo per
+    percorso esatto. Una pagina cosi' si legge una volta sola."""
+    pdf = pdf_colonna_unica(str(tmp_path / "c.pdf"))
+    chiamate = []
+
+    def voci(testo, intestazioni, nota=""):
+        chiamate.append(nota)
+        # stesso debito, percorso diverso alla seconda chiamata SE la pagina viene letta due volte
+        percorso = "SPP.D.O" if len(chiamate) == 1 else "SPP.D.E"
+        return {"corrente": [("SPA.C.IV.1", D("2100")), ("SPP.A.I", D("900")), ("SPP.A.IX", D("100")),
+                             (percorso, D("1100")), ("CE.A.1", D("500")), ("CE.B.7", D("400")), ("CE.21", D("100"))],
+                "precedente": [], "totali": {}}
+
+    struttura = lambda p: _struttura("legge", pagine_sp=[1], pagine_ce=[1],
+                                     mappe=[{"pagina": 1, "tipo_pagina": "prospetto_sp_e_ce"}])
+    r = S.importa(pdf, analizza=struttura, leggi_voci=voci)
+    assert len(chiamate) == 1
+    assert r.report["esito"] == "ok"       # con una lettura sola il debito conta una volta: attivo=passivo=2100
+
+
 # --- Estensioni Task 8 (rulings del controllo) --------------------------------------------------
 
 

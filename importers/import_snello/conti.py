@@ -401,7 +401,17 @@ def da_foglie(foglie):
         per_famiglia[famiglia(codice)].append((f, codice))
     importi = defaultdict(Decimal)
     for elementi in per_famiglia.values():
-        peso_corsia, peso_segno = Counter(), Counter()
+        # Voto per CONTEGGIO (Task 22, G2, diagnosi budget_624): pesare in euro lasciava
+        # un'unica riga fuori posto - il fisico non e' dell'euro, e' del CONTO - dominare
+        # l'intera famiglia quando il suo importo superava la somma di TUTTI i conti veri
+        # (1.468.999,24 contro ~1.042.750 di costi veri, budget_624): il voto ribaltava
+        # "cos" per intero e ogni costo vero finiva sommato come un guadagno
+        # (calculate_ce_result li tratta come guadagni quando sono negativi). L'euro resta
+        # SOLO lo spareggio a parita' di conteggio (lo stesso principio per cui il vecchio
+        # importatore non vota affatto: classify_costi/classify_ricavi classificano ogni
+        # conto per NOME su un secchio a segno fisso, mai per un voto di maggioranza).
+        voti_corsia, euro_corsia = Counter(), Counter()
+        voti_segno, euro_segno = Counter(), Counter()
         for f, _ in elementi:
             if e_fondo(f.percorso) or f.id in irrisolti_ids:
                 continue
@@ -411,10 +421,15 @@ def da_foglie(foglie):
                 # sposterebbe il "lato normale" della famiglia e farebbe girare di segno un
                 # debito vero. A colonna unica (senza Dare/Avere) resta nel voto come sempre.
                 continue
-            peso_corsia[_corsia(f, True) if due_lati else 0] += abs(f.valore)
-            peso_segno[f.valore >= 0] += abs(f.valore)
-        corsia_n = peso_corsia.most_common(1)[0][0] if peso_corsia else 0
-        positivo_n = peso_segno.most_common(1)[0][0] if peso_segno else True
+            corsia, positivo = (_corsia(f, True) if due_lati else 0), f.valore >= 0
+            voti_corsia[corsia] += 1
+            euro_corsia[corsia] += abs(f.valore)
+            voti_segno[positivo] += 1
+            euro_segno[positivo] += abs(f.valore)
+        corsia_n = (max(voti_corsia, key=lambda k: (voti_corsia[k], euro_corsia[k]))
+                    if voti_corsia else 0)
+        positivo_n = (max(voti_segno, key=lambda k: (voti_segno[k], euro_segno[k]))
+                      if voti_segno else True)
         for f, codice in elementi:
             if due_lati and e_netto(f.percorso):
                 # colonna=lato NON vale per capitale/riserve/risultato: un utile e una perdita
@@ -531,7 +546,17 @@ def da_foglie(foglie):
 
 def da_coppie(coppie):
     """Schema di legge: coppie (percorso, importo) come stampate. Un percorso che ha un discendente
-    fra le coppie e' un totale e cade; una voce ripetuta conta una volta; un fondo si sottrae."""
+    fra le coppie e' un totale e cade; una voce ripetuta conta una volta; un fondo si sottrae.
+
+    A differenza di ``da_foglie`` (modo "conti"), qui non c'e' alcun voto di lato: il segno letto
+    passa cosi' com'e', tranne per un solo caso esplicito (Task 22, G2, diagnosi budget_664): un
+    documento che stampa OGNI voce di costo fra parentesi (convenzione di stampa - "budget a
+    periodo parziale", non un segno semantico riga per riga) non ha altrimenti alcuna
+    normalizzazione, e ``calculate_ce_result`` somma quei negativi come guadagni. Si ribalta
+    l'intera famiglia "cos" (per CONTEGGIO di voci, mai per euro - stesso principio della
+    correzione in ``da_foglie`` qui sopra) solo quando la MAGGIORANZA e' negativa: una minoranza
+    dissenziente (una vera contropartita, es. un rimborso) resta con l'effetto di riduzione dopo
+    il ribaltamento uniforme, mai amplificata a dominare il voto."""
     diag = {"non_mappati": [], "escluse": [], "risultato_stampato": None, "lato_corretti": 0,
             "lato_irrisolti": [], "risultato_duplicato": [], "padri_esclusi": []}
     viste, uniche = set(), []
@@ -540,7 +565,7 @@ def da_coppie(coppie):
             viste.add(p)
             uniche.append((p, Decimal(v)))
     tutti = [p for p, _ in uniche]
-    importi = defaultdict(Decimal)
+    voci: list[tuple[str, Decimal, str]] = []
     for p, v in uniche:
         if e_risultato(p):
             diag["risultato_stampato"] = str(v.quantize(_C))
@@ -551,6 +576,18 @@ def da_coppie(coppie):
         if codice is None:
             diag["non_mappati" if p not in ("X", "R") else "escluse"].append([p, p, str(v.quantize(_C))])
             continue
+        voci.append((p, v, codice))
+
+    segni_cos = Counter()
+    for _, v, codice in voci:
+        if v != 0 and codice.startswith("ce") and famiglia(codice) == "cos":
+            segni_cos[v < 0] += 1
+    ribalta_cos = segni_cos.get(True, 0) > segni_cos.get(False, 0)
+
+    importi = defaultdict(Decimal)
+    for p, v, codice in voci:
+        if ribalta_cos and codice.startswith("ce") and famiglia(codice) == "cos":
+            v = -v
         importi[codice] += -abs(v) if e_fondo(p) else v
     bs, ce = completa(_netta_fondi_negativi(dict(importi)))
     diag["immobilizzazioni_negative_tagliate"] = _clamp_immobilizzazioni_negative(bs)

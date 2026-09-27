@@ -236,6 +236,43 @@ def test_wrapper_json_passa_timeout_120(monkeypatch):
     assert visti["timeout"] == 120.0
 
 
+def test_percorso_vuoto_o_solo_sezione_non_e_unassegnazione():
+    """Una risposta 'SPA'/'SPP'/'CE' (solo sezione, senza struttura) o vuota non conta come
+    percorso assegnato: la riga resta senza percorso e il secondo giro la ritenta, invece di
+    restare bloccata su un percorso spazzatura che non verra' mai piu' riletto."""
+    righe = [_riga(i, f"c{i}") for i in range(3)]
+    foglie = righe
+    chiamate = []
+
+    def chiama(system, user, max_tokens):
+        chiamate.append(user)
+        if len(chiamate) == 1:
+            return "0 SPA\n1 SPP.D.7\n2 CE"
+        # secondo giro: solo le righe 0 e 2 (mai assegnate) vengono ritentate
+        assert "1|c1" not in user
+        return "0 SPA.B.II\n2 CE.B.7"
+
+    esito = L.percorsi_dei_conti(righe, foglie, chiama=chiama)
+    assert righe[0].percorso == "SPA.B.II"
+    assert righe[1].percorso == "SPP.D.7"
+    assert righe[2].percorso == "CE.B.7"
+    assert esito["senza_percorso"] == 0
+    assert len(chiamate) == 2
+
+
+def test_percorso_solo_sezione_ancora_dopo_il_secondo_giro_resta_senza():
+    """Se anche il secondo giro risponde solo con la sezione, la riga resta senza percorso
+    (mai un placeholder spazzatura): la dichiara non classificata chi la consuma a valle."""
+    righe = [_riga(0, "conto ignoto")]
+
+    def chiama(system, user, max_tokens):
+        return "0 SPP"
+
+    esito = L.percorsi_dei_conti(righe, righe, chiama=chiama)
+    assert righe[0].percorso is None
+    assert esito["senza_percorso"] == 1
+
+
 def test_trascrivi_pagine_wrapper_default_passa_timeout_120(tmp_path, monkeypatch):
     """Il wrapper di default usato da trascrivi_pagine quando non si passa chiama_json
     (produzione) deve avere lo stesso tetto basso dei due wrapper testuali sopra."""

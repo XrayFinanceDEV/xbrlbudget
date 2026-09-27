@@ -95,8 +95,13 @@ def da_foglie(foglie):
         if f.percorso == "R" or (f.percorso and e_risultato(f.percorso)):
             diag["risultato_stampato"] = str(abs(f.valore).quantize(_C))
             continue
-        if not f.percorso or f.percorso == "X":
-            diag["escluse"].append([f.id, f.percorso or "", str(f.valore.quantize(_C))])
+        if f.percorso == "X":
+            diag["escluse"].append([f.id, f.percorso, str(f.valore.quantize(_C))])
+            continue
+        if not f.percorso:
+            # mai classificata (nemmeno al secondo giro di lettura): massa reale non
+            # classificata, non una riga dichiarata non contabile - non va confusa con 'X'.
+            diag["non_mappati"].append([f.id, "", str(f.valore.quantize(_C))])
             continue
         codice = campo_da_percorso(f.percorso)
         if codice is None:

@@ -97,7 +97,10 @@ def percorsi_dei_conti(righe, foglie, *, chiama=None) -> dict:
             parti = linea.split()
             if len(parti) == 2 and parti[0].isdigit():
                 n = int(parti[0])
-                if n in ammessi:
+                # una risposta vuota o di sola sezione ("SPA","SPP","CE") non e' una
+                # classificazione: non conta come assegnazione, cosi' il secondo giro la
+                # ritenta invece di restare bloccata su un percorso spazzatura.
+                if n in ammessi and parti[1] not in ("", "SPA", "SPP", "CE"):
                     trovati[n] = parti[1]
         return trovati
 

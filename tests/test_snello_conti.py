@@ -182,6 +182,17 @@ def test_risultato_stampato_due_volte_si_conta_una_sola_volta():
     assert diag["risultato_duplicato"] == [["4", "SPP.A.IX", "500.00"]]
 
 
+def test_percorso_mai_assegnato_va_a_non_mappati_non_a_escluse():
+    """Una foglia senza percorso (mai classificata, nemmeno al secondo giro di lettura) e'
+    massa reale non classificata: va in non_mappati, mai confusa con 'X' (riga dichiarata
+    esplicitamente non contabile dal modello) in escluse."""
+    foglie = [_f(1, "L", "1000", "SPA.C.IV.3"), _f(2, "R", "500", "SPP.D.7"),
+              _f(3, "L", "5", "X"), _f(4, "L", "12.34", None)]
+    bs, ce, diag = da_foglie(foglie)
+    assert diag["escluse"] == [["3", "X", "5.00"]]
+    assert diag["non_mappati"] == [["4", "", "12.34"]]
+
+
 def test_risultato_diverso_non_si_deduplica():
     """Due percorsi SPP.A.IX con importo DIVERSO non sono un duplicato: sono due voci vere
     (per esempio l'anno corrente e un pregresso mal classificato) e si sommano entrambe."""

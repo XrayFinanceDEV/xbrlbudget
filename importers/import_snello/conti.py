@@ -85,10 +85,15 @@ def applica_lato(foglie, irrisolti: list | None = None) -> int:
 
 def da_foglie(foglie):
     diag = {"non_mappati": [], "escluse": [], "risultato_stampato": None, "lato_corretti": 0,
-            "lato_irrisolti": [], "risultato_duplicato": []}
+            "lato_irrisolti": [], "risultato_duplicato": [], "padri_esclusi": []}
     diag["lato_corretti"] = applica_lato(foglie, diag["lato_irrisolti"])
     irrisolti_ids = {r[0] for r in diag["lato_irrisolti"]}
     due_lati = len({f.lato for f in foglie} & {"L", "R"}) == 2
+    # Un percorso stampato ACCANTO a un percorso piu' specifico che lo prolunga (es. "SPP.D"
+    # bare insieme a "SPP.D.4") e' lo stesso totale gia' spiegato dai figli: va escluso, mai
+    # sommato di nuovo (come gia' fa da_coppie in modo "legge"). Un fondo (.F) non conta mai
+    # come figlio ai fini di questa regola: netta il lordo, non lo spiega.
+    tutti_percorsi = [f.percorso for f in foglie if f.percorso]
     visti_risultato: dict[Decimal, str] = {}
     per_famiglia = defaultdict(list)
     for f in foglie:
@@ -102,6 +107,9 @@ def da_foglie(foglie):
             # mai classificata (nemmeno al secondo giro di lettura): massa reale non
             # classificata, non una riga dichiarata non contabile - non va confusa con 'X'.
             diag["non_mappati"].append([f.id, "", str(f.valore.quantize(_C))])
+            continue
+        if any(q != f.percorso and q.startswith(f.percorso + ".") and not e_fondo(q) for q in tutti_percorsi):
+            diag["padri_esclusi"].append([f.id, f.percorso, str(f.valore.quantize(_C))])
             continue
         codice = campo_da_percorso(f.percorso)
         if codice is None:
@@ -159,7 +167,7 @@ def da_coppie(coppie):
     """Schema di legge: coppie (percorso, importo) come stampate. Un percorso che ha un discendente
     fra le coppie e' un totale e cade; una voce ripetuta conta una volta; un fondo si sottrae."""
     diag = {"non_mappati": [], "escluse": [], "risultato_stampato": None, "lato_corretti": 0,
-            "lato_irrisolti": [], "risultato_duplicato": []}
+            "lato_irrisolti": [], "risultato_duplicato": [], "padri_esclusi": []}
     viste, uniche = set(), []
     for p, v in coppie:
         if p not in viste:

@@ -168,6 +168,33 @@ def test_perdita_portata_a_nuovo_resta_negativa():
     assert diag["lato_corretti"] == 0
 
 
+# --- Fix round 1 (review): un padre con figli non deve raddoppiare la massa in da_foglie ---
+
+
+def test_padre_con_figli_non_raddoppia_la_massa():
+    """Riscontrato in review: un totale di lettera (SPP.D bare) stampato ACCANTO a righe piu'
+    specifiche dello stesso gruppo (SPP.D.4, SPP.D.7) e' la stessa massa gia' spiegata dai
+    figli: va escluso, mai sommato di nuovo - come gia' fa da_coppie in modo 'legge'. Prima
+    del fix: sp16 finiva 10.000 (3.000+2.000 dai figli PIU' 5.000 dal padre bare, che
+    campo_da_percorso mappa gia' sull'aggregato sp16 stesso)."""
+    foglie = [_f(1, "L", "5000", "SPA.C.IV.3"), _f(2, "R", "3000", "SPP.D.4"),
+              _f(3, "R", "2000", "SPP.D.7"), _f(4, "R", "5000", "SPP.D")]
+    bs, ce, diag = da_foglie(foglie)
+    assert bs["sp16_debiti_breve"] == D("5000.00")
+    assert diag["padri_esclusi"] == [["4", "SPP.D", "5000.00"]]
+
+
+def test_padre_con_figlio_fondo_non_conta_come_figlio():
+    """Un fondo (.F) non e' un figlio ai fini di questa regola, ne' in da_coppie ne' qui: un
+    lordo (SPA.B.II) con solo il proprio fondo (SPA.B.II.2.F) fra le altre foglie non va
+    escluso come "padre con figli" - resta il caso normale di netting del fondo."""
+    foglie = [_f(1, "L", "1000", "SPA.B.II"), _f(2, "R", "400", "SPA.B.II.2.F"),
+              _f(3, "R", "600", "SPP.D.7")]
+    bs, ce, diag = da_foglie(foglie)
+    assert bs["sp03_immob_materiali"] == D("600.00")
+    assert diag["padri_esclusi"] == []
+
+
 # --- Fix lotto A: riga di risultato stampata due volte, contata una sola volta -------------
 
 

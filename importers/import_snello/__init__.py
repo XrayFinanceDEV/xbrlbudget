@@ -150,9 +150,25 @@ def importa(file_path: str, *, ocr_text: str | None = None, analizza=None, leggi
     from importers.import_snello.verifica import misura, normalizza_forma, soglia, tappa, totali_stampati
 
     # Ancora indipendente dall'estrattore, letta una sola volta (nessuna chiamata modello):
-    # in modo "conti" e' l'unico contraddittorio possibile (oggi None sempre); in modo "legge"
-    # vince sui totali riportati dall'LLM quando esiste (li' sotto, in _combina).
-    deterministici = totali_stampati(file_path)
+    # in modo "legge" vince sui totali riportati dall'LLM quando esiste (li' sotto, in
+    # _combina). In modo "conti" il totale stampato entra SOLO sulla colonna che la
+    # struttura identifica come saldo (Ruling Task 21, diagnosi TM 589/590): senza una
+    # colonna certa (``regola_colonna`` vuota - "saldo_corrente"/"saldo_finale" non
+    # dichiarati) non c'e' alcuna ancora, mai un falso squadrato preso dalla prima colonna
+    # che il testo grezzo incontra (era "Saldo non rettificato", non "Saldo finale").
+    if modo == "conti":
+        from importers.import_snello.righe import regola_colonna
+        _regola_stampati = regola_colonna(struttura.colonne_sp or struttura.colonne_ce)
+        deterministici = (totali_stampati(file_path, regola=_regola_stampati) if _regola_stampati
+                          else {"totale_attivo": None, "totale_passivo": None})
+    else:
+        deterministici = totali_stampati(file_path)
+
+    # Task 21: la massa grezza per lato (SP, prima di applica_lato/netting dei fondi), sola
+    # base di confronto valida per lo stampato quando il prospetto e' a sezioni
+    # contrapposte (due lati fisici distinti) - assegnata dopo aver letto le foglie, sotto.
+    # None (nessun grezzo) e' il comportamento di sempre: misura() ripiega su att/pas netti.
+    _grezzo_sp: dict | None = None
 
     def _verifica(bs: dict, ce: dict, stampati: dict | None):
         if modo == "conti":
@@ -163,7 +179,7 @@ def importa(file_path: str, *, ocr_text: str | None = None, analizza=None, leggi
             # tornare su "verifica" e sottrarre l'utile una seconda volta, mascherando un vero
             # sbilancio (budget_330) - lo stesso guasto che il doppio passaggio sotto evita per
             # modo "legge".
-            m = misura(bs, ce, stampati, forma="bilancio")
+            m = misura(bs, ce, stampati, forma="bilancio", grezzo=_grezzo_sp)
             s = soglia(m["attivo"])
             bs, ce, tappo, esito = tappa(bs, ce, m, s)
             return bs, ce, tappo, esito, m, s
@@ -197,6 +213,20 @@ def importa(file_path: str, *, ocr_text: str | None = None, analizza=None, leggi
             pagine_lettura = set(pagine_sp) | set(pagine_ce) | set(struttura.pagine_dettaglio)
             righe = righe_da_pdf(file_path, pagine_lettura, ruoli, ocr_text)
             fo = foglie(righe)
+            # Task 21: la massa grezza per lato SOLO quando il prospetto SP e' a sezioni
+            # contrapposte (entrambi i lati fisici presenti fra le foglie di SP - "bs"): un
+            # elenco a colonna unica non oppone alcuna colonna attivo/passivo fisica, e
+            # att/pas netti (il ramo None di misura()) restano l'unica base valida, come
+            # sempre. "L"/"R" sono attivo/passivo per costruzione di ``collect_source_rows``
+            # (sezioni contrapposte: attivo sempre a sinistra, passivo sempre a destra - lo
+            # stesso convenzione che ``applica_lato``/CLAUDE.md presumono altrove), mai
+            # ridefiniti qui per singolo documento.
+            _fo_sp = [r for r in fo if r.sezione == "bs"]
+            if {"L", "R"} <= {r.lato for r in _fo_sp}:
+                _grezzo_sp = {
+                    "attivo": sum((r.valore for r in _fo_sp if r.lato == "L"), Decimal(0)),
+                    "passivo": sum((r.valore for r in _fo_sp if r.lato == "R"), Decimal(0)),
+                }
             letture = leggi_conti_fn(righe, fo)
 
             fase = "conti"

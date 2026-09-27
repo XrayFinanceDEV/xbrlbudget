@@ -133,3 +133,63 @@ def test_stampati_gap_non_coincidente_col_risultato_non_si_corregge():
     stampati = {"totale_attivo": D("1500"), "totale_passivo": D("1000")}  # gap 500, non 100
     m = misura(bs, CE, stampati, forma="bilancio")
     assert m["scarto_stampati"] == D("500.00")
+
+
+# --- Task 21 (2026-09-27): il totale stampato si confronta sulla massa grezza per lato ------
+# --- (prima di applica_lato/netting), mai contro att/pas netti - diagnosi TM 589/590 --------
+
+
+def test_misura_senza_grezzo_si_comporta_come_prima():
+    """Comportamento di sempre (nessun ``grezzo``): scarto_stampati confronta lo stampato
+    contro att/pas NETTI - invariato dal Task 21 per ogni chiamante che non passa grezzo."""
+    bs = _bs()  # att=1500, pas=1500 (sp13=100 incluso)
+    stampati = {"totale_attivo": D("1500"), "totale_passivo": D("1400")}  # netto dell'utile 100
+    m = misura(bs, CE, stampati, forma="bilancio")
+    assert m["scarto_stampati"] == D("0.00")
+
+
+def test_misura_con_grezzo_confronta_la_massa_grezza_non_i_netti():
+    """Un fondo stampato nel lato passivo ma nettato contro l'attivo (sp03) nella
+    classificazione fa divergere att/pas netti dalla massa grezza per lato che il documento
+    stampa davvero: senza ``grezzo`` lo scarto_stampati vedrebbe un falso sbilancio (netto
+    1100/1100 contro lo stampato grezzo 1400/1400); con ``grezzo`` fornito lo scarto e' zero,
+    perche' la base di confronto e' la massa grezza, non il netto."""
+    bs = _bs(sp03_immob_materiali="900", sp09_disponibilita_liquide="200", sp11_capitale="900",
+             sp16_debiti_breve="200", sp16d_debiti_fornitori_breve="200", sp13_utile_perdita="0")
+    ce = {}  # utile CE 0, cosi' att(1100)=pas(1100) nel netto
+    stampati = {"totale_attivo": D("1400"), "totale_passivo": D("1400")}  # grezzo per lato, come stampato
+    grezzo = {"attivo": D("1400"), "passivo": D("1400")}
+    m_senza = misura(bs, ce, stampati, forma="bilancio")
+    assert m_senza["attivo"] == D("1100.00") and m_senza["passivo"] == D("1100.00")
+    assert m_senza["scarto_stampati"] == D("300.00")   # falso sbilancio: netto (1100) vs grezzo stampato (1400)
+    m_con = misura(bs, ce, stampati, forma="bilancio", grezzo=grezzo)
+    assert m_con["attivo"] == D("1100.00") and m_con["passivo"] == D("1100.00")  # att/pas netti invariati
+    assert m_con["scarto_stampati"] == D("0.00")
+
+
+def test_misura_con_grezzo_rileva_ancora_un_vero_scarto():
+    """``grezzo`` non spegne il contraddittorio: se la massa grezza per lato non coincide col
+    totale stampato (una riga davvero mancante), lo scarto resta e si vede."""
+    bs = _bs(sp03_immob_materiali="900", sp09_disponibilita_liquide="200", sp11_capitale="900",
+             sp16_debiti_breve="200", sp16d_debiti_fornitori_breve="200", sp13_utile_perdita="0")
+    ce = {}
+    stampati = {"totale_attivo": D("1650"), "totale_passivo": D("1400")}  # il documento dichiara 1650, non 1400
+    grezzo = {"attivo": D("1400"), "passivo": D("1400")}
+    m = misura(bs, ce, stampati, forma="bilancio", grezzo=grezzo)
+    assert m["scarto_stampati"] == D("250.00")
+
+
+def test_totali_stampati_con_regola_legge_la_colonna_saldo_finale(tmp_path):
+    """Task 21: con ``regola`` (struttura a 3 colonne, saldo_finale ultima) si legge la
+    colonna giusta anche quando il rigo di controllo stampa piu' importi per lato - non piu'
+    il primo numero dopo il marcatore ('Saldo non rettificato', il difetto TM 589/590)."""
+    doc = fitz.open()
+    page = doc.new_page()
+    page.insert_text((50, 50), "Totale Attivita' 1.000,00 400,00 1.400,00")
+    page.insert_text((50, 70), "Totale Passivita' 1.400,00 1.400,00")
+    pdf = str(tmp_path / "c.pdf")
+    doc.save(pdf)
+    regola = {"n": 3, "k": 2}
+    assert totali_stampati(pdf, regola=regola) == {"totale_attivo": D("1400.00"), "totale_passivo": D("1400.00")}
+    # senza regola (comportamento di sempre): il primo numero, sbagliato su questo layout.
+    assert totali_stampati(pdf) == {"totale_attivo": D("1000.00"), "totale_passivo": D("1400.00")}

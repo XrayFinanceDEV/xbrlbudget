@@ -19,6 +19,19 @@ def _pdf_con_totali(path: str, totale_attivo: str, totale_passivo: str) -> str:
     return path
 
 
+def _pdf_totali_a_colonne(path: str, riga_attivo: str, riga_passivo: str) -> str:
+    """Un PDF con un rigo di controllo a PIU' importi per lato (situazione contabile a
+    sezioni contrapposte, come TM 589/590: 'Saldo non rettificato | Rettifiche | Saldo
+    finale'): ``riga_attivo``/``riga_passivo`` sono le righe intere (etichetta + importi)
+    come le stamperebbe il documento."""
+    doc = fitz.open()
+    page = doc.new_page()
+    page.insert_text((50, 50), riga_attivo)
+    page.insert_text((50, 70), riga_passivo)
+    doc.save(path)
+    return path
+
+
 def _pdf_vuoto(path: str) -> str:
     """Una pagina senza testo: ogni test di questo file forza `analizza` (e spesso anche
     `righe_da_pdf`/`leggi_voci`/`leggi_conti`), quindi il contenuto reale del PDF non conta
@@ -494,3 +507,101 @@ def test_legge_usa_i_totali_llm_quando_il_documento_non_ne_stampa(tmp_path):
 
     r = S.importa(pdf, analizza=lambda p: _struttura("legge"), leggi_voci=voci)
     assert r.report["esito"] == "ok"
+
+
+# --- Task 21 (2026-09-27): il totale stampato, in modo "conti", sulla colonna giusta e -------
+# --- contro la massa grezza per lato, mai contro l'attivo/passivo gia' nettato (diagnosi -----
+# --- TM 589/590: una situazione contabile a sezioni contrapposte con fondi stampati nel ------
+# --- lato passivo, nettati contro l'attivo in classificazione) -------------------------------
+
+
+def _righe_conti_finte(R):
+    """5 foglie di SP a sezioni contrapposte: un fondo (FONDO AMM.TO IMPIANTI) stampato nel
+    lato passivo (R) ma nettato contro l'attivo (sp03) in classificazione. Massa grezza per
+    lato: attivo 1.400,00 (1.200+200), passivo 1.400,00 (300+900+200) - il documento stampa
+    esattamente questi due totali, perche' e' cosi' che una situazione contabile vera
+    quadra (per colonna, prima di qualunque netting). Netto (dopo applica_lato/netting del
+    fondo): sp03=900, sp09=200, sp11=900, sp16d=200 -> attivo=passivo=1.100,00."""
+    return [
+        R.Riga(id="p1r1", pagina=1, lato="L", sezione="bs", testo="IMPIANTI", valore=D("1200")),
+        R.Riga(id="p1r2", pagina=1, lato="L", sezione="bs", testo="BANCA C/C", valore=D("200")),
+        R.Riga(id="p1r3", pagina=1, lato="R", sezione="bs", testo="FONDO AMM.TO IMPIANTI", valore=D("300")),
+        R.Riga(id="p1r4", pagina=1, lato="R", sezione="bs", testo="CAPITALE SOCIALE", valore=D("900")),
+        R.Riga(id="p1r5", pagina=1, lato="R", sezione="bs", testo="FORNITORI ITALIA", valore=D("200")),
+    ]
+
+
+def _leggi_conti_finti(righe, foglie):
+    percorsi = {"p1r1": "SPA.B.II", "p1r2": "SPA.C.IV", "p1r3": "SPA.B.II.F",
+                "p1r4": "SPP.A.I", "p1r5": "SPP.D.7"}
+    for f in foglie:
+        f.percorso = percorsi[f.id]
+    return {"chiamate": 1, "saltate_prima": 0, "senza_percorso": 0}
+
+
+def test_conti_stampati_colonna_saldo_finale_non_e_un_falso_squadrato(tmp_path, monkeypatch):
+    """Ruling Task 21: con una colonna di saldo certa (struttura a 3 colonne, saldo_finale
+    ultima) il totale stampato si legge sulla colonna giusta (1.400,00, non 1.000,00 "Saldo
+    non rettificato") E si confronta contro la massa grezza per lato (1.400,00), non contro
+    l'attivo/passivo gia' nettato dal fondo (1.100,00) - prima di questa correzione la
+    combinazione dei due difetti (colonna sbagliata + confronto sul netto) dava un falso
+    'squadrato' anche quando attivo=passivo e l'utile sono esatti."""
+    from importers.import_snello import righe as R
+
+    pdf = _pdf_totali_a_colonne(
+        str(tmp_path / "c.pdf"),
+        "Totale Attivita' 1.000,00 400,00 1.400,00",
+        "Totale Passivita' 1.400,00 1.400,00",
+    )
+    monkeypatch.setattr(R, "righe_da_pdf", lambda *a, **k: _righe_conti_finte(R))
+
+    struttura = lambda p: _struttura("conti", colonne_sp=["saldo_non_rettificato", "rettifiche", "saldo_finale"],
+                                     intestazioni_sp=["Saldo non rettificato", "Rettifiche", "Saldo finale"])
+    r = S.importa(pdf, analizza=struttura, leggi_conti=_leggi_conti_finti)
+    assert r.report["esito"] == "ok"
+    assert r.report["misura"]["corrente"]["scarto_stampati"] == "0.00"
+    assert r.bs["sp03_immob_materiali"] == D("900.00")
+
+
+def test_conti_stampati_colonna_saldo_finale_rileva_ancora_un_vero_scarto(tmp_path, monkeypatch):
+    """Stesso layout a 3 colonne per lato, ma il documento dichiara davvero un totale
+    diverso dalla massa grezza che le righe lette spiegano (una riga mancante, o
+    un'anomalia vera dell'estrazione): leggere la colonna giusta e confrontarla sul grezzo
+    non deve spegnere un contraddittorio VERO, solo quello falso del netting - 'diagnose,
+    never fabricate': un divario si dichiara, la colonna corretta non lo maschera."""
+    from importers.import_snello import righe as R
+
+    pdf = _pdf_totali_a_colonne(
+        str(tmp_path / "c.pdf"),
+        "Totale Attivita' 1.250,00 400,00 1.650,00",   # il documento dichiara 1.650, non 1.400
+        "Totale Passivita' 1.400,00 1.400,00",
+    )
+    monkeypatch.setattr(R, "righe_da_pdf", lambda *a, **k: _righe_conti_finte(R))
+
+    struttura = lambda p: _struttura("conti", colonne_sp=["saldo_non_rettificato", "rettifiche", "saldo_finale"],
+                                     intestazioni_sp=["Saldo non rettificato", "Rettifiche", "Saldo finale"])
+    r = S.importa(pdf, analizza=struttura, leggi_conti=_leggi_conti_finti)
+    assert r.report["esito"] == "squadrato"
+    assert r.report["misura"]["corrente"]["scarto_stampati"] == "250.00"
+
+
+def test_conti_colonna_ambigua_non_da_ancora(tmp_path, monkeypatch):
+    """Senza 'saldo_corrente'/'saldo_finale' fra i ruoli dichiarati (colonne 'dare'/'avere':
+    ``regola_colonna`` torna {}, la colonna non si identifica con certezza), il totale
+    stampato non entra affatto - nessuna ancora, anche se il documento stampa un Totale
+    Attivo/Passivo ben diverso dalle voci lette. Mai un ripiego sulla prima colonna
+    trovata: 'se la colonna non si identifica con certezza il totale stampato non entra'."""
+    from importers.import_snello import righe as R
+
+    pdf = _pdf_totali_a_colonne(
+        str(tmp_path / "c.pdf"),
+        "Totale Attivo 999.999,00",
+        "Totale Passivo 999.999,00",
+    )
+    monkeypatch.setattr(R, "righe_da_pdf", lambda *a, **k: _righe_conti_finte(R))
+
+    struttura = lambda p: _struttura("conti", colonne_sp=["dare", "avere"], colonne_ce=["dare", "avere"],
+                                     intestazioni_sp=["Dare", "Avere"])
+    r = S.importa(pdf, analizza=struttura, leggi_conti=_leggi_conti_finti)
+    assert r.report["esito"] == "ok"
+    assert r.report["misura"]["corrente"]["scarto_stampati"] == "0.00"

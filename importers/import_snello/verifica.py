@@ -18,16 +18,24 @@ def soglia(totale_attivo: Decimal) -> Decimal:
     return max(minimo, abs(Decimal(totale_attivo)) * pct / 100).quantize(_C)
 
 
-def totali_stampati(file_path: str) -> dict:
+def totali_stampati(file_path: str, regola: dict | None = None) -> dict:
     """I totali che il documento stampa da solo (regex sul testo grezzo, nessuna chiamata
     modello): ancora indipendente dall'estrattore, riusata dal vecchio importatore
     (``pdf_extractor_llm._declared_control_totals``) per dare a ``misura()``/``tappa()`` un
-    contraddittorio reale - oggi assente in modo "conti" (``stampati=None`` sempre) e solo
-    apparente in modo "legge" (i "totali stampati" vengono dalla stessa chiamata LLM che
-    legge le voci, non da una lettura indipendente)."""
+    contraddittorio reale - solo apparente in modo "legge" (i "totali stampati" vengono
+    dalla stessa chiamata LLM che legge le voci, non da una lettura indipendente).
+
+    ``regola`` (Task 21, modo "conti" soltanto): quando un rigo di controllo stampa piu'
+    importi per lato (es. "Saldo non rettificato | Rettifiche | Saldo finale"), il default
+    (nessun ``regola``, comportamento di sempre per modo "legge") prende il primo numero
+    dopo il marcatore - sulle situazioni contabili a piu' colonne e' quasi sempre quello
+    sbagliato. Passando ``regola`` (stessa forma di ``righe.regola_colonna()``, gia' usata
+    per leggere le foglie) si legge invece la colonna che la struttura ha identificato come
+    saldo; il chiamante deve passare ``regola=None`` (o non chiamare affatto) quando quella
+    colonna non si identifica con certezza - qui non c'e' alcun ripiego silenzioso."""
     try:
         from importers.pdf_extractor_llm import _declared_control_totals
-        letti = _declared_control_totals(file_path)
+        letti = _declared_control_totals(file_path, colonna=regola)
     except Exception:
         letti = {}
     return {"totale_attivo": letti.get("attivo"), "totale_passivo": letti.get("passivo")}
@@ -58,7 +66,18 @@ def _fold_utile_in_passivo(stampati: dict | None, utile: Decimal) -> dict | None
     return nuovo
 
 
-def misura(bs: dict, ce: dict, stampati: dict | None = None, forma: str | None = None) -> dict:
+def misura(bs: dict, ce: dict, stampati: dict | None = None, forma: str | None = None,
+           grezzo: dict | None = None) -> dict:
+    """``grezzo`` (Task 21, modo "conti" a sezioni contrapposte soltanto): la somma per
+    lato delle foglie COSI' COME STAMPATE, prima di ``applica_lato``/netting dei fondi -
+    quando un fondo o un altro contro-conto sta fisicamente nella colonna opposta a quella
+    del suo bene/debito, ``att``/``pas`` (sotto, gia' netti) non sono piu' la stessa massa
+    del totale che il documento stampa per QUELLA colonna: confrontare lo stampato contro
+    ``att``/``pas`` netti scambierebbe un artefatto della classificazione per un vero
+    sbilancio (ruling Task 21: "la colonna e' la verita' sul lato", CLAUDE.md). Con
+    ``grezzo`` fornito, SOLO il confronto ``scarto_stampati`` usa la massa grezza per lato;
+    ``att``/``pas`` restituiti (e quindi ``scarto_sp``/``scarto_ce``) restano quelli netti
+    di sempre, invariati."""
     att = sum((Decimal(bs.get(k, 0)) for k in _ATTIVO_FIELDS), Decimal(0))
     pas = sum((Decimal(bs.get(k, 0)) for k in _PASSIVO_FIELDS), Decimal(0))
     sp13 = Decimal(bs.get("sp13_utile_perdita", 0))
@@ -75,8 +94,11 @@ def misura(bs: dict, ce: dict, stampati: dict | None = None, forma: str | None =
         s_sp, s_ce = verifica
     else:
         raise ValueError(f"forma sconosciuta: {forma!r} (attesa 'bilancio', 'verifica' o None)")
+    att_grezzo = Decimal(grezzo["attivo"]) if grezzo and grezzo.get("attivo") is not None else att
+    pas_grezzo = Decimal(grezzo["passivo"]) if grezzo and grezzo.get("passivo") is not None else pas
     scarto_stampati = Decimal(0)
-    for chiave, nostro in (("totale_attivo", att), ("totale_passivo", pas if forma == "bilancio" else pas + utile)):
+    for chiave, nostro in (("totale_attivo", att_grezzo),
+                           ("totale_passivo", pas_grezzo if forma == "bilancio" else pas_grezzo + utile)):
         v = (stampati or {}).get(chiave)
         if v is not None:
             scarto_stampati = max(scarto_stampati, abs(nostro - Decimal(v)))

@@ -79,9 +79,11 @@ class Struttura:
 def modo_da_mappe(mappe: list[dict], *, route_hint: str | None = None) -> str:
     """"conti" quando lo schema prevalente e' un elenco di conti (compreso il "riclassificato
     con codici IVCEE": un elenco analitico per mastro, non uno schema di legge sintetico), o
-    quando il voto e' vicino alla parita' (scarto <= MARGINE_PAREGGIO_MODO pagine) e il
-    classificatore ha gia' segnalato una situazione contabile (`route_hint == ROUTE_TRIAL`) —
-    l'indizio pesa solo li', mai contro una maggioranza netta per lo schema di legge."""
+    quando il voto e' CONTESO (almeno una pagina per lato) e vicino alla parita' (scarto <=
+    MARGINE_PAREGGIO_MODO pagine) e il classificatore ha gia' segnalato una situazione contabile
+    (`route_hint == ROUTE_TRIAL`) — l'indizio pesa solo su un voto conteso, mai su un voto
+    unanime (compreso un documento a pagina singola, `n == 1`, che non oppone alcun voto
+    "conti") e mai contro una maggioranza netta per lo schema di legge."""
     prospetti = [m for m in mappe if m.get("tipo_pagina") in TIPI_SP | TIPI_CE]
     if not prospetti:
         return "legge"
@@ -90,7 +92,8 @@ def modo_da_mappe(mappe: list[dict], *, route_hint: str | None = None) -> str:
     if conti * 2 > n:
         return "conti"
     margine = n - conti * 2
-    if route_hint == ROUTE_TRIAL and margine <= MARGINE_PAREGGIO_MODO:
+    conteso = 0 < conti < n
+    if route_hint == ROUTE_TRIAL and n >= 2 and conteso and margine <= MARGINE_PAREGGIO_MODO:
         return "conti"
     return "legge"
 

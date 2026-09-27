@@ -97,6 +97,32 @@ def test_modo_legge_nonostante_indizio_trial_balance_se_il_voto_non_e_in_parita(
     assert modo_da_mappe(mappe, route_hint=ROUTE_TRIAL) == "legge"
 
 
+def test_modo_legge_con_n1_nonostante_indizio_trial_balance():
+    # Fix round 1, gap 3: con una sola pagina, tutta di schema legge, il voto e' UNANIME — non
+    # "vicino alla parita'" in alcun senso utile — e l'indizio non ha titolo per ribaltarlo.
+    # Prima del fix `margine = n - conti*2 = 1 - 0 = 1 <= MARGINE_PAREGGIO_MODO` scattava lo
+    # stesso, dando "conti" su un documento a pagina singola senza un solo voto per "conti".
+    mappe = [_p(1, "prospetto_sp", "iv_cee_di_legge", ["saldo_corrente"], ["x"])]
+    assert modo_da_mappe(mappe, route_hint=ROUTE_TRIAL) == "legge"
+
+
+def test_modo_legge_unanime_a_due_pagine_nonostante_indizio_trial_balance():
+    # Due pagine, entrambe schema legge (voto unanime, non conteso): l'indizio non decide.
+    mappe = [_p(1, "prospetto_sp", "iv_cee_di_legge", ["saldo_corrente"], ["x"]),
+             _p(2, "prospetto_ce", "iv_cee_di_legge", ["saldo_corrente"], ["x"])]
+    assert modo_da_mappe(mappe, route_hint=ROUTE_TRIAL) == "legge"
+
+
+def test_modo_conti_forma_ambienta_tre_legge_due_conti_con_indizio():
+    # Forma AMBIENTA (diagnosi lotto-b): 3 pagine schema legge, 2 schema conti — un voto CONTESO
+    # (almeno un voto per lato) e vicino alla parita' (margine 1): con l'indizio TRIAL_BALANCE
+    # sceglie "conti"; senza l'indizio resta "legge" come un pareggio non deciso da solo.
+    mappe = ([_p(i, "prospetto_sp", "iv_cee_di_legge", ["saldo_corrente"], ["x"]) for i in (1, 2, 3)]
+             + [_p(i, "prospetto_ce", "piano_dei_conti_gerarchico", ["saldo_corrente"], ["x"]) for i in (4, 5)])
+    assert modo_da_mappe(mappe) == "legge"
+    assert modo_da_mappe(mappe, route_hint=ROUTE_TRIAL) == "conti"
+
+
 def test_vision_assorbe_pagina_senza_tipo_fra_due_pagine_dello_stesso_prospetto(tmp_path):
     # Lotto-b, fix 6b: la vision ha lasciato "nota_o_testo" una pagina che sta subito dopo un
     # prospetto gia' classificato, con importi veri (come budget_972/614/158): va assorbita come

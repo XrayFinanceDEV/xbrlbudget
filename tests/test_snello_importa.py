@@ -45,6 +45,30 @@ def test_legge_oltre_soglia_rilegge_una_volta_poi_ripiega(tmp_path):
     assert len(chiamate) == 3 and any("scarto" in n for n in chiamate)     # SP, CE, una rilettura
 
 
+def test_route_hint_si_inoltra_alla_struttura(tmp_path):
+    # Task lotto-b, fix 9: route_hint arriva dal chiamante (pdf_importer.py, la route del
+    # classificatore) fino ad analizza_struttura, che lo passa a modo_da_mappe. Il default None
+    # non cambia la firma che i test esistenti usano (`analizza=lambda p: ...`).
+    pdf = pdf_colonna_unica(str(tmp_path / "c.pdf"))
+    visti = {}
+
+    def analizza(p, *, route_hint=None):
+        visti["route_hint"] = route_hint
+        return _struttura("legge")
+
+    r = S.importa(pdf, analizza=analizza, leggi_voci=_voci_quadrate, route_hint="TRIAL_BALANCE")
+    assert visti["route_hint"] == "TRIAL_BALANCE"
+    assert r.report["esito"] == "ok"
+
+
+def test_route_hint_assente_non_rompe_una_analizza_senza_quel_parametro(tmp_path):
+    # Senza route_hint (default None) la chiamata resta quella di sempre, posizionale sola:
+    # una `analizza` finta che non accetta affatto quel parametro non deve rompersi.
+    pdf = pdf_colonna_unica(str(tmp_path / "c.pdf"))
+    r = S.importa(pdf, analizza=lambda p: _struttura("legge"), leggi_voci=_voci_quadrate)
+    assert r.report["esito"] == "ok"
+
+
 def test_struttura_in_errore_ripiega(tmp_path):
     pdf = pdf_colonna_unica(str(tmp_path / "c.pdf"))
     def rotta(p):

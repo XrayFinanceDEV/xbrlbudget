@@ -47,13 +47,16 @@ def _unclassified_mass(diag: dict) -> Decimal:
 
 
 def importa(file_path: str, *, ocr_text: str | None = None, analizza=None, leggi_conti=None,
-            leggi_voci=None, trascrivi=None) -> Risultato:
+            leggi_voci=None, trascrivi=None, route_hint: str | None = None) -> Risultato:
     t0 = time.monotonic()
 
     from importers.struttura_documento.analisi import analizza_struttura
     analizza_fn = analizza or analizza_struttura
     try:
-        struttura = analizza_fn(file_path)
+        # route_hint si inoltra solo quando il chiamante lo passa: di default resta None e la
+        # chiamata e' quella di sempre, posizionale sola — una `analizza` finta dei test che non
+        # accetta affatto questo parametro (`lambda p: ...`) non deve rompersi (Task lotto-b, fix 9).
+        struttura = analizza_fn(file_path, route_hint=route_hint) if route_hint is not None else analizza_fn(file_path)
     except Exception as e:
         raise SnelloNonRiuscito({"esito": "ripiego", "fase": "struttura", "errore": type(e).__name__}) from e
 

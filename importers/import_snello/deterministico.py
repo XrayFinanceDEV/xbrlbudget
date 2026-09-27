@@ -21,16 +21,24 @@ _C = Decimal("0.01")
 
 def _adatta(dati: dict | None) -> dict:
     """Codici brevi (``sp03``, ``ce01``) o gia' pieni (``sp03_immob_materiali``) -> nomi
-    pieni di colonna; ogni altra chiave (totali dichiarati, marcatori diagnostici del
-    vecchio importatore come ``_plug_residual``/``_netted_contra``) si scarta in
-    silenzio - non e' un campo sp*/ce*. Stessa regola di ``_map_sc_keys`` in
-    ``pdf_importer.py``, riusata qui via ``NOMI`` (percorsi.py) per non importare quel
-    modulo (ciclo: pdf_importer importa import_snello)."""
+    pieni di colonna; una chiave con underscore (marcatore diagnostico del vecchio
+    importatore: ``_plug_residual``, ``_unclassified_mass``, ``_netted_contra``,
+    ``_skip_declared_reconcile``...) passa TALE E QUALE, mai un ``Decimal`` forzato
+    (alcune sono bool o str) - stessa regola di ``_map_sc_keys`` in ``pdf_importer.py``
+    (``if '_' in k: result[k] = v``), riusata qui via ``NOMI`` (percorsi.py) per non
+    importare quel modulo (ciclo: pdf_importer importa import_snello). Un estrattore
+    dichiara sempre le proprie chiavi diagnostiche, anche a zero: scartarle qui le
+    farebbe leggere a valle come «pulito», non come «non lo so» (CLAUDE.md). Ogni
+    altra chiave (totali dichiarati come ``totale_attivo``) non e' un campo sp*/ce* e
+    si scarta, quella si, in silenzio."""
     if not dati:
         return {}
-    out: dict[str, Decimal] = {}
+    out: dict = {}
     for k, v in dati.items():
         if v is None:
+            continue
+        if k.startswith("_"):
+            out[k] = v
             continue
         pieno = k if k in NOMI.values() else NOMI.get(k)
         if pieno:

@@ -389,3 +389,109 @@ def test_importa_deterministico_sbilanciato_fa_girare_qwen(tmp_path):
         )
 
     assert chiamato["conti"] is True
+
+
+# --- fix round 1 (review): chiavi diagnostiche con underscore mai scartate -------------
+
+def test_adatta_passa_le_chiavi_con_underscore_senza_scartarle():
+    # _map_sc_keys in pdf_importer.py passa ogni chiave con underscore TALE E QUALE
+    # (mai un Decimal forzato: alcune sono bool/str) - _adatta deve fare lo stesso, non
+    # scartarle come se non fossero un campo sp*/ce*: sono diagnostica dichiarata dal
+    # parser, mai un dato inventato al loro posto (CLAUDE.md, "un estrattore dichiara
+    # sempre le proprie chiavi diagnostiche, anche a zero").
+    dati = {
+        "sp09": D("100.00"),
+        "_plug_residual": D("5.00"),
+        "_skip_declared_reconcile": True,
+        "_unclassified_mass": D("12.34"),
+        "_contra_reason": "fondo netto",
+        "totale_attivo": D("999.00"),  # non underscore, non sp*/ce*: si scarta
+    }
+    out = DET._adatta(dati)
+    assert out["sp09_disponibilita_liquide"] == D("100.00")
+    assert out["_plug_residual"] == D("5.00")
+    assert out["_skip_declared_reconcile"] is True
+    assert out["_unclassified_mass"] == D("12.34")
+    assert out["_contra_reason"] == "fondo netto"
+    assert "totale_attivo" not in out
+
+
+def test_tentativo_situazione_contabile_non_scarta_la_massa_non_classificata(tmp_path, monkeypatch):
+    # Un bilancio di verifica riconosciuto (il gate is_situazione_contabile passa) il cui
+    # estrattore dichiara una massa non classificata materiale: il candidato quadra
+    # comunque (fallback lecito, gia' contato una volta) e va adottato - ma la massa
+    # dichiarata deve sopravvivere nel bs adottato, mai un hardcoded zero.
+    pdf = str(tmp_path / "verifica-massa.pdf")
+    _pdf_situazione_contabile(pdf)
+
+    def _fake_extract(file_path, return_prior=False, text_override=None):
+        bs = {"sp09": D("1000.00"), "sp11": D("1000.00"),
+              "_unclassified_mass": D("80000.00"), "_unclassified_mass_measured": D("1")}
+        # ce non vuoto (come build_iv_cee, che riempie sempre ce01..ce20 a zero): un
+        # dict vuoto sarebbe "falsy" e cadrebbe nel cancello di applicabilita', mai
+        # nella verifica che questo test vuole esercitare.
+        ce = {f"ce{i:02d}": D("0.00") for i in range(1, 21)}
+        return bs, ce, None, None
+
+    monkeypatch.setattr(
+        "importers.situazione_contabile_parser.extract_situazione_contabile", _fake_extract)
+
+    esito = DET.tentativo(pdf, ocr_text=_TESTO_BILANCIO_DI_VERIFICA)
+
+    assert esito["adottato"] is True
+    assert esito["bs"]["_unclassified_mass"] == D("80000.00")
+
+
+def test_importa_surfaces_la_massa_non_classificata_del_deterministico(tmp_path, monkeypatch):
+    pdf = str(tmp_path / "qualsiasi.pdf")
+    doc = fitz.open()
+    doc.new_page()
+    doc.save(pdf)
+    doc.close()
+
+    finto = {
+        "adottato": True, "parser": "situazione_contabile_parser", "esito": "ok",
+        "bs": {"sp09_disponibilita_liquide": D("1000.00"), "sp11_capitale": D("1000.00"),
+              "_unclassified_mass": D("80000.00")},
+        "ce": {},
+        "tappo": None,
+        "misura": {"attivo": D("1000.00"), "passivo": D("1000.00"), "utile_ce": D("0.00"),
+                  "sp13": D("0.00"), "forma": "bilancio", "scarto_sp": D("0.00"),
+                  "scarto_ce": D("0.00"), "scarto_stampati": D("0.00")},
+    }
+    monkeypatch.setattr("importers.import_snello.deterministico.tentativo", lambda *a, **kw: finto)
+
+    risultato = import_snello.importa(pdf, analizza=_analizza_qualsiasi(_StrutturaStub(modo="conti")))
+
+    assert risultato.bs["_unclassified_mass"] == D("80000.00")
+    assert risultato.report["deterministico"]["unclassified_mass"] == "80000.00"
+    # diag non e' uno scheletro vuoto costruito a mano che pare pulito: dichiara la fonte,
+    # e porta comunque tutte le chiavi che il resto del codice legge (mai un KeyError).
+    assert risultato.report["diag"]["fonte"] == "situazione_contabile_parser"
+    for chiave in ("non_mappati", "escluse", "lato_irrisolti", "risultato_duplicato", "padri_esclusi"):
+        assert risultato.report["diag"][chiave] == []
+
+
+def test_importa_somma_il_plug_residual_del_parser_a_quello_del_tappo_lean(tmp_path, monkeypatch):
+    pdf = str(tmp_path / "qualsiasi-tappo.pdf")
+    doc = fitz.open()
+    doc.new_page()
+    doc.save(pdf)
+    doc.close()
+
+    finto = {
+        "adottato": True, "parser": "standard_ivcee_parser", "esito": "tappo",
+        "bs": {"sp09_disponibilita_liquide": D("1000.00"), "sp11_capitale": D("900.00"),
+              "_plug_residual": D("50.00")},
+        "ce": {},
+        "tappo": {"campo": "sp16g_altri_debiti_breve", "importo": "100.00", "soglia": "10.00"},
+        "misura": {"attivo": D("1000.00"), "passivo": D("900.00"), "utile_ce": D("0.00"),
+                  "sp13": D("0.00"), "forma": "bilancio", "scarto_sp": D("100.00"),
+                  "scarto_ce": D("0.00"), "scarto_stampati": D("0.00")},
+    }
+    monkeypatch.setattr("importers.import_snello.deterministico.tentativo", lambda *a, **kw: finto)
+
+    risultato = import_snello.importa(pdf, analizza=_analizza_qualsiasi(_StrutturaStub(modo="conti")))
+
+    # 50,00 dichiarati dal parser + 100,00 del tappo lean: mai l'uno al posto dell'altro.
+    assert risultato.bs["_plug_residual"] == D("150.00")

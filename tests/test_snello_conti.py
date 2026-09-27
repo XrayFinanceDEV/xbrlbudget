@@ -121,3 +121,48 @@ def test_lato_irrisolti_sempre_presente_anche_vuoto():
     assert diag["lato_irrisolti"] == []
     _, _, diag2 = da_coppie([("SPP.D.7", D("9"))])
     assert diag2["lato_irrisolti"] == []
+
+
+# --- Fix lotto A: patrimonio netto/risultato non passano da applica_lato -------------------
+
+
+def test_applica_lato_non_tocca_il_patrimonio_netto():
+    """SPP.A.* (capitale, riserve, risultati) cambia lato col segno per natura: applica_lato
+    non deve toccarlo ne' contarlo, con o senza contropartita nota. Il passivo vota in
+    maggioranza Avere (R, 80.000 su due voci) mentre l'utile e' stampato Dare (L, 7.035,31):
+    senza l'esclusione l'utile finirebbe corretto/spostato dal voto di maggioranza."""
+    foglie = [_f(1, "L", "1000", "SPA.C.IV.3"), _f(2, "R", "50000", "SPP.D.7"),
+              _f(3, "R", "30000", "SPP.D.4"), _f(4, "L", "7035.31", "SPP.A.IX")]
+    n = applica_lato(foglie, [])
+    assert n == 0
+    assert foglie[3].percorso == "SPP.A.IX"
+
+
+def test_risultato_di_esercizio_lato_invertito_non_duplica_massa():
+    """Riproduce FORMETAL/623: un utile (SPP.A.IX) stampato sul lato Dare (L) mentre il resto
+    del passivo vota in maggioranza Avere (R, 80.000 su due voci) non deve finire nel fallback
+    (che duplicherebbe la massa, come oggi) ne' cambiare segno: resta il valore letto, positivo,
+    in sp13, e i debiti veri restano positivi (non ribaltati dal peso dell'utile)."""
+    foglie = [_f(1, "L", "1000", "SPA.C.IV.3"),
+              _f(2, "R", "50000", "SPP.D.7"), _f(3, "R", "30000", "SPP.D.4"),
+              _f(4, "L", "7035.31", "SPP.A.IX")]
+    bs, ce, diag = da_foglie(foglie)
+    assert bs["sp13_utile_perdita"] == D("7035.31")
+    assert bs["sp16d_debiti_fornitori_breve"] == D("50000.00")
+    assert bs["sp16a_debiti_banche_breve"] == D("30000.00")
+    assert bs["sp16_debiti_breve"] == D("80000.00")
+    assert diag["lato_irrisolti"] == []
+    assert diag["lato_corretti"] == 0
+    assert bs.get("sp06g_crediti_altri_breve", D("0")) == D("0")
+    assert bs.get("sp16g_altri_debiti_breve", D("0")) == D("0")
+
+
+def test_perdita_portata_a_nuovo_resta_negativa():
+    """Una perdita portata a nuovo (SPP.A.VIII) letta col segno gia' corretto (negativo) non
+    deve diventare positiva ne' finire fra i crediti: e' patrimonio netto negativo."""
+    foglie = [_f(1, "L", "1000", "SPA.C.IV.3"), _f(2, "R", "500", "SPP.D.7"),
+              _f(3, "R", "-209356.57", "SPP.A.VIII")]
+    bs, ce, diag = da_foglie(foglie)
+    assert bs["sp12g_utili_perdite_portati"] == D("-209356.57")
+    assert diag["lato_irrisolti"] == []
+    assert diag["lato_corretti"] == 0

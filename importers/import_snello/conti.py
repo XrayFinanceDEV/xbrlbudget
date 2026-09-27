@@ -6,7 +6,7 @@ from collections import Counter, defaultdict
 from decimal import Decimal
 
 from importers.import_snello.percorsi import (CONTROPARTE, NOMI, campo_da_percorso, completa,
-                                              e_fondo, e_risultato, famiglia, lato_di)
+                                              e_fondo, e_netto, e_risultato, famiglia, lato_di)
 from importers.iv_cee_hierarchy import detail_fields
 
 _C = Decimal("0.01")
@@ -59,6 +59,11 @@ def applica_lato(foglie, irrisolti: list | None = None) -> int:
         return 0
     n = 0
     for f in sp:
+        if e_netto(f.percorso):
+            # capitale/riserve/risultato: contano per stabilire il lato normale delle altre
+            # voci della sezione, ma non sono mai loro stessi un bersaglio di correzione - non
+            # esiste una contropartita per un conto che cambia lato col proprio segno.
+            continue
         if _corsia(f, due_lati) == lato_normale[lato_di(f.percorso)]:
             continue
         corretto = False
@@ -101,12 +106,25 @@ def da_foglie(foglie):
     for elementi in per_famiglia.values():
         peso_corsia, peso_segno = Counter(), Counter()
         for f, _ in elementi:
-            if not e_fondo(f.percorso) and f.id not in irrisolti_ids:
-                peso_corsia[_corsia(f, True) if due_lati else 0] += abs(f.valore)
-                peso_segno[f.valore >= 0] += abs(f.valore)
+            if e_fondo(f.percorso) or f.id in irrisolti_ids:
+                continue
+            if due_lati and e_netto(f.percorso):
+                # su un prospetto Dare/Avere il capitale/riserve/risultato non deve pesare sul
+                # voto delle altre voci passive: un utile grande, stampato Avere per natura,
+                # sposterebbe il "lato normale" della famiglia e farebbe girare di segno un
+                # debito vero. A colonna unica (senza Dare/Avere) resta nel voto come sempre.
+                continue
+            peso_corsia[_corsia(f, True) if due_lati else 0] += abs(f.valore)
+            peso_segno[f.valore >= 0] += abs(f.valore)
         corsia_n = peso_corsia.most_common(1)[0][0] if peso_corsia else 0
         positivo_n = peso_segno.most_common(1)[0][0] if peso_segno else True
         for f, codice in elementi:
+            if due_lati and e_netto(f.percorso):
+                # colonna=lato NON vale per capitale/riserve/risultato: un utile e una perdita
+                # hanno naturalmente lato invertito. Nessuna contropartita per ribaltarli: il
+                # valore letto porta gia' il segno giusto (una perdita e' negativa).
+                importi[codice] += f.valore
+                continue
             v = abs(f.valore)
             if e_fondo(f.percorso):
                 contro = True

@@ -46,6 +46,14 @@ def e_fondo(p: str) -> bool:
     return p.endswith(".F")
 
 
+def e_netto(p: str) -> bool:
+    """Capitale, riserve, risultati (SPP.A.*): cambiano lato col segno per natura (un utile
+    e una perdita hanno naturalmente lato invertito), e non esiste una contropartita per
+    ribaltarli. La colonna non decide il loro segno: lo decide il valore letto."""
+    t = p.split(".")
+    return len(t) >= 2 and t[0] == "SPP" and t[1] == "A"
+
+
 def e_risultato(p: str) -> bool:
     return p in ("CE.21", "CE.D.21")
 

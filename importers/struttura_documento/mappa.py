@@ -74,9 +74,17 @@ PROMPT = (
     "sola nota integrativa o testo è nota_o_testo; una tabella di dettaglio di una voce è dettaglio_conti."
 )
 
-TITOLI_SP = re.compile(r"stato patrimoniale|attivit[aà]'?\s|passivit[aà]|situazione patrimoniale", re.I)
+TITOLI_SP = re.compile(r"stato patrimoniale|passivit[aà]|situazione patrimoniale", re.I)
 TITOLI_CE = re.compile(r"conto economico|situazione economica|a\) valore della produzione"
                         r"|ricavi e profitti|costi,?\s*spese e perdite", re.I)
+
+# "attivita'" da sola conta come titolo di Stato Patrimoniale solo su una riga corta (poche
+# parole, come una vera intestazione) e non preceduta da un apostrofo: la preposizione
+# articolata di un rendiconto finanziario ("dall'attivita' operativa", "dell'attivita' di
+# investimento") ci cadeva sempre, perche' il vecchio TITOLI_SP la matchava ovunque nel testo di
+# testa unito, senza nessun contesto di titolo (Task lotto-b, fix 7, diagnosi budget_671).
+_ATTIVITA_TITOLO = re.compile(r"(?<!['’])attivit[aà]'?(?:\s|$)", re.I)
+MASSIMO_PAROLE_TITOLO_ATTIVITA = 6
 
 # "costi" e "ricavi" sulla STESSA riga stampata, come una vera testata a sezioni contrapposte
 # ("COSTI, SPESE E PERDITE      RICAVI E PROFITTI"): tenuta separata da TITOLI_CE e verificata
@@ -99,6 +107,41 @@ DATA = re.compile(r"^\d{2}[-/]\d{2}[-/]\d{4}$")
 # circolante"/"Totale ..." e abbastanza importi da sembrare un prospetto: il confine della nota
 # integrativa la esclude (difetto B, Task 7b).
 NOTA_INTEGRATIVA = re.compile(r"nota integrativa", re.I)
+
+# Titoli di sezioni diverse dal prospetto: una pagina di continuazione non deve mai attraversare
+# questo confine, anche se non ha un titolo di prospetto proprio e ha importi (Task lotto-b,
+# fix 6, diagnosi budget_671/972/614/158). Controllati solo sulla prima riga di testa: il testo
+# unito su 1500 caratteri e' troppo largo e "relazione"/"verbale" comparirebbero anche in prosa.
+_SEZIONI_CONFINE = ("nota integrativa", "rendiconto finanziario", "relazione", "verbale")
+
+# Al massimo tante pagine di fila senza titolo/tipo proprio si accettano come continuazione dello
+# stesso prospetto: oltre questo limite un blocco che non richiude mai da solo (documento
+# malformato, o due prospetti diversi senza titoli intermedi) rischierebbe di inghiottire tutto
+# il resto del documento.
+MAX_PAGINE_CONTINUAZIONE = 2
+
+
+# Quante righe di testa si guardano per un titolo di sezione confine: non solo la riga 0, perche'
+# un running header aziendale ("ACME SRL - Bilancio al 31-12-2025") puo' precederlo, spingendo il
+# vero titolo sulla seconda riga o oltre (fix round 1, gap 1 del collaudo lotto-b).
+MASSIMO_RIGHE_SEZIONE_CONFINE = 4
+MASSIMO_PAROLE_SEZIONE_CONFINE = 8
+
+
+def _apre_sezione_nuova(page) -> bool:
+    """Una fra le prime righe di testa (non solo la riga 0: un running header aziendale puo'
+    precedere il titolo vero) comincia con il titolo di una sezione diversa dal prospetto in
+    corso: non puo' esserne la continuazione, anche se ha importi e nessun titolo di prospetto
+    proprio. Solo le righe corte (<= 8 parole) contano: un running header o un titolo sono brevi
+    per natura, una riga di prosa lunga non lo e' e non deve far scattare il confine per caso."""
+    righe = _righe_di_testa(page, caratteri=200)
+    for riga in righe[:MASSIMO_RIGHE_SEZIONE_CONFINE]:
+        pulita = riga.strip().lower()
+        if pulita and len(pulita.split()) <= MASSIMO_PAROLE_SEZIONE_CONFINE:
+            if any(pulita.startswith(s) for s in _SEZIONI_CONFINE):
+                return True
+    return False
+
 
 # Quanti caratteri di testa (dopo la ricompattazione) si guardano per riconoscere un titolo di
 # prospetto. 1500, non solo le prime righe: un layout "quattro sezioni" puo' stampare 20+ righe
@@ -157,11 +200,15 @@ def _importi_pagina(page) -> int:
 
 
 def _titolo_pagina(page) -> str | None:
+    righe = _righe_di_testa(page)
     testo = _testo_di_testa(page)
-    if TITOLI_CE.search(testo) or any(COSTI_RICAVI_STESSA_RIGA.search(riga) for riga in _righe_di_testa(page)):
+    if TITOLI_CE.search(testo) or any(COSTI_RICAVI_STESSA_RIGA.search(riga) for riga in righe):
         return "conto economico"
     if TITOLI_SP.search(testo):
         return "stato patrimoniale"
+    for riga in righe:
+        if len(riga.split()) <= MASSIMO_PAROLE_TITOLO_ATTIVITA and _ATTIVITA_TITOLO.search(riga):
+            return "stato patrimoniale"
     return None
 
 
@@ -194,14 +241,18 @@ def mappa_xbrl(pdf: str) -> list[dict]:
     Dalla prima pagina la cui testa contiene "nota integrativa" in poi, nessuna pagina e' piu' un
     prospetto: le tabelle di nota possono ripetere "conto economico"/"Totale ..." e abbastanza
     importi da sembrarlo, ma non lo sono (difetto B, Task 7b). Prima di quel confine, una pagina
-    senza titolo proprio ma con importi e le stesse date del prospetto appena letto ne e' la
-    continuazione (stesso tipo, `continuazione=True`)."""
+    senza titolo proprio ma con importi ne e' la continuazione (stesso tipo, `continuazione=True`):
+    non serve che ripeta le stesse date del prospetto appena letto, una vera continuazione spesso
+    non le ristampa affatto (Task lotto-b, fix 6a, diagnosi budget_671/247) — al massimo
+    MAX_PAGINE_CONTINUAZIONE pagine di fila, e mai oltre una pagina che apre una sezione diversa
+    (nota integrativa, rendiconto finanziario, relazione, verbale)."""
     import fitz
     mappe = []
     with fitz.open(pdf) as doc:
         pagine = list(doc)
         indice_nota = next((i for i, p in enumerate(pagine) if NOTA_INTEGRATIVA.search(_testo_di_testa(p))), None)
         blocco_aperto: tuple[str, tuple] | None = None  # (tipo_pagina, date) del prospetto in corso
+        continuazioni = 0
         for i, page in enumerate(pagine):
             base = {"pagina": page.number + 1, "tipo_pagina": "nota_o_testo", "disposizione": "colonna_unica",
                     "schema": "iv_cee_di_legge", "sezioni": [], "continuazione": False, "codici_conto": False,
@@ -217,14 +268,18 @@ def mappa_xbrl(pdf: str) -> list[dict]:
                 base.update(tipo_pagina=tipo, sezioni=[{"posizione": "unica", "contenuto": "misto", "colonne": colonne}],
                             anno_precedente=anno_precedente)
                 blocco_aperto = (tipo, date)
-            elif not oltre_nota and blocco_aperto is not None and not titolo and importi_ok and date == blocco_aperto[1]:
+                continuazioni = 0
+            elif (not oltre_nota and blocco_aperto is not None and not titolo and importi_ok
+                  and continuazioni < MAX_PAGINE_CONTINUAZIONE and not _apre_sezione_nuova(page)):
                 tipo, date_blocco = blocco_aperto
                 colonne, anno_precedente = _colonne(date_blocco)
                 base.update(tipo_pagina=tipo, continuazione=True,
                             sezioni=[{"posizione": "unica", "contenuto": "misto", "colonne": colonne}],
                             anno_precedente=anno_precedente)
+                continuazioni += 1
             else:
                 blocco_aperto = None
+                continuazioni = 0
             mappe.append(base)
     return mappe
 

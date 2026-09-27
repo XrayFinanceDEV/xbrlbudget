@@ -45,6 +45,30 @@ def test_legge_oltre_soglia_rilegge_una_volta_poi_ripiega(tmp_path):
     assert len(chiamate) == 3 and any("scarto" in n for n in chiamate)     # SP, CE, una rilettura
 
 
+def test_route_hint_si_inoltra_alla_struttura(tmp_path):
+    # Task lotto-b, fix 9: route_hint arriva dal chiamante (pdf_importer.py, la route del
+    # classificatore) fino ad analizza_struttura, che lo passa a modo_da_mappe. Il default None
+    # non cambia la firma che i test esistenti usano (`analizza=lambda p: ...`).
+    pdf = pdf_colonna_unica(str(tmp_path / "c.pdf"))
+    visti = {}
+
+    def analizza(p, *, route_hint=None):
+        visti["route_hint"] = route_hint
+        return _struttura("legge")
+
+    r = S.importa(pdf, analizza=analizza, leggi_voci=_voci_quadrate, route_hint="TRIAL_BALANCE")
+    assert visti["route_hint"] == "TRIAL_BALANCE"
+    assert r.report["esito"] == "ok"
+
+
+def test_route_hint_assente_non_rompe_una_analizza_senza_quel_parametro(tmp_path):
+    # Senza route_hint (default None) la chiamata resta quella di sempre, posizionale sola:
+    # una `analizza` finta che non accetta affatto quel parametro non deve rompersi.
+    pdf = pdf_colonna_unica(str(tmp_path / "c.pdf"))
+    r = S.importa(pdf, analizza=lambda p: _struttura("legge"), leggi_voci=_voci_quadrate)
+    assert r.report["esito"] == "ok"
+
+
 def test_struttura_in_errore_ripiega(tmp_path):
     pdf = pdf_colonna_unica(str(tmp_path / "c.pdf"))
     def rotta(p):
@@ -52,6 +76,55 @@ def test_struttura_in_errore_ripiega(tmp_path):
     with pytest.raises(S.SnelloNonRiuscito) as exc:
         S.importa(pdf, analizza=rotta)
     assert exc.value.report["fase"] == "struttura" and exc.value.report["errore"] == "RuntimeError"
+
+
+def test_pagina_condivisa_sp_e_ce_si_legge_una_sola_volta(tmp_path):
+    """Task lotto-b, fix 8: una pagina "prospetto_sp_e_ce" (SP e CE sulla stessa pagina fisica)
+    entra in pagine_sp E pagine_ce (TIPI_SP/TIPI_CE di analisi.py): leggerla due volte manda la
+    stessa riga stampata a due chiamate indipendenti, che possono risolverla con due percorsi
+    diversi (come budget_397: la stessa riga di debito letta 'SPP.D.O' dalla chiamata SP e
+    'SPP.D.E' dalla chiamata CE) e la contano due volte, perche' da_coppie deduplica solo per
+    percorso esatto. Una pagina cosi' si legge una volta sola."""
+    pdf = pdf_colonna_unica(str(tmp_path / "c.pdf"))
+    chiamate = []
+
+    def voci(testo, intestazioni, nota=""):
+        chiamate.append(nota)
+        # stesso debito, percorso diverso alla seconda chiamata SE la pagina viene letta due volte
+        percorso = "SPP.D.O" if len(chiamate) == 1 else "SPP.D.E"
+        return {"corrente": [("SPA.C.IV.1", D("2100")), ("SPP.A.I", D("900")), ("SPP.A.IX", D("100")),
+                             (percorso, D("1100")), ("CE.A.1", D("500")), ("CE.B.7", D("400")), ("CE.21", D("100"))],
+                "precedente": [], "totali": {}}
+
+    struttura = lambda p: _struttura("legge", pagine_sp=[1], pagine_ce=[1],
+                                     mappe=[{"pagina": 1, "tipo_pagina": "prospetto_sp_e_ce"}])
+    r = S.importa(pdf, analizza=struttura, leggi_voci=voci)
+    assert len(chiamate) == 1
+    assert r.report["esito"] == "ok"       # con una lettura sola il debito conta una volta: attivo=passivo=2100
+
+
+def test_pagina_condivisa_rilettura_dichiara_entrambe_le_sezioni(tmp_path):
+    """Fix round 1, minor 4: sulla pagina condivisa la rilettura dopo uno scarto oltre soglia
+    rilegge SP e CE insieme (`_leggi_sp_e_ce`), ma la diagnostica `letture` incrementava solo la
+    sezione scelta dall'euristica (`sezione`), lasciando l'altra ferma a 1 anche se era stata
+    riletta anch'essa. Ora entrambe le sezioni dichiarano la rilettura."""
+    pdf = pdf_colonna_unica(str(tmp_path / "c.pdf"))
+    chiamate = []
+
+    def voci(testo, intestazioni, nota=""):
+        chiamate.append(nota)
+        debito = D("900") if len(chiamate) == 1 else D("1100")   # 1a chiamata: scarto; 2a: quadra
+        return {"corrente": [("SPA.C.IV.1", D("2100")), ("SPP.A.I", D("900")), ("SPP.A.IX", D("100")),
+                             ("SPP.D.E", debito), ("CE.A.1", D("500")), ("CE.B.7", D("400")),
+                             ("CE.21", D("100"))],
+                "precedente": [], "totali": {}}
+
+    struttura = lambda p: _struttura("legge", pagine_sp=[1], pagine_ce=[1],
+                                     mappe=[{"pagina": 1, "tipo_pagina": "prospetto_sp_e_ce"}])
+    r = S.importa(pdf, analizza=struttura, leggi_voci=voci)
+    assert len(chiamate) == 2
+    assert r.report["esito"] == "ok"
+    assert r.report["letture"] == {"sp": 2, "ce": 2}
 
 
 # --- Estensioni Task 8 (rulings del controllo) --------------------------------------------------

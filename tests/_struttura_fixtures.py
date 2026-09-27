@@ -531,3 +531,169 @@ def pdf_ce_poi_prospetto_fiscale(path: str) -> str:
     _scrivi_prospetto_irap(doc.new_page(width=595, height=842))
     doc.save(path)
     return path
+
+
+# --- Lotto import-pdf-snello, fix 6 (continuazioni di pagina perse) ---------------------------
+
+
+def pdf_xbrl_sp_continuazione_senza_date(path: str) -> str:
+    """Attivo su pagina 1 (titolo + le due date di legge), passivo su pagina 2 SENZA ripetere
+    ne' il titolo ne' le date in testa: una vera continuazione, come budget_671 (fix 6a).
+    `mappa_xbrl` deve riconoscerla comunque, non solo quando le date combaciano esattamente."""
+    doc = fitz.open()
+    intest = [(380, "31-12-2025", True), (480, "31-12-2024", True)]
+    p1 = doc.new_page(width=595, height=842)
+    p1.insert_text((30, 40), "Stato patrimoniale", fontname=FONT, fontsize=10)
+    _riga(p1, 60, intest)
+    righe_p1 = [(30, "B) Immobilizzazioni", "", ""),
+                (34, "Totale immobilizzazioni (B)", "900,00", "950,00"),
+                (30, "C) Attivo circolante", "", ""),
+                (34, "Totale attivo circolante (C)", "300,00", "200,00"),
+                (30, "Totale attivo", "1.200,00", "1.150,00")]
+    y = 80
+    for x, testo, a, b in righe_p1:
+        _riga(p1, y, [(x, testo, False), (380, a, True), (480, b, True)])
+        y += 14
+
+    p2 = doc.new_page(width=595, height=842)  # nessun titolo, nessuna data in testa
+    righe_p2 = [(30, "A) Patrimonio netto", "", ""),
+                (34, "Totale patrimonio netto", "700,00", "650,00"),
+                (30, "D) Debiti", "", ""),
+                (34, "Totale debiti", "500,00", "500,00"),
+                (30, "Totale passivo", "1.200,00", "1.150,00")]
+    y = 40
+    for x, testo, a, b in righe_p2:
+        _riga(p2, y, [(x, testo, False), (380, a, True), (480, b, True)])
+        y += 14
+    doc.save(path)
+    return path
+
+
+def pdf_xbrl_sp_continuazione_oltre_il_limite(path: str) -> str:
+    """Attivo su pagina 1 (titolo + date) seguito da TRE pagine senza titolo proprio, tutte con
+    importi e nessuna parola di sezione nuova: il limite di 2 pagine di continuazione (fix 6)
+    lascia la terza fuori."""
+    doc = fitz.open()
+    intest = [(380, "31-12-2025", True), (480, "31-12-2024", True)]
+    p1 = doc.new_page(width=595, height=842)
+    p1.insert_text((30, 40), "Stato patrimoniale", fontname=FONT, fontsize=10)
+    _riga(p1, 60, intest)
+    righe_p1 = [(30, "B) Immobilizzazioni", "900,00", "950,00"),
+                (30, "C) Attivo circolante", "300,00", "200,00"),
+                (30, "Totale attivo", "1.200,00", "1.150,00")]
+    y = 80
+    for x, testo, a, b in righe_p1:
+        _riga(p1, y, [(x, testo, False), (380, a, True), (480, b, True)])
+        y += 14
+
+    for n in range(3):
+        pagina = doc.new_page(width=595, height=842)
+        y = 40
+        for k in range(3):
+            _riga(pagina, y, [(30, f"Voce continuazione {n}.{k}", False),
+                              (380, f"{100 + n * 10 + k},00", True), (480, f"{90 + n * 10 + k},00", True)])
+            y += 14
+    doc.save(path)
+    return path
+
+
+def pdf_xbrl_rendiconto_dopo_ce(path: str) -> str:
+    """SP e CE regolari (con titolo e date), seguiti da un vero Rendiconto Finanziario: titolo
+    proprio in testa e prosa che contiene "attivita'" dentro preposizioni articolate
+    ("dall'attivita'", "dell'attivita'"), con importi a sufficienza da sembrare un prospetto.
+    Non deve diventare ne' un falso "stato patrimoniale" (vecchio TITOLI_SP, fix 7) ne' una
+    continuazione del CE (fix 6, il testo apre una sezione nuova)."""
+    doc = fitz.open()
+    intest = [(380, "31-12-2025", True), (480, "31-12-2024", True)]
+
+    sp = doc.new_page(width=595, height=842)
+    sp.insert_text((30, 40), "Stato patrimoniale", fontname=FONT, fontsize=10)
+    _riga(sp, 60, intest)
+    righe_sp = [(30, "B) Immobilizzazioni", "900,00", "950,00"),
+                (30, "C) Attivo circolante", "300,00", "200,00"),
+                (30, "Totale attivo", "1.200,00", "1.150,00")]
+    y = 80
+    for x, testo, a, b in righe_sp:
+        _riga(sp, y, [(x, testo, False), (380, a, True), (480, b, True)])
+        y += 14
+
+    ce = doc.new_page(width=595, height=842)
+    ce.insert_text((30, 40), "Conto economico", fontname=FONT, fontsize=10)
+    _riga(ce, 60, intest)
+    righe_ce = [(30, "A) Valore della produzione", "2.000,00", "1.800,00"),
+                (30, "B) Costi della produzione", "1.500,00", "1.350,00"),
+                (30, "21) Utile (perdita) dell'esercizio", "500,00", "450,00")]
+    y = 80
+    for x, testo, a, b in righe_ce:
+        _riga(ce, y, [(x, testo, False), (380, a, True), (480, b, True)])
+        y += 14
+
+    rendiconto = doc.new_page(width=595, height=842)
+    righe = [
+        "Rendiconto finanziario, metodo indiretto",
+        "A. Flussi finanziari derivanti dall'attivita' operativa (metodo indiretto)",
+        "Utile (perdita) dell'esercizio                       500,00      450,00",
+        "Ammortamenti                                         100,00       90,00",
+        "B. Flussi finanziari derivanti dall'attivita' di investimento",
+        "Investimenti in immobilizzazioni materiali          -200,00     -150,00",
+        "C. Flussi finanziari derivanti dall'attivita' di finanziamento",
+        "Rimborso finanziamenti                              -100,00      -80,00",
+        "Disponibilita' liquide a fine esercizio               300,00      200,00",
+    ]
+    y = 40
+    for riga in righe:
+        rendiconto.insert_text((30, y), riga, fontname=FONT, fontsize=8)
+        y += 14
+    doc.save(path)
+    return path
+
+
+def pdf_xbrl_rendiconto_con_intestazione_ripetuta(path: str) -> str:
+    """Come `pdf_xbrl_rendiconto_dopo_ce`, ma il Rendiconto Finanziario ha un'intestazione
+    aziendale ripetuta (riga corta, un running header) PRIMA del titolo di sezione: "Rendiconto
+    finanziario" e' sulla SECONDA riga di testa, non sulla prima (fix round 1, gap 1: controllare
+    solo la riga 0 lasciava passare esattamente questo caso)."""
+    doc = fitz.open()
+    intest = [(380, "31-12-2025", True), (480, "31-12-2024", True)]
+
+    sp = doc.new_page(width=595, height=842)
+    sp.insert_text((30, 40), "Stato patrimoniale", fontname=FONT, fontsize=10)
+    _riga(sp, 60, intest)
+    righe_sp = [(30, "B) Immobilizzazioni", "900,00", "950,00"),
+                (30, "C) Attivo circolante", "300,00", "200,00"),
+                (30, "Totale attivo", "1.200,00", "1.150,00")]
+    y = 80
+    for x, testo, a, b in righe_sp:
+        _riga(sp, y, [(x, testo, False), (380, a, True), (480, b, True)])
+        y += 14
+
+    ce = doc.new_page(width=595, height=842)
+    ce.insert_text((30, 40), "Conto economico", fontname=FONT, fontsize=10)
+    _riga(ce, 60, intest)
+    righe_ce = [(30, "A) Valore della produzione", "2.000,00", "1.800,00"),
+                (30, "B) Costi della produzione", "1.500,00", "1.350,00"),
+                (30, "21) Utile (perdita) dell'esercizio", "500,00", "450,00")]
+    y = 80
+    for x, testo, a, b in righe_ce:
+        _riga(ce, y, [(x, testo, False), (380, a, True), (480, b, True)])
+        y += 14
+
+    rendiconto = doc.new_page(width=595, height=842)
+    righe = [
+        "ACME SRL - Bilancio al 31-12-2025",
+        "Rendiconto finanziario, metodo indiretto",
+        "A. Flussi finanziari derivanti dall'attivita' operativa (metodo indiretto)",
+        "Utile (perdita) dell'esercizio                       500,00      450,00",
+        "Ammortamenti                                         100,00       90,00",
+        "B. Flussi finanziari derivanti dall'attivita' di investimento",
+        "Investimenti in immobilizzazioni materiali          -200,00     -150,00",
+        "C. Flussi finanziari derivanti dall'attivita' di finanziamento",
+        "Rimborso finanziamenti                              -100,00      -80,00",
+        "Disponibilita' liquide a fine esercizio               300,00      200,00",
+    ]
+    y = 40
+    for riga in righe:
+        rendiconto.insert_text((30, y), riga, fontname=FONT, fontsize=8)
+        y += 14
+    doc.save(path)
+    return path

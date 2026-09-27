@@ -907,7 +907,12 @@ def import_pdf_balance_sheet(
                     # con tipi non validi (bug riprodotto in revisione: un valore non
                     # numerico dentro bs fa fallire proprio il calcolo dei totali qui
                     # sotto, DOPO che _snello era gia' assegnato nella versione precedente).
-                    _risultato_snello = import_snello.importa(file_path, ocr_text=ocr_text)
+                    # route_hint: la route che il classificatore ha gia' deciso (ROUTE_TRIAL per una
+                    # situazione contabile) aiuta modo_da_mappe a scegliere "conti" su un voto vicino
+                    # alla parita' fra schema conti e schema legge (Task lotto-b, fix 9, diagnosi
+                    # budget_313: senza l'indizio un pareggio cadeva sul lato sbagliato).
+                    _risultato_snello = import_snello.importa(
+                        file_path, ocr_text=ocr_text, route_hint=classification.route)
                     _bs_snello, _ce_snello = _risultato_snello.bs, _risultato_snello.ce
                     _prior_bs_snello = _risultato_snello.prior_bs
                     _prior_ce_snello = _risultato_snello.prior_ce

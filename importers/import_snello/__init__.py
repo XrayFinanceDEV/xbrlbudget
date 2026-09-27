@@ -8,6 +8,16 @@ from decimal import Decimal
 
 _IMMOBILIZZAZIONI_CAMPI = ("sp02_immob_immateriali", "sp03_immob_materiali", "sp04_immob_finanziarie")
 
+# Nota aggiunta alla chiamata combinata di una pagina "prospetto_sp_e_ce" (Task lotto-b, fix 8):
+# una pagina cosi' entra in pagine_sp E pagine_ce (TIPI_SP/TIPI_CE di analisi.py), e leggerla con
+# due chiamate indipendenti manda la STESSA riga stampata a due letture separate, che possono
+# risolverla con due percorsi legali diversi (es. SPP.D.O da una, SPP.D.E dall'altra) — da_coppie
+# deduplica solo per percorso esatto, quindi la stessa massa finirebbe contata due volte
+# (diagnosi budget_397). Una pagina cosi' si legge una volta sola, con una nota che chiede
+# esplicitamente sia le voci SP sia le voci CE.
+_NOTA_PAGINA_CONDIVISA = ("Questa pagina contiene sia voci di Stato Patrimoniale sia di Conto "
+                         "Economico: leggi entrambe, ogni riga stampata una volta sola, mai due.")
+
 
 class SnelloNonRiuscito(Exception):
     """Il percorso snello non e' arrivato a un risultato utilizzabile: ``report`` dichiara fase ed
@@ -47,13 +57,16 @@ def _unclassified_mass(diag: dict) -> Decimal:
 
 
 def importa(file_path: str, *, ocr_text: str | None = None, analizza=None, leggi_conti=None,
-            leggi_voci=None, trascrivi=None) -> Risultato:
+            leggi_voci=None, trascrivi=None, route_hint: str | None = None) -> Risultato:
     t0 = time.monotonic()
 
     from importers.struttura_documento.analisi import analizza_struttura
     analizza_fn = analizza or analizza_struttura
     try:
-        struttura = analizza_fn(file_path)
+        # route_hint si inoltra solo quando il chiamante lo passa: di default resta None e la
+        # chiamata e' quella di sempre, posizionale sola — una `analizza` finta dei test che non
+        # accetta affatto questo parametro (`lambda p: ...`) non deve rompersi (Task lotto-b, fix 9).
+        struttura = analizza_fn(file_path, route_hint=route_hint) if route_hint is not None else analizza_fn(file_path)
     except Exception as e:
         raise SnelloNonRiuscito({"esito": "ripiego", "fase": "struttura", "errore": type(e).__name__}) from e
 
@@ -104,6 +117,10 @@ def importa(file_path: str, *, ocr_text: str | None = None, analizza=None, leggi
             righe_documento = collect_source_rows(file_path, ocr_text=ocr_text)
             letture = {"sp": 1, "ce": 1}
 
+            # Le pagine "prospetto_sp_e_ce" (SP e CE sulla stessa pagina fisica) entrano in
+            # ENTRAMBE pagine_sp e pagine_ce: se ce ne sono, non le leggiamo due volte (fix 8).
+            pagine_condivise = {m["pagina"] for m in struttura.mappe if m.get("tipo_pagina") == "prospetto_sp_e_ce"}
+
             def _leggi_sezione(pagine: list[int], intestazioni: list[str], nota: str = "") -> dict:
                 pagine_insieme = set(pagine)
                 if any(p in struttura.pagine_senza_testo for p in pagine):
@@ -114,18 +131,34 @@ def importa(file_path: str, *, ocr_text: str | None = None, analizza=None, leggi
                     return leggi_voci_fn(testo, intestazioni, nota=nota)
                 return leggi_voci_fn(testo, intestazioni)
 
+            def _leggi_sp_e_ce(nota_sp: str = "", nota_ce: str = ""):
+                if pagine_condivise:
+                    pagine_unione = sorted(set(pagine_sp) | set(pagine_ce))
+                    intestazioni_unione = list(dict.fromkeys(list(struttura.intestazioni_sp)
+                                                             + list(struttura.intestazioni_ce)))
+                    nota = " ".join(n for n in (nota_sp, nota_ce) if n)
+                    nota_unione = f"{_NOTA_PAGINA_CONDIVISA} {nota}" if nota else _NOTA_PAGINA_CONDIVISA
+                    combinato = _leggi_sezione(pagine_unione, intestazioni_unione, nota=nota_unione)
+                    return combinato, combinato
+                with ThreadPoolExecutor(2) as ex:
+                    fut_sp = ex.submit(_leggi_sezione, pagine_sp, struttura.intestazioni_sp, nota_sp)
+                    fut_ce = ex.submit(_leggi_sezione, pagine_ce, struttura.intestazioni_ce, nota_ce)
+                    return fut_sp.result(), fut_ce.result()
+
             def _combina(sp_res: dict, ce_res: dict):
-                coppie_corrente = sp_res["corrente"] + ce_res["corrente"]
-                coppie_precedente = sp_res["precedente"] + ce_res["precedente"]
-                stampati = _unisci_totali(sp_res["totali"], ce_res["totali"])
+                if sp_res is ce_res:
+                    coppie_corrente = sp_res["corrente"]
+                    coppie_precedente = sp_res["precedente"]
+                    stampati = sp_res["totali"]
+                else:
+                    coppie_corrente = sp_res["corrente"] + ce_res["corrente"]
+                    coppie_precedente = sp_res["precedente"] + ce_res["precedente"]
+                    stampati = _unisci_totali(sp_res["totali"], ce_res["totali"])
                 bs, ce, diag = da_coppie(coppie_corrente)
                 prior = da_coppie(coppie_precedente) if coppie_precedente else None
                 return bs, ce, diag, prior, stampati
 
-            with ThreadPoolExecutor(2) as ex:
-                fut_sp = ex.submit(_leggi_sezione, pagine_sp, struttura.intestazioni_sp)
-                fut_ce = ex.submit(_leggi_sezione, pagine_ce, struttura.intestazioni_ce)
-                sp_res, ce_res = fut_sp.result(), fut_ce.result()
+            sp_res, ce_res = _leggi_sp_e_ce()
 
             fase = "conti"
             bs, ce, diag, prior, stampati = _combina(sp_res, ce_res)
@@ -148,10 +181,19 @@ def importa(file_path: str, *, ocr_text: str | None = None, analizza=None, leggi
                 nota = (f"Una lettura precedente dava uno scarto di {scarto} euro fra attivo e "
                         f"passivo (o fra risultato CE e SP): controlla voci mancanti, doppie o "
                         f"totali presi come voci.")
-            letture[sezione] = letture.get(sezione, 1) + 1
-            if sezione == "sp":
+            if pagine_condivise:
+                # La pagina condivisa si rilegge tutta insieme (SP e CE): entrambe le sezioni
+                # dichiarano la rilettura, non solo quella scelta dall'euristica (minor 4, fix
+                # round 1) — altrimenti la diagnostica mentirebbe su quale sezione e' stata
+                # riletta davvero.
+                letture["sp"] = letture.get("sp", 1) + 1
+                letture["ce"] = letture.get("ce", 1) + 1
+                sp_res, ce_res = _leggi_sp_e_ce(nota_sp=nota, nota_ce=nota)
+            elif sezione == "sp":
+                letture[sezione] = letture.get(sezione, 1) + 1
                 sp_res = _leggi_sezione(pagine_sp, struttura.intestazioni_sp, nota=nota)
             else:
+                letture[sezione] = letture.get(sezione, 1) + 1
                 ce_res = _leggi_sezione(pagine_ce, struttura.intestazioni_ce, nota=nota)
 
             fase = "conti"

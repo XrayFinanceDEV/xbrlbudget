@@ -85,20 +85,28 @@ def _esito(nome: str, bs_raw: dict, ce_raw: dict, stampati_raw: dict | None) -> 
 
 
 def _prova_standard_ivcee(file_path: str) -> dict | None:
-    """Schema di legge a colonne comparative (o compatto a colonna unica): None se il
-    documento non e' nemmeno riconosciuto come tale (``has_comparative_ivcee_columns``
-    falso), altrimenti l'esito (adottato o no) di questo solo parser."""
+    """Schema di legge a colonne comparative, o compatto a colonna unica (Task 23):
+    ``has_comparative_ivcee_columns`` falso non significa piu' "non provarci" - vuol
+    dire solo che il documento non ha due colonne affiancate, e il modulo ha gia' un
+    ramo compatto (``_parse_compact_balance``/``_parse_compact_income``, dietro
+    ``extract_standard_ivcee_balances``/``_income``) che quel caso lo tenta comunque,
+    con la stessa garanzia "il totale stampato decide" e gli stessi controlli
+    incrociati. Se anche il ramo compatto non riconosce il documento (nessuna
+    "stato patrimoniale"/incrocio a colonna singola), i due extract tornano
+    ``None`` e qui si ritorna ``None``: mai bloccare situazione_contabile_parser
+    per un documento che questo parser non ha nemmeno provato a leggere."""
     from importers.standard_ivcee_parser import (
         extract_standard_ivcee_balances,
         extract_standard_ivcee_income,
         has_comparative_ivcee_columns,
     )
 
-    if not has_comparative_ivcee_columns(file_path):
-        return None
+    comparativo = has_comparative_ivcee_columns(file_path)
     bs_raw, _ = extract_standard_ivcee_balances(file_path)
     ce_raw, _ = extract_standard_ivcee_income(file_path)
     if bs_raw is None or ce_raw is None:
+        if not comparativo:
+            return None
         return {"adottato": False, "parser": "standard_ivcee_parser", "esito": "oltre_soglia"}
     stampati = {"totale_attivo": bs_raw.get("totale_attivo"),
                 "totale_passivo": bs_raw.get("totale_passivo")}

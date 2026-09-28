@@ -1366,3 +1366,647 @@ def test_ambienta_verifica_source_balances_are_exact_and_self_validating():
     current_q = check_quadratura(current, current_ce, tol=Decimal("2"))
     assert current_q.quadra
     assert current_q.utile_ce == Decimal("27887.32")
+
+
+# ---------------------------------------------------------------------------
+# Task 23 — gruppo G3, tre dialetti che la diagnosi (2026-09-26) isola dietro
+# lo stesso meccanismo "il totale stampato decide": "Cod." gerarchico a
+# lettere con "il totale precede" (budget_280/320/379), "I -" a trattino con
+# "totale segue" comparativo (budget_297), mastri piatti a colonna singola
+# con "Totale X" dopo i figli (budget_289/352). Fixture sintetiche modellate
+# sulle righe fisiche vere (mai i dati reali), una per dialetto.
+# ---------------------------------------------------------------------------
+
+
+_DOTTED_COD_FONT = "helv"
+
+
+def _write_dotted_cod_pdf(path: Path, *, include_immateriali: bool = True) -> None:
+    """Dialetto "Cod. gerarchico, il totale precede" (280/320/379).
+
+    Colonne comparate per DATA (come i due PDF veri: due "31/12/20XX"
+    affiancate, non un'intestazione a parole), solo la corrente popolata —
+    stesso schema di ``_pdf_comparativo_bilanciato`` in
+    ``test_snello_deterministico.py``. Ogni didascalia porta gia' il proprio
+    totale sulla riga stessa (nessuna riga "Totale X" separata), il codice
+    colonna antepone un numero interno di riferimento a ogni didascalia
+    ("60 B.I) Immobilizzazioni immateriali"), le sotto-voci arabe di CE
+    portano il prefisso della lettera del genitore ("A.1)", "B.6)"), e la
+    scadenza si stampa "Esigibili entro/oltre l'esercizio successivo"
+    (nessun trattino) — una volta come somma di sezione, di nuovo (stesso
+    importo) sotto ogni sotto-voce: la ripetizione verifica che
+    ``_sum_maturity`` prenda solo la prima occorrenza. ``include_immateriali
+    =False`` riproduce budget_320, dove "B.I)" e' del tutto assente perche'
+    zero.
+    """
+    def right(page, x_right, y, text):
+        width = fitz.get_text_length(text, fontname=_DOTTED_COD_FONT, fontsize=8)
+        page.insert_text((x_right - width, y), text, fontname=_DOTTED_COD_FONT, fontsize=8)
+
+    def add_rows(page, y, rows):
+        for label, current in rows:
+            page.insert_text((20, y), label, fontname=_DOTTED_COD_FONT, fontsize=8)
+            if current is not None:
+                right(page, 400, y, current)
+            y += 14
+        return y
+
+    document = fitz.open()
+    bs = document.new_page()
+    bs.insert_text((30, 40), "Situazione contabile riclassificata dettagliata", fontsize=11)
+    right(bs, 400, 60, "31/12/2025")
+    right(bs, 500, 60, "31/12/2024")
+
+    # Quando "B.I)" e' assente la sua massa (100,00) si sposta sulla
+    # disponibilita' liquide, cosi' il totale attivo resta 1.000,00 e la
+    # fixture verifica solo l'omissione del confine, non un secondo scarto.
+    imm_immateriali = [("60 B.I) Immobilizzazioni immateriali", "100,00")] if include_immateriali else []
+    imm_totale = "300,00" if include_immateriali else "200,00"
+    circ_totale = "650,00" if include_immateriali else "750,00"
+    liquide = "150,00" if include_immateriali else "250,00"
+    add_rows(bs, 100, [
+        ("2 Stato patrimoniale attivo", "1.000,00"),
+        ("44 B) Immobilizzazioni", imm_totale),
+        *imm_immateriali,
+        ("276 B.II) Immobilizzazioni materiali", "150,00"),
+        ("534 B.III) Immobilizzazioni finanziarie", "50,00"),
+        ("956 C) Attivo circolante", circ_totale),
+        # "I. Rimanenze" del tutto assente (zero): si va da C) direttamente a
+        # C.II) Crediti, come su 280/320/379.
+        ("1104 C.II) Crediti", "500,00"),
+        ("1110 Esigibili entro l'esercizio successivo", "500,00"),
+        ("1120 C.II.1) Verso clienti", "500,00"),
+        ("1140 Esigibili entro l'esercizio successivo", "500,00"),
+        ("1634 C.IV) Disponibilita liquide", liquide),
+        ("2000 D) Ratei e risconti", "50,00"),
+        ("1834 Stato patrimoniale passivo", "1.000,00"),
+        ("1850 A) Patrimonio netto", "400,00"),
+        ("1870 A.I) Capitale", "300,00"),
+        ("2086 A.IX) Utile (perdita) dell'esercizio", "100,00"),
+        ("2244 C) Trattamento di fine rapporto di lavoro subordinato", "100,00"),
+        ("2264 D) Debiti", "450,00"),
+        ("2270 Esigibili entro l'esercizio successivo", "400,00"),
+        ("2272 Esigibili oltre l'esercizio successivo", "50,00"),
+        ("2398 D.4) Debiti verso banche", "450,00"),
+        ("2400 Esigibili entro l'esercizio successivo", "400,00"),
+        ("2436 Esigibili oltre l'esercizio successivo", "50,00"),
+        ("2900 E) Ratei e risconti", "50,00"),
+    ])
+
+    ce = document.new_page()
+    add_rows(ce, 100, [
+        ("3360 Conto economico", None),
+        ("3380 A) Valore della produzione", "500,00"),
+        ("3400 A.1) Ricavi delle vendite e delle prestazioni", "450,00"),
+        ("3590 A.5) Altri ricavi e proventi", "50,00"),
+        ("3664 B) Costi della produzione", "300,00"),
+        ("3680 B.6) Per materie prime, sussidiarie, di consumo e di merci", "100,00"),
+        ("3770 B.7) Per servizi", "50,00"),
+        ("3850 B.8) Per godimento di beni di terzi", "20,00"),
+        ("3900 B.9) Per il personale", "80,00"),
+        ("3950 B.10) Ammortamenti e svalutazioni", "30,00"),
+        # "11) Variazioni delle rimanenze" del tutto assente (zero), come su
+        # budget_280.
+        ("4000 B.14) Oneri diversi di gestione", "20,00"),
+        ("Differenza tra valore e costi di produzione (a-b)", "200,00"),
+        ("4308 C) Proventi e oneri finanziari", "-20,00"),
+        ("4366 C.16) Altri proventi finanziari", "5,00"),
+        ("4544 C.17) Interessi e altri oneri finanziari", "25,00"),
+        ("Risultato prima delle imposte (a-b±c±d)", "180,00"),
+        ("4918 20) Imposte sul reddito dell'esercizio", "80,00"),
+        ("4934 21) Utile (perdita) dell'esercizio", "100,00"),
+    ])
+    document.save(str(path))
+    document.close()
+
+
+def test_dotted_cod_hierarchy_totale_precede_quadra(tmp_path):
+    """budget_280/379: "B.I)/B.II)/B.III)" con il totale sulla propria riga,
+    "I. Rimanenze" assente, scadenza "Esigibili entro/oltre" senza trattino
+    ripetuta a due profondita' (verifica che non si sommi due volte)."""
+    pdf = tmp_path / "dotted-cod.pdf"
+    _write_dotted_cod_pdf(pdf, include_immateriali=True)
+
+    current, _prior = extract_standard_ivcee_balances(str(pdf))
+    current_ce, _prior_ce = extract_standard_ivcee_income(str(pdf))
+
+    assert current is not None
+    assert current["totale_attivo"] == Decimal("1000.00")
+    assert current["totale_passivo"] == Decimal("1000.00")
+    assert current["sp02_immob_immateriali"] == Decimal("100.00")
+    assert current["sp03_immob_materiali"] == Decimal("150.00")
+    assert current["sp04_immob_finanziarie"] == Decimal("50.00")
+    assert current["sp05_rimanenze"] == Decimal("0.00")
+    # La ripetizione della stessa scadenza a due livelli non raddoppia sp06.
+    assert current["sp06_crediti_breve"] == Decimal("500.00")
+    assert current["sp16_debiti_breve"] == Decimal("400.00")
+    assert current["sp17_debiti_lungo"] == Decimal("50.00")
+    assert current["sp13_utile_perdita"] == Decimal("100.00")
+
+    assert current_ce is not None
+    assert current_ce["ce01_ricavi_vendite"] == Decimal("450.00")
+    assert current_ce["ce20_imposte"] == Decimal("80.00")
+    quadratura = check_quadratura(current, current_ce, tol=Decimal("2"))
+    assert quadratura.quadra
+    assert quadratura.utile_ce == Decimal("100.00")
+
+
+def test_dotted_cod_hierarchy_senza_immateriali_quadra(tmp_path):
+    """budget_320: "B.I) Immobilizzazioni immateriali" del tutto assente
+    (zero), non solo il suo dettaglio — lo stesso principio "assente vale
+    zero" gia' applicato altrove nel modulo, qui esteso al confine stesso."""
+    pdf = tmp_path / "dotted-cod-no-immateriali.pdf"
+    _write_dotted_cod_pdf(pdf, include_immateriali=False)
+
+    current, _prior = extract_standard_ivcee_balances(str(pdf))
+
+    assert current is not None
+    assert current["sp02_immob_immateriali"] == Decimal("0.00")
+    assert current["sp03_immob_materiali"] == Decimal("150.00")
+    assert current["sp09_disponibilita_liquide"] == Decimal("250.00")
+    assert current["totale_attivo"] == Decimal("1000.00")
+    assert current["totale_passivo"] == Decimal("1000.00")
+
+
+def _write_dashed_caption_pdf(path: Path) -> None:
+    """Dialetto "I -" a trattino, comparativo per data (budget_297).
+
+    Stesse colonne per data di ``_write_dotted_cod_pdf``, ma le tre
+    didascalie romane di B) usano il trattino ("I - Immobilizzazioni
+    immateriali") invece del punto o della lettera-parentesi — la terza
+    grafia che #23 aggiunge a ``imm_i``/``imm_ii``/``imm_iii``. Il totale
+    precede ancora sulla propria riga (a differenza del file vero, dove
+    "Totale X" segue su una riga separata e resta fuori standard di questo
+    lotto — vedi report): qui la fixture isola la sola estensione di
+    vocabolario del confine, non il meccanismo "totale segue".
+    """
+    def right(page, x_right, y, text):
+        width = fitz.get_text_length(text, fontname="helv", fontsize=8)
+        page.insert_text((x_right - width, y), text, fontname="helv", fontsize=8)
+
+    def add_rows(page, y, rows):
+        for label, current in rows:
+            page.insert_text((20, y), label, fontname="helv", fontsize=8)
+            if current is not None:
+                right(page, 400, y, current)
+            y += 14
+        return y
+
+    document = fitz.open()
+    bs = document.new_page()
+    bs.insert_text((30, 40), "Bilancio schema XBRL", fontsize=11)
+    right(bs, 400, 60, "31/12/2025")
+    right(bs, 500, 60, "31/12/2024")
+    add_rows(bs, 100, [
+        ("Stato patrimoniale attivo", "1.000,00"),
+        ("B) Immobilizzazioni", "300,00"),
+        ("I - Immobilizzazioni Immateriali", "100,00"),
+        ("II - Immobilizzazioni Materiali", "150,00"),
+        ("III - Immobilizzazioni finanziarie", "50,00"),
+        ("C) Attivo circolante", "650,00"),
+        ("I - Rimanenze", "200,00"),
+        ("II - Crediti", "300,00"),
+        ("1) Verso clienti", "300,00"),
+        ("Esigibili entro l'esercizio successivo", "300,00"),
+        ("IV - Disponibilita liquide", "150,00"),
+        ("D) Ratei e risconti", "50,00"),
+        ("Stato patrimoniale passivo", "1.000,00"),
+        ("A) Patrimonio netto", "400,00"),
+        ("I) Capitale", "300,00"),
+        ("IX) Utile (perdita) dell'esercizio", "100,00"),
+        ("C) Trattamento di fine rapporto di lavoro subordinato", "100,00"),
+        ("D) Debiti", "450,00"),
+        ("Esigibili entro l'esercizio successivo", "450,00"),
+        ("E) Ratei e risconti", "50,00"),
+    ])
+    # "Totale passivo" non esiste su questo dialetto (il totale precede):
+    # `_parse_column` delimita allora `pass_rows` con l'inizio del CE, come
+    # gia' fa per budget_280/320/379 — basta la riga-confine, non un CE vero.
+    ce = document.new_page()
+    ce.insert_text((20, 60), "Conto economico", fontsize=8)
+    document.save(str(path))
+    document.close()
+
+
+def test_dashed_caption_hierarchy_quadra(tmp_path):
+    """budget_297: "I -"/"II -"/"III -" invece di "I."/"B.I)". Il confine si
+    riconosce e, quando il totale precede come nel resto di #23, il bilancio
+    quadra — la sezione "Rendere conto" del report chiarisce che il file
+    reale usa "totale segue" ovunque e per questo non arriva a quadrare."""
+    pdf = tmp_path / "dashed-caption.pdf"
+    _write_dashed_caption_pdf(pdf)
+
+    current, _prior = extract_standard_ivcee_balances(str(pdf))
+
+    assert current is not None
+    assert current["sp02_immob_immateriali"] == Decimal("100.00")
+    assert current["sp03_immob_materiali"] == Decimal("150.00")
+    assert current["sp04_immob_finanziarie"] == Decimal("50.00")
+    assert current["sp05_rimanenze"] == Decimal("200.00")
+    assert current["totale_attivo"] == Decimal("1000.00")
+    assert current["totale_passivo"] == Decimal("1000.00")
+
+
+def _write_flat_mastri_pdf(path: Path) -> None:
+    """Dialetto "mastri piatti, totale segue" a colonna singola (289/352).
+
+    Parentesi ("I) Immobilizzazioni immateriali") invece del trattino gia'
+    supportato, "TOTALE STATO PATRIMONIALE ATTIVO/PASSIVO" invece di "Totale
+    attivo"/"Totale passivo", "III) Immobilizzazioni finanziarie" e "III)
+    Attivita' finanziarie" del tutto assenti (zero), e ogni categoria che
+    porta anche il proprio mastro di dettaglio come riga gemella allo stesso
+    importo ("20010 Riserva legale P", "1201025 Banca... A") — la stessa
+    massa contata due volte se non esclusa da ``_sum_printed_values``.
+    """
+    def right(page, x_right, y, text):
+        width = fitz.get_text_length(text, fontname="helv", fontsize=8)
+        page.insert_text((x_right - width, y), text, fontname="helv", fontsize=8)
+
+    def add_rows(page, y, rows):
+        for label, value in rows:
+            page.insert_text((20, y), label, fontname="helv", fontsize=8)
+            if value is not None:
+                right(page, 400, y, value)
+            y += 14
+        return y
+
+    document = fitz.open()
+    sp = document.new_page()
+    add_rows(sp, 40, [
+        ("STATO PATRIMONIALE ATTIVO", None),
+        (" B) Immobilizzazioni", None),
+        (" I) Immobilizzazioni immateriali", None),
+        ("   1) Costi di impianto e di ampliamento", "50,00"),
+        ("     050101010 Spese di costituzione A", "50,00"),
+        ("   Totale Immobilizzazioni immateriali", "50,00"),
+        (" II) Immobilizzazioni materiali", None),
+        ("   2) Impianti e macchinario", "100,00"),
+        ("     0610015 Macchinari A", "100,00"),
+        ("   Totale Immobilizzazioni materiali", "100,00"),
+        (" Totale Immobilizzazioni (B)", "150,00"),
+        ("C) Attivo circolante", None),
+        (" I) Rimanenze", None),
+        ("   1) Materie prime, sussidiarie e di consumo", "80,00"),
+        ("   Totale Rimanenze", "80,00"),
+        (" II) Crediti", None),
+        ("   1) Verso clienti", "120,00"),
+        ("   Totale Crediti", "120,00"),
+        (" IV) Disponibilita liquide", None),
+        ("   1) Depositi bancari e postali", "30,00"),
+        ("   3) Danaro e valori in cassa", "20,00"),
+        (" Totale Disponibilita liquide", "50,00"),
+        (" Totale Attivo circolante (C)", "250,00"),
+        ("D) Ratei e risconti attivi", "0,00"),
+        (" TOTALE STATO PATRIMONIALE ATTIVO", "400,00"),
+        ("STATO PATRIMONIALE PASSIVO", None),
+        ("A) Patrimonio netto", None),
+        (" I) Capitale", "100,00"),
+        ("   17010 Capitale sociale P", "100,00"),
+        (" IV) Riserva legale", "20,00"),
+        ("   20010 Riserva legale P", "20,00"),
+        (" IX) Utile (perdita) dell'esercizio", "30,00"),
+        (" Totale Patrimonio Netto (A)", "150,00"),
+        ("B) Fondi per rischi e oneri", None),
+        ("C) Trattamento di fine rapporto di lavoro subordinato", "40,00"),
+        ("   30010 F.do TFR P", "40,00"),
+        ("D) Debiti", None),
+        (" Debiti esigibili entro l'esercizio successivo", "150,00"),
+        (" Debiti esigibili oltre l'esercizio successivo", "60,00"),
+        (" 4) Debiti verso banche", None),
+        ("   a) Debiti verso banche esigibili entro l'esercizio successivo", "50,00"),
+        ("     1201025 Banca Popolare c/c A", "50,00"),
+        ("   b) Debiti verso banche esigibili oltre l'esercizio successivo", "60,00"),
+        ("     3601550 Mutuo oltre es.succ. P", "60,00"),
+        (" Totale debiti verso banche", "110,00"),
+        (" 7) Debiti verso fornitori", None),
+        ("   a) Debiti verso fornitori esigibili entro l'esercizio successivo", "100,00"),
+        ("     4000000 Debiti v/fornitori P", "100,00"),
+        (" Totale debiti verso fornitori", "100,00"),
+        (" Totale debiti (D)", "210,00"),
+        ("E) Ratei e risconti passivi", "0,00"),
+        (" TOTALE STATO PATRIMONIALE PASSIVO", "400,00"),
+    ])
+
+    ce = document.new_page()
+    add_rows(ce, 40, [
+        ("CONTO ECONOMICO", None),
+        ("A) Valore della produzione", None),
+        ("1) Ricavi delle vendite e delle prestazioni", "500,00"),
+        ("5) Altri ricavi e proventi", "20,00"),
+        ("Totale valore della produzione (A)", "520,00"),
+        ("B) Costi della produzione", None),
+        ("6) Per materie prime, sussidiarie, di consumo e di merci", "200,00"),
+        ("7) Per servizi", "100,00"),
+        ("8) Per godimento di beni di terzi", "20,00"),
+        ("9) Per il personale", None),
+        ("a) salari e stipendi", "70,00"),
+        ("b) oneri sociali", "25,00"),
+        ("c) trattamento di fine rapporto", "5,00"),
+        ("10) Ammortamenti e svalutazioni", "30,00"),
+        ("11) Variazione rimanenze materie prime", "0,00"),
+        ("14) Oneri diversi di gestione", "10,00"),
+        ("Totale costi della produzione (B)", "460,00"),
+        ("Differenza tra valore e costi della produzione (A - B)", "60,00"),
+        ("C) Proventi e oneri finanziari", None),
+        ("16) Altri proventi finanziari", "2,00"),
+        ("17) Interessi e altri oneri finanziari", "-12,00"),
+        ("Totale proventi e oneri finanziari (C)", "-10,00"),
+        ("D) Rettifiche di valore di attivita finanziarie", "0,00"),
+        ("Risultato prima delle imposte", "50,00"),
+        ("20) Imposte sul reddito dell'esercizio", "20,00"),
+        ("21) UTILE (PERDITA) DEL PERIODO", "30,00"),
+    ])
+    document.save(str(path))
+    document.close()
+
+
+def test_flat_mastri_colonna_singola_quadra(tmp_path):
+    """budget_289/352: mastri piatti a colonna singola, parentesi invece del
+    trattino, "III)" assenti perche' zero, "TOTALE STATO PATRIMONIALE
+    ATTIVO/PASSIVO" invece di "Totale attivo/passivo", e ogni categoria che
+    ripete il proprio mastro di dettaglio (deve contare una volta sola)."""
+    pdf = tmp_path / "flat-mastri.pdf"
+    _write_flat_mastri_pdf(pdf)
+
+    current, _prior = extract_standard_ivcee_balances(str(pdf))
+    current_ce, _prior_ce = extract_standard_ivcee_income(str(pdf))
+
+    assert current is not None
+    assert current["sp02_immob_immateriali"] == Decimal("50.00")
+    assert current["sp03_immob_materiali"] == Decimal("100.00")
+    assert current["sp04_immob_finanziarie"] == Decimal("0.00")
+    assert current["sp08_attivita_finanziarie"] == Decimal("0.00")
+    assert current["sp16a_debiti_banche_breve"] == Decimal("110.00")
+    assert current["sp16d_debiti_fornitori_breve"] == Decimal("100.00")
+    assert current["totale_attivo"] == Decimal("400.00")
+    assert current["totale_passivo"] == Decimal("400.00")
+
+    assert current_ce is not None
+    assert current_ce["ce20_imposte"] == Decimal("20.00")
+    quadratura = check_quadratura(current, current_ce, tol=Decimal("2"))
+    assert quadratura.quadra
+    assert quadratura.utile_ce == Decimal("30.00")
+
+
+# ---------------------------------------------------------------------------
+# Task 23, review round 1 — un layout a più di due colonne ("corrente |
+# comparato | Differenza | Scost. %", file reale budget_379_BILAQ-001) faceva
+# leggere la Differenza (lineare per costruzione: corrente meno comparato,
+# quindi soddisfa ogni controllo incrociato) al posto del comparato vero,
+# perché ``_physical_rows`` conosceva solo due colonne e ogni token a destra
+# del cutoff sovrascriveva ``values[1]``. Ruling: le colonne si scelgono per
+# etichetta d'intestazione; "Differenza"/"Scostamento"/"Variazione"/"%"/
+# "Scost." non sono mai una colonna di saldo (ignorate, mai assegnate); se il
+# comparato non si distingue da un'altra colonna sconosciuta, mai indovinare
+# — si restituisce ``None``.
+# ---------------------------------------------------------------------------
+
+
+def _write_multi_column_pdf(
+    path: Path,
+    extra_headers: list,
+    *,
+    header_offset: float = 0.0,
+    n_extra_columns: int = None,
+) -> None:
+    """Stessa gerarchia "B.I)" (totale precede) di ``_write_dotted_cod_pdf``,
+    con il comparato POPOLATO e una o più colonne extra dopo di lui: il
+    layout reale di budget_379 quando ``extra_headers=["Differenza",
+    "Scost.%"]``, il caso "solo Differenza" a tre colonne quando
+    ``extra_headers=["Differenza"]``, un marcatore non riconosciuto quando
+    ``extra_headers=["Note"]``. ``header_offset`` sposta il testo
+    d'intestazione delle colonne extra IN ALTO di quei punti rispetto alla
+    riga delle due date — un'etichetta di scarto su una riga fisica diversa
+    (#23 re-review: un'etichetta di gruppo sopra, o l'intestazione spezzata
+    su due righe, faceva ricomparire esattamente il difetto del Critical
+    originale). ``n_extra_columns`` (default: ``len(extra_headers)``) separa
+    "quante colonne dati extra" da "quante hanno un'etichetta" — con
+    ``extra_headers=[]`` e ``n_extra_columns=1`` la colonna dati c'è ma non
+    ha alcuna intestazione da nessuna parte (il caso "nessuna intestazione"
+    del ruling). Il comparato è sempre il 40% del corrente; ogni colonna
+    extra porta SEMPRE corrente meno comparato (il 60% del corrente) —
+    lineare per costruzione, quindi indistinguibile da un comparato vero sui
+    soli controlli incrociati: la fixture riproduce esattamente il rischio,
+    non un caso di comodo.
+    """
+    if n_extra_columns is None:
+        n_extra_columns = len(extra_headers)
+    right_current = 373.0
+    right_prior = 443.0
+    right_extra_start = 513.0
+    extra_gap = 60.0
+
+    def right(page, x_right, y, text, size=8):
+        width = fitz.get_text_length(text, fontname="helv", fontsize=size)
+        page.insert_text((x_right - width, y), text, fontname="helv", fontsize=size)
+
+    def it(value: Decimal) -> str:
+        text = f"{abs(value):,.2f}".replace(",", "#").replace(".", ",").replace("#", ".")
+        return f"-{text}" if value < 0 else text
+
+    def add_rows(page, y, rows):
+        for label, current in rows:
+            page.insert_text((20, y), label, fontname="helv", fontsize=8)
+            if current is not None:
+                prior = (current * Decimal("0.4")).quantize(Decimal("0.01"))
+                differenza = current - prior
+                right(page, right_current, y, it(current))
+                right(page, right_prior, y, it(prior))
+                for i in range(n_extra_columns):
+                    right(page, right_extra_start + i * extra_gap, y, it(differenza))
+            y += 14
+        return y
+
+    document = fitz.open()
+    bs = document.new_page()
+    right(bs, right_current, 60, "31/12/2025")
+    right(bs, right_prior, 60, "31/12/2024")
+    for i, header in enumerate(extra_headers):
+        right(bs, right_extra_start + i * extra_gap, 60 - header_offset, header)
+
+    add_rows(bs, 100, [
+        ("2 Stato patrimoniale attivo", Decimal("1000.00")),
+        ("44 B) Immobilizzazioni", Decimal("300.00")),
+        ("60 B.I) Immobilizzazioni immateriali", Decimal("100.00")),
+        ("276 B.II) Immobilizzazioni materiali", Decimal("150.00")),
+        ("534 B.III) Immobilizzazioni finanziarie", Decimal("50.00")),
+        ("956 C) Attivo circolante", Decimal("650.00")),
+        ("1104 C.II) Crediti", Decimal("500.00")),
+        ("1110 Esigibili entro l'esercizio successivo", Decimal("500.00")),
+        ("1634 C.IV) Disponibilita liquide", Decimal("150.00")),
+        ("2000 D) Ratei e risconti", Decimal("50.00")),
+        ("1834 Stato patrimoniale passivo", Decimal("1000.00")),
+        ("1850 A) Patrimonio netto", Decimal("400.00")),
+        ("1870 A.I) Capitale", Decimal("300.00")),
+        ("2086 A.IX) Utile (perdita) dell'esercizio", Decimal("100.00")),
+        ("2244 C) Trattamento di fine rapporto di lavoro subordinato", Decimal("100.00")),
+        ("2264 D) Debiti", Decimal("450.00")),
+        ("2270 Esigibili entro l'esercizio successivo", Decimal("400.00")),
+        ("2272 Esigibili oltre l'esercizio successivo", Decimal("50.00")),
+        ("2900 E) Ratei e risconti", Decimal("50.00")),
+    ])
+
+    ce = document.new_page()
+    ce.insert_text((20, 60), "Conto economico", fontsize=8)
+    document.save(str(path))
+    document.close()
+
+
+def test_layout_a_quattro_colonne_legge_il_comparato_vero_non_la_differenza(tmp_path):
+    """budget_379: "corrente | comparato | Differenza | Scost. %". Prima,
+    ogni token a destra del cutoff sovrascriveva il comparato con l'ultimo
+    letto (Scost.%, poi scartato dal regex degli importi perché a 3 decimali,
+    quindi in pratica la Differenza) — verificato: bs_prior.totale_attivo
+    diventava -65.772,05 (la Differenza reale stampata) invece di
+    416.546,99 (il vero comparato). Qui il comparato deve tornare il 40% del
+    corrente, mai il 60% (la Differenza)."""
+    pdf = tmp_path / "quattro-colonne.pdf"
+    _write_multi_column_pdf(pdf, ["Differenza", "Scost.%"])
+
+    current, prior = extract_standard_ivcee_balances(str(pdf))
+
+    assert current is not None
+    assert current["totale_attivo"] == Decimal("1000.00")
+    assert prior is not None
+    assert prior["totale_attivo"] == Decimal("400.00")  # 40% del corrente
+    assert prior["totale_attivo"] != Decimal("600.00")  # mai la Differenza (60%)
+
+
+def test_layout_a_tre_colonne_solo_differenza_legge_il_comparato_vero(tmp_path):
+    """Stesso rischio con una sola colonna extra dopo il comparato
+    ("corrente | comparato | Differenza", nessuno Scost.%)."""
+    pdf = tmp_path / "tre-colonne.pdf"
+    _write_multi_column_pdf(pdf, ["Differenza"])
+
+    current, prior = extract_standard_ivcee_balances(str(pdf))
+
+    assert current is not None
+    assert current["totale_attivo"] == Decimal("1000.00")
+    assert prior is not None
+    assert prior["totale_attivo"] == Decimal("400.00")
+    assert prior["totale_attivo"] != Decimal("600.00")
+
+
+def test_colonna_extra_non_riconosciuta_non_indovina_il_comparato(tmp_path):
+    """Ruling: se il comparato non si distingue da una colonna sconosciuta
+    (nessun marcatore noto di scarto), non si indovina — il comparato torna
+    ``None``, il corrente resta comunque quello vero."""
+    pdf = tmp_path / "colonna-sconosciuta.pdf"
+    _write_multi_column_pdf(pdf, ["Note"])
+
+    current, prior = extract_standard_ivcee_balances(str(pdf))
+
+    assert current is not None
+    assert current["totale_attivo"] == Decimal("1000.00")
+    assert prior is None
+
+
+def _write_ce_zero_prior_pdf(path: Path) -> None:
+    """CE comparativo dove il comparato è stampato davvero tutto a zero (primo
+    esercizio, budget_371/380 — la stessa serie "BILAQ" di budget_379): la
+    stessa guardia "vuoto" già in `_parse_column`/`_parse_compact_balance`
+    (CLAUDE.md, "Attivo = Passivo = 0 non è una quadratura") deve valere anche
+    qui, o un CE comparato a zero supererebbe ogni controllo incrociato per
+    coincidenza — indistinguibile da una lettura fallita.
+    """
+    right_current = 373.0
+    right_prior = 443.0
+
+    def right(page, x_right, y, text, size=8):
+        width = fitz.get_text_length(text, fontname="helv", fontsize=size)
+        page.insert_text((x_right - width, y), text, fontname="helv", fontsize=size)
+
+    def it(value: Decimal) -> str:
+        text = f"{abs(value):,.2f}".replace(",", "#").replace(".", ",").replace("#", ".")
+        return f"-{text}" if value < 0 else text
+
+    def add_rows(page, y, rows):
+        for label, current in rows:
+            page.insert_text((20, y), label, fontname="helv", fontsize=8)
+            if current is not None:
+                right(page, right_current, y, it(current))
+                right(page, right_prior, y, it(Decimal("0")))
+            y += 14
+
+    document = fitz.open()
+    bs = document.new_page()
+    right(bs, right_current, 60, "31/12/2025")
+    right(bs, right_prior, 60, "31/12/2024")
+    bs.insert_text((20, 100), "stato patrimoniale attivo", fontsize=8)
+    bs.insert_text((20, 120), "stato patrimoniale passivo", fontsize=8)
+
+    ce = document.new_page()
+    right(ce, right_current, 60, "31/12/2025")
+    right(ce, right_prior, 60, "31/12/2024")
+    add_rows(ce, 100, [
+        ("Conto economico", None),
+        ("A) Valore della produzione", Decimal("500.00")),
+        ("1) Ricavi delle vendite e delle prestazioni", Decimal("450.00")),
+        ("5) Altri ricavi e proventi", Decimal("50.00")),
+        ("B) Costi della produzione", Decimal("300.00")),
+        ("6) per materie prime, sussidiarie, di consumo e di merci", Decimal("100.00")),
+        ("7) per servizi", Decimal("50.00")),
+        ("8) per godimento di beni di terzi", Decimal("20.00")),
+        ("9) per il personale", Decimal("80.00")),
+        ("10) Ammortamenti e svalutazioni", Decimal("30.00")),
+        ("14) Oneri diversi di gestione", Decimal("20.00")),
+        ("Differenza tra Valore e Costo della Produzione", Decimal("200.00")),
+        ("C) Proventi e oneri finanziari", Decimal("-20.00")),
+        ("16) Altri proventi finanziari", Decimal("5.00")),
+        ("17) Interessi e altri oneri finanziari", Decimal("25.00")),
+        ("Risultato prima delle imposte", Decimal("180.00")),
+        ("20) Imposte sul reddito dell'esercizio", Decimal("80.00")),
+        ("21) Utile (Perdita) dell'esercizio", Decimal("100.00")),
+    ])
+    document.save(str(path))
+    document.close()
+
+
+def test_ce_comparato_tutto_a_zero_non_e_una_lettura_pulita(tmp_path):
+    """budget_371/380: il comparato genuinamente stampato a 0,00 ovunque
+    supererebbe ogni controllo incrociato di `_parse_income_column` (0=0),
+    tornando un CE "pulito" indistinguibile da una lettura fallita — deve
+    tornare ``None``, mai un dizionario tutto a zero."""
+    pdf = tmp_path / "ce-comparato-zero.pdf"
+    _write_ce_zero_prior_pdf(pdf)
+
+    current, prior = extract_standard_ivcee_income(str(pdf))
+
+    assert current is not None
+    assert current["ce01_ricavi_vendite"] == Decimal("450.00")
+    assert prior is None
+
+
+def test_intestazione_di_scarto_su_due_righe_legge_comunque_il_comparato_vero(tmp_path):
+    """#23 re-review: la stessa Differenza letta come comparato, questa volta
+    perché "Differenza" sta 12pt SOPRA la riga delle due date (un'etichetta
+    di gruppo, o l'intestazione spezzata su due righe fisiche) invece che
+    sulla sua stessa riga — cercare il marcatore solo a ±1,5pt dalla riga
+    delle date lasciava rientrare esattamente lo stesso difetto. La banda
+    d'intestazione ora è tutto ciò che sta sopra la prima riga-dati, non
+    solo la riga delle date."""
+    pdf = tmp_path / "intestazione-due-righe.pdf"
+    _write_multi_column_pdf(pdf, ["Differenza"], header_offset=12.0)
+
+    current, prior = extract_standard_ivcee_balances(str(pdf))
+
+    assert current is not None
+    assert current["totale_attivo"] == Decimal("1000.00")
+    assert prior is not None
+    assert prior["totale_attivo"] == Decimal("400.00")  # 40% del corrente
+    assert prior["totale_attivo"] != Decimal("600.00")  # mai la Differenza (60%)
+
+
+def test_terza_colonna_stabile_senza_alcuna_intestazione_non_indovina(tmp_path):
+    """Ruling: una terza colonna dati stabile (almeno tre righe) senza ALCUNA
+    etichetta d'intestazione da nessuna parte — non solo non riconosciuta,
+    proprio assente — non permette di identificare quale colonna sia il
+    comparato: si rifiuta di indovinare, il comparato torna ``None``."""
+    pdf = tmp_path / "terza-colonna-senza-intestazione.pdf"
+    _write_multi_column_pdf(pdf, [], n_extra_columns=1)
+
+    current, prior = extract_standard_ivcee_balances(str(pdf))
+
+    assert current is not None
+    assert current["totale_attivo"] == Decimal("1000.00")
+    assert prior is None

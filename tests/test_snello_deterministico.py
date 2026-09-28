@@ -561,3 +561,107 @@ def test_importa_somma_il_plug_residual_del_parser_a_quello_del_tappo_lean(tmp_p
 
     # 50,00 dichiarati dal parser + 100,00 del tappo lean: mai l'uno al posto dell'altro.
     assert risultato.bs["_plug_residual"] == D("150.00")
+
+
+def test_prova_standard_ivcee_tenta_anche_la_colonna_singola(tmp_path):
+    """Task 23: prima, un documento senza due colonne affiancate non veniva
+    nemmeno passato a ``extract_standard_ivcee_balances``/``_income`` — il
+    ramo compatto del modulo (mastri piatti a colonna singola, budget_289/352)
+    non veniva mai raggiunto dal percorso snello per NESSUN file. Ora il gate
+    lo tenta comunque, e un documento che quadra si adotta a zero chiamate."""
+    from tests.test_standard_ivcee_parser import _write_flat_mastri_pdf
+
+    pdf = str(tmp_path / "flat-mastri.pdf")
+    _write_flat_mastri_pdf(pdf)
+
+    esito = DET.tentativo(pdf)
+
+    assert esito["adottato"] is True
+    assert esito["parser"] == "standard_ivcee_parser"
+    assert esito["esito"] in ("ok", "tappo")
+    assert esito["bs"]["sp16a_debiti_banche_breve"] == D("110.00")
+
+
+def test_prova_standard_ivcee_colonna_singola_non_riconosciuta_non_blocca(tmp_path):
+    """Un documento a colonna singola che il ramo compatto non riconosce
+    affatto (nessuna "stato patrimoniale") deve tornare ``None`` da
+    ``_prova_standard_ivcee`` — mai un dizionario "oltre_soglia" che
+    bloccherebbe il tentativo successivo di situazione_contabile_parser per
+    un file che questo parser non ha nemmeno provato a leggere."""
+    from importers.import_snello.deterministico import _prova_standard_ivcee
+
+    doc = fitz.open()
+    page = doc.new_page()
+    page.insert_text((50, 50), "Relazione sulla gestione", fontsize=10)
+    page.insert_text((50, 70), "Un testo qualsiasi, senza alcuno schema di bilancio.", fontsize=9)
+    pdf = str(tmp_path / "prosa.pdf")
+    doc.save(pdf)
+    doc.close()
+
+    assert _prova_standard_ivcee(pdf) is None
+
+
+def test_parse_compact_balance_rifiuta_un_estrazione_tutta_a_zero(tmp_path):
+    """Attivo = Passivo = 0 non e' una quadratura (CLAUDE.md, "Quadratura,
+    diagnostica e verdetti"): misurato sul corpus reale (budget_355/356, un
+    "bilancio provvisorio" a mastri piatti a colonna singola stampato
+    davvero a zero ovunque), dove le voci opzionali del Task 23 (
+    ``fin_imm_i``/``fin_att_i`` facoltativi, "Totale fondi per rischi"
+    facoltativo...) smettevano di sollevare e restituivano un dizionario
+    "pulito" a zero — ogni controllo incrociato chiude per coincidenza
+    quando tutto vale zero, ed era il bilancio piu' pulito del corpus prima
+    del guardiano. Stesso schema di didascalie di ``_write_flat_mastri_pdf``,
+    importi tutti a zero: deve tornare ``None``, mai un bilancio vuoto."""
+    from importers.standard_ivcee_parser import extract_standard_ivcee_balances
+
+    doc = fitz.open()
+    sp = doc.new_page()
+    righe = [
+        ("STATO PATRIMONIALE ATTIVO", None),
+        (" B) Immobilizzazioni", None),
+        (" I) Immobilizzazioni immateriali", None),
+        ("   1) Costi di impianto e di ampliamento", "0,00"),
+        ("   Totale Immobilizzazioni immateriali", "0,00"),
+        (" II) Immobilizzazioni materiali", None),
+        ("   2) Impianti e macchinario", "0,00"),
+        ("   Totale Immobilizzazioni materiali", "0,00"),
+        (" Totale Immobilizzazioni (B)", "0,00"),
+        ("C) Attivo circolante", None),
+        (" I) Rimanenze", None),
+        ("   1) Materie prime, sussidiarie e di consumo", "0,00"),
+        ("   Totale Rimanenze", "0,00"),
+        (" II) Crediti", None),
+        ("   1) Verso clienti", "0,00"),
+        ("   Totale Crediti", "0,00"),
+        (" IV) Disponibilita liquide", None),
+        ("   1) Depositi bancari e postali", "0,00"),
+        (" Totale Disponibilita liquide", "0,00"),
+        (" Totale Attivo circolante (C)", "0,00"),
+        ("D) Ratei e risconti attivi", "0,00"),
+        (" TOTALE STATO PATRIMONIALE ATTIVO", "0,00"),
+        ("STATO PATRIMONIALE PASSIVO", None),
+        ("A) Patrimonio netto", None),
+        (" I) Capitale", "0,00"),
+        (" IX) Utile (perdita) dell'esercizio", "0,00"),
+        (" Totale Patrimonio Netto (A)", "0,00"),
+        ("B) Fondi per rischi e oneri", None),
+        ("C) Trattamento di fine rapporto di lavoro subordinato", "0,00"),
+        ("D) Debiti", None),
+        (" 7) Debiti verso fornitori", None),
+        ("   a) Debiti verso fornitori esigibili entro l'esercizio successivo", "0,00"),
+        (" Totale debiti verso fornitori", "0,00"),
+        (" Totale debiti (D)", "0,00"),
+        ("E) Ratei e risconti passivi", "0,00"),
+        (" TOTALE STATO PATRIMONIALE PASSIVO", "0,00"),
+    ]
+    y = 40
+    for label, valore in righe:
+        _riga(sp, y, label=label, valore_corrente=valore)
+        y += 14
+    pdf = str(tmp_path / "vuoto.pdf")
+    doc.save(pdf)
+    doc.close()
+
+    current, _prior = extract_standard_ivcee_balances(pdf)
+
+    assert current is None

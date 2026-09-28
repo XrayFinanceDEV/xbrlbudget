@@ -238,6 +238,10 @@ def importa(file_path: str, *, ocr_text: str | None = None, analizza=None, leggi
                 _grezzo = diag.get("grezzo_sp") or {}
                 _grezzo_sp = {"attivo": _grezzo.get("L", Decimal(0)),
                              "passivo": _grezzo.get("R", Decimal(0))}
+            # Il report finisce in validation_report via json.dumps: niente Decimal nella
+            # diagnostica (TM 589/590, budget_624/330 fallivano al salvataggio, 2026-09-28).
+            if "grezzo_sp" in diag:
+                diag["grezzo_sp"] = {k: str(v) for k, v in diag["grezzo_sp"].items()}
             prior, stampati = None, deterministici
         else:
             from importers.detail_enrichment import collect_source_rows

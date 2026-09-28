@@ -332,6 +332,33 @@ def test_conti_percorso_finto_bilancio_quadra(tmp_path, monkeypatch):
     assert r.prior_bs is None
 
 
+def test_conti_report_serializzabile_con_grezzo_sp(tmp_path, monkeypatch):
+    """Il report finisce in validation_report via json.dumps (pdf_importer): nessun Decimal.
+    Banco t22-mirato-d (2026-09-28): diag["grezzo_sp"] con Decimal faceva fallire l'import di
+    TM 589/590, budget_624 e budget_330 (TypeError al salvataggio)."""
+    import json
+    from importers.import_snello import righe as R
+
+    pdf = _pdf_vuoto(str(tmp_path / "c.pdf"))
+    righe_finte = [
+        R.Riga(id="p1r1", pagina=1, lato="L", testo="IMPIANTI", valore=D("1000"), sezione="bs"),
+        R.Riga(id="p1r2", pagina=1, lato="L", testo="BANCA C/C", valore=D("500"), sezione="bs"),
+        R.Riga(id="p1r3", pagina=1, lato="R", testo="CAPITALE SOCIALE", valore=D("1000"), sezione="bs"),
+        R.Riga(id="p1r4", pagina=1, lato="R", testo="FORNITORI ITALIA", valore=D("500"), sezione="bs"),
+    ]
+    monkeypatch.setattr(R, "righe_da_pdf", lambda *a, **k: righe_finte)
+
+    def leggi_conti(righe, foglie):
+        percorsi = {"p1r1": "SPA.B.II", "p1r2": "SPA.C.IV", "p1r3": "SPP.A.I", "p1r4": "SPP.D.7"}
+        for f in foglie:
+            f.percorso = percorsi[f.id]
+        return {"chiamate": 1, "saltate_prima": 0, "senza_percorso": 0}
+
+    r = S.importa(pdf, analizza=lambda p: _struttura("conti"), leggi_conti=leggi_conti)
+    assert r.report["diag"]["grezzo_sp"] == {"L": "1500", "R": "1500"}
+    json.dumps(r.report)
+
+
 def test_eccezione_in_lettura_diventa_ripiego(tmp_path):
     """Un'eccezione del lettore (ContestoEccessivo, o qualunque altra) non esce cruda: diventa
     SnelloNonRiuscito con fase e classe dichiarate."""

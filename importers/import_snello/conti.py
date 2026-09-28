@@ -47,49 +47,50 @@ def _corsia(f, due_lati: bool):
     return (1 if f.lato == "R" else 0) if due_lati else (f.valore >= 0)
 
 
-# Fix round 1 (ruling del proprietario, 2026-09-28): un campo CE di costo o di ricavo prende il
-# VALORE ASSOLUTO, mai il segno letterale della riga - lo stesso principio del vecchio
-# classificatore (situazione_contabile_parser.classify_costi/classify_ricavi: un campo a segno
-# fisso, mai un segno che arriva dalla riga). Il voto di famiglia per conteggio (fix precedente,
-# stesso giorno) restava comunque un voto: su budget_624 la maggioranza per CONTEGGIO di 8 conti
-# letti negativi contro 1 solo (ce05_materie_prime, letto positivo) ribaltava anche quell'unico
-# conto - una minoranza per conteggio puo' avere il valore vero, e nessun voto lo sa. Un campo
-# resta negativo (riduce il proprio aggregato) SOLO per due ragioni esplicite, mai per un voto:
+# Fix round 2 (ruling del proprietario, 2026-09-28): il segno di un campo CE dipende dal MODO.
+# In modo "conti" (da_foglie) ogni foglia porta una colonna fisica (lato L/R): la colonna
+# decide, come applica_lato gia' fa per lo SP (vedi il ramo "cos"/"ric" del per_famiglia qui
+# sotto - nessun campo a segno libero li', nemmeno ce10: la colonna lo governa come ogni altro).
+# In modo "legge" (da_coppie) c'e' una sola colonna con un segno letterale: qui, e solo qui,
+# alcuni campi restano a SEGNO LIBERO per natura - variazioni OIC che possono legittimamente
+# ridurre il proprio raggruppamento - ce02 (A.2, variazioni rimanenze prodotti in corso/
+# semilavorati/finiti), ce03 (A.3, variazioni lavori in corso su ordinazione - non ce03a, A.4
+# incrementi di immobilizzazioni, che non e' una variazione), ce10 (B.11, variazione rimanenze
+# materie prime, convenzione OIC: un aumento di giacenza riduce il costo). Nessun'altra voce
+# IV-CEE e' una "variazione": ce09c/ce09d sono svalutazioni (sempre un costo, mai negative), gli
+# aggregati ce18/ce19 sono gia' separati per segno (proventi/oneri straordinari), non voci nette.
 _CE_SEGNO_LIBERO = {"ce02", "ce03", "ce10"}
-# (b) campi a segno libero per natura: variazioni OIC che possono legittimamente ridurre il
-# proprio raggruppamento - ce02 (A.2, variazioni rimanenze prodotti in corso/semilavorati/
-# finiti), ce03 (A.3, variazioni lavori in corso su ordinazione - non ce03a, A.4 incrementi di
-# immobilizzazioni, che non e' una variazione), ce10 (B.11, variazione rimanenze materie prime,
-# convenzione OIC: un aumento di giacenza riduce il costo). Nessun'altra voce IV-CEE e' una
-# "variazione": ce09c/ce09d sono svalutazioni (sempre un costo, mai negative), gli aggregati
-# ce18/ce19 sono gia' separati per segno (proventi/oneri straordinari), non voci nette.
 
-_RETTIFICA_KEYWORDS = ("RESO", "RESI", "SCONTO", "SCONTI", "ABBUONO", "ABBUONI", "RIMBORSO",
-                       "RIMBORSI", "STORNO", "STORNI", "RETTIFICA", "RETTIFICHE")
+# Solo modo "legge" (da_coppie): RIMBORSO/RIMBORSI e RETTIFICA/RETTIFICHE sono state tolte dal
+# giro precedente (fix round 1) - "Rimborsi" e' spesso una voce di ricavo NORMALE (TM 589: un
+# leaf ce04 "Rimborsi" da 4.022,90, non una riduzione), e "rettifiche" e' un termine troppo
+# generico per contare come riduzione esplicita. Restano solo le quattro didascalie che sono
+# SEMPRE una riduzione del proprio campo, mai un conto a se': resi, sconti, abbuoni, storni.
+_RETTIFICA_KEYWORDS = ("RESO", "RESI", "SCONTO", "SCONTI", "ABBUONO", "ABBUONI", "STORNO", "STORNI")
 
 
 def _e_rettifica_esplicita(testo: str) -> bool:
-    """(a) una didascalia di rettifica esplicita (resi, sconti, abbuoni, rimborsi, storni,
-    rettifiche): una riduzione VERA del campo, dichiarata dal testo del conto - non dedotta da
-    un voto su altre righe. Nessuna lista del genere esiste gia' nel vecchio parser per il CE
-    (solo 'RICAVI' fra i costi, un segnale diverso: una voce di ricavo letta nella sezione
-    sbagliata, gia' gestita da classify_costi/riclassifica_ignote sotto)."""
+    """Una didascalia di rettifica esplicita (resi, sconti, abbuoni, storni): una riduzione VERA
+    del campo, dichiarata dal testo del conto - non dedotta da un voto su altre righe. Usata
+    solo in modo "legge" (da_coppie), che non porta mai testo (nessuna coppia percorso/importo
+    ha una didascalia libera): resta quindi sempre False li' - una precondizione strutturale
+    del modo, non un difetto - documentata qui per chi estendesse ``da_coppie`` con un testo in
+    futuro."""
     t = (testo or "").upper()
     return any(k in t for k in _RETTIFICA_KEYWORDS)
 
 
-def _segno_ce(codice: str, valore: Decimal, testo: str, forza_riduzione: bool = False) -> Decimal:
-    """Il segno definitivo di un campo CE (famiglia 'cos' o 'ric'): mai un voto, sempre una
-    regola per campo/didascalia. ``forza_riduzione`` viene da un tag interno del vecchio
-    classificatore (ce01_return/ce13_cost/ce10_close, via riclassifica_ignote piu' sotto): il
-    vecchio parser ha gia' deciso che quella riga riduce il campo (letta nella sezione opposta
-    alla sua vera famiglia), e questa decisione esplicita vince anche su un campo a segno
-    libero come ce10 (contro-esempio: 'RIM.FIN MAGAZZINO' fra i ricavi con ce10_close, che deve
-    restare una riduzione anche se ce10 di per se' e' a segno libero)."""
-    if forza_riduzione:
-        return -abs(valore)
+def _segno_ce_legge(codice: str, valore: Decimal, testo: str, convenzione: int) -> Decimal:
+    """Segno di un campo CE in modo "legge" (da_coppie): un'unica colonna, un segno letterale.
+    Un campo a segno fisso prende il valore assoluto, salvo una didascalia di rettifica
+    esplicita (``_e_rettifica_esplicita``, mai vera qui: da_coppie non porta testo). Un campo a
+    segno libero (``_CE_SEGNO_LIBERO``) prende il segno letto MOLTIPLICATO per la convenzione di
+    stampa del documento (``convenzione``, +1 o -1: vedi ``_convenzione_costi`` in da_coppie) -
+    la stessa convenzione di stampa che riguarda ogni altro costo della sezione riguarda anche
+    lui (budget_115/297: costi stampati negativi, quindi ce10 letto -30.517 diventa +30.517 -
+    fix round 1 lo lasciava invariato, ignorando la convenzione)."""
     if codice in _CE_SEGNO_LIBERO:
-        return valore
+        return valore * convenzione
     if _e_rettifica_esplicita(testo):
         return -abs(valore)
     return abs(valore)
@@ -215,14 +216,15 @@ def _e_riga_di_controllo(testo: str) -> bool:
 #   - 'ce13_cost'   (proventi da partecip. letti fra i costi) -> 'ce13' (ce13 - entry.amount)
 #   - 'ce10_close'  (rimanenze finali lette fra i ricavi) -> 'ce10' (opening - closing)
 #   - 'ce08a_tfr'   (e' gia' il dettaglio vero, solo rinominato) -> 'ce08a' (ce08a_tfr_accrual)
-# I primi tre (fix round 1, 2026-09-28: rimosso il voto di famiglia CE) sono gia' una decisione
-# esplicita del vecchio parser - una riga letta nella sezione opposta alla propria famiglia vera
-# (un ricavo fra i costi, un costo fra i ricavi, rimanenze finali lette come un ricavo) - e
-# vanno marcati come riduzione ESPLICITA (``_TAG_CE_RIDUCE`` sotto), non dedotti da un voto di
-# corsia che non esiste piu'. 'ce08a_tfr' resta un puro rinominare (nessuna riduzione).
+# Fix round 2 (ruling del proprietario, 2026-09-28): non serve piu' marcare i primi tre come
+# riduzione esplicita - la foglia entra nel voto di colonna di ``da_foglie`` (sotto) con la
+# FAMIGLIA del campo tradotto ('ce01'/'ce13'/'ce10', non piu' il tag grezzo), e siccome questi
+# tre tag esistono solo quando la foglia e' fisicamente nella colonna OPPOSTA alla propria vera
+# famiglia (e' li' che classify_costi/classify_ricavi trova un ricavo fra i costi, un provento
+# fra i costi, una rimanenza finale fra i ricavi), il voto di colonna la marca gia' "fuori
+# colonna" da solo - lo stesso risultato di prima, senza bisogno di un marcatore apposito.
 _TAG_CE_INTERNI = {"ce01_return": "ce01", "ce13_cost": "ce13", "ce10_close": "ce10",
                    "ce08a_tfr": "ce08a"}
-_TAG_CE_RIDUCE = frozenset({"ce01_return", "ce13_cost", "ce10_close"})
 
 
 def _voto_direzione_ce(foglie) -> tuple[dict, bool]:
@@ -232,7 +234,11 @@ def _voto_direzione_ce(foglie) -> tuple[dict, bool]:
     (budget_405), la maggioranza dei conti gia' letti lo e'. Serve a scegliere IL
     classificatore giusto (classify_costi o classify_ricavi) per una foglia non instradata, mai
     a provare entrambi alla cieca - una parola di ricavo letta fra i costi (RICAVI, PROVENTI+
-    PARTECIP) darebbe uno specifico su entrambi i lati, e la foglia resterebbe sempre esclusa."""
+    PARTECIP) darebbe uno specifico su entrambi i lati, e la foglia resterebbe sempre esclusa.
+
+    Voto per CONTEGGIO (fix round 2, 2026-09-28, diagnosi budget_624): pesare in euro lascia
+    un'unica riga enorme fuori posto dominare la scelta della direzione - lo stesso difetto
+    del voto di segno gia' corretto in ``da_foglie`` qui sotto, sulla stessa colonna."""
     ce = [f for f in foglie if f.percorso and lato_di(f.percorso) == "ce"]
     due_lati = len({f.lato for f in ce} & {"L", "R"}) == 2
     peso = Counter()
@@ -240,7 +246,7 @@ def _voto_direzione_ce(foglie) -> tuple[dict, bool]:
         codice = campo_da_percorso(f.percorso)
         if codice is None:
             continue
-        peso[(famiglia(codice), _corsia(f, due_lati))] += abs(f.valore)
+        peso[(famiglia(codice), _corsia(f, due_lati))] += 1
     normale = {}
     for sez in ("cos", "ric"):
         candidati = [(v, k) for (s, k), v in peso.items() if s == sez]
@@ -282,16 +288,16 @@ def riclassifica_ignote(foglie, diag: dict) -> None:
     campo inventato: catture anche gli altri tag interni non tradotti, es. 'depr_sp02',
     'deduct_crediti', che classify_passivo puo' restituire come "specifico").
 
-    Muta ``f.percorso`` sul posto con un marcatore che ``campo_da_percorso`` non traduce:
-    ``'#<campo>'`` per un rinominare puro (es. 'ce08a_tfr'), ``'#-<campo>'`` quando il campo
-    grezzo era uno dei tre tag di riduzione del vecchio parser (``_TAG_CE_RIDUCE``: una voce di
-    ricavo letta fra i costi, un provento letto fra i costi, una rimanenza finale letta fra i
-    ricavi). ``da_foglie`` lo riconosce all'inizio del proprio giro e la foglia entra come
-    qualunque altra foglia gia' classificata - e' cosi', non con un nuovo calcolo di lato, che il
-    netto Dare/Avere di uno stesso mastro si ottiene (FORMETAL, banco 2026-09-26: '40/00000
-    DEBITI V/FORNITORI' 13.542,00 e 348.578,85 su lati opposti -> sp16d netto 335.036,85). Per il
-    CE, il marcatore ``'#-'`` porta gia' la decisione del vecchio parser (fix round 1,
-    2026-09-28: non c'e' piu' un voto di famiglia a dedurla dalla corsia fisica)."""
+    Muta ``f.percorso`` sul posto con un marcatore ``'#<campo>'`` che ``campo_da_percorso`` non
+    traduce: ``da_foglie`` lo riconosce all'inizio del proprio giro e la foglia entra nel voto di
+    colonna (per il CE) o di lato (per lo SP) come qualunque altra foglia gia' classificata - e'
+    cosi', non con un nuovo calcolo, che il netto Dare/Avere di uno stesso mastro si ottiene
+    (FORMETAL, banco 2026-09-26: '40/00000 DEBITI V/FORNITORI' 13.542,00 e 348.578,85 su lati
+    opposti -> sp16d netto 335.036,85). Per il CE (fix round 2, 2026-09-28), un tag interno che
+    era una riduzione implicita (ce01_return/ce13_cost/ce10_close) resta tale da solo: la foglia
+    e' fisicamente sulla colonna OPPOSTA alla famiglia del campo tradotto (e' per questo che
+    classify_costi/classify_ricavi l'hanno trovata li'), e il voto di colonna di ``da_foglie``
+    la marca "fuori colonna" - una riduzione - senza bisogno di saperlo in anticipo."""
     from importers.situazione_contabile_parser import (
         TIER0_FIELDS, _resolve_ce_field, classify_attivo, classify_costi, classify_passivo,
         classify_ricavi)
@@ -319,13 +325,12 @@ def riclassifica_ignote(foglie, diag: dict) -> None:
             campo_grezzo = c if specifico else _resolve_ce_field(desc, direzione)
             if campo_grezzo is None:
                 continue
-            riduce = campo_grezzo in _TAG_CE_RIDUCE
             campo = _TAG_CE_INTERNI.get(campo_grezzo, campo_grezzo)
             if campo in TIER0_FIELDS or campo not in NOMI:
                 continue
             diag["riclassificati_vecchio_parser"].append(
                 [f.id, f.testo[:60], campo, str(f.valore.quantize(_C))])
-            f.percorso = f"#-{campo}" if riduce else f"#{campo}"
+            f.percorso = f"#{campo}"
         else:
             candidati: set = set()
             for classify in (classify_attivo, classify_passivo):
@@ -395,11 +400,14 @@ def da_foglie(foglie):
     for f in foglie:
         if f.percorso and f.percorso.startswith("#"):
             # marcatore di riclassifica_ignote: gia' un campo corto valido (mai un percorso di
-            # legge). '#-<campo>' porta gia' la decisione di riduzione del vecchio parser
-            # (_TAG_CE_RIDUCE); '#<campo>' e' un puro rinominare.
-            riduce = f.percorso.startswith("#-")
-            codice = f.percorso[2:] if riduce else f.percorso[1:]
-            per_famiglia[famiglia(codice)].append((f, codice, riduce))
+            # legge). Riceve un segno dal voto di colonna/lato come qualunque altra foglia, ma
+            # non VOTA (terzo campo True): e' per costruzione una foglia che il classificatore
+            # diretto ha rinunciato a instradare, spesso proprio perche' fisicamente fuori
+            # posto (ce01_return/ce13_cost/ce10_close) - lasciarla votare la propria stessa
+            # colonna falserebbe il voto con un pareggio auto-riferito (test preesistente,
+            # ce10_close: un solo altro conto "cos" vero e questa foglia stessa, 1 a 1).
+            codice = f.percorso[1:]
+            per_famiglia[famiglia(codice)].append((f, codice, True))
             continue
         if f.percorso and e_risultato(f.percorso):
             diag["risultato_stampato"] = str(abs(f.valore).quantize(_C))
@@ -457,14 +465,54 @@ def da_foglie(foglie):
     importi = defaultdict(Decimal)
     for fam, elementi in per_famiglia.items():
         if fam in ("cos", "ric"):
-            # Fix round 1 (ruling del proprietario, 2026-09-28): niente voto di famiglia per il
-            # CE - un campo per campo/didascalia (_segno_ce), mai per maggioranza. Il voto per
-            # conteggio (fix precedente) restava un voto: su budget_624 la maggioranza per
-            # CONTEGGIO di 8 conti letti negativi contro 1 solo (ce05_materie_prime, letto
-            # positivo, il vero valore) ribaltava anche quell'unico conto vero - una minoranza
-            # per conteggio puo' avere il segno vero, e nessun voto lo sa.
-            for f, codice, riduce in elementi:
-                v = _segno_ce(codice, f.valore, f.testo, riduce)
+            # Fix round 2 (ruling del proprietario, 2026-09-28): "la colonna decide, contro la
+            # famiglia del campo" - lo stesso principio del voto di lato SP (applica_lato),
+            # applicato al CE. Si vota per CONTEGGIO (mai per euro: budget_624, 5 conti veri su
+            # "L" contro 1 solo fuori posto su "R" da 1.468.999,24 - pesare in euro fa vincere
+            # l'unico conto sbagliato) quale corsia e' normale per "cos", quale per "ric". Una
+            # foglia sulla propria colonna normale porta il segno letto COSI' COM'E' (un importo
+            # gia' negativo dentro la propria colonna resta una vera contropartita, mai
+            # "raddrizzato" a positivo); una foglia sulla colonna dell'ALTRA famiglia e' sempre
+            # una riduzione (-abs), a prescindere dal segno letto - fisicamente fuori posto,
+            # quindi il segno letto da solo non e' piu' attendibile. ce10 conta come "cos" (un
+            # costo, sp05a lato materie prime), ce02/ce03 come "ric" (RICAVI): nessuna eccezione
+            # "a segno libero" qui - quella esiste solo in modo "legge" (da_coppie), dove non
+            # c'e' alcuna colonna fisica da cui dedurre nulla.
+            if not due_lati:
+                # Colonna unica: _corsia degenera al segno stesso (nessuna colonna fisica da
+                # cui dedurre nulla - un "voto" qui sarebbe un voto sul segno letto, che e'
+                # esattamente cio' che non ci si puo' fidare), quindi ogni campo prende il
+                # valore assoluto, come un campo a segno fisso (test preesistente,
+                # colonna_unica: CE.A.1 letto -60 e' comunque un ricavo vero, +60,00).
+                for f, codice, _t in elementi:
+                    v = abs(f.valore)
+                    if v != f.valore:
+                        diag["ce_segno_forzato"].append(
+                            [f.id, codice, str(f.valore.quantize(_C)), str(v.quantize(_C))])
+                    importi[codice] += v
+                continue
+            # Il voto NON include le foglie tradotte da riclassifica_ignote (terzo campo True):
+            # sono per costruzione conti che il classificatore diretto ha rinunciato a
+            # instradare, spesso proprio perche' fisicamente fuori posto (ce01_return/
+            # ce13_cost/ce10_close) - lasciarle votare la propria stessa colonna falserebbe il
+            # voto con un pareggio auto-riferito (test preesistente, ce10_close: un solo altro
+            # conto "cos" vero contro questa foglia stessa, 1 a 1 invece di una maggioranza
+            # chiara). Il segno si applica comunque a TUTTE le foglie della famiglia, tradotte
+            # incluse: solo il voto le esclude, non l'esito.
+            voti_colonna = Counter()
+            for f, codice, tradotta in elementi:
+                if tradotta:
+                    continue
+                voti_colonna[(famiglia(codice), _corsia(f, due_lati))] += 1
+            normale = {}
+            for sez in ("cos", "ric"):
+                candidati = [(v, k) for (s, k), v in voti_colonna.items() if s == sez]
+                if candidati:
+                    normale[sez] = max(candidati)[1]
+            for f, codice, _t in elementi:
+                corsia = _corsia(f, due_lati)
+                atteso = normale.get(famiglia(codice))
+                v = f.valore if (atteso is None or corsia == atteso) else -abs(f.valore)
                 if v != f.valore:
                     diag["ce_segno_forzato"].append(
                         [f.id, codice, str(f.valore.quantize(_C)), str(v.quantize(_C))])
@@ -475,7 +523,7 @@ def da_foglie(foglie):
         # non toccato dal ruling sul segno CE.
         voti_corsia, euro_corsia = Counter(), Counter()
         voti_segno, euro_segno = Counter(), Counter()
-        for f, _, _r in elementi:
+        for f, _, _t in elementi:
             if e_fondo(f.percorso) or f.id in irrisolti_ids:
                 continue
             if due_lati and e_netto(f.percorso):
@@ -493,7 +541,7 @@ def da_foglie(foglie):
                     if voti_corsia else 0)
         positivo_n = (max(voti_segno, key=lambda k: (voti_segno[k], euro_segno[k]))
                       if voti_segno else True)
-        for f, codice, _r in elementi:
+        for f, codice, _t in elementi:
             if due_lati and e_netto(f.percorso):
                 # colonna=lato NON vale per capitale/riserve/risultato: un utile e una perdita
                 # hanno naturalmente lato invertito. Nessuna contropartita per ribaltarli: il
@@ -607,19 +655,35 @@ def da_foglie(foglie):
     return bs, ce, diag
 
 
+def _convenzione_costi(voci) -> int:
+    """La convenzione di stampa dei costi in modo "legge": +1 se il documento stampa i costi a
+    segno fisso positivi (il caso normale), -1 se li stampa negativi (budget_664/115/297: ogni
+    voce di costo fra parentesi, una convenzione di stampa, non un segno semantico riga per
+    riga). Votata per CONTEGGIO sui soli campi CE a segno FISSO della famiglia "cos" (mai i
+    campi a segno libero, ce02/ce03/ce10, che non dicono nulla sulla convenzione - il loro
+    stesso segno dipende dalla convenzione, non puo' votarla) - mai per euro, stesso principio
+    del voto di colonna in da_foglie."""
+    segni = Counter()
+    for _, v, codice in voci:
+        if v != 0 and codice.startswith("ce") and famiglia(codice) == "cos" and codice not in _CE_SEGNO_LIBERO:
+            segni[v < 0] += 1
+    return -1 if segni.get(True, 0) > segni.get(False, 0) else 1
+
+
 def da_coppie(coppie):
     """Schema di legge: coppie (percorso, importo) come stampate. Un percorso che ha un discendente
     fra le coppie e' un totale e cade; una voce ripetuta conta una volta; un fondo si sottrae.
 
-    A differenza di ``da_foglie`` (modo "conti"), qui non c'e' alcun voto di lato: il percorso e'
-    gia' la voce di legge (non un mastro di ledger), quindi non c'e' mai una didascalia di
-    rettifica da leggere (``_e_rettifica_esplicita`` non trova mai nulla: ``da_coppie`` non porta
-    testo). Un campo CE di costo o di ricavo prende comunque il valore assoluto per lo stesso
-    principio di ``da_foglie`` (fix round 1, ruling del proprietario, 2026-09-28) - mai un voto di
-    famiglia (il fix precedente, Task 22 G2, ribaltava l'intera famiglia "cos" a maggioranza per
-    conteggio: un documento con una vera contropartita maggioritaria per numero l'avrebbe
-    ribaltata comunque) - salvo i campi a segno libero per natura (``_CE_SEGNO_LIBERO``: ce02,
-    ce03, ce10), dove il segno letto e' l'unico segno che conta."""
+    A differenza di ``da_foglie`` (modo "conti"), qui non c'e' alcuna colonna fisica da cui
+    dedurre un lato: il percorso e' gia' la voce di legge (non un mastro di ledger), quindi non
+    c'e' mai una didascalia di rettifica da leggere (``_e_rettifica_esplicita`` non trova mai
+    nulla: ``da_coppie`` non porta testo). Un campo CE a segno fisso prende il valore assoluto;
+    un campo a segno libero (``_CE_SEGNO_LIBERO``: ce02, ce03, ce10) prende il segno letto
+    MOLTIPLICATO per la convenzione di stampa del documento (``_convenzione_costi``, fix round 2,
+    2026-09-28: il fix precedente lasciava il segno libero invariato, ignorando che la stessa
+    convenzione che stampa i costi negativi riguarda anche un campo a segno libero -
+    budget_115/297, ce10 letto -30.517/-7.831 con costi in convenzione negativa diventa
+    +30.517/+7.831)."""
     diag = {"non_mappati": [], "escluse": [], "risultato_stampato": None, "lato_corretti": 0,
             "lato_irrisolti": [], "risultato_duplicato": [], "padri_esclusi": [],
             "ce_segno_forzato": []}
@@ -629,7 +693,7 @@ def da_coppie(coppie):
             viste.add(p)
             uniche.append((p, Decimal(v)))
     tutti = [p for p, _ in uniche]
-    importi = defaultdict(Decimal)
+    voci: list[tuple[str, Decimal, str]] = []
     for p, v in uniche:
         if e_risultato(p):
             diag["risultato_stampato"] = str(v.quantize(_C))
@@ -640,11 +704,17 @@ def da_coppie(coppie):
         if codice is None:
             diag["non_mappati" if p not in ("X", "R") else "escluse"].append([p, p, str(v.quantize(_C))])
             continue
+        voci.append((p, v, codice))
+
+    convenzione = _convenzione_costi(voci)
+
+    importi = defaultdict(Decimal)
+    for p, v, codice in voci:
         if e_fondo(p):
             importi[codice] += -abs(v)
             continue
         if famiglia(codice) in ("cos", "ric"):
-            v_applicato = _segno_ce(codice, v, "")
+            v_applicato = _segno_ce_legge(codice, v, "", convenzione)
             if v_applicato != v:
                 diag["ce_segno_forzato"].append(
                     [p, codice, str(v.quantize(_C)), str(v_applicato.quantize(_C))])

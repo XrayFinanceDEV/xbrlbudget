@@ -261,3 +261,22 @@ def test_totali_stampati_non_prova_l_ordinamento_se_gia_coerente(tmp_path, monke
 
     monkeypatch.setattr(pdf_llm, "_extract_full_text", _sorvegliata)
     assert totali_stampati(pdf) == {"totale_attivo": D("5000"), "totale_passivo": D("5000")}
+
+
+def test_misura_con_grezzo_aggiunge_l_utile_al_passivo_grezzo():
+    """TM 589 (2026-09-28): il grezzo per lato non contiene il risultato corrente (da_foglie
+    non lo fa mai entrare dalle righe: sp13 = utile CE), mentre lo stampato passivo, netto
+    del risultato, viene ripiegato con l'utile da _fold_utile_in_passivo. Il confronto deve
+    quindi usare passivo grezzo + utile: altrimenti lo scarto e' sempre pari all'utile."""
+    bs = {"sp09_disponibilita_liquide": D("1302133.80"), "sp11_capitale": D("1273134.72"),
+          "sp13_utile_perdita": D("28999.08")}
+    ce = {"ce01_ricavi_vendite": D("28999.08")}
+    stampati = {"totale_attivo": D("1302133.80"), "totale_passivo": D("1273134.72")}
+    grezzo = {"attivo": D("1302133.80"), "passivo": D("1273134.72")}
+    m = misura(bs, ce, stampati, forma="bilancio", grezzo=grezzo)
+    assert m["utile_ce"] == D("28999.08")
+    assert m["scarto_stampati"] == D("0.00")
+    # una riga passiva davvero mancante resta visibile
+    m2 = misura(bs, ce, stampati, forma="bilancio",
+                grezzo={"attivo": D("1302133.80"), "passivo": D("1263134.72")})
+    assert m2["scarto_stampati"] == D("10000.00")

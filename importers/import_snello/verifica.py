@@ -131,10 +131,16 @@ def misura(bs: dict, ce: dict, stampati: dict | None = None, forma: str | None =
     else:
         raise ValueError(f"forma sconosciuta: {forma!r} (attesa 'bilancio', 'verifica' o None)")
     att_grezzo = Decimal(grezzo["attivo"]) if grezzo and grezzo.get("attivo") is not None else att
-    pas_grezzo = Decimal(grezzo["passivo"]) if grezzo and grezzo.get("passivo") is not None else pas
+    if grezzo and grezzo.get("passivo") is not None:
+        # Il grezzo per lato non contiene mai il risultato corrente (da_foglie non lo fa
+        # entrare dalle righe: sp13 = utile CE), mentre lo stampato passivo e' gia' comprensivo
+        # dell'utile o ripiegato da _fold_utile_in_passivo: si confronta passivo grezzo + utile
+        # (TM 589/590, 2026-09-28: senza, lo scarto valeva sempre l'utile).
+        pas_confronto = Decimal(grezzo["passivo"]) + utile
+    else:
+        pas_confronto = pas if forma == "bilancio" else pas + utile
     scarto_stampati = Decimal(0)
-    for chiave, nostro in (("totale_attivo", att_grezzo),
-                           ("totale_passivo", pas_grezzo if forma == "bilancio" else pas_grezzo + utile)):
+    for chiave, nostro in (("totale_attivo", att_grezzo), ("totale_passivo", pas_confronto)):
         v = (stampati or {}).get(chiave)
         if v is not None:
             scarto_stampati = max(scarto_stampati, abs(nostro - Decimal(v)))

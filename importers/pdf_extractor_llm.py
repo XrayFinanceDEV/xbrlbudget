@@ -4038,8 +4038,7 @@ def _valore_in_colonna(numeri: list, colonna: Optional[Dict[str, int]]) -> Optio
 
 
 def _declared_control_totals(file_path: str, text: Optional[str] = None,
-                             colonna: Optional[Dict[str, int]] = None,
-                             text_ordinato: Optional[str] = None) -> Dict[str, Optional[Decimal]]:
+                             colonna: Optional[Dict[str, int]] = None) -> Dict[str, Optional[Decimal]]:
     """Read a trial balance's OWN declared control totals from the printed footer.
 
     GENERAL anti-masking anchor (level L2): every situazione contabile / bilancio di
@@ -4062,25 +4061,18 @@ def _declared_control_totals(file_path: str, text: Optional[str] = None,
     identified as the balance; an occurrence whose column cannot be resolved with
     certainty contributes nothing (never a fallback to the first number).
 
-    ``text_ordinato`` (fix round 1, Task 22 G3, ruling del proprietario 2026-09-28, diagnosi
-    budget_297): un'ulteriore fonte di ricerca SOLO per attivo/passivo, in aggiunta al testo
-    normale - mai al suo posto, e mai per gli altri campi (pareggio/utile/perdita/costi/
-    ricavi). "TOTALE ATTIVO" i cui importi sono scritti PRIMA di se stesso nel content-stream
-    grezzo ("3.680.418\\n2.428.464\\nTOTALE ATTIVO") non e' un rigo che ``_largest_after`` sa
-    leggere: nel testo grezzo il vero totale resta invisibile, e la ricerca ancora su un
-    subtotale di sezione ("Totale attivo circolante (C)"). ``text_ordinato`` (testo per
-    POSIZIONE, ``pdf_extractor_llm._extract_full_text(..., forza_ordinamento=True)`` -
-    ``standard_ivcee_parser._physical_rows`` ordina allo stesso modo) mette l'etichetta prima
-    dei propri importi come sul resto del documento, e vi si aggiunge come haystack IN PIU':
-    "il maggiore vince" (la stessa regola che gia' governa i dettagli-vs-totale) sceglie da
-    sola il vero totale sul subtotale, senza bisogno di scegliere una fonte unica - mai
-    passato dagli altri chiamanti, che restano byte-identici (default ``None``)."""
+    """
     out: Dict[str, Optional[Decimal]] = {
         "attivo": None, "passivo": None, "pareggio": None, "utile": None, "perdita": None,
         "costi": None, "ricavi": None,
     }
     # `text` lets the caller supply already-extracted text (e.g. OCR of a scanned PDF,
-    # where _extract_full_text would return nothing). Fall back to reading the file.
+    # where _extract_full_text would return nothing, or a position-ordered reading - Task 22
+    # G3, fix round 2: il chiamante snello (``import_snello.verifica.totali_stampati``) prova
+    # QUESTA funzione due volte, una col testo di sempre, una con
+    # ``_extract_full_text(..., forza_ordinamento=True)``, e sceglie la prima lettura coerente
+    # (attivo=passivo entro soglia) - mai una fusione delle due fonti qui dentro). Fall back to
+    # reading the file.
     if text is None:
         try:
             text = _extract_full_text(file_path)
@@ -4092,12 +4084,6 @@ def _declared_control_totals(file_path: str, text: Optional[str] = None,
     import unicodedata
     low = "".join(c for c in unicodedata.normalize("NFKD", low) if not unicodedata.combining(c))
     nos = re.sub(r"[ \t]+", "", low)  # collapse intra-line spacing (keep newlines)
-    _attivo_hays = [(low, False), (nos, True)]
-    if text_ordinato:
-        low_ord = text_ordinato.lower()
-        low_ord = "".join(c for c in unicodedata.normalize("NFKD", low_ord) if not unicodedata.combining(c))
-        nos_ord = re.sub(r"[ \t]+", "", low_ord)
-        _attivo_hays += [(low_ord, False), (nos_ord, True)]
 
     def _largest_after(markers, hays=None, colonna=None) -> Optional[Decimal]:
         """Largest Italian-number amount occurring within ~80 chars after any marker.
@@ -4157,12 +4143,12 @@ def _declared_control_totals(file_path: str, text: Optional[str] = None,
     out["attivo"] = _largest_after([
         "totale attivo", "totale attivita", "totale dell'attivo",
         "totale stato patrimoniale attivo", "totale stato patrimoniale - attivo",
-    ], hays=_attivo_hays, colonna=colonna)
+    ], colonna=colonna)
     out["passivo"] = _largest_after([
         "totale passivo", "totale passivita", "totale a pareggio passivo",
         "totale passivo e patrimonio netto", "totale passivita e netto",
         "totale stato patrimoniale passivo", "totale stato patrimoniale - passivo",
-    ], hays=_attivo_hays, colonna=colonna)
+    ], colonna=colonna)
 
     # Some detailed reclassified exports print the top-level section total directly
     # below ``Stato patrimoniale attivo/passivo`` without the word ``Totale``

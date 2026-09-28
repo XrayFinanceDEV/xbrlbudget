@@ -280,3 +280,22 @@ def test_misura_con_grezzo_aggiunge_l_utile_al_passivo_grezzo():
     m2 = misura(bs, ce, stampati, forma="bilancio",
                 grezzo={"attivo": D("1302133.80"), "passivo": D("1263134.72")})
     assert m2["scarto_stampati"] == D("10000.00")
+
+
+def test_misura_con_grezzo_perdita_stampata_nel_lato_attivo():
+    """D2M (passata4, 2026-09-28): a sezioni contrapposte la perdita si stampa nel lato
+    attivo per arrivare al pareggio. Il totale letto sulla colonna di saldo e' il pareggio
+    (attivo grezzo + perdita = passivo grezzo): lo stesso risultato puo' stare su un lato o
+    sull'altro, e nessuna delle due convenzioni e' uno sbilancio."""
+    bs = {"sp09_disponibilita_liquide": D("300168.27"), "sp11_capitale": D("341299.18"),
+          "sp13_utile_perdita": D("-41130.91")}
+    ce = {"ce06_servizi": D("41130.91")}
+    stampati = {"totale_attivo": D("341299.18"), "totale_passivo": D("341299.18")}
+    grezzo = {"attivo": D("300168.27"), "passivo": D("341299.18")}
+    m = misura(bs, ce, stampati, forma="bilancio", grezzo=grezzo)
+    assert m["utile_ce"] == D("-41130.91")
+    assert m["scarto_stampati"] == D("0.00")
+    # una riga attiva davvero mancante resta visibile
+    m2 = misura(bs, ce, stampati, forma="bilancio",
+                grezzo={"attivo": D("290168.27"), "passivo": D("341299.18")})
+    assert m2["scarto_stampati"] == D("10000.00")

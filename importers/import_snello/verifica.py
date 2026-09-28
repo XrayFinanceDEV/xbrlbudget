@@ -130,20 +130,24 @@ def misura(bs: dict, ce: dict, stampati: dict | None = None, forma: str | None =
         s_sp, s_ce = verifica
     else:
         raise ValueError(f"forma sconosciuta: {forma!r} (attesa 'bilancio', 'verifica' o None)")
-    att_grezzo = Decimal(grezzo["attivo"]) if grezzo and grezzo.get("attivo") is not None else att
-    if grezzo and grezzo.get("passivo") is not None:
+    if grezzo and grezzo.get("attivo") is not None and grezzo.get("passivo") is not None:
         # Il grezzo per lato non contiene mai il risultato corrente (da_foglie non lo fa
-        # entrare dalle righe: sp13 = utile CE), mentre lo stampato passivo e' gia' comprensivo
-        # dell'utile o ripiegato da _fold_utile_in_passivo: si confronta passivo grezzo + utile
-        # (TM 589/590, 2026-09-28: senza, lo scarto valeva sempre l'utile).
-        pas_confronto = Decimal(grezzo["passivo"]) + utile
+        # entrare dalle righe: sp13 = utile CE). A sezioni contrapposte il documento lo stampa
+        # sul lato che serve al pareggio - l'utile nel passivo (TM 589/590), la perdita
+        # nell'attivo (D2M, 2026-09-28) - oppure lo lascia fuori dai totali di sezione: per
+        # ciascun lato vale la convenzione piu' vicina, con o senza il risultato. Il
+        # contraddittorio interno (scarto_sp) resta quello di sempre.
+        att_g, pas_g = Decimal(grezzo["attivo"]), Decimal(grezzo["passivo"])
+        confronti = (("totale_attivo", (att_g, att_g - utile)),
+                     ("totale_passivo", (pas_g, pas_g + utile)))
     else:
-        pas_confronto = pas if forma == "bilancio" else pas + utile
+        confronti = (("totale_attivo", (att,)),
+                     ("totale_passivo", (pas if forma == "bilancio" else pas + utile,)))
     scarto_stampati = Decimal(0)
-    for chiave, nostro in (("totale_attivo", att_grezzo), ("totale_passivo", pas_confronto)):
+    for chiave, nostri in confronti:
         v = (stampati or {}).get(chiave)
         if v is not None:
-            scarto_stampati = max(scarto_stampati, abs(nostro - Decimal(v)))
+            scarto_stampati = max(scarto_stampati, min(abs(n - Decimal(v)) for n in nostri))
     return {"attivo": att, "passivo": pas, "utile_ce": utile, "sp13": sp13, "forma": forma,
             "scarto_sp": s_sp.quantize(_C), "scarto_ce": s_ce.quantize(_C), "scarto_stampati": scarto_stampati.quantize(_C)}
 

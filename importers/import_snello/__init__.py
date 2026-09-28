@@ -220,17 +220,24 @@ def importa(file_path: str, *, ocr_text: str | None = None, analizza=None, leggi
             # sempre. "L"/"R" sono attivo/passivo per costruzione di ``collect_source_rows``
             # (sezioni contrapposte: attivo sempre a sinistra, passivo sempre a destra - lo
             # stesso convenzione che ``applica_lato``/CLAUDE.md presumono altrove), mai
-            # ridefiniti qui per singolo documento.
+            # ridefiniti qui per singolo documento. Il PRESUPPOSTO (un prospetto a sezioni
+            # contrapposte) si legge ancora sulle foglie grezze, PRIMA di ``da_foglie`` - ma
+            # la SOMMA (fix round 3, ruling del proprietario 2026-09-28, diagnosi TM 589/590)
+            # viene DOPO, da ``diag["grezzo_sp"]``: sommare qui, su ``fo`` non ancora
+            # classificato, include righe come "Totale Attivita'" che marca_totali lascia
+            # viva come foglia (i suoi figli non sono nella pagina letta, o non si
+            # risolvono) e che da_foglie scarta poi come 'X'/escluse - un totale duplicato
+            # che raddoppia la massa (TM 589: grezzo attivo 2x il vero attivo).
             _fo_sp = [r for r in fo if r.sezione == "bs"]
-            if {"L", "R"} <= {r.lato for r in _fo_sp}:
-                _grezzo_sp = {
-                    "attivo": sum((r.valore for r in _fo_sp if r.lato == "L"), Decimal(0)),
-                    "passivo": sum((r.valore for r in _fo_sp if r.lato == "R"), Decimal(0)),
-                }
+            _sezioni_contrapposte = {"L", "R"} <= {r.lato for r in _fo_sp}
             letture = leggi_conti_fn(righe, fo)
 
             fase = "conti"
             bs, ce, diag = da_foglie(fo)
+            if _sezioni_contrapposte:
+                _grezzo = diag.get("grezzo_sp") or {}
+                _grezzo_sp = {"attivo": _grezzo.get("L", Decimal(0)),
+                             "passivo": _grezzo.get("R", Decimal(0))}
             prior, stampati = None, deterministici
         else:
             from importers.detail_enrichment import collect_source_rows

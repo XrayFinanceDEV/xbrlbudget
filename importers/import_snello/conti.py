@@ -384,11 +384,28 @@ def da_foglie(foglie):
     diag = {"non_mappati": [], "escluse": [], "risultato_stampato": None, "lato_corretti": 0,
             "lato_irrisolti": [], "risultato_duplicato": [], "padri_esclusi": [],
             "risultato_precedente": [], "risultato_escluso": [], "risultato_ambiguo": None,
-            "riclassificati_vecchio_parser": [], "ce_segno_forzato": []}
+            "riclassificati_vecchio_parser": [], "ce_segno_forzato": [], "grezzo_sp": {}}
     diag["lato_corretti"] = applica_lato(foglie, diag["lato_irrisolti"])
     riclassifica_ignote(foglie, diag)
     irrisolti_ids = {r[0] for r in diag["lato_irrisolti"]}
     due_lati = len({f.lato for f in foglie} & {"L", "R"}) == 2
+    # Fix round 3 (ruling del proprietario, 2026-09-28, diagnosi TM 589/590): la massa grezza
+    # per lato (Task 21, "grezzo": la base di confronto per l'ancora dei totali stampati sui
+    # prospetti a sezioni contrapposte) si accumula QUI, sulle SOLE foglie SP che ENTRANO
+    # davvero nel risultato - mai su ``foglie(righe)`` prima di questa funzione (il difetto:
+    # una riga come "Totale Attivita'" che marca_totali lascia viva come foglia, perche' i
+    # suoi figli non sono nella pagina letta o non si risolvono, veniva sommata nel grezzo
+    # PRIMA che da_foglie la scartasse come 'X'/escluse - un totale duplicato che raddoppia la
+    # massa, TM 589: grezzo attivo 2x il vero attivo). Si aggiorna a OGNI punto del ciclo dove
+    # una foglia SP (``f.sezione == "bs"``) contribuisce davvero al foglio finale - mai per le
+    # foglie escluse/non mappate/pareggio/ambigue non ancora risolte (quelle ultime si sommano
+    # dopo, quando la loro sorte e' decisa).
+    grezzo_sp: dict[str, Decimal] = {}
+
+    def _grezzo(f) -> None:
+        if f.sezione == "bs":
+            grezzo_sp[f.lato] = grezzo_sp.get(f.lato, Decimal(0)) + f.valore
+
     # Un percorso stampato ACCANTO a un percorso piu' specifico che lo prolunga (es. "SPP.D"
     # bare insieme a "SPP.D.4") e' lo stesso totale gia' spiegato dai figli: va escluso, mai
     # sommato di nuovo (come gia' fa da_coppie in modo "legge"). Un fondo o una scadenza da
@@ -407,6 +424,8 @@ def da_foglie(foglie):
             # colonna falserebbe il voto con un pareggio auto-riferito (test preesistente,
             # ce10_close: un solo altro conto "cos" vero e questa foglia stessa, 1 a 1).
             codice = f.percorso[1:]
+            if famiglia(codice) in ("att", "pas"):
+                _grezzo(f)
             per_famiglia[famiglia(codice)].append((f, codice, True))
             continue
         if f.percorso and e_risultato(f.percorso):
@@ -428,6 +447,7 @@ def da_foglie(foglie):
         if prior_caption(f.testo):
             v = sign_by_caption(f.testo, f.valore)
             pregresso += v
+            _grezzo(f)
             diag["risultato_precedente"].append([f.id, f.percorso, str(v.quantize(_C))])
             continue
         if f.percorso == "SPP.A.VIII":
@@ -435,6 +455,7 @@ def da_foglie(foglie):
             # o mancante) non toglie fiducia al percorso esplicito, e il segno resta quello
             # letto (nessuna contropartita per un conto di netto, come applica_lato).
             pregresso += f.valore
+            _grezzo(f)
             diag["risultato_precedente"].append([f.id, f.percorso, str(f.valore.quantize(_C))])
             continue
         if f.percorso in ("R", "SPP.A.IX"):
@@ -452,6 +473,7 @@ def da_foglie(foglie):
                 # mai un candidato per l'ipotesi ambigua (che resta per le righe di quadratura
                 # senza codice, "candidate current" per la classificazione del vecchio parser).
                 pregresso += f.valore
+                _grezzo(f)
                 diag["risultato_precedente"].append([f.id, f.percorso, str(f.valore.quantize(_C))])
             else:
                 ambigue.append(f)
@@ -461,6 +483,8 @@ def da_foglie(foglie):
         if codice is None:
             diag["non_mappati"].append([f.id, f.percorso, str(f.valore.quantize(_C))])
             continue
+        if famiglia(codice) in ("att", "pas"):
+            _grezzo(f)
         per_famiglia[famiglia(codice)].append((f, codice, False))
     importi = defaultdict(Decimal)
     for fam, elementi in per_famiglia.items():
@@ -578,6 +602,7 @@ def da_foglie(foglie):
     utile_ce = calculate_ce_result(ce).net_profit.quantize(_C)
     if not ambigue:
         bs["sp13_utile_perdita"] = utile_ce
+        diag["grezzo_sp"] = dict(grezzo_sp)
         return bs, ce, diag
 
     candidati = [[f.id, f.percorso, str(f.valore.quantize(_C))] for f in ambigue]
@@ -610,6 +635,7 @@ def da_foglie(foglie):
         bs["sp13_utile_perdita"] = utile_ce
         diag["risultato_ambiguo"] = {"ipotesi": "corrente", "importo": importo_totale,
                                      "candidati": candidati, "motivo": "troppe_foglie_ambigue"}
+        diag["grezzo_sp"] = dict(grezzo_sp)
         return bs, ce, diag
 
     def _foglio_per_assegnazione(precedenti: tuple[bool, ...]) -> dict:
@@ -652,6 +678,15 @@ def da_foglie(foglie):
     if len(gruppi_ambigui) > 1:
         diag["risultato_ambiguo"]["per_foglia"] = [
             "precedente" if prec else "corrente" for prec in migliore_assegnazione]
+    # Un gruppo ambiguo assegnato "precedente" entra nel pregresso (sp12g, sopra): la stessa
+    # massa entra ora anche nel grezzo per lato, per lo stesso motivo (e' un vero conto di
+    # patrimonio netto, solo scoperto a posteriori) - un gruppo "corrente" resta escluso dal
+    # grezzo come dal foglio (sp13 viene sempre dal CE).
+    for gruppo, prec in zip(gruppi_ambigui, migliore_assegnazione):
+        if prec:
+            for f in gruppo:
+                _grezzo(f)
+    diag["grezzo_sp"] = dict(grezzo_sp)
     return bs, ce, diag
 
 

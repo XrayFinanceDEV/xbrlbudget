@@ -3,6 +3,7 @@ from decimal import Decimal as D
 from importers.import_snello.conti import applica_lato, da_coppie, da_foglie
 from importers.import_snello.percorsi import NOMI
 from importers.import_snello.righe import Riga
+from importers.import_snello.verifica import misura
 from importers.iv_cee_hierarchy import detail_fields
 
 _TIER0 = ("sp02", "sp03", "sp04", "sp11", "sp12", "sp13", "sp16a", "sp17a")
@@ -827,3 +828,61 @@ def test_g2_famiglia_costi_gia_positiva_non_dichiara_alcuna_forzatura():  # modo
     assert ce["ce07_godimento_beni"] == D("200.00")
     assert ce["ce08_costi_personale"] == D("100.00")
     assert diag["ce_segno_forzato"] == []
+
+
+# --- Task 22, G3, fix round 3 (ruling del proprietario, 2026-09-28): il grezzo per lato ------
+# --- (Task 21) si calcola DENTRO da_foglie, sulle sole foglie che sopravvivono, mai su -------
+# --- foglie(righe) prima della classificazione - diagnosi TM 589/590, dove un "Totale ------
+# --- Attivita'" rimasto vivo come foglia (mai risolto a mastro) e scartato come 'X' veniva ---
+# --- comunque sommato nel grezzo, raddoppiando la massa (grezzo attivo = 2x il vero attivo).
+
+
+def test_g3_grezzo_sp_esclude_un_totale_duplicato_scartato_come_x():
+    """Riproduce TM 589: "Totale Attivita'" resta viva come foglia (marca_totali non trova i
+    suoi figli, magari perche' non sono nella pagina letta) e Qwen la marca 'X' - da_foglie la
+    scarta correttamente (diag['escluse']), ma il vecchio grezzo (calcolato PRIMA di
+    da_foglie, su tutte le foglie fisiche) la sommava comunque insieme ai suoi veri
+    componenti, raddoppiando la massa. Il grezzo si dichiara ora dentro da_foglie, sulle sole
+    foglie che sopravvivono."""
+    foglie = [
+        _f(1, "L", "600000", "SPA.B.II.2", sezione="bs"),                     # immobilizzazioni, vero
+        _f(2, "L", "400000", "SPA.C.II.1", sezione="bs"),                     # crediti, vero
+        _f(3, "L", "1000000", "X", testo="TOTALE ATTIVITA'", sezione="bs"),   # duplicato, scartato
+        _f(4, "R", "1000000", "SPP.A.I", sezione="bs"),                       # capitale, vero
+    ]
+    bs, ce, diag = da_foglie(foglie)
+    assert diag["escluse"] == [["3", "X", "1000000.00"]]
+    assert diag["grezzo_sp"] == {"L": D("1000000.00"), "R": D("1000000.00")}   # non 2.000.000,00
+
+
+def test_g3_grezzo_sp_include_il_pregresso_e_l_ambiguo_risolto_precedente():
+    """Non regressione: una riga di pregresso esplicita (SPP.A.VIII) e una foglia ambigua
+    risolta come "precedente" sono vera massa di patrimonio netto - il grezzo le include,
+    esattamente come il foglio finale le include in sp12g. CE assente (utile_ce = 0): senza,
+    l'ambiguo resta "corrente" perche' il candidato "precedente" non chiude lo scarto entro
+    soglia, e non e' quello che il test vuole dimostrare."""
+    foglie = [
+        _f(1, "L", "500000", "SPA.B.II.2", sezione="bs"),
+        _f(2, "R", "300000", "SPP.A.I", sezione="bs"),
+        _f(3, "R", "150000", "SPP.A.VIII", testo="UTILI PORTATI A NUOVO", sezione="bs"),
+        _f(4, "R", "50000", "SPP.A.IX", testo="RISULTATO", sezione="bs"),      # ambiguo: chiude a zero solo se "precedente"
+    ]
+    bs, ce, diag = da_foglie(foglie)
+    assert diag["risultato_ambiguo"]["ipotesi"] == "precedente"
+    assert diag["grezzo_sp"] == {"L": D("500000.00"), "R": D("500000.00")}
+
+
+def test_g3_grezzo_sp_massa_vera_mancante_resta_nello_scarto_stampati():
+    """Non regressione: il fix non nasconde una massa vera davvero MANCANTE (non un totale
+    duplicato) - se un conto reale non e' mai stato letto, il grezzo per lato resta piu'
+    piccolo del totale che il documento stampa da solo, e lo scarto si vede ancora."""
+    foglie = [
+        _f(1, "L", "600000", "SPA.B.II.2", sezione="bs"),
+        _f(2, "R", "600000", "SPP.A.I", sezione="bs"),
+    ]
+    bs, ce, diag = da_foglie(foglie)
+    assert diag["grezzo_sp"] == {"L": D("600000.00"), "R": D("600000.00")}
+    m = misura(bs, ce, {"totale_attivo": D("1000000.00"), "totale_passivo": D("1000000.00")},
+              forma="bilancio",
+              grezzo={"attivo": diag["grezzo_sp"]["L"], "passivo": diag["grezzo_sp"]["R"]})
+    assert m["scarto_stampati"] == D("400000.00")     # 1.000.000 stampato - 600.000 letto davvero

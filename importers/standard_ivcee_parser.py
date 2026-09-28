@@ -69,14 +69,46 @@ class _Row:
         return self.values[column]
 
 
-def _column_centres(document: fitz.Document) -> Optional[Tuple[float, float]]:
-    candidates: List[Tuple[float, float]] = []
+# Un marcatore di intestazione che non è MAI una colonna di saldo: una
+# differenza fra le due date, uno scostamento o una percentuale. Un layout a
+# quattro colonne ("corrente | comparato | Differenza | Scost. %") li stampa
+# accanto alle due date vere che `_column_layout` cerca — la Differenza è
+# lineare (corrente meno comparato) per costruzione, quindi soddisferebbe da
+# sola ogni controllo incrociato di `_parse_column` se venisse scambiata per
+# il comparato (review Task 23, file reale budget_379_BILAQ-001).
+_EXCLUDED_COLUMN_HEADERS = ("differenza", "scostamento", "variazione", "scost", "%")
+
+
+def _is_excluded_column_header(text: str) -> bool:
+    normalised = _normalise(text)
+    return any(
+        normalised == marker or normalised.startswith(marker)
+        for marker in _EXCLUDED_COLUMN_HEADERS
+    )
+
+
+def _column_layout(
+    document: fitz.Document,
+) -> Optional[Tuple[float, float, bool, Optional[float]]]:
+    """(current_x, prior_x, prior_affidabile, bound_x).
+
+    Stessa selezione di coppia di date di sempre — `_column_centres` sotto
+    ne prende solo i primi due elementi, quindi il suo risultato non cambia
+    di una virgola per nessun chiamante esistente. In più, guarda se sulla
+    STESSA riga fisica della data "comparato" c'è altro testo a destra:
+    - nulla: layout a due sole colonne, comportamento di sempre
+      (``prior_affidabile=True``, ``bound_x=None``);
+    - solo marcatori noti di scarto (Differenza/Scostamento/Variazione/
+      Scost./%): il comparato resta valido, ``bound_x`` è il confine oltre
+      il quale un importo non è mai una colonna di saldo — la lettura vera
+      del comparato, non la Differenza;
+    - qualunque altra cosa non riconosciuta: non si indovina quale sia la
+      terza colonna, il comparato non si legge (``prior_affidabile=False``).
+    """
+    candidates: List[Tuple[float, float, bool, Optional[float]]] = []
     for page in document:
-        date_words = [
-            word
-            for word in page.get_text("words", sort=True)
-            if _DATE_RE.fullmatch(str(word[4]).strip())
-        ]
+        words = page.get_text("words", sort=True)
+        date_words = [word for word in words if _DATE_RE.fullmatch(str(word[4]).strip())]
         for first in date_words:
             peers = [
                 second
@@ -87,13 +119,32 @@ def _column_centres(document: fitz.Document) -> Optional[Tuple[float, float]]:
             if not peers:
                 continue
             second = min(peers, key=lambda word: float(word[0]))
-            centres = (
-                (float(first[0]) + float(first[2])) / 2,
-                (float(second[0]) + float(second[2])) / 2,
-            )
-            if centres[0] > 300 and centres[1] - centres[0] >= 25:
-                candidates.append(centres)
-    return max(candidates, key=lambda pair: pair[0]) if candidates else None
+            current_centre = (float(first[0]) + float(first[2])) / 2
+            prior_centre = (float(second[0]) + float(second[2])) / 2
+            if not (current_centre > 300 and prior_centre - current_centre >= 25):
+                continue
+            extra = [
+                word
+                for word in words
+                if abs(float(word[1]) - float(second[1])) <= 1.5
+                and float(word[0]) > float(second[2]) + 1
+            ]
+            prior_ok = True
+            bound_x: Optional[float] = None
+            if extra:
+                if all(_is_excluded_column_header(str(word[4])) for word in extra):
+                    nearest = min(extra, key=lambda word: float(word[0]))
+                    nearest_centre = (float(nearest[0]) + float(nearest[2])) / 2
+                    bound_x = (prior_centre + nearest_centre) / 2
+                else:
+                    prior_ok = False
+            candidates.append((current_centre, prior_centre, prior_ok, bound_x))
+    return max(candidates, key=lambda item: item[0]) if candidates else None
+
+
+def _column_centres(document: fitz.Document) -> Optional[Tuple[float, float]]:
+    layout = _column_layout(document)
+    return None if layout is None else (layout[0], layout[1])
 
 
 def _labelled_column_centres(document: fitz.Document) -> Optional[Tuple[float, float]]:
@@ -188,7 +239,15 @@ def has_comparative_ivcee_columns(file_path: str) -> bool:
         document.close()
 
 
-def _physical_rows(document: fitz.Document, centres: Tuple[float, float]) -> List[_Row]:
+def _physical_rows(
+    document: fitz.Document,
+    centres: Tuple[float, float],
+    bound: Optional[float] = None,
+) -> List[_Row]:
+    """``bound``: il confine destro oltre il quale un importo non è mai una
+    colonna di saldo (Differenza/Scostamento/%, `_column_layout`) — il token
+    è ignorato del tutto, mai assegnato a corrente né a comparato e mai
+    aggiunto all'etichetta."""
     current_x, prior_x = centres
     column_cutoff = (current_x + prior_x) / 2
     rows: List[_Row] = []
@@ -210,6 +269,8 @@ def _physical_rows(document: fitz.Document, centres: Tuple[float, float]) -> Lis
                 token = str(word[4]).strip()
                 parsed = _amount(token)
                 centre_x = (float(word[0]) + float(word[2])) / 2
+                if bound is not None and centre_x >= bound:
+                    continue
                 column = 0 if centre_x < column_cutoff else 1
                 # A legal amount is right-aligned to one of the two proven date
                 # columns.  Continuation pages may shift the current column left
@@ -1280,6 +1341,16 @@ def _parse_income_column(
         )
         if not all(checks):
             return None
+        # #23 review round 1: la stessa trappola "vuoto" del lato SP
+        # (CLAUDE.md, "Attivo = Passivo = 0 non è una quadratura") vale anche
+        # qui — un conto economico interamente a zero soddisfa ogni controllo
+        # incrociato per coincidenza, indistinguibile da una lettura fallita.
+        # Misurato su un file reale (budget_371/380, la stessa serie "BILAQ"
+        # di budget_379, un primo esercizio con la colonna comparato stampata
+        # tutta a "0,00"): senza questa guardia il comparato tornerebbe un
+        # dizionario "pulito" invece di dichiararsi non letto.
+        if value_production == 0 and production_costs == 0 and financial == 0 and ce17 == 0:
+            return None
 
         return {
             "ce01_ricavi_vendite": ce01,
@@ -1408,6 +1479,14 @@ def _parse_compact_income(rows: Sequence[_Row]) -> Optional[Dict[str, Decimal]]:
         )
         if not all(checks):
             return None
+        # NOTA (#23 review round 1, non corretto qui): questa funzione ha la
+        # stessa lacuna "vuoto" di `_parse_income_column` (un CE a colonna
+        # singola interamente a zero passerebbe ogni controllo per
+        # coincidenza — misurato su budget_355/356) ma è preesistente a
+        # entrambi i round di questo task e su un percorso diverso
+        # (`_parse_compact_income`, mai toccato qui): lasciata fuori dallo
+        # scope di questo giro per non allargare un diff che il coordinatore
+        # ha chiesto minimo, segnalata nel report.
 
         return {
             "ce01_ricavi_vendite": ce01,
@@ -1464,10 +1543,16 @@ def extract_standard_ivcee_balances(
         required = ("stato patrimoniale", "attivo", "passivo", "conto economico")
         if not all(marker in text for marker in required):
             return None, None
-        centres = _column_centres(document)
-        if centres is not None:
-            rows = _physical_rows(document, centres)
-            return _parse_column(rows, 0), _parse_column(rows, 1)
+        layout = _column_layout(document)
+        if layout is not None:
+            current_x, prior_x, prior_ok, bound_x = layout
+            rows = _physical_rows(document, (current_x, prior_x), bound=bound_x)
+            current = _parse_column(rows, 0)
+            # `prior_ok=False` (review Task 23): un layout a più di due colonne
+            # dove la terza non è un marcatore di scarto riconosciuto — mai
+            # indovinare quale sia il comparato.
+            prior = _parse_column(rows, 1) if prior_ok else None
+            return current, prior
         centres = _labelled_column_centres(document)
         if centres is not None:
             # #27 declined reading this layout at all: its anchors are right
@@ -1495,10 +1580,13 @@ def extract_standard_ivcee_income(
     except Exception:
         return None, None
     try:
-        centres = _column_centres(document)
-        if centres is not None:
-            rows = _physical_rows(document, centres)
-            return _parse_income_column(rows, 0), _parse_income_column(rows, 1)
+        layout = _column_layout(document)
+        if layout is not None:
+            current_x, prior_x, prior_ok, bound_x = layout
+            rows = _physical_rows(document, (current_x, prior_x), bound=bound_x)
+            current = _parse_income_column(rows, 0)
+            prior = _parse_income_column(rows, 1) if prior_ok else None
+            return current, prior
         centres = _labelled_column_centres(document)
         if centres is not None:
             # Same restriction as extract_standard_ivcee_balances: only the

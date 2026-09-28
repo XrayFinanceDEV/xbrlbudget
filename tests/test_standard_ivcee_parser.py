@@ -1746,3 +1746,215 @@ def test_flat_mastri_colonna_singola_quadra(tmp_path):
     quadratura = check_quadratura(current, current_ce, tol=Decimal("2"))
     assert quadratura.quadra
     assert quadratura.utile_ce == Decimal("30.00")
+
+
+# ---------------------------------------------------------------------------
+# Task 23, review round 1 — un layout a più di due colonne ("corrente |
+# comparato | Differenza | Scost. %", file reale budget_379_BILAQ-001) faceva
+# leggere la Differenza (lineare per costruzione: corrente meno comparato,
+# quindi soddisfa ogni controllo incrociato) al posto del comparato vero,
+# perché ``_physical_rows`` conosceva solo due colonne e ogni token a destra
+# del cutoff sovrascriveva ``values[1]``. Ruling: le colonne si scelgono per
+# etichetta d'intestazione; "Differenza"/"Scostamento"/"Variazione"/"%"/
+# "Scost." non sono mai una colonna di saldo (ignorate, mai assegnate); se il
+# comparato non si distingue da un'altra colonna sconosciuta, mai indovinare
+# — si restituisce ``None``.
+# ---------------------------------------------------------------------------
+
+
+def _write_multi_column_pdf(path: Path, extra_headers: list) -> None:
+    """Stessa gerarchia "B.I)" (totale precede) di ``_write_dotted_cod_pdf``,
+    con il comparato POPOLATO e, sulla stessa riga d'intestazione, una o più
+    colonne extra dopo di lui: il layout reale di budget_379 quando
+    ``extra_headers=["Differenza", "Scost.%"]``, il caso "solo Differenza" a
+    tre colonne quando ``extra_headers=["Differenza"]``, un marcatore non
+    riconosciuto quando ``extra_headers=["Note"]``. Il comparato è sempre il
+    40% del corrente; la colonna extra porta SEMPRE corrente meno comparato
+    (il 60% del corrente) — lineare per costruzione, quindi indistinguibile
+    da un comparato vero sui soli controlli incrociati: la fixture riproduce
+    esattamente il rischio, non un caso di comodo.
+    """
+    right_current = 373.0
+    right_prior = 443.0
+    right_extra_start = 513.0
+    extra_gap = 60.0
+
+    def right(page, x_right, y, text, size=8):
+        width = fitz.get_text_length(text, fontname="helv", fontsize=size)
+        page.insert_text((x_right - width, y), text, fontname="helv", fontsize=size)
+
+    def it(value: Decimal) -> str:
+        text = f"{abs(value):,.2f}".replace(",", "#").replace(".", ",").replace("#", ".")
+        return f"-{text}" if value < 0 else text
+
+    def add_rows(page, y, rows):
+        for label, current in rows:
+            page.insert_text((20, y), label, fontname="helv", fontsize=8)
+            if current is not None:
+                prior = (current * Decimal("0.4")).quantize(Decimal("0.01"))
+                differenza = current - prior
+                right(page, right_current, y, it(current))
+                right(page, right_prior, y, it(prior))
+                for i in range(len(extra_headers)):
+                    right(page, right_extra_start + i * extra_gap, y, it(differenza))
+            y += 14
+        return y
+
+    document = fitz.open()
+    bs = document.new_page()
+    right(bs, right_current, 60, "31/12/2025")
+    right(bs, right_prior, 60, "31/12/2024")
+    for i, header in enumerate(extra_headers):
+        right(bs, right_extra_start + i * extra_gap, 60, header)
+
+    add_rows(bs, 100, [
+        ("2 Stato patrimoniale attivo", Decimal("1000.00")),
+        ("44 B) Immobilizzazioni", Decimal("300.00")),
+        ("60 B.I) Immobilizzazioni immateriali", Decimal("100.00")),
+        ("276 B.II) Immobilizzazioni materiali", Decimal("150.00")),
+        ("534 B.III) Immobilizzazioni finanziarie", Decimal("50.00")),
+        ("956 C) Attivo circolante", Decimal("650.00")),
+        ("1104 C.II) Crediti", Decimal("500.00")),
+        ("1110 Esigibili entro l'esercizio successivo", Decimal("500.00")),
+        ("1634 C.IV) Disponibilita liquide", Decimal("150.00")),
+        ("2000 D) Ratei e risconti", Decimal("50.00")),
+        ("1834 Stato patrimoniale passivo", Decimal("1000.00")),
+        ("1850 A) Patrimonio netto", Decimal("400.00")),
+        ("1870 A.I) Capitale", Decimal("300.00")),
+        ("2086 A.IX) Utile (perdita) dell'esercizio", Decimal("100.00")),
+        ("2244 C) Trattamento di fine rapporto di lavoro subordinato", Decimal("100.00")),
+        ("2264 D) Debiti", Decimal("450.00")),
+        ("2270 Esigibili entro l'esercizio successivo", Decimal("400.00")),
+        ("2272 Esigibili oltre l'esercizio successivo", Decimal("50.00")),
+        ("2900 E) Ratei e risconti", Decimal("50.00")),
+    ])
+
+    ce = document.new_page()
+    ce.insert_text((20, 60), "Conto economico", fontsize=8)
+    document.save(str(path))
+    document.close()
+
+
+def test_layout_a_quattro_colonne_legge_il_comparato_vero_non_la_differenza(tmp_path):
+    """budget_379: "corrente | comparato | Differenza | Scost. %". Prima,
+    ogni token a destra del cutoff sovrascriveva il comparato con l'ultimo
+    letto (Scost.%, poi scartato dal regex degli importi perché a 3 decimali,
+    quindi in pratica la Differenza) — verificato: bs_prior.totale_attivo
+    diventava -65.772,05 (la Differenza reale stampata) invece di
+    416.546,99 (il vero comparato). Qui il comparato deve tornare il 40% del
+    corrente, mai il 60% (la Differenza)."""
+    pdf = tmp_path / "quattro-colonne.pdf"
+    _write_multi_column_pdf(pdf, ["Differenza", "Scost.%"])
+
+    current, prior = extract_standard_ivcee_balances(str(pdf))
+
+    assert current is not None
+    assert current["totale_attivo"] == Decimal("1000.00")
+    assert prior is not None
+    assert prior["totale_attivo"] == Decimal("400.00")  # 40% del corrente
+    assert prior["totale_attivo"] != Decimal("600.00")  # mai la Differenza (60%)
+
+
+def test_layout_a_tre_colonne_solo_differenza_legge_il_comparato_vero(tmp_path):
+    """Stesso rischio con una sola colonna extra dopo il comparato
+    ("corrente | comparato | Differenza", nessuno Scost.%)."""
+    pdf = tmp_path / "tre-colonne.pdf"
+    _write_multi_column_pdf(pdf, ["Differenza"])
+
+    current, prior = extract_standard_ivcee_balances(str(pdf))
+
+    assert current is not None
+    assert current["totale_attivo"] == Decimal("1000.00")
+    assert prior is not None
+    assert prior["totale_attivo"] == Decimal("400.00")
+    assert prior["totale_attivo"] != Decimal("600.00")
+
+
+def test_colonna_extra_non_riconosciuta_non_indovina_il_comparato(tmp_path):
+    """Ruling: se il comparato non si distingue da una colonna sconosciuta
+    (nessun marcatore noto di scarto), non si indovina — il comparato torna
+    ``None``, il corrente resta comunque quello vero."""
+    pdf = tmp_path / "colonna-sconosciuta.pdf"
+    _write_multi_column_pdf(pdf, ["Note"])
+
+    current, prior = extract_standard_ivcee_balances(str(pdf))
+
+    assert current is not None
+    assert current["totale_attivo"] == Decimal("1000.00")
+    assert prior is None
+
+
+def _write_ce_zero_prior_pdf(path: Path) -> None:
+    """CE comparativo dove il comparato è stampato davvero tutto a zero (primo
+    esercizio, budget_371/380 — la stessa serie "BILAQ" di budget_379): la
+    stessa guardia "vuoto" già in `_parse_column`/`_parse_compact_balance`
+    (CLAUDE.md, "Attivo = Passivo = 0 non è una quadratura") deve valere anche
+    qui, o un CE comparato a zero supererebbe ogni controllo incrociato per
+    coincidenza — indistinguibile da una lettura fallita.
+    """
+    right_current = 373.0
+    right_prior = 443.0
+
+    def right(page, x_right, y, text, size=8):
+        width = fitz.get_text_length(text, fontname="helv", fontsize=size)
+        page.insert_text((x_right - width, y), text, fontname="helv", fontsize=size)
+
+    def it(value: Decimal) -> str:
+        text = f"{abs(value):,.2f}".replace(",", "#").replace(".", ",").replace("#", ".")
+        return f"-{text}" if value < 0 else text
+
+    def add_rows(page, y, rows):
+        for label, current in rows:
+            page.insert_text((20, y), label, fontname="helv", fontsize=8)
+            if current is not None:
+                right(page, right_current, y, it(current))
+                right(page, right_prior, y, it(Decimal("0")))
+            y += 14
+
+    document = fitz.open()
+    bs = document.new_page()
+    right(bs, right_current, 60, "31/12/2025")
+    right(bs, right_prior, 60, "31/12/2024")
+    bs.insert_text((20, 100), "stato patrimoniale attivo", fontsize=8)
+    bs.insert_text((20, 120), "stato patrimoniale passivo", fontsize=8)
+
+    ce = document.new_page()
+    right(ce, right_current, 60, "31/12/2025")
+    right(ce, right_prior, 60, "31/12/2024")
+    add_rows(ce, 100, [
+        ("Conto economico", None),
+        ("A) Valore della produzione", Decimal("500.00")),
+        ("1) Ricavi delle vendite e delle prestazioni", Decimal("450.00")),
+        ("5) Altri ricavi e proventi", Decimal("50.00")),
+        ("B) Costi della produzione", Decimal("300.00")),
+        ("6) per materie prime, sussidiarie, di consumo e di merci", Decimal("100.00")),
+        ("7) per servizi", Decimal("50.00")),
+        ("8) per godimento di beni di terzi", Decimal("20.00")),
+        ("9) per il personale", Decimal("80.00")),
+        ("10) Ammortamenti e svalutazioni", Decimal("30.00")),
+        ("14) Oneri diversi di gestione", Decimal("20.00")),
+        ("Differenza tra Valore e Costo della Produzione", Decimal("200.00")),
+        ("C) Proventi e oneri finanziari", Decimal("-20.00")),
+        ("16) Altri proventi finanziari", Decimal("5.00")),
+        ("17) Interessi e altri oneri finanziari", Decimal("25.00")),
+        ("Risultato prima delle imposte", Decimal("180.00")),
+        ("20) Imposte sul reddito dell'esercizio", Decimal("80.00")),
+        ("21) Utile (Perdita) dell'esercizio", Decimal("100.00")),
+    ])
+    document.save(str(path))
+    document.close()
+
+
+def test_ce_comparato_tutto_a_zero_non_e_una_lettura_pulita(tmp_path):
+    """budget_371/380: il comparato genuinamente stampato a 0,00 ovunque
+    supererebbe ogni controllo incrociato di `_parse_income_column` (0=0),
+    tornando un CE "pulito" indistinguibile da una lettura fallita — deve
+    tornare ``None``, mai un dizionario tutto a zero."""
+    pdf = tmp_path / "ce-comparato-zero.pdf"
+    _write_ce_zero_prior_pdf(pdf)
+
+    current, prior = extract_standard_ivcee_income(str(pdf))
+
+    assert current is not None
+    assert current["ce01_ricavi_vendite"] == Decimal("450.00")
+    assert prior is None

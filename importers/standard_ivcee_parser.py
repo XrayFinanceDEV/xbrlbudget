@@ -94,16 +94,26 @@ def _column_layout(
 
     Stessa selezione di coppia di date di sempre — `_column_centres` sotto
     ne prende solo i primi due elementi, quindi il suo risultato non cambia
-    di una virgola per nessun chiamante esistente. In più, guarda se sulla
-    STESSA riga fisica della data "comparato" c'è altro testo a destra:
-    - nulla: layout a due sole colonne, comportamento di sempre
-      (``prior_affidabile=True``, ``bound_x=None``);
-    - solo marcatori noti di scarto (Differenza/Scostamento/Variazione/
-      Scost./%): il comparato resta valido, ``bound_x`` è il confine oltre
-      il quale un importo non è mai una colonna di saldo — la lettura vera
-      del comparato, non la Differenza;
-    - qualunque altra cosa non riconosciuta: non si indovina quale sia la
-      terza colonna, il comparato non si legge (``prior_affidabile=False``).
+    di una virgola per nessun chiamante esistente.
+
+    #23 re-review: un'intestazione di scarto (Differenza/Scostamento/%) può
+    stare su una riga fisica DIVERSA dalle due date (un'etichetta di gruppo
+    sopra, o l'intestazione spezzata su due righe) — cercarla solo a ±1,5pt
+    dalla riga delle date lascia passare esattamente lo stesso difetto del
+    Critical originale, solo innescato da un'interruzione di riga invece che
+    da una quarta colonna sulla stessa riga. La decisione segue i DATI, non
+    solo l'intestazione:
+    1. si cerca, in tutte le righe-dati (sotto l'intestazione), un importo
+       stabile — presente su almeno tre righe diverse — a destra del
+       comparato: se non c'è, il documento ha solo due colonne, comportamento
+       di sempre (``prior_affidabile=True``, ``bound_x=None``);
+    2. se c'è, si cerca un marcatore noto di scarto in tutta la BANDA
+       d'intestazione — ogni riga sopra la prima riga-dati, non solo quella
+       delle date — indipendentemente da quale riga fisica lo porta;
+    3. trovato, il comparato resta valido e ``bound_x`` (dal dato, non
+       dall'intestazione: più preciso) delimita dove finisce la sua colonna;
+    4. non trovato, non si indovina quale sia la terza colonna: il comparato
+       non si legge (``prior_affidabile=False``).
     """
     candidates: List[Tuple[float, float, bool, Optional[float]]] = []
     for page in document:
@@ -123,22 +133,70 @@ def _column_layout(
             prior_centre = (float(second[0]) + float(second[2])) / 2
             if not (current_centre > 300 and prior_centre - current_centre >= 25):
                 continue
-            extra = [
-                word
-                for word in words
-                if abs(float(word[1]) - float(second[1])) <= 1.5
-                and float(word[0]) > float(second[2]) + 1
+            header_y = float(second[1])
+            column_gap = prior_centre - current_centre
+
+            words_below_header = sorted(
+                (word for word in words if float(word[1]) > header_y + 1.5),
+                key=lambda word: (float(word[1]), float(word[0])),
+            )
+            # Il valore di una riga non e' allineato allo stesso bordo della
+            # sua data d'intestazione quanto basta per un tolleranza stretta
+            # (misurato: 15,5pt di scarto su un file reale) — si usa lo
+            # stesso spartiacque di `_physical_rows` (il punto medio fra le
+            # due colonne), non una vicinanza alla data.
+            column_cutoff = (current_centre + prior_centre) / 2
+            first_data_y = next(
+                (
+                    float(word[1])
+                    for word in words_below_header
+                    if _amount(str(word[4]).strip()) is not None
+                    and (float(word[0]) + float(word[2])) / 2 > 300
+                    and (float(word[0]) + float(word[2])) / 2 < column_cutoff
+                ),
+                None,
+            )
+            if first_data_y is None:
+                # Nessuna riga-dati sotto l'intestazione: niente da temere.
+                candidates.append((current_centre, prior_centre, True, None))
+                continue
+
+            third_band_rows: Dict[float, float] = {}
+            for word in words_below_header:
+                y = float(word[1])
+                if y < first_data_y - 1.5:
+                    continue
+                amount = _amount(str(word[4]).strip())
+                if amount is None:
+                    continue
+                centre_x = (float(word[0]) + float(word[2])) / 2
+                if centre_x > prior_centre + column_gap * 0.5:
+                    row_key = round(y)
+                    third_band_rows[row_key] = min(
+                        third_band_rows.get(row_key, centre_x), centre_x
+                    )
+            if len(third_band_rows) < 3:
+                # Un importo isolato oltre il comparato (una nota, un
+                # arrotondamento di pagina) non è una terza colonna stabile.
+                candidates.append((current_centre, prior_centre, True, None))
+                continue
+
+            third_col_x = min(third_band_rows.values())
+            header_band = [
+                word for word in words
+                if float(word[1]) < first_data_y - 1.5
+                and float(word[0]) > current_centre
             ]
-            prior_ok = True
-            bound_x: Optional[float] = None
-            if extra:
-                if all(_is_excluded_column_header(str(word[4])) for word in extra):
-                    nearest = min(extra, key=lambda word: float(word[0]))
-                    nearest_centre = (float(nearest[0]) + float(nearest[2])) / 2
-                    bound_x = (prior_centre + nearest_centre) / 2
-                else:
-                    prior_ok = False
-            candidates.append((current_centre, prior_centre, prior_ok, bound_x))
+            marker_found = any(
+                _is_excluded_column_header(str(word[4])) for word in header_band
+            )
+            if marker_found:
+                bound_x = (prior_centre + third_col_x) / 2
+                candidates.append((current_centre, prior_centre, True, bound_x))
+            else:
+                # Una terza colonna stabile che nessuna riga d'intestazione
+                # identifica: mai indovinare quale sia il comparato.
+                candidates.append((current_centre, prior_centre, False, None))
     return max(candidates, key=lambda item: item[0]) if candidates else None
 
 

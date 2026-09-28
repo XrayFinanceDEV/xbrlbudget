@@ -1762,18 +1762,35 @@ def test_flat_mastri_colonna_singola_quadra(tmp_path):
 # ---------------------------------------------------------------------------
 
 
-def _write_multi_column_pdf(path: Path, extra_headers: list) -> None:
+def _write_multi_column_pdf(
+    path: Path,
+    extra_headers: list,
+    *,
+    header_offset: float = 0.0,
+    n_extra_columns: int = None,
+) -> None:
     """Stessa gerarchia "B.I)" (totale precede) di ``_write_dotted_cod_pdf``,
-    con il comparato POPOLATO e, sulla stessa riga d'intestazione, una o più
-    colonne extra dopo di lui: il layout reale di budget_379 quando
-    ``extra_headers=["Differenza", "Scost.%"]``, il caso "solo Differenza" a
-    tre colonne quando ``extra_headers=["Differenza"]``, un marcatore non
-    riconosciuto quando ``extra_headers=["Note"]``. Il comparato è sempre il
-    40% del corrente; la colonna extra porta SEMPRE corrente meno comparato
-    (il 60% del corrente) — lineare per costruzione, quindi indistinguibile
-    da un comparato vero sui soli controlli incrociati: la fixture riproduce
-    esattamente il rischio, non un caso di comodo.
+    con il comparato POPOLATO e una o più colonne extra dopo di lui: il
+    layout reale di budget_379 quando ``extra_headers=["Differenza",
+    "Scost.%"]``, il caso "solo Differenza" a tre colonne quando
+    ``extra_headers=["Differenza"]``, un marcatore non riconosciuto quando
+    ``extra_headers=["Note"]``. ``header_offset`` sposta il testo
+    d'intestazione delle colonne extra IN ALTO di quei punti rispetto alla
+    riga delle due date — un'etichetta di scarto su una riga fisica diversa
+    (#23 re-review: un'etichetta di gruppo sopra, o l'intestazione spezzata
+    su due righe, faceva ricomparire esattamente il difetto del Critical
+    originale). ``n_extra_columns`` (default: ``len(extra_headers)``) separa
+    "quante colonne dati extra" da "quante hanno un'etichetta" — con
+    ``extra_headers=[]`` e ``n_extra_columns=1`` la colonna dati c'è ma non
+    ha alcuna intestazione da nessuna parte (il caso "nessuna intestazione"
+    del ruling). Il comparato è sempre il 40% del corrente; ogni colonna
+    extra porta SEMPRE corrente meno comparato (il 60% del corrente) —
+    lineare per costruzione, quindi indistinguibile da un comparato vero sui
+    soli controlli incrociati: la fixture riproduce esattamente il rischio,
+    non un caso di comodo.
     """
+    if n_extra_columns is None:
+        n_extra_columns = len(extra_headers)
     right_current = 373.0
     right_prior = 443.0
     right_extra_start = 513.0
@@ -1795,7 +1812,7 @@ def _write_multi_column_pdf(path: Path, extra_headers: list) -> None:
                 differenza = current - prior
                 right(page, right_current, y, it(current))
                 right(page, right_prior, y, it(prior))
-                for i in range(len(extra_headers)):
+                for i in range(n_extra_columns):
                     right(page, right_extra_start + i * extra_gap, y, it(differenza))
             y += 14
         return y
@@ -1805,7 +1822,7 @@ def _write_multi_column_pdf(path: Path, extra_headers: list) -> None:
     right(bs, right_current, 60, "31/12/2025")
     right(bs, right_prior, 60, "31/12/2024")
     for i, header in enumerate(extra_headers):
-        right(bs, right_extra_start + i * extra_gap, 60, header)
+        right(bs, right_extra_start + i * extra_gap, 60 - header_offset, header)
 
     add_rows(bs, 100, [
         ("2 Stato patrimoniale attivo", Decimal("1000.00")),
@@ -1957,4 +1974,39 @@ def test_ce_comparato_tutto_a_zero_non_e_una_lettura_pulita(tmp_path):
 
     assert current is not None
     assert current["ce01_ricavi_vendite"] == Decimal("450.00")
+    assert prior is None
+
+
+def test_intestazione_di_scarto_su_due_righe_legge_comunque_il_comparato_vero(tmp_path):
+    """#23 re-review: la stessa Differenza letta come comparato, questa volta
+    perché "Differenza" sta 12pt SOPRA la riga delle due date (un'etichetta
+    di gruppo, o l'intestazione spezzata su due righe fisiche) invece che
+    sulla sua stessa riga — cercare il marcatore solo a ±1,5pt dalla riga
+    delle date lasciava rientrare esattamente lo stesso difetto. La banda
+    d'intestazione ora è tutto ciò che sta sopra la prima riga-dati, non
+    solo la riga delle date."""
+    pdf = tmp_path / "intestazione-due-righe.pdf"
+    _write_multi_column_pdf(pdf, ["Differenza"], header_offset=12.0)
+
+    current, prior = extract_standard_ivcee_balances(str(pdf))
+
+    assert current is not None
+    assert current["totale_attivo"] == Decimal("1000.00")
+    assert prior is not None
+    assert prior["totale_attivo"] == Decimal("400.00")  # 40% del corrente
+    assert prior["totale_attivo"] != Decimal("600.00")  # mai la Differenza (60%)
+
+
+def test_terza_colonna_stabile_senza_alcuna_intestazione_non_indovina(tmp_path):
+    """Ruling: una terza colonna dati stabile (almeno tre righe) senza ALCUNA
+    etichetta d'intestazione da nessuna parte — non solo non riconosciuta,
+    proprio assente — non permette di identificare quale colonna sia il
+    comparato: si rifiuta di indovinare, il comparato torna ``None``."""
+    pdf = tmp_path / "terza-colonna-senza-intestazione.pdf"
+    _write_multi_column_pdf(pdf, [], n_extra_columns=1)
+
+    current, prior = extract_standard_ivcee_balances(str(pdf))
+
+    assert current is not None
+    assert current["totale_attivo"] == Decimal("1000.00")
     assert prior is None

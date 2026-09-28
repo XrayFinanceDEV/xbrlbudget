@@ -697,3 +697,149 @@ def pdf_xbrl_rendiconto_con_intestazione_ripetuta(path: str) -> str:
         y += 14
     doc.save(path)
     return path
+
+
+def pdf_xbrl_rendiconto_con_attivita_senza_preposizione(path: str) -> str:
+    """Come `pdf_xbrl_rendiconto_dopo_ce`, ma la riga che nomina "attivita'" non ha la
+    preposizione articolata che il fix 7 esclude ("dall'", "dell'", ...): e' la forma reale di
+    budget_671, "(Plusvalenze)/Minusvalenze derivanti dalla cessione di attivita'" (6 parole,
+    "di attivita'" - preceduta da uno spazio, non da un apostrofo). Il lookbehind di
+    `_ATTIVITA_TITOLO` non la esclude, e la riga corta (<= 6 parole) supera
+    `MASSIMO_PAROLE_TITOLO_ATTIVITA`: senza il fix del Task 22 questa pagina di Rendiconto
+    Finanziario diventa un falso "stato patrimoniale"."""
+    doc = fitz.open()
+    intest = [(380, "31-12-2025", True), (480, "31-12-2024", True)]
+
+    sp = doc.new_page(width=595, height=842)
+    sp.insert_text((30, 40), "Stato patrimoniale", fontname=FONT, fontsize=10)
+    _riga(sp, 60, intest)
+    righe_sp = [(30, "B) Immobilizzazioni", "900,00", "950,00"),
+                (30, "C) Attivo circolante", "300,00", "200,00"),
+                (30, "Totale attivo", "1.200,00", "1.150,00")]
+    y = 80
+    for x, testo, a, b in righe_sp:
+        _riga(sp, y, [(x, testo, False), (380, a, True), (480, b, True)])
+        y += 14
+
+    ce = doc.new_page(width=595, height=842)
+    ce.insert_text((30, 40), "Conto economico", fontname=FONT, fontsize=10)
+    _riga(ce, 60, intest)
+    righe_ce = [(30, "A) Valore della produzione", "2.000,00", "1.800,00"),
+                (30, "B) Costi della produzione", "1.500,00", "1.350,00"),
+                (30, "21) Utile (perdita) dell'esercizio", "500,00", "450,00")]
+    y = 80
+    for x, testo, a, b in righe_ce:
+        _riga(ce, y, [(x, testo, False), (380, a, True), (480, b, True)])
+        y += 14
+
+    rendiconto = doc.new_page(width=595, height=842)
+    rendiconto.insert_text((30, 40), "Rendiconto finanziario, metodo indiretto", fontname=FONT, fontsize=8)
+    _riga(rendiconto, 60, intest)
+    righe = [
+        "A) Flussi finanziari derivanti dall'attivita' operativa (metodo indiretto)",
+        "Utile (perdita) dell'esercizio                       500,00      450,00",
+        "(Plusvalenze)/Minusvalenze derivanti dalla cessione di attivita'",
+        "0                                                       0",
+        "1) Utile prima delle imposte, interessi                1.034,00   1.033,00",
+        "Ammortamenti                                          200,00       90,00",
+    ]
+    y = 80
+    for riga in righe:
+        rendiconto.insert_text((30, y), riga, fontname=FONT, fontsize=8)
+        y += 14
+    doc.save(path)
+    return path
+
+
+def pdf_xbrl_sp_continuazione_tre_pagine_con_totale_passivo(path: str) -> str:
+    """Forma reale di budget_671: Attivo su pagina 1 (titolo + date), poi TRE pagine di
+    continuazione senza titolo proprio - le prime due generiche (immobilizzazioni/patrimonio
+    netto), la TERZA (oltre `MAX_PAGINE_CONTINUAZIONE = 2`) porta la coda di D) DEBITI con
+    "Totale debiti" e "Totale passivo" stampati. Senza il fix del Task 22 questa terza pagina
+    resta fuori da `pagine_sp` (il tetto di 2 pagine la esclude), perdendo l'intero blocco
+    debiti."""
+    doc = fitz.open()
+    intest = [(380, "31-12-2025", True), (480, "31-12-2024", True)]
+    p1 = doc.new_page(width=595, height=842)
+    p1.insert_text((30, 40), "Stato patrimoniale", fontname=FONT, fontsize=10)
+    _riga(p1, 60, intest)
+    righe_p1 = [(30, "B) Immobilizzazioni", "", ""),
+                (34, "Totale immobilizzazioni (B)", "900,00", "950,00"),
+                (30, "C) Attivo circolante", "300,00", "200,00"),
+                (30, "Totale attivo", "1.200,00", "1.150,00")]
+    y = 80
+    for x, testo, a, b in righe_p1:
+        _riga(p1, y, [(x, testo, False), (380, a, True), (480, b, True)])
+        y += 14
+
+    p2 = doc.new_page(width=595, height=842)  # continuazione 1, generica
+    righe_p2 = [(30, "A) Patrimonio netto", "", ""),
+                (34, "I - Capitale", "500,00", "500,00"),
+                (34, "II - Riserva legale", "20,00", "15,00"),
+                (34, "III - Altre riserve", "80,00", "60,00")]
+    y = 40
+    for x, testo, a, b in righe_p2:
+        _riga(p2, y, [(x, testo, False), (380, a, True), (480, b, True)])
+        y += 14
+
+    p3 = doc.new_page(width=595, height=842)  # continuazione 2, generica
+    righe_p3 = [(30, "Totale patrimonio netto", "700,00", "650,00"),
+                (34, "B) Fondi per rischi e oneri", "50,00", "40,00"),
+                (34, "C) Trattamento di fine rapporto", "30,00", "25,00")]
+    y = 40
+    for x, testo, a, b in righe_p3:
+        _riga(p3, y, [(x, testo, False), (380, a, True), (480, b, True)])
+        y += 14
+
+    p4 = doc.new_page(width=595, height=842)  # continuazione 3, oltre il tetto: la coda dei debiti
+    righe_p4 = [(30, "D) Debiti", "", ""),
+                (34, "esigibili entro l'esercizio successivo", "300,00", "280,00"),
+                (34, "esigibili oltre l'esercizio successivo", "150,00", "130,00"),
+                (34, "Totale debiti", "450,00", "410,00"),
+                (30, "Totale passivo", "1.200,00", "1.150,00")]
+    y = 40
+    for x, testo, a, b in righe_p4:
+        _riga(p4, y, [(x, testo, False), (380, a, True), (480, b, True)])
+        y += 14
+    doc.save(path)
+    return path
+
+
+def pdf_sp_poi_rendiconto_senza_ce(path: str) -> str:
+    """SP con titolo, seguito DIRETTAMENTE da un Rendiconto Finanziario (nessun CE in mezzo, a
+    differenza di `pdf_xbrl_rendiconto_con_attivita_senza_preposizione`): il blocco SP
+    immediatamente precedente ha lo STESSO titolo che il vecchio bug avrebbe attribuito per
+    errore al Rendiconto ("stato patrimoniale") - la forma che avrebbe fatto FONDERE le due
+    pagine in un solo blocco (`blocchi()`), riusando l'immagine della pagina SP per la pagina di
+    Rendiconto. Nessuna intestazione di colonna sul Rendiconto: il solo titolo decide la fusione."""
+    doc = fitz.open()
+    intest = [(380, "31-12-2025", True), (480, "31-12-2024", True)]
+
+    sp = doc.new_page(width=595, height=842)
+    sp.insert_text((30, 40), "Stato patrimoniale", fontname=FONT, fontsize=10)
+    _riga(sp, 60, intest)
+    righe_sp = [(30, "B) Immobilizzazioni", "900,00", "950,00"),
+                (30, "C) Attivo circolante", "300,00", "200,00"),
+                (30, "Totale attivo", "1.200,00", "1.150,00")]
+    y = 80
+    for x, testo, a, b in righe_sp:
+        _riga(sp, y, [(x, testo, False), (380, a, True), (480, b, True)])
+        y += 14
+
+    rendiconto = doc.new_page(width=595, height=842)
+    rendiconto.insert_text((30, 40), "Rendiconto finanziario, metodo indiretto", fontname=FONT, fontsize=8)
+    _riga(rendiconto, 60, intest)
+    righe = [
+        "A) Flussi finanziari derivanti dall'attivita' operativa (metodo indiretto)",
+        "Utile (perdita) dell'esercizio                       500,00      450,00",
+        "(Plusvalenze)/Minusvalenze derivanti dalla cessione di attivita'",
+        "0                                                       0",
+        "1) Utile prima delle imposte, interessi                1.034,00   1.033,00",
+        "Ammortamenti                                          200,00       90,00",
+    ]
+    y = 80
+    for riga in righe:
+        rendiconto.insert_text((30, y), riga, fontname=FONT, fontsize=8)
+        y += 14
+    doc.save(path)
+    return path

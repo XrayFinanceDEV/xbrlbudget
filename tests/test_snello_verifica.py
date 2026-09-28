@@ -193,3 +193,90 @@ def test_totali_stampati_con_regola_legge_la_colonna_saldo_finale(tmp_path):
     assert totali_stampati(pdf, regola=regola) == {"totale_attivo": D("1400.00"), "totale_passivo": D("1400.00")}
     # senza regola (comportamento di sempre): il primo numero, sbagliato su questo layout.
     assert totali_stampati(pdf) == {"totale_attivo": D("1000.00"), "totale_passivo": D("1400.00")}
+
+
+def test_totali_stampati_numero_scritto_prima_della_propria_etichetta(tmp_path):
+    """Task 22, G3, fix round 2 (diagnosi budget_297): il content-stream a volte scrive
+    l'importo di un totale PRIMA della propria etichetta ("3.680.418,00\\nTOTALE ATTIVO", non
+    "TOTALE ATTIVO\\n3.680.418,00") - un rigo solo fuori ordine, non un intero documento
+    scomposto. La lettura primaria (testo di sempre) ancora sul subtotale che precede
+    ("Totale attivo circolante (C)") ed e' INCOERENTE con il passivo (stesso difetto, ancora
+    su un altro subtotale): solo allora si prova il testo ordinato per posizione, che legge
+    sia attivo sia passivo correttamente (coerenti fra loro) - fix round 2, mai una fusione
+    delle due fonti (round 1, scartato: rompeva altri file)."""
+    doc = fitz.open()
+    page = doc.new_page()
+    page.insert_text((50, 90), "Totale attivo circolante (C)")
+    page.insert_text((300, 90), "1.041.258,00")
+    page.insert_text((300, 110), "3.680.418,00")     # il numero, PRIMA della sua etichetta
+    page.insert_text((50, 110), "TOTALE ATTIVO")     # ...nel content-stream
+    page.insert_text((50, 140), "Totale debiti")
+    page.insert_text((300, 140), "999.000,00")       # un altro subtotale, diverso dal vero passivo
+    page.insert_text((300, 160), "3.680.418,00")     # il vero totale passivo, stesso difetto
+    page.insert_text((50, 160), "TOTALE PASSIVO")
+    pdf = str(tmp_path / "c.pdf")
+    doc.save(pdf)
+    assert totali_stampati(pdf) == {"totale_attivo": D("3680418.00"), "totale_passivo": D("3680418.00")}
+
+
+def test_totali_stampati_non_disturba_etichette_riga_a_riga(tmp_path):
+    """Non regressione: un altro meccanismo di _declared_control_totals
+    (_section_heading_total) legge un'etichetta SU UNA RIGA e il proprio importo sulla riga
+    IMMEDIATAMENTE seguente ("Stato patrimoniale attivo\\n1.603.874,24", il formato reale di
+    budget_280/320/379) - solo attivo qui (nessun passivo dichiarato, quindi la lettura resta
+    "non coerente" per definizione), ma il fix round 2 non tenta nemmeno l'ordinamento per
+    posizione perche' l'ordinato non aggiunge nulla di coerente in piu' (nessun passivo li'
+    nemmeno): resta la lettura primaria, che _section_heading_total legge correttamente."""
+    doc = fitz.open()
+    page = doc.new_page()
+    page.insert_text((50, 90), "Stato patrimoniale attivo")
+    page.insert_text((50, 110), "1.603.874,24")
+    pdf = str(tmp_path / "c.pdf")
+    doc.save(pdf)
+    assert totali_stampati(pdf)["totale_attivo"] == D("1603874.24")
+
+
+def test_totali_stampati_non_prova_l_ordinamento_se_gia_coerente(tmp_path, monkeypatch):
+    """Fix round 2: quando la lettura primaria e' gia' coerente (attivo=passivo entro
+    soglia), il testo ordinato per posizione non si costruisce nemmeno - un costo evitato, e
+    la garanzia che nessun file gia' corretto (TM 589/590 nel banco reale) possa mai leggere
+    un numero diverso da quello di sempre."""
+    doc = fitz.open()
+    page = doc.new_page()
+    page.insert_text((50, 50), "Totale Attivo 5.000,00")
+    page.insert_text((50, 70), "Totale Passivo 5.000,00")
+    pdf = str(tmp_path / "c.pdf")
+    doc.save(pdf)
+
+    def _esplode(*a, **k):
+        raise AssertionError("_extract_full_text(forza_ordinamento=True) non doveva essere chiamata")
+
+    import importers.pdf_extractor_llm as pdf_llm
+    originale = pdf_llm._extract_full_text
+
+    def _sorvegliata(file_path, max_pages=60, forza_ordinamento=False):
+        if forza_ordinamento:
+            _esplode()
+        return originale(file_path, max_pages=max_pages, forza_ordinamento=forza_ordinamento)
+
+    monkeypatch.setattr(pdf_llm, "_extract_full_text", _sorvegliata)
+    assert totali_stampati(pdf) == {"totale_attivo": D("5000"), "totale_passivo": D("5000")}
+
+
+def test_misura_con_grezzo_aggiunge_l_utile_al_passivo_grezzo():
+    """TM 589 (2026-09-28): il grezzo per lato non contiene il risultato corrente (da_foglie
+    non lo fa mai entrare dalle righe: sp13 = utile CE), mentre lo stampato passivo, netto
+    del risultato, viene ripiegato con l'utile da _fold_utile_in_passivo. Il confronto deve
+    quindi usare passivo grezzo + utile: altrimenti lo scarto e' sempre pari all'utile."""
+    bs = {"sp09_disponibilita_liquide": D("1302133.80"), "sp11_capitale": D("1273134.72"),
+          "sp13_utile_perdita": D("28999.08")}
+    ce = {"ce01_ricavi_vendite": D("28999.08")}
+    stampati = {"totale_attivo": D("1302133.80"), "totale_passivo": D("1273134.72")}
+    grezzo = {"attivo": D("1302133.80"), "passivo": D("1273134.72")}
+    m = misura(bs, ce, stampati, forma="bilancio", grezzo=grezzo)
+    assert m["utile_ce"] == D("28999.08")
+    assert m["scarto_stampati"] == D("0.00")
+    # una riga passiva davvero mancante resta visibile
+    m2 = misura(bs, ce, stampati, forma="bilancio",
+                grezzo={"attivo": D("1302133.80"), "passivo": D("1263134.72")})
+    assert m2["scarto_stampati"] == D("10000.00")

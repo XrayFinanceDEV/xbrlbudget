@@ -621,16 +621,25 @@ def _stream_order_is_scrambled(page: fitz.Page) -> bool:
     return inversions > len(tops) * _SCRAMBLED_INVERSION_PCT
 
 
-def reading_order_text(page: fitz.Page) -> str:
+def reading_order_text(page: fitz.Page, forza_ordinamento: bool = False) -> str:
     """Testo della pagina nell'ordine in cui e' STAMPATA.
 
     Restituisce il testo grezzo (byte-identico a ``page.get_text()``) quando lo
     stream e' gia' in ordine — cosi' i PDF ben formati, su cui i prompt sono
     tarati, non cambiano di un carattere — e passa all'ordinamento per
     coordinate solo sulle pagine dimostrabilmente scomposte.
-    """
+
+    ``forza_ordinamento`` (fix round 1, Task 22 G3, ruling del proprietario 2026-09-28,
+    diagnosi budget_297): ``_stream_order_is_scrambled`` e' un criterio a livello di PAGINA
+    (conta le inversioni fra blocchi); un singolo rigo fuori ordine ("3.680.418\\n2.428.464\\n
+    TOTALE ATTIVO", il numero scritto PRIMA della propria etichetta - una riga sola, non un
+    blocco) non lo supera, e la pagina resta "non scomposta" anche se quella riga sola lo e'.
+    Passando ``forza_ordinamento=True`` si tenta SEMPRE l'ordinamento per coordinate, con la
+    stessa guardia di sicurezza sotto (mai se cambia le parole): usato solo dal chiamante che
+    lo richiede esplicitamente (``totali_stampati``, il percorso snello) - ogni altro
+    chiamante (default ``False``) resta sul comportamento di sempre, byte-identico."""
     raw = page.get_text()
-    if not _stream_order_is_scrambled(page):
+    if not forza_ordinamento and not _stream_order_is_scrambled(page):
         return raw
     ordered = page.get_text(sort=True)
     # Riordinare e' SPOSTARE, non riscrivere: se le parole in uscita non sono
@@ -3776,11 +3785,14 @@ RULES:
 - Extract the CURRENT YEAR values only."""
 
 
-def _extract_full_text(file_path: str, max_pages: int = 60) -> str:
+def _extract_full_text(file_path: str, max_pages: int = 60, forza_ordinamento: bool = False) -> str:
     """Return the concatenated text of (up to max_pages) PDF pages.
 
     Trial balances have no IV-CEE section headers to anchor on, so the whole
     account list is sent to the LLM rather than a detected SP/CE window.
+
+    ``forza_ordinamento`` (fix round 1, Task 22 G3): passato a ``reading_order_text`` -
+    solo il chiamante che lo richiede esplicitamente lo forza; il default resta invariato.
     """
     try:
         doc = fitz.open(file_path)
@@ -3797,7 +3809,7 @@ def _extract_full_text(file_path: str, max_pages: int = 60) -> str:
         parts.append(
             detached_texts.get(i)
             or _filter_difference_columns(page)
-            or reading_order_text(page)
+            or reading_order_text(page, forza_ordinamento=forza_ordinamento)
         )
     doc.close()
     return "\n".join(parts)
@@ -4048,13 +4060,19 @@ def _declared_control_totals(file_path: str, text: Optional[str] = None,
     ``import_snello.righe.regola_colonna()``) instead picks the column the caller has
     identified as the balance; an occurrence whose column cannot be resolved with
     certainty contributes nothing (never a fallback to the first number).
+
     """
     out: Dict[str, Optional[Decimal]] = {
         "attivo": None, "passivo": None, "pareggio": None, "utile": None, "perdita": None,
         "costi": None, "ricavi": None,
     }
     # `text` lets the caller supply already-extracted text (e.g. OCR of a scanned PDF,
-    # where _extract_full_text would return nothing). Fall back to reading the file.
+    # where _extract_full_text would return nothing, or a position-ordered reading - Task 22
+    # G3, fix round 2: il chiamante snello (``import_snello.verifica.totali_stampati``) prova
+    # QUESTA funzione due volte, una col testo di sempre, una con
+    # ``_extract_full_text(..., forza_ordinamento=True)``, e sceglie la prima lettura coerente
+    # (attivo=passivo entro soglia) - mai una fusione delle due fonti qui dentro). Fall back to
+    # reading the file.
     if text is None:
         try:
             text = _extract_full_text(file_path)

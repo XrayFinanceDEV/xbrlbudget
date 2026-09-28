@@ -3,6 +3,7 @@ from decimal import Decimal as D
 from importers.import_snello.conti import applica_lato, da_coppie, da_foglie
 from importers.import_snello.percorsi import NOMI
 from importers.import_snello.righe import Riga
+from importers.import_snello.verifica import misura
 from importers.iv_cee_hierarchy import detail_fields
 
 _TIER0 = ("sp02", "sp03", "sp04", "sp11", "sp12", "sp13", "sp16a", "sp17a")
@@ -694,3 +695,194 @@ def test_formetal_test_righe_reali_codice_conto_decide_deterministico():
     att = bs["sp09_disponibilita_liquide"]
     pas = bs["sp11_capitale"] + bs["sp12g_utili_perdite_portati"] + bs["sp13_utile_perdita"]
     assert att == pas == D("1195896.96")
+
+
+# --- Task 22, G2, fix round 2 (ruling del proprietario, 2026-09-28): il segno di un campo CE --
+# --- dipende dal MODO. In modo "conti" (da_foglie) la colonna fisica (lato L/R) decide, contro
+# --- la famiglia del campo - lo stesso principio del voto di lato SP - votata per CONTEGGIO, --
+# --- mai per euro. In modo "legge" (da_coppie, colonna singola) non c'e' alcuna colonna: si ---
+# --- vota per conteggio la CONVENZIONE di stampa (costi positivi o negativi) sui soli campi --
+# --- a segno fisso, e i campi a segno libero (ce02/ce03/ce10) seguono quella convenzione. ----
+
+
+def test_g2_budget_624_la_colonna_decide_non_il_segno_letto(): # modo conti
+    """Riproduce il meccanismo REALE di budget_624 (diagnosi originale + rilievo della review,
+    2026-09-27): 5 conti di costo VERI, fisicamente sul lato "L" (la colonna dei costi),
+    letti POSITIVI come sempre; UN SOLO conto (una contropartita di materie prime) finito per
+    un bug a monte (fuori scopo qui) sul lato "R" (la colonna dei ricavi), anch'esso letto
+    POSITIVO. Il vecchio voto (euro) e il voto per conteggio del round 1 (segno, non colonna)
+    ribaltavano entrambi la famiglia intera in un modo o nell'altro; il voto di COLONNA per
+    conteggio isola l'unico conto fuori posto (1 contro 5) e lo tratta come una riduzione,
+    lasciando i 5 conti veri positivi cosi' come letti."""
+    foglie = [
+        _f(1, "L", "300000", "CE.B.7", sezione="ce"),         # servizi -> ce06, colonna vera
+        _f(2, "L", "200000", "CE.B.8", sezione="ce"),         # godimento beni -> ce07
+        _f(3, "L", "400000", "CE.9", sezione="ce"),           # personale -> ce08
+        _f(4, "L", "60000", "CE.10", sezione="ce"),           # ammortamenti -> ce09
+        _f(5, "L", "142750", "CE.17", sezione="ce"),          # oneri finanziari -> ce15
+        _f(6, "R", "1468999.24", "CE.B.11", sezione="ce"),    # contropartita, fuori colonna (causa (a), fuori scopo)
+        _f(7, "R", "2050000", "CE.A.1", sezione="ce"),        # ricavi, ancora della colonna "ric"
+    ]
+    bs, ce, diag = da_foglie(foglie)
+    assert ce["ce06_servizi"] == D("300000.00")
+    assert ce["ce07_godimento_beni"] == D("200000.00")
+    assert ce["ce08_costi_personale"] == D("400000.00")
+    assert ce["ce09_ammortamenti"] == D("60000.00")
+    assert ce["ce15_oneri_finanziari"] == D("142750.00")
+    assert ce["ce10_var_rimanenze_mat_prime"] == D("-1468999.24")   # fuori colonna: una riduzione
+    assert ce["ce01_ricavi_vendite"] == D("2050000.00")
+    assert diag["ce_segno_forzato"] == [["6", "ce10", "1468999.24", "-1468999.24"]]
+
+
+def test_g2_tm589_rimborsi_non_e_una_rettifica():  # modo conti
+    """Riproduce TM 589 (rilievo della review dopo il round 1): "Rimborsi" e' una voce di
+    ALTRI RICAVI normale, non una riduzione - il fix round 1 la forzava negativa per la
+    parola-chiave RIMBORSO/RIMBORSI, tolta ora dalla lista (mai piu' usata in modo "conti":
+    qui non esiste alcuna lista di parole-chiave, solo la colonna). "Rimborsi" e' fisicamente
+    sulla colonna dei ricavi, come ogni altro ricavo vero: nessuna forzatura."""
+    foglie = [
+        _f(1, "L", "300000", "CE.B.7", sezione="ce"),                 # servizi -> ce06
+        _f(2, "L", "200000", "CE.B.8", sezione="ce"),                 # godimento beni -> ce07
+        _f(3, "R", "500000", "CE.A.1", sezione="ce"),                 # ricavi vendite -> ce01
+        _f(4, "R", "4022.90", "CE.A.5", testo="RIMBORSI", sezione="ce"),  # altri ricavi -> ce04
+    ]
+    bs, ce, diag = da_foglie(foglie)
+    assert ce["ce04_altri_ricavi"] == D("4022.90")
+    assert diag["ce_segno_forzato"] == []
+
+
+def test_g2_tm590_rimanenze_su_entrambe_le_colonne():  # modo conti
+    """Riproduce TM 590 (rilievo della review dopo il round 1): due conti di rimanenze materie
+    prime, uno sulla colonna dei costi (vero, resta cosi' com'e') e uno finito sulla colonna
+    dei ricavi (fuori posto, una riduzione) - il segno dipende dalla colonna in cui il conto e'
+    fisicamente stampato, non da un'eccezione "a segno libero" che lo lascia sempre invariato
+    (il difetto del round 1: 148.750 + 42.500 = 191.250 invece di 148.750 - 42.500 = 106.250)."""
+    foglie = [
+        _f(1, "L", "300000", "CE.B.7", sezione="ce"),          # servizi -> ce06, ancora colonna costi
+        _f(2, "L", "148750", "CE.B.11", sezione="ce"),         # rimanenze, sulla colonna vera -> ce10
+        _f(3, "R", "42500", "CE.B.11", sezione="ce"),          # rimanenze, fuori colonna -> ce10
+        _f(4, "R", "500000", "CE.A.1", sezione="ce"),          # ricavi, ancora colonna ricavi
+    ]
+    bs, ce, diag = da_foglie(foglie)
+    assert ce["ce10_var_rimanenze_mat_prime"] == D("106250.00")   # 148.750 - 42.500
+    assert diag["ce_segno_forzato"] == [["3", "ce10", "42500.00", "-42500.00"]]
+
+
+def test_g2_budget_115_297_ce10_sotto_convenzione_negativa():  # modo legge
+    """Riproduce budget_115/297 (rilievo della review dopo il round 1): il documento stampa i
+    costi a segno fisso NEGATIVI (convenzione di stampa) - la stessa convenzione riguarda
+    anche ce10, a segno libero: letto -30.517 diventa +30.517 (il round 1 lo lasciava
+    invariato, ignorando la convenzione)."""
+    coppie = [
+        ("CE.A.1", D("500000")),
+        ("CE.B.6", D("-138665")),
+        ("CE.B.7", D("-897132")),
+        ("CE.B.11", D("-30517")),      # ce10, segno libero: segue la convenzione (negativa)
+    ]
+    bs, ce, diag = da_coppie(coppie)
+    assert ce["ce05_materie_prime"] == D("138665.00")
+    assert ce["ce06_servizi"] == D("897132.00")
+    assert ce["ce10_var_rimanenze_mat_prime"] == D("30517.00")
+    assert ["CE.B.11", "ce10", "-30517.00", "30517.00"] in diag["ce_segno_forzato"]
+
+
+def test_g2_ce10_segno_libero_segue_la_convenzione_positiva():  # modo legge
+    """Non regressione: con la convenzione POSITIVA (il caso normale), ce10 a segno libero
+    resta il segno letto, invariato - moltiplicare per +1 non cambia nulla."""
+    coppie = [("CE.A.1", D("1000")), ("CE.B.7", D("300")), ("CE.B.11", D("-50"))]
+    bs, ce, diag = da_coppie(coppie)
+    assert ce["ce06_servizi"] == D("300.00")
+    assert ce["ce10_var_rimanenze_mat_prime"] == D("-50.00")
+    assert diag["ce_segno_forzato"] == []
+
+
+def test_g2_costi_stampati_tra_parentesi_si_normalizzano_positivi():  # modo legge
+    """Riproduce il meccanismo di budget_664 (Task 22, G2): un documento che stampa OGNI voce
+    di costo fra parentesi (convenzione di stampa) non ha, in ``da_coppie`` (modo "legge"),
+    alcuna normalizzazione di segno. Ogni campo di costo a segno fisso prende il proprio
+    valore assoluto - una convenzione di stampa uniforme non ha bisogno di essere riconosciuta
+    come tale, perche' non c'e' nulla da "ribaltare in blocco"."""
+    coppie = [
+        ("CE.A.1", D("500000")),
+        ("CE.B.7", D("-81052.54")),
+        ("CE.B.8", D("-19041.05")),
+        ("CE.B.9", D("-90315.28")),
+        ("CE.C.17", D("-117.56")),
+        ("CE.21", D("309473.57")),
+    ]
+    bs, ce, diag = da_coppie(coppie)
+    assert ce["ce06_servizi"] == D("81052.54")
+    assert ce["ce07_godimento_beni"] == D("19041.05")
+    assert ce["ce08_costi_personale"] == D("90315.28")
+    assert ce["ce15_oneri_finanziari"] == D("117.56")
+    assert {r[1] for r in diag["ce_segno_forzato"]} == {"ce06", "ce07", "ce08", "ce15"}
+
+
+def test_g2_famiglia_costi_gia_positiva_non_dichiara_alcuna_forzatura():  # modo legge
+    """Con i costi gia' positivi (nessuna convenzione di stampa negativa), ``abs()`` non
+    cambia nulla: nessuna forzatura si dichiara, perche' non ce n'e' stata alcuna."""
+    coppie = [("CE.A.1", D("1000")), ("CE.B.7", D("300")), ("CE.B.8", D("200")),
+              ("CE.B.9", D("100"))]
+    bs, ce, diag = da_coppie(coppie)
+    assert ce["ce06_servizi"] == D("300.00")
+    assert ce["ce07_godimento_beni"] == D("200.00")
+    assert ce["ce08_costi_personale"] == D("100.00")
+    assert diag["ce_segno_forzato"] == []
+
+
+# --- Task 22, G3, fix round 3 (ruling del proprietario, 2026-09-28): il grezzo per lato ------
+# --- (Task 21) si calcola DENTRO da_foglie, sulle sole foglie che sopravvivono, mai su -------
+# --- foglie(righe) prima della classificazione - diagnosi TM 589/590, dove un "Totale ------
+# --- Attivita'" rimasto vivo come foglia (mai risolto a mastro) e scartato come 'X' veniva ---
+# --- comunque sommato nel grezzo, raddoppiando la massa (grezzo attivo = 2x il vero attivo).
+
+
+def test_g3_grezzo_sp_esclude_un_totale_duplicato_scartato_come_x():
+    """Riproduce TM 589: "Totale Attivita'" resta viva come foglia (marca_totali non trova i
+    suoi figli, magari perche' non sono nella pagina letta) e Qwen la marca 'X' - da_foglie la
+    scarta correttamente (diag['escluse']), ma il vecchio grezzo (calcolato PRIMA di
+    da_foglie, su tutte le foglie fisiche) la sommava comunque insieme ai suoi veri
+    componenti, raddoppiando la massa. Il grezzo si dichiara ora dentro da_foglie, sulle sole
+    foglie che sopravvivono."""
+    foglie = [
+        _f(1, "L", "600000", "SPA.B.II.2", sezione="bs"),                     # immobilizzazioni, vero
+        _f(2, "L", "400000", "SPA.C.II.1", sezione="bs"),                     # crediti, vero
+        _f(3, "L", "1000000", "X", testo="TOTALE ATTIVITA'", sezione="bs"),   # duplicato, scartato
+        _f(4, "R", "1000000", "SPP.A.I", sezione="bs"),                       # capitale, vero
+    ]
+    bs, ce, diag = da_foglie(foglie)
+    assert diag["escluse"] == [["3", "X", "1000000.00"]]
+    assert diag["grezzo_sp"] == {"L": D("1000000.00"), "R": D("1000000.00")}   # non 2.000.000,00
+
+
+def test_g3_grezzo_sp_include_il_pregresso_e_l_ambiguo_risolto_precedente():
+    """Non regressione: una riga di pregresso esplicita (SPP.A.VIII) e una foglia ambigua
+    risolta come "precedente" sono vera massa di patrimonio netto - il grezzo le include,
+    esattamente come il foglio finale le include in sp12g. CE assente (utile_ce = 0): senza,
+    l'ambiguo resta "corrente" perche' il candidato "precedente" non chiude lo scarto entro
+    soglia, e non e' quello che il test vuole dimostrare."""
+    foglie = [
+        _f(1, "L", "500000", "SPA.B.II.2", sezione="bs"),
+        _f(2, "R", "300000", "SPP.A.I", sezione="bs"),
+        _f(3, "R", "150000", "SPP.A.VIII", testo="UTILI PORTATI A NUOVO", sezione="bs"),
+        _f(4, "R", "50000", "SPP.A.IX", testo="RISULTATO", sezione="bs"),      # ambiguo: chiude a zero solo se "precedente"
+    ]
+    bs, ce, diag = da_foglie(foglie)
+    assert diag["risultato_ambiguo"]["ipotesi"] == "precedente"
+    assert diag["grezzo_sp"] == {"L": D("500000.00"), "R": D("500000.00")}
+
+
+def test_g3_grezzo_sp_massa_vera_mancante_resta_nello_scarto_stampati():
+    """Non regressione: il fix non nasconde una massa vera davvero MANCANTE (non un totale
+    duplicato) - se un conto reale non e' mai stato letto, il grezzo per lato resta piu'
+    piccolo del totale che il documento stampa da solo, e lo scarto si vede ancora."""
+    foglie = [
+        _f(1, "L", "600000", "SPA.B.II.2", sezione="bs"),
+        _f(2, "R", "600000", "SPP.A.I", sezione="bs"),
+    ]
+    bs, ce, diag = da_foglie(foglie)
+    assert diag["grezzo_sp"] == {"L": D("600000.00"), "R": D("600000.00")}
+    m = misura(bs, ce, {"totale_attivo": D("1000000.00"), "totale_passivo": D("1000000.00")},
+              forma="bilancio",
+              grezzo={"attivo": diag["grezzo_sp"]["L"], "passivo": diag["grezzo_sp"]["R"]})
+    assert m["scarto_stampati"] == D("400000.00")     # 1.000.000 stampato - 600.000 letto davvero

@@ -18,6 +18,23 @@ def soglia(totale_attivo: Decimal) -> Decimal:
     return max(minimo, abs(Decimal(totale_attivo)) * pct / 100).quantize(_C)
 
 
+def _coerente(letti: dict, tolleranza: Decimal) -> bool:
+    """Attivo e passivo dichiarati si tengono in piedi da soli: presenti entro
+    ``tolleranza`` l'uno dall'altro, o dall'altro PIU' l'utile dichiarato (una situazione a
+    sezioni contrapposte puo' stampare il passivo al netto del risultato d'esercizio - stesso
+    principio di ``_fold_utile_in_passivo`` sotto, qui solo per decidere se fidarsi della
+    lettura, non per correggerla). Nessuno dei due presente, o troppo distanti da entrambi i
+    confronti: non coerente."""
+    a, p = letti.get("attivo"), letti.get("passivo")
+    if a is None or p is None:
+        return False
+    a, p = Decimal(a), Decimal(p)
+    if abs(a - p) <= tolleranza:
+        return True
+    u = letti.get("utile")
+    return u is not None and abs(a - (p + Decimal(u))) <= tolleranza
+
+
 def totali_stampati(file_path: str, regola: dict | None = None) -> dict:
     """I totali che il documento stampa da solo (regex sul testo grezzo, nessuna chiamata
     modello): ancora indipendente dall'estrattore, riusata dal vecchio importatore
@@ -32,10 +49,29 @@ def totali_stampati(file_path: str, regola: dict | None = None) -> dict:
     sbagliato. Passando ``regola`` (stessa forma di ``righe.regola_colonna()``, gia' usata
     per leggere le foglie) si legge invece la colonna che la struttura ha identificato come
     saldo; il chiamante deve passare ``regola=None`` (o non chiamare affatto) quando quella
-    colonna non si identifica con certezza - qui non c'e' alcun ripiego silenzioso."""
+    colonna non si identifica con certezza - qui non c'e' alcun ripiego silenzioso.
+
+    Fix round 2 (ruling del proprietario, 2026-09-28, diagnosi budget_297): la lettura sul
+    testo ordinato per POSIZIONE (``_extract_full_text(..., forza_ordinamento=True)``) si prova
+    SOLO quando la lettura primaria (testo di sempre) non e' coerente (``_coerente``: attivo e
+    passivo assenti, o troppo distanti anche tenendo conto dell'utile) - mai come fonte IN PIU'
+    da fondere con "il maggiore vince" (fix round 1, scartato: budget_297/664 si sistemavano,
+    ma budget_280/320/379/TM 589/590 si rompevano - ``_section_heading_total``, un meccanismo
+    diverso della stessa funzione, legge un'etichetta su una riga e il proprio importo sulla
+    riga IMMEDIATAMENTE seguente, e l'ordinamento per posizione unisce le due righe in una,
+    rompendolo). Se anche la lettura ordinata non e' coerente, resta quella primaria (mai
+    peggiorare un dato assente/incoerente con uno diverso ma ugualmente incoerente)."""
     try:
-        from importers.pdf_extractor_llm import _declared_control_totals
+        from importers.pdf_extractor_llm import _declared_control_totals, _extract_full_text
         letti = _declared_control_totals(file_path, colonna=regola)
+        tolleranza = soglia(letti["attivo"]) if letti.get("attivo") is not None else soglia(Decimal(0))
+        if not _coerente(letti, tolleranza):
+            testo_ordinato = _extract_full_text(file_path, forza_ordinamento=True)
+            ordinato = _declared_control_totals(file_path, text=testo_ordinato, colonna=regola)
+            tolleranza_ord = (soglia(ordinato["attivo"]) if ordinato.get("attivo") is not None
+                              else tolleranza)
+            if _coerente(ordinato, tolleranza_ord):
+                letti = ordinato
     except Exception:
         letti = {}
     return {"totale_attivo": letti.get("attivo"), "totale_passivo": letti.get("passivo")}
@@ -95,10 +131,16 @@ def misura(bs: dict, ce: dict, stampati: dict | None = None, forma: str | None =
     else:
         raise ValueError(f"forma sconosciuta: {forma!r} (attesa 'bilancio', 'verifica' o None)")
     att_grezzo = Decimal(grezzo["attivo"]) if grezzo and grezzo.get("attivo") is not None else att
-    pas_grezzo = Decimal(grezzo["passivo"]) if grezzo and grezzo.get("passivo") is not None else pas
+    if grezzo and grezzo.get("passivo") is not None:
+        # Il grezzo per lato non contiene mai il risultato corrente (da_foglie non lo fa
+        # entrare dalle righe: sp13 = utile CE), mentre lo stampato passivo e' gia' comprensivo
+        # dell'utile o ripiegato da _fold_utile_in_passivo: si confronta passivo grezzo + utile
+        # (TM 589/590, 2026-09-28: senza, lo scarto valeva sempre l'utile).
+        pas_confronto = Decimal(grezzo["passivo"]) + utile
+    else:
+        pas_confronto = pas if forma == "bilancio" else pas + utile
     scarto_stampati = Decimal(0)
-    for chiave, nostro in (("totale_attivo", att_grezzo),
-                           ("totale_passivo", pas_grezzo if forma == "bilancio" else pas_grezzo + utile)):
+    for chiave, nostro in (("totale_attivo", att_grezzo), ("totale_passivo", pas_confronto)):
         v = (stampati or {}).get(chiave)
         if v is not None:
             scarto_stampati = max(scarto_stampati, abs(nostro - Decimal(v)))

@@ -32,10 +32,28 @@ def totali_stampati(file_path: str, regola: dict | None = None) -> dict:
     sbagliato. Passando ``regola`` (stessa forma di ``righe.regola_colonna()``, gia' usata
     per leggere le foglie) si legge invece la colonna che la struttura ha identificato come
     saldo; il chiamante deve passare ``regola=None`` (o non chiamare affatto) quando quella
-    colonna non si identifica con certezza - qui non c'e' alcun ripiego silenzioso."""
+    colonna non si identifica con certezza - qui non c'e' alcun ripiego silenzioso.
+
+    Oltre al testo normale, qui si passa anche il testo ordinato per POSIZIONE
+    (``_extract_full_text(..., forza_ordinamento=True)``, fix round 1, Task 22 G3, ruling del
+    proprietario 2026-09-28, diagnosi budget_297) come fonte IN PIU' per attivo/passivo
+    (``_declared_control_totals(text_ordinato=...)``, mai al posto del testo normale, mai per
+    gli altri campi): "TOTALE ATTIVO" con i propri importi scritti PRIMA di se stesso nel
+    content-stream grezzo ("3.680.418\\n2.428.464\\nTOTALE ATTIVO") e' un rigo solo fuori
+    ordine, che il criterio di scomposizione a livello di pagina (usato dal testo normale,
+    invariato) non vede - l'ancora finiva sul subtotale "Totale attivo circolante (C)" invece
+    che sul vero totale. "Il maggiore vince" (la stessa regola che gia' governa i dettagli-
+    vs-totale) sceglie da sola il vero totale, senza sostituire una fonte con l'altra - un
+    'ordinamento per posizione' puo' rompere ALTRI meccanismi che si affidano al testo grezzo
+    (``_section_heading_total``: l'etichetta e il suo importo, sulla stessa riga geometrica
+    ma colonne diverse, finiscono uniti in un'unica riga di testo invece che separati,
+    budget_280/320/379 - misurato, non solo temuto). Solo questa chiamata (il percorso
+    snello) lo richiede esplicitamente; ogni altro chiamante di
+    ``_declared_control_totals`` non passa ``text_ordinato`` e resta byte-identico."""
     try:
-        from importers.pdf_extractor_llm import _declared_control_totals
-        letti = _declared_control_totals(file_path, colonna=regola)
+        from importers.pdf_extractor_llm import _declared_control_totals, _extract_full_text
+        testo_ordinato = _extract_full_text(file_path, forza_ordinamento=True)
+        letti = _declared_control_totals(file_path, text_ordinato=testo_ordinato, colonna=regola)
     except Exception:
         letti = {}
     return {"totale_attivo": letti.get("attivo"), "totale_passivo": letti.get("passivo")}

@@ -193,3 +193,36 @@ def test_totali_stampati_con_regola_legge_la_colonna_saldo_finale(tmp_path):
     assert totali_stampati(pdf, regola=regola) == {"totale_attivo": D("1400.00"), "totale_passivo": D("1400.00")}
     # senza regola (comportamento di sempre): il primo numero, sbagliato su questo layout.
     assert totali_stampati(pdf) == {"totale_attivo": D("1000.00"), "totale_passivo": D("1400.00")}
+
+
+def test_totali_stampati_numero_scritto_prima_della_propria_etichetta(tmp_path):
+    """Task 22, G3, fix round 1 (diagnosi budget_297): il content-stream a volte scrive
+    l'importo di un totale PRIMA della propria etichetta ("3.680.418,00\\nTOTALE ATTIVO", non
+    "TOTALE ATTIVO\\n3.680.418,00") - un rigo solo fuori ordine, non un intero documento
+    scomposto. Senza correzione l'ancora resta sul subtotale che la precede
+    ("Totale attivo circolante (C)", correttamente ordinato) invece del vero totale."""
+    doc = fitz.open()
+    page = doc.new_page()
+    page.insert_text((50, 90), "Totale attivo circolante (C)")
+    page.insert_text((300, 90), "1.041.258,00")
+    page.insert_text((300, 110), "3.680.418,00")     # il numero, PRIMA della sua etichetta
+    page.insert_text((50, 110), "TOTALE ATTIVO")     # ...nel content-stream
+    pdf = str(tmp_path / "c.pdf")
+    doc.save(pdf)
+    assert totali_stampati(pdf)["totale_attivo"] == D("3680418.00")
+
+
+def test_totali_stampati_non_disturba_etichette_riga_a_riga(tmp_path):
+    """Non regressione: un altro meccanismo di _declared_control_totals
+    (_section_heading_total) legge un'etichetta SU UNA RIGA e il proprio importo sulla riga
+    IMMEDIATAMENTE seguente ("Stato patrimoniale attivo\\n1.603.874,24", il formato reale di
+    budget_280/320/379) - l'aggiunta del testo ordinato per posizione (solo per attivo/
+    passivo, "il maggiore vince") non deve rompere questo meccanismo, che legge il testo
+    normale, invariato."""
+    doc = fitz.open()
+    page = doc.new_page()
+    page.insert_text((50, 90), "Stato patrimoniale attivo")
+    page.insert_text((50, 110), "1.603.874,24")
+    pdf = str(tmp_path / "c.pdf")
+    doc.save(pdf)
+    assert totali_stampati(pdf)["totale_attivo"] == D("1603874.24")

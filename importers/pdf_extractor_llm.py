@@ -621,16 +621,25 @@ def _stream_order_is_scrambled(page: fitz.Page) -> bool:
     return inversions > len(tops) * _SCRAMBLED_INVERSION_PCT
 
 
-def reading_order_text(page: fitz.Page) -> str:
+def reading_order_text(page: fitz.Page, forza_ordinamento: bool = False) -> str:
     """Testo della pagina nell'ordine in cui e' STAMPATA.
 
     Restituisce il testo grezzo (byte-identico a ``page.get_text()``) quando lo
     stream e' gia' in ordine — cosi' i PDF ben formati, su cui i prompt sono
     tarati, non cambiano di un carattere — e passa all'ordinamento per
     coordinate solo sulle pagine dimostrabilmente scomposte.
-    """
+
+    ``forza_ordinamento`` (fix round 1, Task 22 G3, ruling del proprietario 2026-09-28,
+    diagnosi budget_297): ``_stream_order_is_scrambled`` e' un criterio a livello di PAGINA
+    (conta le inversioni fra blocchi); un singolo rigo fuori ordine ("3.680.418\\n2.428.464\\n
+    TOTALE ATTIVO", il numero scritto PRIMA della propria etichetta - una riga sola, non un
+    blocco) non lo supera, e la pagina resta "non scomposta" anche se quella riga sola lo e'.
+    Passando ``forza_ordinamento=True`` si tenta SEMPRE l'ordinamento per coordinate, con la
+    stessa guardia di sicurezza sotto (mai se cambia le parole): usato solo dal chiamante che
+    lo richiede esplicitamente (``totali_stampati``, il percorso snello) - ogni altro
+    chiamante (default ``False``) resta sul comportamento di sempre, byte-identico."""
     raw = page.get_text()
-    if not _stream_order_is_scrambled(page):
+    if not forza_ordinamento and not _stream_order_is_scrambled(page):
         return raw
     ordered = page.get_text(sort=True)
     # Riordinare e' SPOSTARE, non riscrivere: se le parole in uscita non sono
@@ -3776,11 +3785,14 @@ RULES:
 - Extract the CURRENT YEAR values only."""
 
 
-def _extract_full_text(file_path: str, max_pages: int = 60) -> str:
+def _extract_full_text(file_path: str, max_pages: int = 60, forza_ordinamento: bool = False) -> str:
     """Return the concatenated text of (up to max_pages) PDF pages.
 
     Trial balances have no IV-CEE section headers to anchor on, so the whole
     account list is sent to the LLM rather than a detected SP/CE window.
+
+    ``forza_ordinamento`` (fix round 1, Task 22 G3): passato a ``reading_order_text`` -
+    solo il chiamante che lo richiede esplicitamente lo forza; il default resta invariato.
     """
     try:
         doc = fitz.open(file_path)
@@ -3797,7 +3809,7 @@ def _extract_full_text(file_path: str, max_pages: int = 60) -> str:
         parts.append(
             detached_texts.get(i)
             or _filter_difference_columns(page)
-            or reading_order_text(page)
+            or reading_order_text(page, forza_ordinamento=forza_ordinamento)
         )
     doc.close()
     return "\n".join(parts)
@@ -4026,7 +4038,8 @@ def _valore_in_colonna(numeri: list, colonna: Optional[Dict[str, int]]) -> Optio
 
 
 def _declared_control_totals(file_path: str, text: Optional[str] = None,
-                             colonna: Optional[Dict[str, int]] = None) -> Dict[str, Optional[Decimal]]:
+                             colonna: Optional[Dict[str, int]] = None,
+                             text_ordinato: Optional[str] = None) -> Dict[str, Optional[Decimal]]:
     """Read a trial balance's OWN declared control totals from the printed footer.
 
     GENERAL anti-masking anchor (level L2): every situazione contabile / bilancio di
@@ -4048,7 +4061,20 @@ def _declared_control_totals(file_path: str, text: Optional[str] = None,
     ``import_snello.righe.regola_colonna()``) instead picks the column the caller has
     identified as the balance; an occurrence whose column cannot be resolved with
     certainty contributes nothing (never a fallback to the first number).
-    """
+
+    ``text_ordinato`` (fix round 1, Task 22 G3, ruling del proprietario 2026-09-28, diagnosi
+    budget_297): un'ulteriore fonte di ricerca SOLO per attivo/passivo, in aggiunta al testo
+    normale - mai al suo posto, e mai per gli altri campi (pareggio/utile/perdita/costi/
+    ricavi). "TOTALE ATTIVO" i cui importi sono scritti PRIMA di se stesso nel content-stream
+    grezzo ("3.680.418\\n2.428.464\\nTOTALE ATTIVO") non e' un rigo che ``_largest_after`` sa
+    leggere: nel testo grezzo il vero totale resta invisibile, e la ricerca ancora su un
+    subtotale di sezione ("Totale attivo circolante (C)"). ``text_ordinato`` (testo per
+    POSIZIONE, ``pdf_extractor_llm._extract_full_text(..., forza_ordinamento=True)`` -
+    ``standard_ivcee_parser._physical_rows`` ordina allo stesso modo) mette l'etichetta prima
+    dei propri importi come sul resto del documento, e vi si aggiunge come haystack IN PIU':
+    "il maggiore vince" (la stessa regola che gia' governa i dettagli-vs-totale) sceglie da
+    sola il vero totale sul subtotale, senza bisogno di scegliere una fonte unica - mai
+    passato dagli altri chiamanti, che restano byte-identici (default ``None``)."""
     out: Dict[str, Optional[Decimal]] = {
         "attivo": None, "passivo": None, "pareggio": None, "utile": None, "perdita": None,
         "costi": None, "ricavi": None,
@@ -4066,6 +4092,12 @@ def _declared_control_totals(file_path: str, text: Optional[str] = None,
     import unicodedata
     low = "".join(c for c in unicodedata.normalize("NFKD", low) if not unicodedata.combining(c))
     nos = re.sub(r"[ \t]+", "", low)  # collapse intra-line spacing (keep newlines)
+    _attivo_hays = [(low, False), (nos, True)]
+    if text_ordinato:
+        low_ord = text_ordinato.lower()
+        low_ord = "".join(c for c in unicodedata.normalize("NFKD", low_ord) if not unicodedata.combining(c))
+        nos_ord = re.sub(r"[ \t]+", "", low_ord)
+        _attivo_hays += [(low_ord, False), (nos_ord, True)]
 
     def _largest_after(markers, hays=None, colonna=None) -> Optional[Decimal]:
         """Largest Italian-number amount occurring within ~80 chars after any marker.
@@ -4125,12 +4157,12 @@ def _declared_control_totals(file_path: str, text: Optional[str] = None,
     out["attivo"] = _largest_after([
         "totale attivo", "totale attivita", "totale dell'attivo",
         "totale stato patrimoniale attivo", "totale stato patrimoniale - attivo",
-    ], colonna=colonna)
+    ], hays=_attivo_hays, colonna=colonna)
     out["passivo"] = _largest_after([
         "totale passivo", "totale passivita", "totale a pareggio passivo",
         "totale passivo e patrimonio netto", "totale passivita e netto",
         "totale stato patrimoniale passivo", "totale stato patrimoniale - passivo",
-    ], colonna=colonna)
+    ], hays=_attivo_hays, colonna=colonna)
 
     # Some detailed reclassified exports print the top-level section total directly
     # below ``Stato patrimoniale attivo/passivo`` without the word ``Totale``

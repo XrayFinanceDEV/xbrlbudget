@@ -69,14 +69,56 @@ class _Row:
         return self.values[column]
 
 
-def _column_centres(document: fitz.Document) -> Optional[Tuple[float, float]]:
-    candidates: List[Tuple[float, float]] = []
+# Un marcatore di intestazione che non è MAI una colonna di saldo: una
+# differenza fra le due date, uno scostamento o una percentuale. Un layout a
+# quattro colonne ("corrente | comparato | Differenza | Scost. %") li stampa
+# accanto alle due date vere che `_column_layout` cerca — la Differenza è
+# lineare (corrente meno comparato) per costruzione, quindi soddisferebbe da
+# sola ogni controllo incrociato di `_parse_column` se venisse scambiata per
+# il comparato (review Task 23, file reale budget_379_BILAQ-001).
+_EXCLUDED_COLUMN_HEADERS = ("differenza", "scostamento", "variazione", "scost", "%")
+
+
+def _is_excluded_column_header(text: str) -> bool:
+    normalised = _normalise(text)
+    return any(
+        normalised == marker or normalised.startswith(marker)
+        for marker in _EXCLUDED_COLUMN_HEADERS
+    )
+
+
+def _column_layout(
+    document: fitz.Document,
+) -> Optional[Tuple[float, float, bool, Optional[float]]]:
+    """(current_x, prior_x, prior_affidabile, bound_x).
+
+    Stessa selezione di coppia di date di sempre — `_column_centres` sotto
+    ne prende solo i primi due elementi, quindi il suo risultato non cambia
+    di una virgola per nessun chiamante esistente.
+
+    #23 re-review: un'intestazione di scarto (Differenza/Scostamento/%) può
+    stare su una riga fisica DIVERSA dalle due date (un'etichetta di gruppo
+    sopra, o l'intestazione spezzata su due righe) — cercarla solo a ±1,5pt
+    dalla riga delle date lascia passare esattamente lo stesso difetto del
+    Critical originale, solo innescato da un'interruzione di riga invece che
+    da una quarta colonna sulla stessa riga. La decisione segue i DATI, non
+    solo l'intestazione:
+    1. si cerca, in tutte le righe-dati (sotto l'intestazione), un importo
+       stabile — presente su almeno tre righe diverse — a destra del
+       comparato: se non c'è, il documento ha solo due colonne, comportamento
+       di sempre (``prior_affidabile=True``, ``bound_x=None``);
+    2. se c'è, si cerca un marcatore noto di scarto in tutta la BANDA
+       d'intestazione — ogni riga sopra la prima riga-dati, non solo quella
+       delle date — indipendentemente da quale riga fisica lo porta;
+    3. trovato, il comparato resta valido e ``bound_x`` (dal dato, non
+       dall'intestazione: più preciso) delimita dove finisce la sua colonna;
+    4. non trovato, non si indovina quale sia la terza colonna: il comparato
+       non si legge (``prior_affidabile=False``).
+    """
+    candidates: List[Tuple[float, float, bool, Optional[float]]] = []
     for page in document:
-        date_words = [
-            word
-            for word in page.get_text("words", sort=True)
-            if _DATE_RE.fullmatch(str(word[4]).strip())
-        ]
+        words = page.get_text("words", sort=True)
+        date_words = [word for word in words if _DATE_RE.fullmatch(str(word[4]).strip())]
         for first in date_words:
             peers = [
                 second
@@ -87,13 +129,80 @@ def _column_centres(document: fitz.Document) -> Optional[Tuple[float, float]]:
             if not peers:
                 continue
             second = min(peers, key=lambda word: float(word[0]))
-            centres = (
-                (float(first[0]) + float(first[2])) / 2,
-                (float(second[0]) + float(second[2])) / 2,
+            current_centre = (float(first[0]) + float(first[2])) / 2
+            prior_centre = (float(second[0]) + float(second[2])) / 2
+            if not (current_centre > 300 and prior_centre - current_centre >= 25):
+                continue
+            header_y = float(second[1])
+            column_gap = prior_centre - current_centre
+
+            words_below_header = sorted(
+                (word for word in words if float(word[1]) > header_y + 1.5),
+                key=lambda word: (float(word[1]), float(word[0])),
             )
-            if centres[0] > 300 and centres[1] - centres[0] >= 25:
-                candidates.append(centres)
-    return max(candidates, key=lambda pair: pair[0]) if candidates else None
+            # Il valore di una riga non e' allineato allo stesso bordo della
+            # sua data d'intestazione quanto basta per un tolleranza stretta
+            # (misurato: 15,5pt di scarto su un file reale) — si usa lo
+            # stesso spartiacque di `_physical_rows` (il punto medio fra le
+            # due colonne), non una vicinanza alla data.
+            column_cutoff = (current_centre + prior_centre) / 2
+            first_data_y = next(
+                (
+                    float(word[1])
+                    for word in words_below_header
+                    if _amount(str(word[4]).strip()) is not None
+                    and (float(word[0]) + float(word[2])) / 2 > 300
+                    and (float(word[0]) + float(word[2])) / 2 < column_cutoff
+                ),
+                None,
+            )
+            if first_data_y is None:
+                # Nessuna riga-dati sotto l'intestazione: niente da temere.
+                candidates.append((current_centre, prior_centre, True, None))
+                continue
+
+            third_band_rows: Dict[float, float] = {}
+            for word in words_below_header:
+                y = float(word[1])
+                if y < first_data_y - 1.5:
+                    continue
+                amount = _amount(str(word[4]).strip())
+                if amount is None:
+                    continue
+                centre_x = (float(word[0]) + float(word[2])) / 2
+                if centre_x > prior_centre + column_gap * 0.5:
+                    row_key = round(y)
+                    third_band_rows[row_key] = min(
+                        third_band_rows.get(row_key, centre_x), centre_x
+                    )
+            if len(third_band_rows) < 3:
+                # Un importo isolato oltre il comparato (una nota, un
+                # arrotondamento di pagina) non è una terza colonna stabile.
+                candidates.append((current_centre, prior_centre, True, None))
+                continue
+
+            third_col_x = min(third_band_rows.values())
+            header_band = [
+                word for word in words
+                if float(word[1]) < first_data_y - 1.5
+                and float(word[0]) > current_centre
+            ]
+            marker_found = any(
+                _is_excluded_column_header(str(word[4])) for word in header_band
+            )
+            if marker_found:
+                bound_x = (prior_centre + third_col_x) / 2
+                candidates.append((current_centre, prior_centre, True, bound_x))
+            else:
+                # Una terza colonna stabile che nessuna riga d'intestazione
+                # identifica: mai indovinare quale sia il comparato.
+                candidates.append((current_centre, prior_centre, False, None))
+    return max(candidates, key=lambda item: item[0]) if candidates else None
+
+
+def _column_centres(document: fitz.Document) -> Optional[Tuple[float, float]]:
+    layout = _column_layout(document)
+    return None if layout is None else (layout[0], layout[1])
 
 
 def _labelled_column_centres(document: fitz.Document) -> Optional[Tuple[float, float]]:
@@ -188,7 +297,15 @@ def has_comparative_ivcee_columns(file_path: str) -> bool:
         document.close()
 
 
-def _physical_rows(document: fitz.Document, centres: Tuple[float, float]) -> List[_Row]:
+def _physical_rows(
+    document: fitz.Document,
+    centres: Tuple[float, float],
+    bound: Optional[float] = None,
+) -> List[_Row]:
+    """``bound``: il confine destro oltre il quale un importo non è mai una
+    colonna di saldo (Differenza/Scostamento/%, `_column_layout`) — il token
+    è ignorato del tutto, mai assegnato a corrente né a comparato e mai
+    aggiunto all'etichetta."""
     current_x, prior_x = centres
     column_cutoff = (current_x + prior_x) / 2
     rows: List[_Row] = []
@@ -210,6 +327,8 @@ def _physical_rows(document: fitz.Document, centres: Tuple[float, float]) -> Lis
                 token = str(word[4]).strip()
                 parsed = _amount(token)
                 centre_x = (float(word[0]) + float(word[2])) / 2
+                if bound is not None and centre_x >= bound:
+                    continue
                 column = 0 if centre_x < column_cutoff else 1
                 # A legal amount is right-aligned to one of the two proven date
                 # columns.  Continuation pages may shift the current column left
@@ -294,6 +413,77 @@ def _find_re(
     raise ValueError(f"IV-CEE source label not found: {pattern}")
 
 
+def _find_opt(
+    rows: Sequence[_Row], *terms: str, start: int = 0, end: Optional[int] = None
+) -> Optional[int]:
+    """Like ``_find``, but ``None`` (never a raise) when the caption is not there.
+
+    #19 diagnosis: this print layout omits a legal caption ENTIRELY when its
+    amount is zero ("A) Crediti verso soci", "III. Attività finanziarie che non
+    costituiscono immobilizzazioni", "B) Fondi per rischi e oneri", CE items
+    2)/3)/12)/13)/15)/17 bis) and the whole "D) Rettifiche di valore" section
+    are all absent on AMBIENTA, not printed with a 0,00). An absent OPTIONAL
+    caption is zero; a genuinely missing MANDATORY one still raises via
+    ``_find``/``_find_re``.
+    """
+    try:
+        return _find(rows, *terms, start=start, end=end)
+    except ValueError:
+        return None
+
+
+def _find_re_opt(
+    rows: Sequence[_Row], pattern: str, start: int = 0, end: Optional[int] = None
+) -> Optional[int]:
+    try:
+        return _find_re(rows, pattern, start=start, end=end)
+    except ValueError:
+        return None
+
+
+def _find_variant(
+    rows: Sequence[_Row],
+    variants: Sequence[Tuple[str, ...]],
+    start: int = 0,
+    end: Optional[int] = None,
+) -> int:
+    """The first alternative spelling that matches, tried in the given order.
+
+    Different gestionali print the same legal caption in different words (#19
+    diagnosis: "I. Immobilizzazioni Immateriali" spelled out in full, where the
+    already-supported layout abbreviates to "I. Immateriali"). Each alternative
+    is still matched as a whole contiguous phrase — this never loosens matching
+    to independent keywords, only adds known exact phrasings.
+    """
+    for terms in variants:
+        index = _find_opt(rows, *terms, start=start, end=end)
+        if index is not None:
+            return index
+    raise ValueError(f"IV-CEE source label not found (any of): {variants}")
+
+
+def _find_variant_opt(
+    rows: Sequence[_Row],
+    variants: Sequence[Tuple[str, ...]],
+    start: int = 0,
+    end: Optional[int] = None,
+) -> Optional[int]:
+    """Like ``_find_variant``, but ``None`` (never a raise) when none matches.
+
+    #23 diagnosis (gruppo G3): this print layout omits an entire ROMAN-NUMERAL
+    sub-section when its amount is zero, not only the CE/fondi captions already
+    covered by ``_find_opt`` (budget_320: "B.I) Immobilizzazioni immateriali"
+    absent, straight from "B) Immobilizzazioni" to "B.II)"; budget_289/352:
+    "III) Immobilizzazioni finanziarie"/"III) Attività finanziarie" absent
+    entirely). Same rule, same zero-when-absent convention, just applied to a
+    caption that also has alternate spellings.
+    """
+    try:
+        return _find_variant(rows, variants, start=start, end=end)
+    except ValueError:
+        return None
+
+
 def _value_at(rows: Sequence[_Row], index: int, column: int) -> Decimal:
     value = rows[index].value(column)
     if value is None:
@@ -301,23 +491,17 @@ def _value_at(rows: Sequence[_Row], index: int, column: int) -> Decimal:
     return value
 
 
-def _last_unlabelled(
-    rows: Sequence[_Row], start: int, end: int, column: int
-) -> Decimal:
-    candidates = [
-        row.value(column)
-        for row in rows[start + 1:end]
-        if not row.label and row.value(column) is not None
-    ]
-    if not candidates:
-        raise ValueError("IV-CEE source subtotal missing")
-    return candidates[-1]  # printed closing subtotal for the legal section
-
-
 def _block_value(
     rows: Sequence[_Row], start: int, end: int, column: int
 ) -> Decimal:
-    """Displayed item value: closing subtotal, direct row value, or explicit blank."""
+    """Displayed item value: closing subtotal, direct row value, or explicit blank.
+
+    Covers two source styles with the same read: an anonymous subtotal row
+    printed right after the item's detail (``candidates``), or the total
+    printed directly on the caption's own row — "il totale precede" (#19
+    diagnosis: the «bilancio riclassificato UE» never prints a separate
+    "Totale X" row at any level, the caption row always carries it instead).
+    """
     candidates = [
         row.value(column)
         for row in rows[start + 1:end]
@@ -328,18 +512,77 @@ def _block_value(
     return rows[start].value(column) or Decimal("0")
 
 
-def _sum_maturity(
-    rows: Sequence[_Row], start: int, end: int, column: int, maturity: str
+def _section_total_value(
+    rows: Sequence[_Row],
+    caption_index: int,
+    next_index: int,
+    total_terms: Tuple[str, ...],
+    column: int,
+    search_start: Optional[int] = None,
 ) -> Decimal:
-    marker = _normalise(maturity)
-    return sum(
+    """A legal section's displayed total.
+
+    Prefers an explicit "Totale X" row (searched by content between the
+    caption and the next section, never by inventing a position) when the
+    source prints one — the layout already supported before #19. Otherwise
+    falls back to ``_block_value`` on the caption itself: "il totale precede"
+    when the caption row carries the amount directly, or an anonymous
+    subtotal row when that is what the source prints instead.
+    """
+    if total_terms:
+        total_i = _find_opt(
+            rows, *total_terms,
+            start=caption_index + 1 if search_start is None else search_start,
+            end=next_index,
+        )
+        if total_i is not None:
+            return _value_at(rows, total_i, column)
+    return _block_value(rows, caption_index, next_index, column)
+
+
+def _sum_maturity(
+    rows: Sequence[_Row], start: int, end: int, column: int, direction: str
+) -> Decimal:
+    """Sum the "- entro/oltre ... esercizio ..." split rows of one direction.
+
+    Tolerant to the optional "l'" article: #19 diagnosis, this document prints
+    "- entro esercizio successivo" (no article) on the receivables side and
+    "- entro l'esercizio successivo" (with article) on the payables side of
+    the very same file. ``direction`` is "entro" or "oltre"; matching the
+    "- <direction> " marker as a SUBSTRING (not just a prefix: the already-
+    supported comparative layout prints it inline, e.g. "Verso clienti -
+    entro l'esercizio successivo") and never requiring "esercizio" too covers
+    both spellings without caring what precedes or follows it.
+
+    #23 diagnosis (gruppo G3, budget_280/320/379/297): a second, independent
+    cluster of files never prints the dash at all — "Esigibili entro
+    l'esercizio successivo"/"Esigibili oltre l'esercizio successivo". Unlike
+    the dash style (one flat row per leaf account, genuinely additive), this
+    one prints the split ONCE at the section's own top, then REPEATS the
+    same split at every nested sub-item below it (e.g. "II) Crediti" carries
+    its own "Esigibili entro..." immediately, and "1) Verso clienti" a few
+    rows later carries its OWN, already included in the first). Summing every
+    occurrence double-counts (measured: exactly 2x on budget_280's crediti,
+    926.036,05 x2); only the FIRST occurrence (the outermost, right after the
+    section caption) is the section's true total, so this style takes that
+    one row and stops, never sums.
+    """
+    dash_marker = f"- {direction} "
+    dash_total = sum(
         (
             row.value(column)
             for row in rows[start + 1:end]
-            if marker in row.label and row.value(column) is not None
+            if dash_marker in row.label and row.value(column) is not None
         ),
         Decimal("0"),
     )
+    if dash_total != 0:
+        return dash_total
+    no_dash_marker = f"esigibili {direction} "
+    for row in rows[start + 1:end]:
+        if no_dash_marker in row.label and row.value(column) is not None:
+            return row.value(column)
+    return Decimal("0")
 
 
 def _close(left: Decimal, right: Decimal) -> bool:
@@ -351,58 +594,178 @@ def _parse_column(rows: Sequence[_Row], column: int) -> Optional[Dict[str, Decim
     try:
         sp_att = _find(rows, "stato patrimoniale attivo")
         sp_pas = _find(rows, "stato patrimoniale passivo", start=sp_att + 1)
-        total_pas_i = _find(rows, "totale passivo", start=sp_pas + 1)
+        # "Totale passivo" as a distinct row does not exist when the source
+        # prints every legal total on its own caption's row ("il totale
+        # precede", #19 diagnosis): fall back to where the CE section starts
+        # (a required marker, see extract_standard_ivcee_balances) to bound
+        # pass_rows instead of inventing a position.
+        total_pas_i = _find_opt(rows, "totale passivo", start=sp_pas + 1)
+        if total_pas_i is None:
+            total_pas_i = _find(rows, "conto economico", start=sp_pas + 1) - 1
         asset_rows = rows[sp_att:sp_pas]
         pass_rows = rows[sp_pas:total_pas_i + 1]
 
-        # --- Attivo ---------------------------------------------------------
+        # --- Attivo: boundaries first, values from consecutive boundaries ---
         b_imm = _find(asset_rows, "b) immobilizzazioni")
-        imm_i = _find(asset_rows, "i. immateriali", start=b_imm + 1)
-        imm_ii = _find(asset_rows, "ii. materiali", start=imm_i + 1)
-        imm_iii = _find(asset_rows, "iii. finanziarie", start=imm_ii + 1)
-        total_imm_i = _find(asset_rows, "totale immobilizzazioni", start=imm_iii + 1)
+        sp01_i = _find_opt(asset_rows, "a) crediti verso soci", start=0, end=b_imm)
+        sp01 = (
+            (asset_rows[sp01_i].value(column) or Decimal("0"))
+            if sp01_i is not None else Decimal("0")
+        )
 
-        c_att = _find(asset_rows, "c) attivo circolante", start=total_imm_i + 1)
-        rim_i = _find(asset_rows, "i. rimanenze", start=c_att + 1)
-        cred_i = _find(asset_rows, "ii. crediti", start=rim_i + 1)
-        fin_i = _find(asset_rows, "iii. attivita finanziarie", start=cred_i + 1)
-        liq_i = _find(asset_rows, "iv. disponibilita liquide", start=fin_i + 1)
-        total_c_i = _find(asset_rows, "totale attivo circolante", start=liq_i + 1)
-        ratei_att_i = _find(asset_rows, "d) ratei e risconti", start=total_c_i + 1)
-        total_att_i = _find(asset_rows, "totale attivo", start=ratei_att_i + 1)
+        # #23 diagnosis (gruppo G3): a second template spells these three
+        # captions "B.I)"/"B.II)"/"B.III)" (a lettered Cod. hierarchy, the
+        # dotted "i."/"ii."/"iii." forms never appear at all) or "I -"/"II -"
+        # (a dashed hierarchy, budget_297) — same legal caption, three more
+        # printed spellings. "B.I)" is itself omitted entirely when its
+        # amount is zero (budget_320, same "absent means zero" convention as
+        # the already-optional captions below): unlike imm_ii/imm_iii (always
+        # observed present in this corpus), imm_i needs the optional variant.
+        imm_i = _find_variant_opt(
+            asset_rows,
+            (
+                ("i. immateriali",),
+                ("i. immobilizzazioni immateriali",),
+                ("b.i) immobilizzazioni immateriali",),
+                ("i - immobilizzazioni immateriali",),
+            ),
+            start=b_imm + 1,
+        )
+        imm_ii = _find_variant(
+            asset_rows,
+            (
+                ("ii. materiali",),
+                ("ii. immobilizzazioni materiali",),
+                ("b.ii) immobilizzazioni materiali",),
+                ("ii - immobilizzazioni materiali",),
+            ),
+            start=(imm_i if imm_i is not None else b_imm) + 1,
+        )
+        imm_iii = _find_variant(
+            asset_rows,
+            (
+                ("iii. finanziarie",),
+                ("iii. immobilizzazioni finanziarie",),
+                ("b.iii) immobilizzazioni finanziarie",),
+                ("iii - immobilizzazioni finanziarie",),
+            ),
+            start=imm_ii + 1,
+        )
+        c_att = _find(asset_rows, "c) attivo circolante", start=imm_iii + 1)
 
-        sp01_i = _find(asset_rows, "a) crediti verso soci", start=0, end=b_imm)
-        sp01 = asset_rows[sp01_i].value(column) or Decimal("0")
-        sp02 = _last_unlabelled(asset_rows, imm_i, imm_ii, column)
-        sp03 = _last_unlabelled(asset_rows, imm_ii, imm_iii, column)
-        sp04 = _last_unlabelled(asset_rows, imm_iii, total_imm_i, column)
-        total_imm = _value_at(asset_rows, total_imm_i, column)
+        sp02 = (
+            _block_value(asset_rows, imm_i, imm_ii, column)
+            if imm_i is not None else Decimal("0")
+        )
+        sp03 = _block_value(asset_rows, imm_ii, imm_iii, column)
+        sp04 = _block_value(asset_rows, imm_iii, c_att, column)
+        total_imm = _section_total_value(
+            asset_rows, b_imm, c_att, ("totale immobilizzazioni",), column,
+            search_start=imm_iii + 1,
+        )
 
-        sp05 = _last_unlabelled(asset_rows, rim_i, cred_i, column)
-        sp06 = _sum_maturity(asset_rows, cred_i, fin_i, column, "- entro l'esercizio")
-        sp07 = _sum_maturity(asset_rows, cred_i, fin_i, column, "- oltre l'esercizio")
-        total_crediti = _last_unlabelled(asset_rows, cred_i, fin_i, column)
-        sp08 = _last_unlabelled(asset_rows, fin_i, liq_i, column)
-        sp09 = _last_unlabelled(asset_rows, liq_i, total_c_i, column)
-        total_c = _value_at(asset_rows, total_c_i, column)
+        # "I. Rimanenze" is printed only when non-zero (#23 diagnosis: absent
+        # on all of budget_280/320/379, same convention as the already-
+        # optional captions elsewhere in this parser) — its dashed spelling
+        # ("I - Rimanenze", budget_297) added alongside the dotted one.
+        rim_i = _find_variant_opt(
+            asset_rows,
+            (("i. rimanenze",), ("i - rimanenze",)),
+            start=c_att + 1,
+        )
+        cred_i = _find_variant(
+            asset_rows,
+            (("ii. crediti",), ("ii) crediti",), ("ii - crediti",)),
+            start=(rim_i if rim_i is not None else c_att) + 1,
+        )
+        # "III. Attività finanziarie che non costituiscono immobilizzazioni" is
+        # printed only when non-zero (#19 diagnosis): absent, sp08 is zero and
+        # the crediti section's own boundary becomes "IV. Disponibilità liquide".
+        fin_i = _find_variant_opt(
+            asset_rows,
+            (("iii. attivita finanziarie",), ("iii) attivita finanziarie",), ("iii - attivita finanziarie",)),
+            start=cred_i + 1,
+        )
+        liq_i = _find_variant(
+            asset_rows,
+            (
+                ("iv. disponibilita liquide",),
+                ("iv. disponibilita' liquide",),
+                ("iv) disponibilita liquide",),
+                ("iv - disponibilita liquide",),
+            ),
+            start=(fin_i if fin_i is not None else cred_i) + 1,
+        )
+        ratei_att_i = _find(asset_rows, "d) ratei e risconti", start=liq_i + 1)
+        total_att_i = _find_opt(asset_rows, "totale attivo", start=ratei_att_i + 1)
+
+        cred_end = fin_i if fin_i is not None else liq_i
+        sp05 = (
+            _block_value(asset_rows, rim_i, cred_i, column)
+            if rim_i is not None else Decimal("0")
+        )
+        sp06 = _sum_maturity(asset_rows, cred_i, cred_end, column, "entro")
+        sp07 = _sum_maturity(asset_rows, cred_i, cred_end, column, "oltre")
+        total_crediti = _block_value(asset_rows, cred_i, cred_end, column)
+        sp08 = (
+            _block_value(asset_rows, fin_i, liq_i, column)
+            if fin_i is not None else Decimal("0")
+        )
+        sp09 = _block_value(asset_rows, liq_i, ratei_att_i, column)
+        total_c = _section_total_value(
+            asset_rows, c_att, ratei_att_i, ("totale attivo circolante",), column,
+            search_start=liq_i + 1,
+        )
         sp10 = _value_at(asset_rows, ratei_att_i, column)
-        total_att = _value_at(asset_rows, total_att_i, column)
+        total_att = (
+            _value_at(asset_rows, total_att_i, column)
+            if total_att_i is not None
+            else _value_at(asset_rows, 0, column)  # "Stato patrimoniale attivo" itself
+        )
 
-        # --- Passivo --------------------------------------------------------
+        # --- Passivo: same pattern -------------------------------------------
         pn_i = _find(pass_rows, "a) patrimonio netto")
-        capitale_i = _find(pass_rows, "i. capitale", start=pn_i + 1)
-        utile_i = _find(pass_rows, "ix. utile", start=capitale_i + 1)
+        capitale_i = _find_variant(
+            pass_rows,
+            (("i. capitale",), ("i) capitale",), ("i - capitale",)),
+            start=pn_i + 1,
+        )
+        # #23 diagnosis: "IX. Utile"/"IX. Perdita" printed "IX)"/"IX -" on the
+        # G3 templates, same as the roman-numeral captions above.
+        utile_i = _find_variant(
+            pass_rows,
+            (("ix. utile",), ("ix) utile",), ("ix - utile",)),
+            start=capitale_i + 1,
+        )
         try:
-            perdita_i = _find(pass_rows, "ix. perdita", start=utile_i + 1)
+            perdita_i = _find_variant(
+                pass_rows,
+                (("ix. perdita",), ("ix) perdita",), ("ix - perdita",)),
+                start=utile_i + 1,
+            )
         except ValueError:
             perdita_i = -1
-        total_pn_i = _find(pass_rows, "totale patrimonio netto", start=utile_i + 1)
-        fondi_i = _find(pass_rows, "totale fondi per rischi e oneri", start=total_pn_i + 1)
-        tfr_i = _find(pass_rows, "c) trattamento di fine rapporto", start=fondi_i + 1)
+        total_pn_i = _find_opt(pass_rows, "totale patrimonio netto", start=utile_i + 1)
+        # "B) Fondi per rischi e oneri" is printed only when non-zero, its own
+        # explicit "Totale ..." row when it is (#19 diagnosis: entirely absent
+        # on AMBIENTA, not a 0,00 row) — "C) Trattamento di fine rapporto"
+        # always follows it (or A) Patrimonio netto when it is missing too).
+        pn_end = total_pn_i if total_pn_i is not None else utile_i
+        tfr_i = _find(pass_rows, "c) trattamento di fine rapporto", start=pn_end + 1)
+        fondi_total_i = _find_opt(
+            pass_rows, "totale fondi per rischi e oneri", start=pn_end + 1, end=tfr_i
+        )
+        if fondi_total_i is not None:
+            sp14 = _value_at(pass_rows, fondi_total_i, column)
+        else:
+            fondi_i = _find_opt(pass_rows, "b) fondi per rischi", start=pn_end + 1, end=tfr_i)
+            sp14 = (
+                _block_value(pass_rows, fondi_i, tfr_i, column)
+                if fondi_i is not None else Decimal("0")
+            )
         debiti_i = _find(pass_rows, "d) debiti", start=tfr_i + 1)
         ratei_pas_i = _find(pass_rows, "e) ratei e risconti", start=debiti_i + 1)
-        total_deb_i = _find(pass_rows, "totale debiti", start=debiti_i + 1, end=ratei_pas_i)
-        total_pass_i = _find(pass_rows, "totale passivo", start=ratei_pas_i + 1)
+        total_pass_i = _find_opt(pass_rows, "totale passivo", start=ratei_pas_i + 1)
 
         sp11 = _value_at(pass_rows, capitale_i, column)
         utile = pass_rows[utile_i].value(column) or Decimal("0")
@@ -412,17 +775,25 @@ def _parse_column(rows: Sequence[_Row], column: int) -> Optional[Dict[str, Decim
             else Decimal("0")
         )
         sp13 = utile - perdita
-        total_pn = _value_at(pass_rows, total_pn_i, column)
+        total_pn = _section_total_value(
+            pass_rows, pn_i, tfr_i, ("totale patrimonio netto",), column,
+            search_start=utile_i + 1,
+        )
         # Source definition A.II..VIII/X: the displayed PN total less the two
         # separately printed legal fields, capitale and current-year result.
         sp12 = total_pn - sp11 - sp13
-        sp14 = _value_at(pass_rows, fondi_i, column)
         sp15 = _value_at(pass_rows, tfr_i, column)
-        sp16 = _sum_maturity(pass_rows, debiti_i, ratei_pas_i, column, "- entro l'esercizio")
-        sp17 = _sum_maturity(pass_rows, debiti_i, ratei_pas_i, column, "- oltre l'esercizio")
-        total_deb = _value_at(pass_rows, total_deb_i, column)
+        sp16 = _sum_maturity(pass_rows, debiti_i, ratei_pas_i, column, "entro")
+        sp17 = _sum_maturity(pass_rows, debiti_i, ratei_pas_i, column, "oltre")
+        total_deb = _section_total_value(
+            pass_rows, debiti_i, ratei_pas_i, ("totale debiti",), column,
+        )
         sp18 = _value_at(pass_rows, ratei_pas_i, column)
-        total_pass = _value_at(pass_rows, total_pass_i, column)
+        total_pass = (
+            _value_at(pass_rows, total_pass_i, column)
+            if total_pass_i is not None
+            else _value_at(pass_rows, 0, column)  # "Stato patrimoniale passivo" itself
+        )
 
         # Independent source controls.  No balance difference is allocated.
         checks = (
@@ -438,6 +809,14 @@ def _parse_column(rows: Sequence[_Row], column: int) -> Optional[Dict[str, Decim
             _close(total_att, total_pass),
         )
         if not all(checks):
+            return None
+        # Attivo = Passivo = 0 non e' una quadratura (CLAUDE.md, "Quadratura,
+        # diagnostica e verdetti"): con tutte le voci opzionali di #23 (imm_i,
+        # rim_i, fin_i, tax_i...) un documento senza alcun importo reale (un
+        # modello in bianco, un template) supererebbe ogni controllo per
+        # coincidenza - zero contro zero chiude comunque. Un'estrazione vuota
+        # non e' un bilancio pulito.
+        if total_att == 0 and total_pass == 0:
             return None
 
         return {
@@ -491,12 +870,37 @@ def _optional_direct_value_re(
         return Decimal("0")
 
 
+# A general-ledger mastro reference printed on its own, before the account's
+# description ("23010 riserva straordinaria p", "1201025 banca popolare
+# pugliese c/c a") — #23 diagnosis (budget_289/352): this dialect prints BOTH
+# the legal category ("IV) Riserva legale") and, immediately under it, every
+# underlying mastro that composes it, each carrying the SAME amount again.
+# Never confused with a legal item number ("4) Debiti verso banche"), which
+# always has ")" glued to the digits with no space in between.
+_LEDGER_MASTRO_RE = re.compile(r"^\d+(?:\.\d+)?\s")
+
+
 def _sum_printed_values(rows: Sequence[_Row], start: int, end: int) -> Decimal:
+    """Sum every printed leaf value in range, skipping totals and mastri.
+
+    Excludes an explicit "Totale ..." row (that IS the sum, not a leaf to
+    add), the "ledger mastro" line that repeats a category's own value a
+    second time (above), and — debiti only, #23 diagnosis budget_352 — the
+    bare "Debiti esigibili entro/oltre l'esercizio successivo" row: the
+    WHOLE section's own maturity split, printed once at the top and again,
+    with a business description, on every per-lender category below it
+    ("a) Debiti verso banche esigibili entro..."). Only the bare aggregate
+    is excluded — the category-level rows still start with a letter, never
+    literally "debiti esigibili", so they are kept.
+    """
     return sum(
         (
             row.value(0)
             for row in rows[start:end]
-            if row.value(0) is not None and not row.label.startswith("totale ")
+            if row.value(0) is not None
+            and not row.label.startswith("totale ")
+            and not row.label.startswith("debiti esigibili")
+            and not _LEDGER_MASTRO_RE.match(row.label)
         ),
         Decimal("0"),
     )
@@ -512,33 +916,116 @@ def _parse_compact_balance(rows: Sequence[_Row]) -> Optional[Dict[str, Decimal]]
     try:
         sp_att = _find(rows, "stato patrimoniale", "attivo")
         sp_pas = _find(rows, "stato patrimoniale", "passivo", start=sp_att + 1)
-        total_pas_i = _find(rows, "totale passivo", start=sp_pas + 1)
+        # #23 diagnosis (budget_289/352): this dialect prints "TOTALE STATO
+        # PATRIMONIALE PASSIVO"/"...ATTIVO", not the bare "Totale
+        # passivo"/"Totale attivo" of the already-supported compact layout —
+        # `_find_re` tolerates the optional extra words without losing the
+        # original phrasing (`.match()` anchors both at the row's own start).
+        total_pas_i = _find_re(rows, r"^totale (?:stato patrimoniale )?passivo", start=sp_pas + 1)
         asset_rows = rows[sp_att:sp_pas]
         pass_rows = rows[sp_pas:total_pas_i + 1]
 
-        immat_i = _find(asset_rows, "i - immobilizzazioni immateriali")
-        mat_i = _find(asset_rows, "ii - immobilizzazioni materiali", start=immat_i + 1)
-        fin_imm_i = _find(asset_rows, "iii - immobilizzazioni finanziarie", start=mat_i + 1)
-        total_imm_i = _find(asset_rows, "totale immobilizzazioni (b)", start=fin_imm_i + 1)
-        rim_i = _find(asset_rows, "i - rimanenze", start=total_imm_i + 1)
-        cred_i = _find(asset_rows, "ii - crediti", start=rim_i + 1)
-        fin_att_i = _find(asset_rows, "iii - attivita finanziarie", start=cred_i + 1)
-        liq_i = _find(asset_rows, "iv - disponibilita liquide", start=fin_att_i + 1)
+        # #23 diagnosis (budget_289/352): a third dialect for the same three
+        # legal captions (3a/3c above cover "B.I)"/"I -"), here bracketed
+        # ("I) Immobilizzazioni immateriali", no dash) on FLAT numeric-mastro
+        # statements. "III) Immobilizzazioni finanziarie" is printed only
+        # when non-zero (absent on both 289 and 352, same convention as
+        # elsewhere): optional, sp04 zero when absent.
+        immat_i = _find_variant(
+            asset_rows, (("i - immobilizzazioni immateriali",), ("i) immobilizzazioni immateriali",))
+        )
+        mat_i = _find_variant(
+            asset_rows,
+            (("ii - immobilizzazioni materiali",), ("ii) immobilizzazioni materiali",)),
+            start=immat_i + 1,
+        )
+        fin_imm_i = _find_variant_opt(
+            asset_rows,
+            (("iii - immobilizzazioni finanziarie",), ("iii) immobilizzazioni finanziarie",)),
+            start=mat_i + 1,
+        )
+        total_imm_i = _find(
+            asset_rows, "totale immobilizzazioni (b)",
+            start=(fin_imm_i if fin_imm_i is not None else mat_i) + 1,
+        )
+        rim_i = _find_variant(
+            asset_rows, (("i - rimanenze",), ("i) rimanenze",)), start=total_imm_i + 1
+        )
+        cred_i = _find_variant(
+            asset_rows, (("ii - crediti",), ("ii) crediti",)), start=rim_i + 1
+        )
+        # "III) Attività finanziarie che non costituiscono immobilizzazioni"
+        # is printed only when non-zero (#23 diagnosis: absent on 289,
+        # present with its own "Totale..." row on 352).
+        fin_att_i = _find_variant_opt(
+            asset_rows,
+            (("iii - attivita finanziarie",), ("iii) attivita finanziarie",)),
+            start=cred_i + 1,
+        )
+        liq_i = _find_variant(
+            asset_rows,
+            (("iv - disponibilita liquide",), ("iv) disponibilita liquide",)),
+            start=(fin_att_i if fin_att_i is not None else cred_i) + 1,
+        )
         total_c_i = _find(asset_rows, "totale attivo circolante", start=liq_i + 1)
 
-        sp01 = _direct_value(asset_rows, "a) crediti verso soci")
+        # "A) Crediti verso soci..." is printed with the caption alone and no
+        # value at all when it is zero on this dialect (#23 diagnosis:
+        # budget_289/352), not the "0,00" of the already-supported compact
+        # layout — absent-or-valueless both mean zero, never a hard failure
+        # on this single genuinely optional legal field.
+        try:
+            sp01 = _direct_value(asset_rows, "a) crediti verso soci")
+        except ValueError:
+            sp01 = Decimal("0")
         sp02 = _direct_value(asset_rows, "totale immobilizzazioni immateriali")
         sp03 = _direct_value(asset_rows, "totale immobilizzazioni materiali")
-        sp04 = _direct_value(asset_rows, "iii", "immobilizzazioni finanziarie")
+        sp04 = (
+            _value_at(asset_rows, fin_imm_i, 0) if fin_imm_i is not None else Decimal("0")
+        )
         total_imm = _direct_value(asset_rows, "totale immobilizzazioni (b)")
         sp05 = _direct_value(asset_rows, "totale rimanenze")
-        sp06 = _direct_value(asset_rows, "totale crediti")
+        # #23 diagnosis (budget_289/352): plain substring "totale crediti"
+        # matches the FIRST such row — "Totale crediti verso clienti", a per-
+        # category sub-total that precedes the section's own bare "Totale
+        # crediti" and also contains that substring (same class of bug fixed
+        # on `total_deb_i` above). Anchored to the exact phrase alone.
+        sp06 = _direct_value_re(asset_rows, r"^totale crediti\s*$")
         sp07 = Decimal("0")
-        sp08 = _direct_value(asset_rows, "iii", "attivita finanziarie non immobilizzate")
-        sp09 = _direct_value(asset_rows, "depositi bancari")
+        # The already-supported dash layout prints the value directly on the
+        # "III - Attivita finanziarie..." caption (a lone "0,00"); #23
+        # diagnosis (budget_352) prints it via an explicit "Totale attivita
+        # finanziarie..." row instead when there is real detail underneath
+        # (absent entirely on 289 — optional above). Caption value first
+        # (unchanged where it carries one), explicit total only when the
+        # caption alone reads zero.
+        if fin_att_i is None:
+            sp08 = Decimal("0")
+        else:
+            sp08_diretto = asset_rows[fin_att_i].value(0) or Decimal("0")
+            sp08 = (
+                sp08_diretto
+                if sp08_diretto != 0
+                else _optional_direct_value_re(
+                    asset_rows, r"^totale attivita finanziarie", fin_att_i + 1, liq_i
+                )
+            )
+        # #23 diagnosis (budget_289/352): "IV) Disponibilità liquide" splits
+        # bank deposits and cash on two mastro rows here, with its own
+        # explicit "Totale disponibilità liquide" afterward — the already-
+        # supported compact layout prints one combined "Depositi bancari e
+        # postali, cassa" row instead, with no such total. Prefer the
+        # explicit total when the source prints one; fall back to the single
+        # combined caption otherwise (existing behaviour, unchanged).
+        try:
+            sp09 = _direct_value_re(
+                asset_rows, r"^totale disponibilita liquide", liq_i + 1, total_c_i
+            )
+        except ValueError:
+            sp09 = _direct_value(asset_rows, "depositi bancari")
         total_c = _direct_value(asset_rows, "totale attivo circolante")
         sp10 = _direct_value(asset_rows, "d) ratei e risconti attivi")
-        total_att = _direct_value_re(asset_rows, r"^totale attivo(?:\s*\(|$)")
+        total_att = _direct_value_re(asset_rows, r"^totale (?:stato patrimoniale )?attivo(?:\s*\(|$)")
 
         sp02b = _optional_direct_value_re(
             asset_rows, r"^2\) costi di sviluppo", immat_i + 1, mat_i
@@ -588,22 +1075,44 @@ def _parse_compact_balance(rows: Sequence[_Row]) -> Optional[Dict[str, Decimal]]
             sp06a, sp06g = sp06g, Decimal("0")
 
         pn_i = _find(pass_rows, "a) patrimonio netto")
-        capitale_i = _find(pass_rows, "i - capitale", start=pn_i + 1)
-        result_i = _find(pass_rows, "ix - utile", start=capitale_i + 1)
+        capitale_i = _find_variant(
+            pass_rows, (("i - capitale",), ("i) capitale",)), start=pn_i + 1
+        )
+        result_i = _find_variant(
+            pass_rows, (("ix - utile",), ("ix) utile",)), start=capitale_i + 1
+        )
         total_pn_i = _find(pass_rows, "totale patrimonio netto", start=result_i + 1)
         fondi_i = _find(pass_rows, "b) fondi per rischi", start=total_pn_i + 1)
         tfr_i = _find(pass_rows, "c) trattamento di fine rapporto", start=fondi_i + 1)
         debiti_i = _find(pass_rows, "d) debiti", start=tfr_i + 1)
-        total_deb_i = _find(pass_rows, "totale debiti", start=debiti_i + 1)
+        # #23 diagnosis (budget_289/352): plain substring "totale debiti"
+        # matches the FIRST of several rows — "Totale debiti verso banche"
+        # (a per-category sub-total, read separately into sp16a above) comes
+        # BEFORE the section's own "Totale debiti (D)" and also contains that
+        # substring, so the unanchored `_find` used to grab the wrong
+        # (smaller) row here. Anchored so only "totale debiti" itself,
+        # immediately followed by "(" or the end of the label, counts.
+        total_deb_i = _find_re(pass_rows, r"^totale debiti\s*(?:\(|$)", start=debiti_i + 1)
         ratei_pas_i = _find(pass_rows, "e) ratei e risconti passivi", start=total_deb_i + 1)
-        total_pass_i = _find(pass_rows, "totale passivo", start=ratei_pas_i + 1)
+        total_pass_i = _find_re(pass_rows, r"^totale (?:stato patrimoniale )?passivo", start=ratei_pas_i + 1)
 
         sp11 = _value_at(pass_rows, capitale_i, 0)
         sp13 = _value_at(pass_rows, result_i, 0)
         total_pn = _value_at(pass_rows, total_pn_i, 0)
         printed_reserves = _sum_printed_values(pass_rows, capitale_i + 1, result_i)
         sp12 = total_pn - sp11 - sp13
-        sp14 = _value_at(pass_rows, fondi_i, 0)
+        # The already-supported compact layout prints the value directly on
+        # "B) Fondi per rischi e oneri" (a lone "0,00", no detail); #23
+        # diagnosis (budget_289/352) never does when it has real sub-items —
+        # its own explicit "Totale fondi..." row does instead. Caption first
+        # (unchanged where it carries the value), the explicit total only
+        # when the caption alone reads zero — same rule as ``_debiti_categoria``.
+        sp14_diretto = pass_rows[fondi_i].value(0) or Decimal("0")
+        sp14 = (
+            sp14_diretto
+            if sp14_diretto != 0
+            else _optional_direct_value_re(pass_rows, r"^totale fondi per rischi", fondi_i + 1, tfr_i)
+        )
         sp15 = _value_at(pass_rows, tfr_i, 0)
         total_deb = _value_at(pass_rows, total_deb_i, 0)
         printed_debts = _sum_printed_values(pass_rows, debiti_i + 1, total_deb_i)
@@ -621,21 +1130,32 @@ def _parse_compact_balance(rows: Sequence[_Row]) -> Optional[Dict[str, Decimal]]
         sp12g = _optional_direct_value_re(
             pass_rows, r"^viii\b.*utili .*portati", capitale_i + 1, result_i
         )
-        sp16a = _optional_direct_value_re(
-            pass_rows, r"^4\) debiti verso banche", debiti_i + 1, total_deb_i
-        )
+        # The already-supported compact layout prints the value directly on
+        # the "N) Debiti verso X" caption row; #23 diagnosis (budget_289/352)
+        # never does (compound header, same as "B) Fondi" above) and relies
+        # on its own explicit "Totale debiti verso X" row instead. Try the
+        # caption first (unchanged behaviour where it carries the value) and
+        # only fall back to the explicit total when the caption alone reads
+        # zero — never the other way round, or a real "Totale debiti verso
+        # banche" row on a file that ALSO happens to print a non-zero
+        # unrelated amount on the caption would be shadowed.
+        def _debiti_categoria(pattern_diretto: str, pattern_totale: str) -> Decimal:
+            diretto = _optional_direct_value_re(
+                pass_rows, pattern_diretto, debiti_i + 1, total_deb_i
+            )
+            if diretto != 0:
+                return diretto
+            return _optional_direct_value_re(
+                pass_rows, pattern_totale, debiti_i + 1, total_deb_i
+            )
+
+        sp16a = _debiti_categoria(r"^4\) debiti verso banche", r"^totale debiti verso banche")
         sp16b = _optional_direct_value_re(
             pass_rows, r"^5\) debiti verso altri finanziatori", debiti_i + 1, total_deb_i
         )
-        sp16d = _optional_direct_value_re(
-            pass_rows, r"^7\) debiti verso fornitori", debiti_i + 1, total_deb_i
-        )
-        sp16e = _optional_direct_value_re(
-            pass_rows, r"^12\) debiti tributari", debiti_i + 1, total_deb_i
-        )
-        sp16f = _optional_direct_value_re(
-            pass_rows, r"^13\) debiti verso istituti", debiti_i + 1, total_deb_i
-        )
+        sp16d = _debiti_categoria(r"^7\) debiti verso fornitori", r"^totale debiti verso fornitori")
+        sp16e = _debiti_categoria(r"^12\) debiti tributari", r"^totale debiti tributari")
+        sp16f = _debiti_categoria(r"^13\) debiti verso istituti", r"^totale debiti verso istituti")
         sp16g = sp16 - sp16a - sp16b - sp16d - sp16e - sp16f
 
         checks = (
@@ -652,6 +1172,10 @@ def _parse_compact_balance(rows: Sequence[_Row]) -> Optional[Dict[str, Decimal]]
             _close(total_att, total_pass),
         )
         if not all(checks):
+            return None
+        # Attivo = Passivo = 0 non e' una quadratura (CLAUDE.md, "Quadratura,
+        # diagnostica e verdetti") - vedi la stessa nota su _parse_column.
+        if total_att == 0 and total_pass == 0:
             return None
 
         return {
@@ -717,75 +1241,144 @@ def _parse_income_column(
         ce_start = _find(rows, "conto economico")
         ce_rows = rows[ce_start:]
 
-        a_i = _find_re(ce_rows, r"^a\) valore della produzione")
-        a1 = _find_re(ce_rows, r"^1\) ricavi", start=a_i + 1)
-        a2 = _find_re(ce_rows, r"^2\) variazione", start=a1 + 1)
-        a3 = _find_re(ce_rows, r"^3\) variazioni dei lavori", start=a2 + 1)
-        a4 = _find_re(ce_rows, r"^4\) incrementi", start=a3 + 1)
-        a5 = _find_re(ce_rows, r"^5\) altri ricavi", start=a4 + 1)
-        total_a = _find(ce_rows, "totale valore della produzione", start=a5 + 1)
+        # --- boundaries first: an optional caption contributes zero and never
+        # consumes a position, a mandatory one still raises via _find/_find_re
+        # (#19 diagnosis: A.2/A.3, B.12/B.13, C.15, C.17 bis and the whole "D)
+        # Rettifiche di valore" section are printed only when non-zero).
+        #
+        # #23 diagnosis (gruppo G3, budget_280/320/379): two independent
+        # printing quirks of this template, on top of one another. First, the
+        # arabic sub-items of A)/B)/C) carry their PARENT LETTER as a dotted
+        # prefix ("A.1) Ricavi...", "B.6) Per materie...", "C.16) Altri
+        # proventi..."), never bare "1)"/"6)"/"16)". Second, EVERY row —
+        # including the top-level A)/B)/C)/D)/20)/21) captions themselves —
+        # carries the source's own internal Cod. reference number before the
+        # legal caption ("3380 A) Valore della produzione", "4918 20) Imposte
+        # sul reddito..."): the same "Cod. + didascalia" column already
+        # tolerated by substring `_find` elsewhere in this module (#23
+        # diagnosis §3a), but every boundary here used `_find_re`, anchored at
+        # the row's true start, where it always failed. Both prefixes are
+        # optional and independent (a boundary can carry either, both, or
+        # neither) — `_P` covers both, in the order they're printed.
+        _P = r"^(?:\d[\d.]*\s+)?(?:[a-z]\.)?"
+        a_i = _find_re(ce_rows, _P + r"a\) valore della produzione")
+        a1 = _find_re(ce_rows, _P + r"1\) ricavi", start=a_i + 1)
+        a2 = _find_re_opt(ce_rows, _P + r"2\) variazione", start=a1 + 1)
+        a3 = _find_re_opt(ce_rows, _P + r"3\) variazioni dei lavori", start=(a2 if a2 is not None else a1) + 1)
+        a4 = _find_re_opt(
+            ce_rows, _P + r"4\) incrementi",
+            start=(a3 if a3 is not None else (a2 if a2 is not None else a1)) + 1,
+        )
+        a5 = _find_re(ce_rows, _P + r"5\) altri ricavi", start=(a4 if a4 is not None else (a3 if a3 is not None else (a2 if a2 is not None else a1))) + 1)
 
-        b_i = _find_re(ce_rows, r"^b\) costi della produzione", start=total_a + 1)
-        b6 = _find_re(ce_rows, r"^6\) per materie", start=b_i + 1)
-        b7 = _find_re(ce_rows, r"^7\) per servizi", start=b6 + 1)
-        b8 = _find_re(ce_rows, r"^8\) per godimento", start=b7 + 1)
-        b9 = _find_re(ce_rows, r"^9\) per il personale", start=b8 + 1)
-        b10 = _find_re(ce_rows, r"^10\) ammortamenti", start=b9 + 1)
-        b11 = _find_re(ce_rows, r"^11\) variazioni delle rimanenze", start=b10 + 1)
-        b12 = _find_re(ce_rows, r"^12\) accantonamento", start=b11 + 1)
-        b13 = _find_re(ce_rows, r"^13\) altri accantonamenti", start=b12 + 1)
-        b14 = _find_re(ce_rows, r"^14\) oneri diversi", start=b13 + 1)
-        total_b = _find(ce_rows, "totale costi della produzione", start=b14 + 1)
-        difference_i = _find(
-            ce_rows, "differenza tra valore e costi", start=total_b + 1
+        b_i = _find_re(ce_rows, _P + r"b\) costi della produzione", start=a5 + 1)
+        b6 = _find_re(ce_rows, _P + r"6\) per materie", start=b_i + 1)
+        b7 = _find_re(ce_rows, _P + r"7\) per servizi", start=b6 + 1)
+        b8 = _find_re(ce_rows, _P + r"8\) per godimento", start=b7 + 1)
+        b9 = _find_re(ce_rows, _P + r"9\) per il personale", start=b8 + 1)
+        b10 = _find_re(ce_rows, _P + r"10\) ammortamenti", start=b9 + 1)
+        # "11) Variazioni delle rimanenze di materie prime..." is printed only
+        # when non-zero (#23 diagnosis: absent on budget_280, same convention
+        # as A.2/A.3/B.12/B.13 above and everywhere else in this module).
+        b11 = _find_re_opt(ce_rows, _P + r"11\) variazioni delle rimanenze", start=b10 + 1)
+        b12 = _find_re_opt(ce_rows, _P + r"12\) accantonamento", start=(b11 if b11 is not None else b10) + 1)
+        b13 = _find_re_opt(
+            ce_rows, _P + r"13\) altri accantonamenti",
+            start=(b12 if b12 is not None else (b11 if b11 is not None else b10)) + 1,
+        )
+        b14 = _find_re(
+            ce_rows, _P + r"14\) oneri diversi",
+            start=(b13 if b13 is not None else (b12 if b12 is not None else (b11 if b11 is not None else b10))) + 1,
+        )
+        # Singular "costo" on AMBIENTA, plural "costi" on the already-supported
+        # layout (#19 diagnosis §4): a term missing the final vowel matches both.
+        difference_i = _find(ce_rows, "differenza tra valore e cost", start=b14 + 1)
+
+        c_i = _find_re(ce_rows, _P + r"c\) (?:totale )?proventi e oneri finanziari", start=difference_i + 1)
+        c15 = _find_re_opt(ce_rows, _P + r"15\) proventi da partecipazioni", start=c_i + 1)
+        c16 = _find_re(ce_rows, _P + r"16\) altri proventi finanziari", start=(c15 if c15 is not None else c_i) + 1)
+        c17 = _find_re(ce_rows, _P + r"17\) interessi e altri oneri", start=c16 + 1)
+        c17b = _find_re_opt(ce_rows, _P + r"17 bis\) utili e perdite", start=c17 + 1)
+
+        d_i = _find_re_opt(ce_rows, _P + r"d\) rettifiche di valore", start=(c17b if c17b is not None else c17) + 1)
+        pretax_i = _find(
+            ce_rows, "risultato prima delle imposte",
+            start=(d_i if d_i is not None else (c17b if c17b is not None else c17)) + 1,
+        )
+        # "20) Imposte sul reddito" is printed only when non-zero (#23
+        # diagnosis: absent on budget_379, a loss year — same "absent means
+        # zero" convention as every other optional caption in this module).
+        tax_i = _find_re_opt(ce_rows, _P + r"20\) imposte sul reddito", start=pretax_i + 1)
+        result_i = _find_re(
+            ce_rows, _P + r"21\) utile \(perdita\)",
+            start=(tax_i if tax_i is not None else pretax_i) + 1,
         )
 
-        c_i = _find_re(ce_rows, r"^c\) proventi e oneri finanziari", start=difference_i + 1)
-        c15 = _find_re(ce_rows, r"^15\) proventi da partecipazioni", start=c_i + 1)
-        c16 = _find_re(ce_rows, r"^16\) altri proventi finanziari", start=c15 + 1)
-        c17 = _find_re(ce_rows, r"^17\) interessi e altri oneri", start=c16 + 1)
-        c17b = _find_re(ce_rows, r"^17 bis\) utili e perdite", start=c17 + 1)
-        total_c = _find(ce_rows, "totale proventi e oneri finanziari", start=c17b + 1)
+        # Value of an optional item: a block reaching to the NEXT item actually
+        # present in the chain (never a fixed neighbour that might itself be
+        # absent), or zero when the item itself is absent.
+        def _chain_value(chain: Tuple[Optional[int], ...], item: Optional[int]) -> Decimal:
+            if item is None:
+                return Decimal("0")
+            present = [index for index in chain if index is not None]
+            return _block_value(ce_rows, item, present[present.index(item) + 1], column)
 
-        d_i = _find_re(ce_rows, r"^d\) rettifiche di valore", start=total_c + 1)
-        total_d = _find(
-            ce_rows,
-            "totale rettifiche di valore di attivita e passivita finanziarie",
-            start=d_i + 1,
-        )
-        pretax_i = _find(ce_rows, "risultato prima delle imposte", start=total_d + 1)
-        tax_i = _find_re(ce_rows, r"^20\) imposte sul reddito", start=pretax_i + 1)
-        result_i = _find_re(ce_rows, r"^21\) utile \(perdita\)", start=tax_i + 1)
-
-        ce01 = _block_value(ce_rows, a1, a2, column)
-        ce02 = _block_value(ce_rows, a2, a3, column)
+        a_chain = (a1, a2, a3, a4, a5, b_i)
+        ce01 = _chain_value(a_chain, a1)
+        ce02 = _chain_value(a_chain, a2)
         # A.3 is not represented in the application schema; it must be zero for
         # this strict fallback, otherwise declining is safer than losing a value.
-        a3_value = _block_value(ce_rows, a3, a4, column)
-        ce03 = _block_value(ce_rows, a4, a5, column)
-        ce04 = _block_value(ce_rows, a5, total_a, column)
-        declared_a = _value_at(ce_rows, total_a, column)
+        a3_value = _chain_value(a_chain, a3)
+        ce03 = _chain_value(a_chain, a4)
+        ce04 = _block_value(ce_rows, a5, b_i, column)
+        declared_a = _section_total_value(
+            ce_rows, a_i, b_i, ("totale valore della produzione",), column, search_start=a5 + 1
+        )
 
         ce05 = _block_value(ce_rows, b6, b7, column)
         ce06 = _block_value(ce_rows, b7, b8, column)
         ce07 = _block_value(ce_rows, b8, b9, column)
         ce08 = _block_value(ce_rows, b9, b10, column)
         ce09 = _block_value(ce_rows, b10, b11, column)
-        ce10 = _block_value(ce_rows, b11, b12, column)
-        ce11 = _block_value(ce_rows, b12, b13, column)
-        ce11b = _block_value(ce_rows, b13, b14, column)
-        ce12 = _block_value(ce_rows, b14, total_b, column)
-        declared_b = _value_at(ce_rows, total_b, column)
+        b_chain = (b11, b12, b13, b14, difference_i)
+        ce10 = _chain_value(b_chain, b11)
+        ce11 = _chain_value(b_chain, b12)
+        ce11b = _chain_value(b_chain, b13)
+        ce12 = _block_value(ce_rows, b14, difference_i, column)
+        declared_b = _section_total_value(
+            ce_rows, b_i, difference_i, ("totale costi della produzione",), column, search_start=b14 + 1
+        )
         declared_difference = _value_at(ce_rows, difference_i, column)
 
-        ce13 = _block_value(ce_rows, c15, c16, column)
+        d_or_pretax = d_i if d_i is not None else pretax_i
+        c_chain = (c15, c16, c17, c17b, d_or_pretax)
+        ce13 = _chain_value(c_chain, c15)
         ce14 = _block_value(ce_rows, c16, c17, column)
-        ce15 = _block_value(ce_rows, c17, c17b, column)
-        ce16 = _block_value(ce_rows, c17b, total_c, column)
-        declared_c = _value_at(ce_rows, total_c, column)
-        ce17 = ce_rows[total_d].value(column) or Decimal("0")
+        ce15 = _chain_value(c_chain, c17)
+        ce16 = _chain_value(c_chain, c17b)
+        declared_c = _section_total_value(
+            ce_rows, c_i, d_or_pretax, ("totale proventi e oneri finanziari",), column,
+            search_start=(c17b if c17b is not None else c17) + 1,
+        )
+        if d_i is not None:
+            # Unlike the other declared totals this one is tolerant to a blank
+            # printed amount (a genuinely zero "D)" is common and often left
+            # without a value at all, not just without a caption) — the
+            # original behaviour before #19, kept via `_block_value` rather
+            # than the stricter `_section_total_value`/`_value_at`.
+            total_d_i = _find_opt(
+                ce_rows,
+                "totale rettifiche di valore di attivita e passivita finanziarie",
+                start=d_i + 1, end=pretax_i,
+            )
+            ce17 = _block_value(ce_rows, total_d_i if total_d_i is not None else d_i, pretax_i, column)
+        else:
+            ce17 = Decimal("0")
         declared_pretax = _value_at(ce_rows, pretax_i, column)
-        ce20 = _block_value(ce_rows, tax_i, result_i, column)
+        ce20 = (
+            _block_value(ce_rows, tax_i, result_i, column)
+            if tax_i is not None else Decimal("0")
+        )
         declared_result = _value_at(ce_rows, result_i, column)
 
         value_production = ce01 + ce02 + ce03 + ce04
@@ -805,6 +1398,16 @@ def _parse_income_column(
             _close(result, declared_result),
         )
         if not all(checks):
+            return None
+        # #23 review round 1: la stessa trappola "vuoto" del lato SP
+        # (CLAUDE.md, "Attivo = Passivo = 0 non è una quadratura") vale anche
+        # qui — un conto economico interamente a zero soddisfa ogni controllo
+        # incrociato per coincidenza, indistinguibile da una lettura fallita.
+        # Misurato su un file reale (budget_371/380, la stessa serie "BILAQ"
+        # di budget_379, un primo esercizio con la colonna comparato stampata
+        # tutta a "0,00"): senza questa guardia il comparato tornerebbe un
+        # dizionario "pulito" invece di dichiararsi non letto.
+        if value_production == 0 and production_costs == 0 and financial == 0 and ce17 == 0:
             return None
 
         return {
@@ -934,6 +1537,14 @@ def _parse_compact_income(rows: Sequence[_Row]) -> Optional[Dict[str, Decimal]]:
         )
         if not all(checks):
             return None
+        # NOTA (#23 review round 1, non corretto qui): questa funzione ha la
+        # stessa lacuna "vuoto" di `_parse_income_column` (un CE a colonna
+        # singola interamente a zero passerebbe ogni controllo per
+        # coincidenza — misurato su budget_355/356) ma è preesistente a
+        # entrambi i round di questo task e su un percorso diverso
+        # (`_parse_compact_income`, mai toccato qui): lasciata fuori dallo
+        # scope di questo giro per non allargare un diff che il coordinatore
+        # ha chiesto minimo, segnalata nel report.
 
         return {
             "ce01_ricavi_vendite": ce01,
@@ -981,21 +1592,39 @@ def extract_standard_ivcee_balances(
         return None, None
     try:
         text = "\n".join(page.get_text() for page in document).casefold()
-        required = (
-            "stato patrimoniale",
-            "attivo",
-            "passivo",
-            "totale attivo",
-            "totale passivo",
-            "conto economico",
-        )
+        # "Totale attivo"/"totale passivo" are NOT required: "il totale
+        # precede" documents (#19 diagnosis, the «bilancio riclassificato UE»)
+        # never print the word "totale" at all, the grand totals sit directly
+        # on "Stato patrimoniale attivo/passivo". The row-level cross-foot
+        # checks in `_parse_column` are what actually decide, not this
+        # early text gate.
+        required = ("stato patrimoniale", "attivo", "passivo", "conto economico")
         if not all(marker in text for marker in required):
             return None, None
-        centres = _column_centres(document)
-        if centres is None:
-            return _parse_compact_balance(_single_column_rows(document)), None
-        rows = _physical_rows(document, centres)
-        return _parse_column(rows, 0), _parse_column(rows, 1)
+        layout = _column_layout(document)
+        if layout is not None:
+            current_x, prior_x, prior_ok, bound_x = layout
+            rows = _physical_rows(document, (current_x, prior_x), bound=bound_x)
+            current = _parse_column(rows, 0)
+            # `prior_ok=False` (review Task 23): un layout a più di due colonne
+            # dove la terza non è un marcatore di scarto riconosciuto — mai
+            # indovinare quale sia il comparato.
+            prior = _parse_column(rows, 1) if prior_ok else None
+            return current, prior
+        centres = _labelled_column_centres(document)
+        if centres is not None:
+            # #27 declined reading this layout at all: its anchors are right
+            # edges on a four-column print (corrente | comparato | scostamento
+            # | %), `_physical_rows` only knows two, and the second one ends up
+            # with the variance instead of the prior year. That risk is real
+            # only for the SECOND column: the current-year column sits left of
+            # the mid-point cutoff, clear of scostamento/% (#19 diagnosis,
+            # verified against AMBIENTA's printed totals). Read column 0 only,
+            # and never even attempt column 1 — a declared "no prior" here,
+            # not a cross-foot gamble on a column known to be corrupted.
+            rows = _physical_rows(document, centres)
+            return _parse_column(rows, 0), None
+        return _parse_compact_balance(_single_column_rows(document)), None
     finally:
         document.close()
 
@@ -1009,11 +1638,20 @@ def extract_standard_ivcee_income(
     except Exception:
         return None, None
     try:
-        centres = _column_centres(document)
-        if centres is None:
-            return _parse_compact_income(_single_column_rows(document)), None
-        rows = _physical_rows(document, centres)
-        return _parse_income_column(rows, 0), _parse_income_column(rows, 1)
+        layout = _column_layout(document)
+        if layout is not None:
+            current_x, prior_x, prior_ok, bound_x = layout
+            rows = _physical_rows(document, (current_x, prior_x), bound=bound_x)
+            current = _parse_income_column(rows, 0)
+            prior = _parse_income_column(rows, 1) if prior_ok else None
+            return current, prior
+        centres = _labelled_column_centres(document)
+        if centres is not None:
+            # Same restriction as extract_standard_ivcee_balances: only the
+            # current-year column is reliable on this layout (#27, #19).
+            rows = _physical_rows(document, centres)
+            return _parse_income_column(rows, 0), None
+        return _parse_compact_income(_single_column_rows(document)), None
     finally:
         document.close()
 

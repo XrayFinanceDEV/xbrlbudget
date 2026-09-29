@@ -79,6 +79,66 @@ def _it_amount(value: Decimal) -> str:
     return f"{value:,.2f}".replace(',', '#').replace('.', ',').replace('#', '.')
 
 
+def _declared_totals_contradiction(file_path: str, text: Optional[str]) -> Optional[str]:
+    """Diagnosi pura: il documento sorgente contraddice se stesso, Attivo dichiarato !=
+    Passivo dichiarato (oltre 2 euro). Legge solo i totali che il documento stampa
+    (``_declared_control_totals``), non tocca alcun valore contabile e non impedisce
+    l'estrazione: e' il chiamante che decide come proseguire (Task 17, decisione del
+    proprietario 2026-09-27 — «se il bilancio non e' quadrato deve essere comunque
+    importato con avviso»: questi documenti non si scartano piu' prima di scegliere un
+    estrattore, si importano con questo avviso). None quando i totali dichiarati
+    mancano, non sono leggibili o coincidono.
+    """
+    try:
+        from importers.pdf_extractor_llm import _declared_control_totals
+        source_controls = _declared_control_totals(file_path, text=text)
+    except Exception as source_control_error:
+        # Controllo best-effort: totali non leggibili non bloccano ne' dichiarano nulla.
+        logger.info(
+            "IV-CEE source preflight unavailable (%s: %s)",
+            type(source_control_error).__name__, source_control_error,
+        )
+        return None
+    source_attivo = source_controls.get("attivo")
+    source_passivo = source_controls.get("passivo")
+    if source_attivo is None or source_passivo is None:
+        return None
+    source_difference = abs(source_attivo - source_passivo)
+    if source_difference <= Decimal("2"):
+        return None
+    return (
+        f"{_UNBALANCED_WARNING_PREFIX}: il bilancio sorgente non quadra prima "
+        f"dell'importazione: Totale Attivo €{_euro_it(source_attivo)} != Totale "
+        f"Passivo €{_euro_it(source_passivo)} (scarto €{_euro_it(source_difference)}). "
+        f"{_UNBALANCED_WARNING_SUFFIX}"
+    )
+
+
+def _snello_squadrato_reason(report: Dict[str, Any]) -> str:
+    """Avviso per un risultato del percorso snello con esito 'squadrato' (Task 17): lo
+    scarto e' quello MISURATO dal percorso snello stesso (``report['misura']['corrente']``),
+    mai ricalcolato qui — puo' venire dall'attivo/passivo del foglio ricostruito, dal
+    confronto CE/SP, o dal confronto coi totali stampati dal documento (quest'ultimo non
+    e' visto da ``mapper.validate_balance``, che guarda solo gli aggregati del foglio)."""
+    misura = (report.get("misura") or {}).get("corrente") or {}
+
+    def _fmt(chiave: str) -> str:
+        valore = misura.get(chiave)
+        if valore is None:
+            return "n/d"
+        try:
+            return f"€{_euro_it(Decimal(str(valore)))}"
+        except Exception:
+            return str(valore)
+
+    return (
+        f"{_UNBALANCED_WARNING_PREFIX}: il percorso snello resta oltre soglia dopo "
+        f"l'unica rilettura (scarto Attivo/Passivo {_fmt('scarto_sp')}, scarto CE/SP "
+        f"{_fmt('scarto_ce')}, scarto sui totali stampati dal documento "
+        f"{_fmt('scarto_stampati')}). {_UNBALANCED_WARNING_SUFFIX}"
+    )
+
+
 def _classify_balance_failure(
     balance_sheet_data: Dict[str, Decimal],
     *,
@@ -118,7 +178,14 @@ def _classify_balance_failure(
     if not is_trial_balance and _is_aggregated_summary(sample_text):
         contradiction = _summary_internal_contradiction(sample_text)
         if contradiction:
-            return BalanceFailureVerdict(contradiction, None)
+            # Task 17 (decisione del proprietario, 2026-09-27): un documento internamente
+            # incoerente con i propri totali stampati non e' piu' un errore duro — si
+            # importa comunque, con questo stesso testo diagnostico come avviso, e
+            # l'utente lo corregge in Rettifiche.
+            return BalanceFailureVerdict(
+                None,
+                f"{_UNBALANCED_WARNING_PREFIX}: {contradiction} {_UNBALANCED_WARNING_SUFFIX}",
+            )
         return BalanceFailureVerdict(
             "Formato non supportato: il documento è un riepilogo aggregato per "
             "macro-voci, non uno schema di bilancio IV-CEE (art. 2424/2425) "
@@ -877,41 +944,89 @@ def import_pdf_balance_sheet(
 
         is_trial_balance = (classification.route == ROUTE_TRIAL)
 
-        # Reject an explicitly contradictory legal statement before choosing an
-        # extractor.  Previously this check ran only *after* extraction failed:
-        # on a clean text PDF without an API key, a printed Attivo/Passivo mismatch
-        # therefore surfaced as the unrelated "ANTHROPIC_API_KEY is required"
-        # error.  These are immutable source controls, so no extractor or plug is
-        # allowed to hide the contradiction.
-        if classification.route == ROUTE_IVCEE and not is_scanned and not _ocr_source:
-            try:
-                from importers.pdf_extractor_llm import _declared_control_totals
+        # Import snello (economia): dietro IMPORT_MOTORE=snello, un unico motore
+        # legge la struttura del documento e produce SP/CE gia' quadrati. E'
+        # un'economia, non una nuova rotta: se non produce nulla di utilizzabile
+        # (o solleva), il codice sotto — is_trial_balance/IV-CEE come oggi — resta
+        # il ripiego dichiarato, mai silenzioso (validation_report["import_snello"]
+        # lo dice sempre, quando l'interruttore e' acceso). Scansioni e testo da
+        # OCR (is_scanned/_ocr_source) non hanno mai una struttura testuale
+        # affidabile da analizzare: il percorso snello non si tenta nemmeno, e lo
+        # dichiara con esito "non_applicabile" invece di un ripiego silenzioso.
+        # Un'istanza XBRL nativa non arriva qui: la rotta ROUTE_XBRL solleva sopra.
+        _snello = None
+        _snello_report = None
+        if os.environ.get("IMPORT_MOTORE") == "snello":
+            if is_scanned or _ocr_source:
+                _snello_report = {
+                    "esito": "non_applicabile",
+                    "motivo": "scansione" if is_scanned else "ocr",
+                }
+            else:
+                from importers import import_snello
+                try:
+                    # Tutto in locali fino in fondo: un'eccezione IN QUALUNQUE punto di
+                    # questo blocco (compreso il calcolo dei totali sotto) non deve
+                    # lasciare _snello/balance_sheet_data/... assegnati a meta': i due
+                    # cancelli piu' sotto leggono "_snello is None" per decidere se il
+                    # codice di oggi deve girare, e un _snello legato a un risultato mai
+                    # adottato per intero li terrebbe chiusi su un bilancio incompleto o
+                    # con tipi non validi (bug riprodotto in revisione: un valore non
+                    # numerico dentro bs fa fallire proprio il calcolo dei totali qui
+                    # sotto, DOPO che _snello era gia' assegnato nella versione precedente).
+                    # route_hint: la route che il classificatore ha gia' deciso (ROUTE_TRIAL per una
+                    # situazione contabile) aiuta modo_da_mappe a scegliere "conti" su un voto vicino
+                    # alla parita' fra schema conti e schema legge (Task lotto-b, fix 9, diagnosi
+                    # budget_313: senza l'indizio un pareggio cadeva sul lato sbagliato).
+                    _risultato_snello = import_snello.importa(
+                        file_path, ocr_text=ocr_text, route_hint=classification.route)
+                    _bs_snello, _ce_snello = _risultato_snello.bs, _risultato_snello.ce
+                    _prior_bs_snello = _risultato_snello.prior_bs
+                    _prior_ce_snello = _risultato_snello.prior_ce
+                    # Il motore snello lavora sulle somme sp01..sp18 (stesse
+                    # _ATTIVO_FIELDS/_PASSIVO_FIELDS di mapper.validate_balance,
+                    # gia' quadrate da tappa()/misura()), ma non scrive mai
+                    # 'totale_attivo'/'totale_passivo' sul dict: ogni altro
+                    # estrattore li dichiara da se'. Senza, validate_balance li
+                    # legge assenti (= zero) e _classify_balance_failure tratta
+                    # un bilancio quadrato come un'estrazione vuota (hard_error).
+                    from importers.iv_cee_hierarchy import _ATTIVO_FIELDS, _PASSIVO_FIELDS
+                    for _dati_snello in (_bs_snello, _prior_bs_snello):
+                        if _dati_snello is not None:
+                            _dati_snello["totale_attivo"] = sum(
+                                (Decimal(_dati_snello.get(k, 0)) for k in _ATTIVO_FIELDS), Decimal(0))
+                            _dati_snello["totale_passivo"] = sum(
+                                (Decimal(_dati_snello.get(k, 0)) for k in _PASSIVO_FIELDS), Decimal(0))
+                    # Il blocco e' riuscito per intero: solo ora si adotta il risultato.
+                    _snello = _risultato_snello
+                    _snello_report = _snello.report
+                    balance_sheet_data, income_data = _bs_snello, _ce_snello
+                    prior_bs_data, prior_ce_data = _prior_bs_snello, _prior_ce_snello
+                except import_snello.SnelloNonRiuscito as exc:
+                    _snello = None
+                    _snello_report = exc.report
+                except Exception as exc:  # il percorso snello e' un'economia: senza, l'import di oggi
+                    _snello = None
+                    logger.warning("Import snello non riuscito (%s): importatore attuale", type(exc).__name__)
+                    _snello_report = {"esito": "ripiego", "fase": "eccezione", "errore": type(exc).__name__}
 
-                source_controls = _declared_control_totals(
-                    file_path, text=sample_text
-                )
-                source_attivo = source_controls.get("attivo")
-                source_passivo = source_controls.get("passivo")
-                if source_attivo is not None and source_passivo is not None:
-                    source_difference = abs(source_attivo - source_passivo)
-                    if source_difference > Decimal("2"):
-                        raise PDFImportError(
-                            "Il bilancio sorgente non quadra prima dell'importazione: "
-                            f"Totale Attivo €{_euro_it(source_attivo)} != Totale "
-                            f"Passivo €{_euro_it(source_passivo)} (scarto "
-                            f"€{_euro_it(source_difference)}). "
-                            "Correggere il documento contabile originale."
-                        )
-            except PDFImportError:
-                raise
-            except Exception as source_control_error:
-                # Control discovery is best effort.  If totals are not legible,
-                # continue with the existing extraction and semantic gates.
-                logger.info(
-                    "IV-CEE source preflight unavailable (%s: %s)",
-                    type(source_control_error).__name__,
-                    source_control_error,
-                )
+        # Detect an explicitly contradictory legal statement before choosing an
+        # extractor — but never reject it. Task 17 (decisione del proprietario,
+        # 2026-09-27): «se il bilancio non e' quadrato deve essere comunque importato
+        # con avviso, l'utente lo correggera' nella tab rettifiche», e questo vale
+        # anche per un documento che contraddice i propri stessi totali stampati.
+        # Prima di questa decisione un mismatch Attivo/Passivo dichiarato bloccava
+        # l'import qui (PDFImportError, prima ancora di scegliere un estrattore); ora
+        # il controllo resta (le stesse "immutable source controls" del commento
+        # originale: nessun estrattore o plug puo' nascondere la contraddizione), ma
+        # produce solo un avviso dichiarato — l'estrazione prosegue con le regole di
+        # sempre e, se produce un bilancio importabile, si salva con questo avviso in
+        # testa (vedi piu' sotto, dove ``unbalanced_reason`` viene costruito).
+        _declared_totals_warning: Optional[str] = None
+        if classification.route == ROUTE_IVCEE and not is_scanned and not _ocr_source:
+            _declared_totals_warning = _declared_totals_contradiction(file_path, sample_text)
+            if _declared_totals_warning:
+                logger.warning(_declared_totals_warning)
 
         _macro_report = {}
 
@@ -1244,19 +1359,24 @@ def import_pdf_balance_sheet(
         _source_candidates = []
         _source_reports = {}
         try:
-            if not is_scanned and not _ocr_source:
+            # Un risultato snello adottato ha gia' fatto la propria verifica: rileggere
+            # le fonti (ledger_evidence su gx10) costava fino a 10 minuti per file.
+            if not is_scanned and not _ocr_source and _snello is None:
                 _source_candidates = extract_source_candidates(file_path)
         except Exception as source_err:
             logger.warning("Source cross-foot unavailable: %s", source_err)
         _source_complete = bool(_source_candidates and _source_candidates[0][0] is not None
                                 and _source_candidates[0][1] is not None)
-        if _source_complete:
+        if _source_complete and _snello is None:
+            # Un risultato snello gia' quadrato non va scavalcato da un candidato
+            # indipendente: _snello is None e' l'unico caso in cui questo blocco
+            # puo' sovrascrivere balance_sheet_data/income_data.
             balance_sheet_data, income_data = map(dict, _source_candidates[0][:2])
             prior_bs_data = prior_ce_data = None
             if len(_source_candidates) > 1 and all(v is not None for v in _source_candidates[1][:2]):
                 prior_bs_data, prior_ce_data = map(dict, _source_candidates[1][:2])
             logger.info("Using independently cross-footed source SP and CE")
-        if is_trial_balance and not _source_complete:
+        if is_trial_balance and not _source_complete and _snello is None:
             # Route C (trial balance / situazione contabile). GENERAL rule: run BOTH the
             # CoGe LLM extractor and the deterministic best-effort parser, then keep the
             # CLEANER one — the candidate whose unclassified residual (_plug_residual, read
@@ -1519,7 +1639,7 @@ def import_pdf_balance_sheet(
                  prior_bs_data, prior_ce_data) = _extract_route_c_last_resort(
                     _llm_extract
                 )
-        if not is_trial_balance and not _source_complete:
+        if not is_trial_balance and not _source_complete and _snello is None:
             # IV CEE format (routes A/B) — use LLM extraction
             balance_sheet_data, income_data, prior_bs_data, prior_ce_data = _llm_extract()
             # Debiti aggregates (sp16/sp17) are schema-derived totals with no source
@@ -1589,6 +1709,9 @@ def import_pdf_balance_sheet(
         balance_sheet_data, prior_bs_data, _detail_report = enrich_pdf_details(
             file_path, balance_sheet_data, prior_bs_data, fiscal_year=fiscal_year,
             ocr_text=ocr_text,
+            pagine=(_snello.struttura.pagine_dettagli()
+                    if _snello is not None and _snello.report.get("modo") == "legge" else None),
+            usa_llm=not (_snello is not None and _snello.report.get("modo") == "conti"),
         )
         sc_quadratura_warnings.extend(_detail_report.get('warnings', []))
 
@@ -1626,7 +1749,20 @@ def import_pdf_balance_sheet(
 
         # Step 2: Validate balance sheet (both paths)
         logger.info("Validating balance sheet...")
-        unbalanced_reason: Optional[str] = None
+        # Un documento che contraddice i propri totali stampati (gate sopra, prima della
+        # scelta dell'estrattore) resta dichiarato anche se cio' che si e' riusciti a
+        # estrarre poi quadra da solo: e' un difetto della fonte, non dell'estrazione, e
+        # nessun estrattore o plug lo deve nascondere (Task 17).
+        unbalanced_reason: Optional[str] = _declared_totals_warning
+        # Un risultato snello 'squadrato' (Task 17) puo' restare oltre soglia solo sul
+        # confronto coi totali STAMPATI dal documento (scarto_stampati), che
+        # mapper.validate_balance non vede (guarda solo gli aggregati del foglio, non i
+        # totali stampati): l'avviso va dichiarato qui, esplicitamente, prima di quel
+        # controllo — non e' un nuovo cancello di quadratura, e' la stessa diagnostica
+        # gia' misurata dal percorso snello.
+        if unbalanced_reason is None and _snello is not None and _snello.report.get("esito") == "squadrato":
+            unbalanced_reason = _snello_squadrato_reason(_snello.report)
+            logger.warning(unbalanced_reason)
         if not mapper.validate_balance(balance_sheet_data):
             _verdict = _classify_balance_failure(
                 balance_sheet_data,
@@ -1642,7 +1778,10 @@ def import_pdf_balance_sheet(
             # Sbilancio: si importa e si corregge in Rettifiche. forecastable
             # restera' False da solo (semantic_valid include la quadratura),
             # e _validate_forecast_source blocca comunque la proiezione.
-            unbalanced_reason = _verdict.warning
+            if unbalanced_reason is None:
+                unbalanced_reason = _verdict.warning
+            logger.warning(_verdict.warning)
+        elif unbalanced_reason:
             logger.warning(unbalanced_reason)
 
         # Unified quadratura diagnostic across ALL routes (shared IV-CEE engine):
@@ -1794,6 +1933,8 @@ def import_pdf_balance_sheet(
             logger.warning(f"Reliability non calcolata: {_rel_err}")
 
         _validation_payload = _validation_report_payload(_qd, reliability=_reliability)
+        if _snello_report is not None:
+            _validation_payload["import_snello"] = _snello_report
         if is_trial_balance:
             # Fornitore configurato per il pass CoGe di route C, dichiarato su OGNI import
             # di route C (non solo quando il pass CoGe ha vinto il confronto col candidato
@@ -1976,6 +2117,8 @@ def import_pdf_balance_sheet(
                         db.flush()
 
                     _prior_validation = _validation_report_payload(_prior_q)
+                    if _snello_report is not None:
+                        _prior_validation["import_snello"] = _snello_report
                     if is_trial_balance:
                         # Stesso fornitore dichiarato dell'anno corrente (route C legge
                         # entrambe le colonne con lo stesso pass CoGe): vedi il commento
@@ -2053,7 +2196,9 @@ def import_pdf_balance_sheet(
         db.commit()
 
         extraction_time = (datetime.utcnow() - extraction_start).total_seconds()
-        if is_trial_balance:
+        if _snello is not None:
+            extraction_method = "import_snello"
+        elif is_trial_balance:
             # Route C: distinguish the CoGe LLM pass from the deterministic parser fallback.
             extraction_method = "situazione_contabile_llm" if _coge_ok else "situazione_contabile"
         elif balance_sheet_data.get("_source_mineru_ivcee"):

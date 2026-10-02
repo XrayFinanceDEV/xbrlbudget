@@ -902,6 +902,9 @@ def estrai(file_path: str) -> Optional[dict]:
         righe, colonne, anni = _leggi_righe(documento)
         if not righe or not colonne:
             return _rifiutato(anni, "prospetto_non_letto")
+        if len(anni) >= 2 and anni[1] > anni[0]:
+            # intestazioni invertite (`2024 | 2025`): la prima colonna non e' l'anno corrente
+            return _rifiutato(anni, "anni_invertiti", anni_letti=list(anni), motivo="la seconda colonna e' piu' recente della prima")
         try:
             radici, calcolati, totali, errori = _costruisci(righe, colonne)
             colonne_dati = [_importi_colonna(radici, c) for c in range(colonne)]

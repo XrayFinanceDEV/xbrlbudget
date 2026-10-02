@@ -853,3 +853,13 @@ def test_voce_stampata_come_foglia_unica_resta_sull_aggregato(tmp_path):
     assert r["ce"]["ce08_costi_personale"] == D("42477")
     assert r["ce"].get("ce08d_altri_costi_personale", 0) == D("0")
     assert r["ignoti"] == []
+
+
+def test_intestazione_invertita_rifiuta_il_candidato(tmp_path):
+    """Round 2 (N2): `2024 | 2025` darebbe il 2024 come anno corrente: mai adottato."""
+    sp = _sostituisci(SP_ABBREVIATO, DATE, "31-12-2024\\n31-12-2025".replace("\\n", "\n"))
+    ce = _sostituisci(CE_ABBREVIATO, "31-12-2025 31-12-2024", "31-12-2024 31-12-2025")
+    r = X.estrai(_abbreviato(tmp_path, sp=sp, ce=ce))
+    assert r["adottabile"] is False
+    assert r["rifiuto"]["controllo"] == "anni_invertiti"
+    assert r["rifiuto"]["anni_letti"] == [2024, 2025]

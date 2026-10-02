@@ -124,6 +124,7 @@ def _risultato_deterministico(_det: dict, struttura, modo: str, t0: float) -> "R
         # nota); il report dice da dove vengono e cosa si e' potuto applicare.
         **({"dettagli": {"fonte": "prospetto_e_nota_xbrl", **_det["dettagli"]}}
            if _det.get("dettagli") is not None else {}),
+        **({"ignoti": _det["ignoti"]} if _det.get("ignoti") else {}),
         "anomalie": _anomalie(_bs_det, _diag_det), "secondi": round(time.monotonic() - t0, 1),
     }
     return Risultato(bs=_bs_det, ce=dict(_det["ce"]), prior_bs=_det.get("prior_bs"),

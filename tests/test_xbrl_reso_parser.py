@@ -315,7 +315,7 @@ def test_didascalia_sconosciuta_nei_costi_va_su_ce06_ed_e_contata(tmp_path):
     assert r["adottabile"] is True, r["rifiuto"]
     assert r["ce"]["ce06_servizi"] == D("226212")                  # 225.712 letti + 500 sul secchio
     assert r["bs"]["_unclassified_mass"] == D("500")
-    assert r["bs"]["_xbrl_reso_ignoti"][0][0] == "costo mai visto"
+    assert r["ignoti"][0][0] == "costo mai visto" and r["ignoti"][0][1] == "ce06"
 
 
 def test_didascalia_sconosciuta_senza_secchio_rifiuta(tmp_path):
@@ -637,3 +637,33 @@ def test_riga_di_dettaglio_negativa_resta_col_suo_segno(tmp_path):
     r = X.estrai(_abbreviato(tmp_path, sp=sp))
     assert r["prior_ce"]["ce03_lavori_interni"] == D("-1500")
     assert r["prior_bs"]["sp13_utile_perdita"] == D("40047")
+
+
+def test_estrai_che_solleva_non_impedisce_il_percorso_di_sempre(tmp_path, monkeypatch):
+    from importers.import_snello import deterministico as DET
+
+    def rotto(path):
+        raise RuntimeError("lettore rotto")
+    monkeypatch.setattr(X, "estrai", rotto)
+    esito = DET.tentativo(_abbreviato(tmp_path))
+    assert esito["adottato"] is False                       # il percorso classico non legge questo file
+    assert esito["xbrl_reso"] == {"esito": "errore"}
+
+
+def test_massa_non_classificata_sopra_soglia_non_si_adotta_e_si_dichiara(tmp_path):
+    from importers.import_snello import deterministico as DET
+    ce = list(CE_ABBREVIATO)
+    # 5.000 euro su una didascalia mai vista (sopra max(100 euro, 0,1% dell'attivo) = 1.672,72)
+    ce = _sostituisci(ce, "7) per servizi\n226.212\n236.952", "7) per servizi\n221.212\n236.952")
+    ce.insert(ce.index("14) oneri diversi di gestione\n8.638\n128.844"), "costo mai visto\n5.000\n0")
+    esito = DET.tentativo(_abbreviato(tmp_path, ce=ce))
+    assert esito["adottato"] is False
+    assert esito["xbrl_reso"]["esito"] == "massa_non_classificata"
+    assert esito["xbrl_reso"]["unclassified_mass"] == "5000.00"
+
+
+def test_riconosci_un_file_senza_estensione_pdf(tmp_path):
+    path = _abbreviato(tmp_path)
+    import shutil
+    shutil.copy(path, str(tmp_path / "caricato"))
+    assert X.riconosci(str(tmp_path / "caricato")) is True

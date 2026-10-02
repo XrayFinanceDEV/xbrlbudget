@@ -26,6 +26,7 @@ Regole (CLAUDE.md, «Invarianti e trappole»):
 """
 from __future__ import annotations
 
+import os
 import re
 from dataclasses import dataclass, field
 from decimal import Decimal
@@ -81,18 +82,22 @@ def _norm(testo: str) -> str:
 # Riconoscimento
 # --------------------------------------------------------------------------------------
 
+_PAGINE_RICONOSCIMENTO = 8
+
+
 def riconosci(sorgente: str) -> bool:
     """Vero se il documento e' il PDF reso da un XBRL depositato: il piede di tassonomia compare
-    su una pagina che porta il titolo del prospetto. Accetta un percorso di file o direttamente il
-    testo (una pagina o piu'). Solo testo, nessun modello."""
+    su una pagina che porta il titolo del prospetto (le prime pagine bastano: il prospetto e'
+    sempre in testa). Accetta un percorso di file o direttamente il testo. Solo testo, nessun
+    modello."""
     if not sorgente:
         return False
-    if "\n" in sorgente or not sorgente.lower().endswith(".pdf"):
+    if not os.path.isfile(sorgente):
         return bool(_PIEDE.search(sorgente)) and bool(
             re.search(r"^Stato patrimoniale", sorgente, re.M))
     try:
         with fitz.open(sorgente) as documento:
-            for pagina in documento:
+            for pagina in list(documento)[:_PAGINE_RICONOSCIMENTO]:
                 testo = pagina.get_text()
                 if _PIEDE.search(testo) and re.search(r"^Stato patrimoniale", testo, re.M):
                     return True
@@ -877,9 +882,7 @@ def estrai(file_path: str) -> Optional[dict]:
         elif dati.scadenze_lette:
             bs["_source_maturity_read"] = Decimal("1")
         bs["_source_xbrl_reso"] = Decimal("1")
-        if dati.ignoti:
-            bs["_xbrl_reso_ignoti"] = [list(x) for x in dati.ignoti]
-        risultati.append((bs, ce))
+        risultati.append((bs, ce, [list(x) for x in dati.ignoti]))
 
     def primo(c):
         a = anomalie[c]
@@ -900,16 +903,16 @@ def estrai(file_path: str) -> Optional[dict]:
             prior_stato = "scartato"
             prior_rifiuto = primo(1)
         else:
-            (prior_bs, prior_ce), prior_stato = risultati[1], "letto"
+            (prior_bs, prior_ce, _), prior_stato = risultati[1], "letto"
             prior_rifiuto = None
     else:
         prior_rifiuto = None
-    bs, ce = risultati[0]
+    bs, ce, ignoti = risultati[0]
     return {
         "adottabile": True, "rifiuto": None, "anni": anni, "bs": bs, "ce": ce,
         "prior_bs": prior_bs, "prior_ce": prior_ce, "prior_stato": prior_stato,
         "prior_rifiuto": prior_rifiuto,
         "stampati": {"totale_attivo": stampati["attivo"][0] if "attivo" in stampati else None,
                      "totale_passivo": stampati["passivo"][0] if "passivo" in stampati else None},
-        "dettagli": dettagli,
+        "dettagli": dettagli, "ignoti": ignoti,
     }

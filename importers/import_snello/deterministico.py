@@ -107,6 +107,7 @@ def _prova_xbrl_reso(file_path: str) -> dict | None:
                 "rifiuto": candidato["rifiuto"]}
     esito = _esito("xbrl_reso_parser", candidato["bs"], candidato["ce"], candidato["stampati"])
     esito["dettagli"] = candidato["dettagli"]
+    esito["ignoti"] = candidato["ignoti"]
     if esito["adottato"] and candidato["prior_bs"] is not None:
         esito["prior_bs"] = _adatta(candidato["prior_bs"])
         esito["prior_ce"] = _adatta(candidato["prior_ce"])
@@ -247,5 +248,5 @@ def tentativo(file_path: str, ocr_text: str | None = None) -> dict:
         return reso
     esito = _tentativo_classico(file_path, ocr_text)
     if reso is not None:
-        esito = {**esito, "xbrl_reso": {k: reso[k] for k in ("esito", "rifiuto") if k in reso}}
+        esito = {**esito, "xbrl_reso": {k: reso[k] for k in ("esito", "rifiuto", "unclassified_mass") if k in reso}}
     return esito

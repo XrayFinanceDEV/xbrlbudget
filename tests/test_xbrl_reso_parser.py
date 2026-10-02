@@ -48,7 +48,11 @@ def _pdf(tmp_path, pagine, nome="reso.pdf", piede=True):
                 pagina.insert_text((40, y), linea, fontname="helv", fontsize=9)
                 y += 12
             y += 14
-        if piede:
+        if piede == "pagina":
+            # altro generatore, senza tassonomia: "Bilancio di esercizio / Pagina N di M" in fondo
+            pagina.insert_text((57, 700), "Bilancio di esercizio ", fontname="helv", fontsize=7)
+            pagina.insert_text((57, 712), f"Pagina {numero} di {totale} ", fontname="helv", fontsize=7)
+        elif piede:
             # il piede e' una pila di blocchi in fondo alla pagina, come nel documento reale
             for dy, linea in ((0, "v.2.14.5\nAZIENDA SRL"), (24, "Bilancio di esercizio al 31-12-2025\n"
                                                               f"Pag. {numero} di {totale}"),
@@ -176,7 +180,7 @@ def test_riconosci_da_testo():
 
 
 def test_non_xbrl_non_riconosciuto_e_estrai_none(tmp_path):
-    path = _pdf(tmp_path, [SP_ABBREVIATO, CE_ABBREVIATO], piede=False)
+    path = _pdf(tmp_path, [SP_ABBREVIATO], piede=False)     # un solo prospetto, nessun piede
     assert X.riconosci(path) is False
     assert X.estrai(path) is None
 
@@ -788,3 +792,29 @@ def test_nessuna_anomalia_senza_negativi(tmp_path, monkeypatch):
     _vieta_modelli(monkeypatch)
     ris = import_snello.importa(_abbreviato(tmp_path))
     assert ris.report["anomalie"] == []
+
+
+# ---- fix round 1, addizione A: stessa famiglia senza piede di tassonomia ----------------------
+
+def test_riconosciuto_per_struttura_senza_piede(tmp_path):
+    path = _pdf(tmp_path, [SP_ABBREVIATO, CE_ABBREVIATO], piede="pagina")
+    assert X.riconosci(path) is True
+    r = X.estrai(path)
+    assert r["adottabile"] is True, r["rifiuto"]
+    assert r["bs"]["sp13_utile_perdita"] == D("100419")
+    assert r["ce"]["ce06_servizi"] == D("226212")
+
+
+def test_intestazione_di_pagina_in_mezzo_a_un_raggruppamento_non_lo_spezza(tmp_path):
+    ce_a = CE_ABBREVIATO[:CE_ABBREVIATO.index("b) ammortamento delle immobilizzazioni materiali\n34.614\n34.551")]
+    ce_b = CE_ABBREVIATO[len(ce_a):]
+    r = X.estrai(_pdf(tmp_path, [SP_ABBREVIATO, ce_a, ce_b], piede="pagina"))
+    assert r["adottabile"] is True, r["rifiuto"]
+    assert r["ce"]["ce09_ammortamenti"] == D("35592")
+
+
+def test_testo_senza_piede_e_senza_la_struttura_non_e_riconosciuto(tmp_path):
+    assert X.riconosci("Stato patrimoniale\nAttivo\nTotale attivo\n100\n") is False
+    # un prospetto qualunque (importi sulla stessa riga della didascalia) non e' questa famiglia
+    solo_sp = _pdf(tmp_path, [SP_ABBREVIATO], piede="pagina")
+    assert X.riconosci(solo_sp) is False

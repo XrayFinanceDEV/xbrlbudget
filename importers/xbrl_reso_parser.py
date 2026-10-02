@@ -84,26 +84,47 @@ def _norm(testo: str) -> str:
 
 _PAGINE_RICONOSCIMENTO = 8
 
+# Segnale strutturale (altri generatori dello stesso render, senza piede di tassonomia): le
+# didascalie di legge stanno ciascuna su una riga a se', coi loro importi uno per riga, sotto le
+# intestazioni a data. Il riconoscimento e' solo una porta: l'adozione richiede comunque ogni
+# totale stampato riprodotto al centesimo, quindi un falso riconoscimento esce rifiutato.
+_STRUTTURA = tuple(re.compile(rx, re.M) for rx in (
+    r"^\s*Stato patrimoniale\b[^\n]*$",
+    r"^\s*Conto economico\s*$",
+    r"^\s*Totale attivo\s*$",
+    r"^\s*Totale passivo\s*$",
+    r"^\s*Totale valore della produzione\s*$",
+    r"^\s*Totale costi della produzione\s*$",
+    r"^\s*Differenza tra valore e costi della produzione[^\n]*$",
+    r"^\s*21\) Utile \(perdita\) dell'esercizio\s*$",
+))
+_RE_DATA_RIGA = re.compile(r"^\s*\d{2}-\d{2}-\d{4}\s*$", re.M)
+
+
+def _ha_struttura(testo: str) -> bool:
+    return all(rx.search(testo) for rx in _STRUTTURA) and len(_RE_DATA_RIGA.findall(testo)) >= 2
+
 
 def riconosci(sorgente: str) -> bool:
     """Vero se il documento e' il PDF reso da un XBRL depositato: il piede di tassonomia compare
-    su una pagina che porta il titolo del prospetto (le prime pagine bastano: il prospetto e'
-    sempre in testa). Accetta un percorso di file o direttamente il testo. Solo testo, nessun
-    modello."""
+    su una pagina che porta il titolo del prospetto (sufficiente), oppure, per gli altri
+    generatori dello stesso render, la struttura delle didascalie di legge con gli importi uno
+    per riga (prime pagine: il prospetto e' sempre in testa). Accetta un percorso di file o
+    direttamente il testo. Solo testo, nessun modello."""
     if not sorgente:
         return False
     if not os.path.isfile(sorgente):
-        return bool(_PIEDE.search(sorgente)) and bool(
-            re.search(r"^Stato patrimoniale", sorgente, re.M))
+        return (bool(_PIEDE.search(sorgente)) and bool(re.search(r"^Stato patrimoniale", sorgente, re.M))
+                ) or _ha_struttura(sorgente)
     try:
         with fitz.open(sorgente) as documento:
-            for pagina in list(documento)[:_PAGINE_RICONOSCIMENTO]:
-                testo = pagina.get_text()
-                if _PIEDE.search(testo) and re.search(r"^Stato patrimoniale", testo, re.M):
-                    return True
+            testi = [p.get_text() for p in list(documento)[:_PAGINE_RICONOSCIMENTO]]
     except Exception:
         return False
-    return False
+    for testo in testi:
+        if _PIEDE.search(testo) and re.search(r"^Stato patrimoniale", testo, re.M):
+            return True
+    return _ha_struttura("\n".join(testi))
 
 
 # --------------------------------------------------------------------------------------
@@ -132,6 +153,9 @@ def _e_piede(righe: list[str]) -> bool:
     prima = righe[0].strip()
     return bool(re.match(r"^v\.\d+(?:\.\d+)*$", prima)
                 or re.match(r"^Pag\. \d+ di \d+$", prima)
+                # altro generatore: "Bilancio di esercizio" a se' + "Pagina N di M"
+                or prima == "Bilancio di esercizio"
+                or re.match(r"^Pagina \d+ di \d+$", prima)
                 or prima.startswith("Bilancio di esercizio al")
                 or prima.startswith("Generato automaticamente"))
 

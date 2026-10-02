@@ -532,3 +532,18 @@ def test_avvisi_del_percorso_snello_senza_duplicati(tmp_path, monkeypatch):
     avvisi = result["warnings"]
     assert len(avvisi) == len(set(avvisi))
     assert avvisi.count(quadratura) == 1
+
+
+def test_avviso_del_documento_sbilanciato_ha_la_sua_frase():
+    """Round 2 (N5): nessuna rilettura e' avvenuta, quindi l'avviso non dice «dopo l'unica
+    rilettura»; dice che i totali stampati dal documento differiscono, e che si corregge o si
+    carica un bilancio quadrato."""
+    rapporto = {"causa": "documento_sbilanciato",
+                "misura": {"corrente": {"scarto_sp": "-24974.95", "scarto_ce": "0.00", "scarto_stampati": "0.00"}}}
+    testo = pdf_importer._snello_squadrato_reason(rapporto)
+    assert testo.startswith("BILANCIO SBILANCIATO")
+    assert "rilettura" not in testo
+    assert "Totale Attivo" in testo and "Totale Passivo" in testo and "24.974,95" in testo
+    assert "Rettifiche" in testo
+    altro = pdf_importer._snello_squadrato_reason({"misura": rapporto["misura"]})
+    assert "rilettura" in altro                                  # le altre cause: invariate

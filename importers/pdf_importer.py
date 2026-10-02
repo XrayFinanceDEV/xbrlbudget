@@ -131,6 +131,19 @@ def _snello_squadrato_reason(report: Dict[str, Any]) -> str:
         except Exception:
             return str(valore)
 
+    if report.get("causa") == "documento_sbilanciato":
+        # Nessuna rilettura e' avvenuta: i totali che il documento stampa si contraddicono fra
+        # loro e le voci lette li riproducono (Task 25, round 2).
+        try:
+            scarto = f"€{_euro_it(abs(Decimal(str(misura.get('scarto_sp')))))}"
+        except Exception:
+            scarto = "n/d"
+        return (
+            f"{_UNBALANCED_WARNING_PREFIX}: il Totale Attivo e il Totale Passivo stampati dal "
+            f"documento differiscono di {scarto}, e le voci lette li riproducono. Il bilancio è "
+            f"stato importato così com'è: correggilo in Rettifiche oppure carica una versione "
+            f"quadrata del bilancio."
+        )
     return (
         f"{_UNBALANCED_WARNING_PREFIX}: il percorso snello resta oltre soglia dopo "
         f"l'unica rilettura (scarto Attivo/Passivo {_fmt('scarto_sp')}, scarto CE/SP "

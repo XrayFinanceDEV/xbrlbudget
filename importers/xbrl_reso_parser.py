@@ -126,6 +126,7 @@ class _Riga:
 def _e_piede(righe: list[str]) -> bool:
     prima = righe[0].strip()
     return bool(re.match(r"^v\.\d+(?:\.\d+)*$", prima)
+                or re.match(r"^Pag\. \d+ di \d+$", prima)
                 or prima.startswith("Bilancio di esercizio al")
                 or prima.startswith("Generato automaticamente"))
 
@@ -140,13 +141,22 @@ def _leggi_righe(documento: fitz.Document) -> tuple[list[_Riga], int, list[int]]
     anni: list[int] = []
     iniziato = False
     finito = False
+    saltare_ragione_sociale = False
     for numero, pagina in enumerate(documento):
         in_nota = False
         for blocco in pagina.get_text("blocks"):
             grezze = blocco[4].split("\n")
             pulite = [r.strip() for r in grezze if r.strip()]
-            if not pulite or _e_piede(pulite):
+            if not pulite:
                 continue
+            if _e_piede(pulite):
+                # "v.2.14.5" da sola: il blocco dopo e' la ragione sociale del piede, mai una riga
+                saltare_ragione_sociale = len(pulite) == 1 and bool(re.match(r"^v\.\d", pulite[0]))
+                continue
+            if saltare_ragione_sociale:
+                saltare_ragione_sociale = False
+                if len(pulite) == 1 and not _IMPORTO.match(pulite[0]):
+                    continue
             # Nota a pie di tabella ("(1)" da solo in un blocco, poi il suo contenuto): sta in
             # fondo alla pagina, mai nel prospetto.
             if len(pulite) == 1 and _RE_NOTA_PIEDE.match(pulite[0]):
@@ -731,7 +741,22 @@ def _chiudi(importi: dict[str, Decimal]):
     return completa({k: v for k, v in importi.items()})
 
 
-def _verifica(col: int, bs: dict, ce: dict, stampati: dict, calcolati: dict) -> list:
+# Totali intermedi stampati -> campi aggregati che devono riprodurli dopo la traduzione percorso ->
+# campo: la quadratura attivo = passivo non vede una massa finita nell'aggregato sbagliato dello
+# stesso lato (un credito su una immobilizzazione), questo si'. Chiave: percorso del nodo che il
+# totale chiude.
+_AGGREGATI_DEL_TOTALE = {
+    "SPA.B": ("sp02", "sp03", "sp04"), "SPA.B.I": ("sp02",), "SPA.B.II": ("sp03",),
+    "SPA.C": ("sp05", "sp06", "sp07", "sp08", "sp09"), "SPA.C.I": ("sp05",),
+    "SPA.C.II": ("sp06", "sp07"), "SPA.C.III": ("sp08",), "SPA.C.IV": ("sp09",),
+    "SPP.A": ("sp11", "sp12", "sp13"), "SPP.B": ("sp14",), "SPP.D": ("sp16", "sp17"),
+    "CE.B.9": ("ce08",), "CE.B.10": ("ce09",), "CE.A.5": ("ce04",),
+    "CE.C.16": ("ce14",), "CE.C.17": ("ce15",),
+}
+
+
+def _verifica(col: int, bs: dict, ce: dict, stampati: dict, calcolati: dict,
+              totali: list) -> list:
     """Controlli di campo (dopo la traduzione percorso -> campo): ognuno al centesimo."""
     from calculations.ce_result import calculate_ce_result
     from importers.iv_cee_hierarchy import _ATTIVO_FIELDS, _PASSIVO_FIELDS
@@ -748,6 +773,17 @@ def _verifica(col: int, bs: dict, ce: dict, stampati: dict, calcolati: dict) -> 
     conf("passivo_campi", pas, stampati.get("passivo"))
     if att != pas:
         errori.append((col, "attivo_diverso_da_passivo", {"attivo": str(att), "passivo": str(pas)}))
+    from importers.import_snello.percorsi import NOMI
+    for didascalia, valori, nodo in totali:
+        campi = _AGGREGATI_DEL_TOTALE.get(nodo.percorso)
+        if campi is None:
+            continue
+        sorgente = ce if nodo.percorso.startswith("CE") else bs
+        letto = sum((Decimal(sorgente.get(NOMI[c], 0)) for c in campi), _ZERO)
+        if letto != valori[col]:
+            errori.append((col, "aggregati_del_totale", {
+                "didascalia": didascalia, "campi": list(campi), "letto": str(letto),
+                "stampato": str(valori[col])}))
     r = calculate_ce_result(ce)
     conf("valore_produzione", r.production_value, stampati.get("valore_produzione"))
     conf("costi_produzione", r.production_cost, stampati.get("costi_produzione"))
@@ -833,7 +869,7 @@ def estrai(file_path: str) -> Optional[dict]:
             for tipo, raccolta in tabelle.items():
                 dettagli[tipo] = _applica_tabella(importi, tipo, raccolta)
         bs, ce = _chiudi(importi)
-        anomalie[c].extend(_verifica(c, bs, ce, stampati, calcolati))
+        anomalie[c].extend(_verifica(c, bs, ce, stampati, calcolati, totali))
         bs["_unclassified_mass"] = dati.massa.quantize(_C)
         bs["_plug_residual"] = Decimal("0.00")
         if dati.scadenza_assente:

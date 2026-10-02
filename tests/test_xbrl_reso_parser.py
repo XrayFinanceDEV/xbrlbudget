@@ -578,3 +578,62 @@ def test_un_reso_adottato_salta_il_passaggio_dei_dettagli_e_dice_da_dove_vengono
     assert rapporto["fonte"] == "deterministico:xbrl_reso_parser"
     assert rapporto["dettagli"]["debiti"]["applicata"] is True
     assert result["extraction_method"] == "import_snello"
+
+
+# ---- casi di layout visti sul corpus -----------------------------------------------------------
+
+def test_una_sola_colonna_anno_nessun_precedente(tmp_path):
+    def una(righe):
+        out = []
+        for r in righe:
+            linee = r.split("\n")
+            amounts = [l for l in linee if X._IMPORTO.match(l.strip())]
+            out.append("\n".join(linee[:-1]) if len(amounts) == 2 else r)
+        return out
+    sp = _sostituisci(una(SP_ABBREVIATO), DATE, "31-12-2025")
+    ce = _sostituisci(una(CE_ABBREVIATO), "31-12-2025 31-12-2024", "31-12-2025")
+    r = X.estrai(_abbreviato(tmp_path, sp=sp, ce=ce))
+    assert r["adottabile"] is True, r["rifiuto"]
+    assert r["prior_bs"] is None and r["prior_stato"] == "assente"
+    assert r["anni"] == [2025]
+
+
+def test_pagina_che_si_spezza_dentro_un_raggruppamento(tmp_path):
+    """Il piede di pagina fra la riga di raggruppamento e il suo ultimo componente non deve
+    far perdere il raggruppamento (budget 202: il componente b) apre la pagina dopo)."""
+    ce_a = CE_ABBREVIATO[:CE_ABBREVIATO.index("b) ammortamento delle immobilizzazioni materiali\n34.614\n34.551")]
+    ce_b = CE_ABBREVIATO[len(ce_a):]
+    r = X.estrai(_pdf(tmp_path, [SP_ABBREVIATO, ce_a, ce_b]))
+    assert r["adottabile"] is True, r["rifiuto"]
+    assert r["ce"]["ce09_ammortamenti"] == D("35592")
+
+
+def test_nota_a_pie_di_tabella_non_entra_nel_prospetto(tmp_path):
+    sp = list(SP_ABBREVIATO)
+    sp += ["(1)", "Altre riserve\n31/12/2025 31/12/2024", "Riserva straordinaria\n669.472\n857.531",
+           "Differenza da arrotondamento all'unità di Euro\n(1)"]
+    sp = _sostituisci(sp, "VI - Altre riserve\n669.472\n857.531", "VI - Altre riserve\n669.472 (1)\n857.531")
+    r = X.estrai(_abbreviato(tmp_path, sp=sp))
+    assert r["adottabile"] is True, r["rifiuto"]
+    assert r["bs"]["sp12e_altre_riserve"] == D("669472")
+
+
+def test_totale_a_zero_di_una_sezione_senza_righe(tmp_path):
+    ce = list(CE_ABBREVIATO)
+    i = ce.index("Risultato prima delle imposte (A - B + - C + - D)\n107.909\n44.128")
+    ce[i:i] = ["D) Rettifiche di valore di attività e passività finanziarie",
+               "Totale delle rettifiche di valore di attività e passività finanziarie (18 - 19)\n-\n-"]
+    r = X.estrai(_abbreviato(tmp_path, ce=ce))
+    assert r["adottabile"] is True, r["rifiuto"]
+    assert r["ce"]["ce20_imposte"] == D("7490")
+
+
+def test_riga_di_dettaglio_negativa_resta_col_suo_segno(tmp_path):
+    """Un importo stampato tra parentesi e' negativo: mai assolutizzato (la quadratura decide)."""
+    sp = _sostituisci(SP_ABBREVIATO, "VI - Altre riserve\n669.472\n857.531",
+                      "VI - Altre riserve\n669.472\n857.531")
+    sp = _sostituisci(sp, "IX - Utile (perdita) dell'esercizio\n100.419\n40.047",
+                      "IX - Utile (perdita) dell'esercizio\n100.419\n40.047")
+    r = X.estrai(_abbreviato(tmp_path, sp=sp))
+    assert r["prior_ce"]["ce03_lavori_interni"] == D("-1500")
+    assert r["prior_bs"]["sp13_utile_perdita"] == D("40047")

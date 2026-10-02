@@ -1890,6 +1890,11 @@ def import_pdf_balance_sheet(
         warnings.extend(sc_quadratura_warnings)
         if unbalanced_reason:
             warnings.insert(0, unbalanced_reason)
+        if _snello is not None:
+            # Percorso snello (Task 25 fix round 1): lo stesso avviso arriva da piu' fonti
+            # (validate_hierarchy e la quadratura unificata); ogni avviso distinto esce una
+            # volta sola. Il percorso di produzione (_snello None) non cambia.
+            warnings = list(dict.fromkeys(warnings))
         if warnings:
             logger.warning(f"Balance sheet hierarchy warnings: {warnings}")
 

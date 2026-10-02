@@ -502,3 +502,33 @@ def test_squadrato_sui_soli_totali_stampati_dichiara_comunque_l_avviso(tmp_path,
     assert result["validation_report"]["import_snello"]["esito"] == "squadrato"
     assert result["validation_status"] == "unbalanced"
     assert any(w.startswith(pdf_importer._UNBALANCED_WARNING_PREFIX) for w in result["warnings"])
+
+
+def test_avvisi_del_percorso_snello_senza_duplicati(tmp_path, monkeypatch):
+    """Task 25 fix round 1, addizione B(b): lo stesso avviso (p.es. BILANCIO NON QUADRATO) arriva
+    da piu' fonti (validate_hierarchy e la quadratura unificata): sul percorso snello ogni avviso
+    distinto esce una volta sola."""
+    monkeypatch.setenv("IMPORT_MOTORE", "snello")
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    _vieta_estrattori_di_oggi(monkeypatch)
+    from importers.pdf_mapper import IVCEEMapper
+    quadratura = "BILANCIO NON QUADRATO: attivo 5.000,00 != passivo 1.000,00 (sbilancio 4.000,00)"
+    originale = IVCEEMapper.validate_hierarchy
+    monkeypatch.setattr(IVCEEMapper, "validate_hierarchy",
+                        lambda self, bs: list(originale(self, bs)) + [
+                            quadratura, "GERARCHIA INCOERENTE: x", quadratura, "GERARCHIA INCOERENTE: x"])
+    bs = {"sp09_disponibilita_liquide": D("5000"), "sp11_capitale": D("1000"),
+          "_plug_residual": D("0"), "_unclassified_mass": D("0")}
+    report = {"esito": "squadrato", "modo": "legge", "struttura": {},
+              "misura": {"corrente": {"scarto_sp": "4000.00", "scarto_ce": "0", "scarto_stampati": "0"}},
+              "tappo": {"corrente": None}, "letture": {"sp": 1, "ce": 1}, "diag": {"lato_irrisolti": []},
+              "anomalie": [], "secondi": 0.1}
+    monkeypatch.setattr(import_snello, "importa", lambda *a, **k: Risultato(
+        bs=bs, ce={}, prior_bs=None, prior_ce=None, report=report, struttura=_struttura()))
+    _db_in_memoria(monkeypatch)
+    result = pdf_importer.import_pdf_balance_sheet(
+        file_path=_pdf(tmp_path, RIGHE_PAREGGIO), fiscal_year=2025, company_name="Avvisi unici",
+        create_company=True, sector=1, user_id="snello-avvisi", period_months=12)
+    avvisi = result["warnings"]
+    assert len(avvisi) == len(set(avvisi))
+    assert avvisi.count(quadratura) == 1

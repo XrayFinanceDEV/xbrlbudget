@@ -362,19 +362,41 @@ def _client():
     return anthropic.Anthropic(max_retries=1, timeout=120)
 
 
+def _schema_uscita(nodo):
+    """Lo schema per l'uscita strutturata: uguale a SCHEMA, con il tipo esplicito sulle enum
+    (qui sono scritte senza ``type``, come bastava allo strumento forzato)."""
+    if isinstance(nodo, dict):
+        out = {k: _schema_uscita(v) for k, v in nodo.items()}
+        if "enum" in out and "type" not in out:
+            out["type"] = "string"
+        return out
+    if isinstance(nodo, list):
+        return [_schema_uscita(v) for v in nodo]
+    return nodo
+
+
 def mappa_pagina(client, png: bytes) -> dict:
+    """Una pagina, una risposta JSON conforme a SCHEMA. Si usa l'uscita strutturata
+    (``output_config.format``) e non piu' lo strumento forzato: ``tool_choice`` tool/any e' un
+    400 su Sonnet 5.5, mentre l'uscita strutturata vale anche su Sonnet 5. Il ragionamento su
+    Sonnet 5.5 e' sempre acceso e conta in ``max_tokens``: sforzo basso (la mappa e' una
+    descrizione, non un calcolo) e tetto largo, altrimenti il JSON esce troncato."""
     r = client.messages.create(
-        model=MODELLO, max_tokens=900,
+        model=MODELLO, max_tokens=6000,
         messages=[{"role": "user", "content": [
             {"type": "image", "source": {"type": "base64", "media_type": "image/png",
                                          "data": base64.b64encode(png).decode()}},
             {"type": "text", "text": PROMPT}]}],
-        tools=[{"name": "struttura", "description": "struttura della pagina", "input_schema": SCHEMA}],
-        tool_choice={"type": "tool", "name": "struttura"})
-    blocchi = [b for b in r.content if b.type == "tool_use"]
-    if not blocchi:
-        raise RuntimeError("mappa senza tool_use")
-    out = dict(blocchi[0].input)
+        output_config={"effort": "low",
+                       "format": {"type": "json_schema", "schema": _schema_uscita(SCHEMA)}})
+    testi = [b.text for b in r.content if b.type == "text"]
+    stop = getattr(r, "stop_reason", None)
+    if not testi or stop in ("max_tokens", "refusal"):
+        raise RuntimeError(f"mappa senza risposta utilizzabile (stop_reason={stop})")
+    try:
+        out = dict(json.loads(testi[0]))
+    except ValueError as e:
+        raise RuntimeError("mappa: JSON non valido") from e
     out["_token"] = {"in": r.usage.input_tokens, "out": r.usage.output_tokens}
     return out
 

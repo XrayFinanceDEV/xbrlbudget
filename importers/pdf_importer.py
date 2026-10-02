@@ -1706,14 +1706,21 @@ def import_pdf_balance_sheet(
         # may move short/long portions but preserves combined credits/debts.
         # Controls, CE and period results cannot be changed by the LLM.
         from importers.detail_enrichment import enrich_pdf_details
-        balance_sheet_data, prior_bs_data, _detail_report = enrich_pdf_details(
-            file_path, balance_sheet_data, prior_bs_data, fiscal_year=fiscal_year,
-            ocr_text=ocr_text,
-            pagine=(_snello.struttura.pagine_dettagli()
-                    if _snello is not None
-                    and _snello.report.get("modo") in ("legge", "legge_con_dettaglio") else None),
-            usa_llm=not (_snello is not None and _snello.report.get("modo") == "conti"),
-        )
+        if _snello is not None and _snello.report.get("fonte") == "deterministico:xbrl_reso_parser":
+            # Reso XBRL adottato (Task 25): i dettagli sono gia' quelli del prospetto e delle
+            # tabelle di nota (riconciliati al centesimo, o dichiarati non applicati nel report
+            # snello): nessun secondo passaggio, e di sicuro nessuna lettura del modello.
+            _detail_report = {"status": "skipped", "reason": "dettagli_letti_dal_prospetto_xbrl",
+                              "warnings": []}
+        else:
+            balance_sheet_data, prior_bs_data, _detail_report = enrich_pdf_details(
+                file_path, balance_sheet_data, prior_bs_data, fiscal_year=fiscal_year,
+                ocr_text=ocr_text,
+                pagine=(_snello.struttura.pagine_dettagli()
+                        if _snello is not None
+                        and _snello.report.get("modo") in ("legge", "legge_con_dettaglio") else None),
+                usa_llm=not (_snello is not None and _snello.report.get("modo") == "conti"),
+            )
         sc_quadratura_warnings.extend(_detail_report.get('warnings', []))
 
         # Diagnose the CE/SP result gap for PDF routes. The helper records

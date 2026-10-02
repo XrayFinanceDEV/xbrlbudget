@@ -15,6 +15,7 @@ _MODI_LEGGE = ("legge", "legge_con_dettaglio")
 # girata. La situazione contabile e' un elenco di conti, gli altri due leggono lo schema di legge.
 _MODO_DA_PARSER = {"standard_ivcee_parser": "legge",
                    "schema_legge_con_dettaglio": "legge_con_dettaglio",
+                   "xbrl_reso_parser": "legge",
                    "situazione_contabile_parser": "conti"}
 
 _IMMOBILIZZAZIONI_CAMPI = ("sp02_immob_immateriali", "sp03_immob_materiali", "sp04_immob_finanziarie")
@@ -119,10 +120,14 @@ def _risultato_deterministico(_det: dict, struttura, modo: str, t0: float) -> "R
         "diag": _diag_det,
         "deterministico": {"parser": _det["parser"], "esito": _det["esito"],
                            "unclassified_mass": str(_massa_det)},
+        # Task 25: i dettagli del reso XBRL stanno gia' nel risultato (prospetto e tabelle di
+        # nota); il report dice da dove vengono e cosa si e' potuto applicare.
+        **({"dettagli": {"fonte": "prospetto_e_nota_xbrl", **_det["dettagli"]}}
+           if _det.get("dettagli") is not None else {}),
         "anomalie": _anomalie(_bs_det, _diag_det), "secondi": round(time.monotonic() - t0, 1),
     }
-    return Risultato(bs=_bs_det, ce=dict(_det["ce"]), prior_bs=None, prior_ce=None,
-                     report=report, struttura=struttura)
+    return Risultato(bs=_bs_det, ce=dict(_det["ce"]), prior_bs=_det.get("prior_bs"),
+                     prior_ce=_det.get("prior_ce"), report=report, struttura=struttura)
 
 
 def importa(file_path: str, *, ocr_text: str | None = None, analizza=None, leggi_conti=None,
@@ -168,6 +173,9 @@ def importa(file_path: str, *, ocr_text: str | None = None, analizza=None, leggi
         # report anche quando si prosegue col percorso Qwen - mai un silenzio che
         # sembrerebbe "nessun problema" (CLAUDE.md, chiavi diagnostiche sempre dichiarate).
         _report_deterministico["unclassified_mass"] = _det["unclassified_mass"]
+    if "xbrl_reso" in _det:
+        # Task 25: un reso XBRL riconosciuto ma non adottato dichiara quale controllo e' fallito.
+        _report_deterministico["xbrl_reso"] = _det["xbrl_reso"]
 
     from importers.import_snello.verifica import misura, normalizza_forma, soglia, tappa, totali_stampati
 

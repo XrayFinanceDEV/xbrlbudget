@@ -60,11 +60,14 @@ def _verifica_bilancio(bs: dict, ce: dict, stampati: dict | None):
 def _esito(nome: str, bs_raw: dict, ce_raw: dict, stampati_raw: dict | None) -> dict:
     bs, ce = _adatta(bs_raw), _adatta(ce_raw)
     if not bs or not ce:
-        return {"adottato": False, "parser": nome, "esito": "oltre_soglia"}
+        # Il candidato non ha restituito nulla: e' "vuoto", non "oltre soglia" (Task 25: la
+        # diagnostica non deve far pensare a una quadratura mancata dove non c'e' stata lettura).
+        return {"adottato": False, "parser": nome, "esito": "vuoto"}
     stampati = {k: v for k, v in (stampati_raw or {}).items() if v is not None} or None
     bs, ce, tappo, esito, m = _verifica_bilancio(bs, ce, stampati)
     if esito not in ("ok", "tappo"):
-        return {"adottato": False, "parser": nome, "esito": "oltre_soglia"}
+        return {"adottato": False, "parser": nome,
+                "esito": "vuoto" if esito == "vuoto" else "oltre_soglia"}
     # Ruling (a), Task 18 (2026-09-27): quadrare da solo non basta piu'. Un candidato
     # bilanciato la cui massa non classificata (dichiarata dal parser sottostante, mai un
     # hardcoded zero) supera la STESSA soglia che verifica.tappa() usa per lo scarto
@@ -82,6 +85,38 @@ def _esito(nome: str, bs_raw: dict, ce_raw: dict, stampati_raw: dict | None) -> 
                 "unclassified_mass": str(massa.quantize(_C))}
     return {"adottato": True, "parser": nome, "esito": esito, "bs": bs, "ce": ce,
             "tappo": tappo, "misura": m}
+
+
+def _prova_xbrl_reso(file_path: str) -> dict | None:
+    """Il PDF reso da un XBRL depositato (Task 25): tassonomia nel piede di pagina, prospetti come
+    elenco di righe, totali stampati che il lettore deve riprodurre al centesimo
+    (``xbrl_reso_parser``: nessuna tolleranza, nessun tappo). None se il documento non e' di
+    questa famiglia. Un candidato che non chiude e' rifiutato nominando il controllo fallito
+    (``rifiuto``) e la ricerca prosegue come prima; uno che chiude passa comunque dalle STESSE
+    regole di adozione degli altri (``_esito``), e porta con se' l'anno precedente e i dettagli
+    letti dal prospetto e dalla nota (nessuna lettura del modello, mai)."""
+    from importers.xbrl_reso_parser import estrai, riconosci
+
+    if not riconosci(file_path):
+        return None
+    candidato = estrai(file_path)
+    if candidato is None:
+        return None
+    if not candidato["adottabile"]:
+        return {"adottato": False, "parser": "xbrl_reso_parser", "esito": "oltre_soglia",
+                "rifiuto": candidato["rifiuto"]}
+    esito = _esito("xbrl_reso_parser", candidato["bs"], candidato["ce"], candidato["stampati"])
+    esito["dettagli"] = candidato["dettagli"]
+    esito["ignoti"] = candidato["ignoti"]
+    if esito["adottato"] and candidato["prior_bs"] is not None:
+        esito["prior_bs"] = _adatta(candidato["prior_bs"])
+        esito["prior_ce"] = _adatta(candidato["prior_ce"])
+    esito["prior_stato"] = candidato["prior_stato"]
+    if len(candidato["anni"]) > 1:
+        esito["anno_precedente"] = candidato["anni"][1]
+    if candidato.get("prior_rifiuto"):
+        esito["prior_rifiuto"] = candidato["prior_rifiuto"]
+    return esito
 
 
 def _prova_standard_ivcee(file_path: str) -> dict | None:
@@ -107,10 +142,32 @@ def _prova_standard_ivcee(file_path: str) -> dict | None:
     if bs_raw is None or ce_raw is None:
         if not comparativo:
             return None
-        return {"adottato": False, "parser": "standard_ivcee_parser", "esito": "oltre_soglia"}
+        return {"adottato": False, "parser": "standard_ivcee_parser", "esito": "vuoto"}
     stampati = {"totale_attivo": bs_raw.get("totale_attivo"),
                 "totale_passivo": bs_raw.get("totale_passivo")}
     return _esito("standard_ivcee_parser", bs_raw, ce_raw, stampati)
+
+
+def _prova_schema_con_dettaglio(file_path: str) -> dict | None:
+    """Schema di legge con dettaglio conti (Task 24; budget_313, budget_352): le macro voci si
+    leggono dalle sole didascalie con importo, le righe con codice conto non entrano mai nella
+    lettura (``extract_ivcee_didascalie``). Stesse regole di adozione dei parser standard (lo
+    stesso ``_esito``: quadratura entro soglia e massa non classificata sotto soglia), nessuna
+    nuova. None se il documento non porta righe-conto (non e' questa famiglia: lo leggono i
+    parser di sempre); non adottato se le didascalie non chiudono sui totali stampati."""
+    from importers.standard_ivcee_parser import _MIN_ACCOUNT_ROWS, extract_ivcee_didascalie
+
+    bs_raw, ce_raw, conti = extract_ivcee_didascalie(file_path)
+    if conti < _MIN_ACCOUNT_ROWS:
+        return None
+    if bs_raw is None or ce_raw is None:
+        return {"adottato": False, "parser": "schema_legge_con_dettaglio", "esito": "vuoto",
+                "conti_esclusi": conti}
+    stampati = {"totale_attivo": bs_raw.get("totale_attivo"),
+                "totale_passivo": bs_raw.get("totale_passivo")}
+    esito = _esito("schema_legge_con_dettaglio", bs_raw, ce_raw, stampati)
+    esito["conti_esclusi"] = conti
+    return esito
 
 
 def _prova_situazione_contabile(file_path: str, ocr_text: str | None) -> dict | None:
@@ -137,11 +194,11 @@ def _prova_situazione_contabile(file_path: str, ocr_text: str | None) -> dict | 
     bs_raw, ce_raw, _, _ = extract_situazione_contabile(
         file_path, return_prior=True, text_override=testo or None)
     if not bs_raw or not ce_raw:
-        return {"adottato": False, "parser": "situazione_contabile_parser", "esito": "oltre_soglia"}
+        return {"adottato": False, "parser": "situazione_contabile_parser", "esito": "vuoto"}
     return _esito("situazione_contabile_parser", bs_raw, ce_raw, None)
 
 
-def tentativo(file_path: str, ocr_text: str | None = None) -> dict:
+def _tentativo_classico(file_path: str, ocr_text: str | None = None) -> dict:
     """Prova, in ordine, un solo parser deterministico applicabile: il primo che si
     applica decide (mai i due sommati, mai un secondo tentativo dopo il primo). Ritorna
     sempre un dict con almeno ``adottato``/``parser``/``esito``; ``esito`` pubblico e'
@@ -149,14 +206,51 @@ def tentativo(file_path: str, ocr_text: str | None = None) -> dict:
     "massa_non_classificata" (non adottato) - mai una terza via. Su "massa_non_classificata"
     il dict porta anche ``unclassified_mass`` (stringa Decimal): la massa non scompare, solo
     non basta a se stessa per l'adozione (ruling a, Task 18)."""
-    for nome, prova in (
-        ("standard_ivcee_parser", lambda: _prova_standard_ivcee(file_path)),
-        ("situazione_contabile_parser", lambda: _prova_situazione_contabile(file_path, ocr_text)),
-    ):
-        try:
-            esito = prova()
-        except Exception:
-            return {"adottato": False, "parser": nome, "esito": "errore"}
-        if esito is not None:
-            return esito
+    # Ordine (Task 24): parser standard, poi lo schema di legge con dettaglio conti, poi la
+    # situazione contabile. Il parser standard che SI APPLICA ma non quadra chiude la ricerca
+    # come prima (mai due candidati sommati); lo schema con dettaglio entra solo quando il
+    # parser standard non ha adottato, e se anch'esso non adotta la ricerca prosegue esattamente
+    # come prima verso la situazione contabile: un bilancio di verifica vero non ha didascalie
+    # di legge con importo e non lo vede mai.
+    try:
+        standard = _prova_standard_ivcee(file_path)
+    except Exception:
+        return {"adottato": False, "parser": "standard_ivcee_parser", "esito": "errore"}
+    if standard is not None and standard["adottato"]:
+        return standard
+    try:
+        con_dettaglio = _prova_schema_con_dettaglio(file_path)
+    except Exception:
+        con_dettaglio = None
+    if con_dettaglio is not None and con_dettaglio["adottato"]:
+        return con_dettaglio
+    if standard is not None:
+        return standard
+    try:
+        esito = _prova_situazione_contabile(file_path, ocr_text)
+    except Exception:
+        return {"adottato": False, "parser": "situazione_contabile_parser", "esito": "errore"}
+    if esito is not None:
+        return esito
     return {"adottato": False, "parser": None, "esito": "non_applicabile"}
+
+
+def tentativo(file_path: str, ocr_text: str | None = None) -> dict:
+    """Come ``_tentativo_classico``, preceduto dal lettore del PDF reso da XBRL (Task 25): se il
+    documento e' di quella famiglia ed e' adottabile si adotta, senza provare nient'altro (nessun
+    secondo candidato sommato). Altrimenti la ricerca prosegue ESATTAMENTE come prima; un
+    candidato riconosciuto ma non adottato lascia il suo motivo nel risultato (``xbrl_reso``),
+    mai un silenzio. ``esito`` pubblico: oltre ai valori dichiarati sopra, "vuoto" per un
+    candidato che non ha restituito nulla."""
+    try:
+        reso = _prova_xbrl_reso(file_path)
+    except Exception as exc:
+        # il ripiego resta, ma un difetto del lettore non deve essere invisibile
+        reso = {"adottato": False, "parser": "xbrl_reso_parser", "esito": "errore",
+                "errore": f"{type(exc).__name__}: {exc}"}
+    if reso is not None and reso["adottato"]:
+        return reso
+    esito = _tentativo_classico(file_path, ocr_text)
+    if reso is not None:
+        esito = {**esito, "xbrl_reso": {k: reso[k] for k in ("esito", "rifiuto", "unclassified_mass", "errore") if k in reso}}
+    return esito

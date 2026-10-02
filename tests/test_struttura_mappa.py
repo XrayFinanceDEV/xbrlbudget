@@ -1,4 +1,5 @@
 import fitz
+import pytest
 
 from importers.struttura_documento.mappa import _titolo_pagina, blocchi, mappa_documento, mappa_xbrl
 from tests._struttura_fixtures import (MAPPA_COLONNA_UNICA, MAPPA_CONTRAPPOSTE, pdf_bilancio_verifica_senza_titoli,
@@ -219,11 +220,18 @@ def test_mappa_xbrl_non_assorbe_il_rendiconto_dietro_un_intestazione_ripetuta(tm
 
 
 def test_mappa_pagina_produce_lo_schema(monkeypatch):
+    """Sonnet 5.5 (2026-10-02): l'uso forzato di uno strumento (tool_choice tool/any) e' un 400
+    su quel modello. La struttura si chiede con l'uscita strutturata (output_config.format),
+    che vale anche su Sonnet 5; il ragionamento e' sempre acceso e conta in max_tokens."""
+    import json as _json
     from importers.struttura_documento import mappa as m
 
-    class Blocco:
-        type = "tool_use"
-        input = {**MAPPA_CONTRAPPOSTE}
+    class Pensiero:
+        type, thinking = "thinking", ""
+
+    class Testo:
+        type = "text"
+        text = _json.dumps(MAPPA_CONTRAPPOSTE)
 
     class Uso:
         input_tokens, output_tokens = 3000, 500
@@ -232,12 +240,38 @@ def test_mappa_pagina_produce_lo_schema(monkeypatch):
         class messages:
             @staticmethod
             def create(**kw):
-                assert kw["tool_choice"] == {"type": "tool", "name": "struttura"}
+                assert "tool_choice" not in kw and "tools" not in kw
+                formato = kw["output_config"]["format"]
+                assert formato["type"] == "json_schema" and formato["schema"]["additionalProperties"] is False
+                assert kw["max_tokens"] >= 4000
                 assert kw["messages"][0]["content"][0]["type"] == "image"
-                return type("R", (), {"content": [Blocco()], "usage": Uso()})()
+                return type("R", (), {"content": [Pensiero(), Testo()], "usage": Uso(),
+                                      "stop_reason": "end_turn"})()
 
     out = m.mappa_pagina(Client(), b"png")
     assert out["disposizione"] == "sezioni_contrapposte" and out["_token"] == {"in": 3000, "out": 500}
+
+
+def test_mappa_pagina_senza_testo_o_troncata_solleva():
+    from importers.struttura_documento import mappa as m
+
+    class Uso:
+        input_tokens, output_tokens = 3000, 4000
+
+    def client(stop, blocchi):
+        class C:
+            class messages:
+                @staticmethod
+                def create(**kw):
+                    return type("R", (), {"content": blocchi, "usage": Uso(), "stop_reason": stop})()
+        return C()
+
+    class Tronco:
+        type, text = "text", '{"tipo_pagina": "prospetto_sp", "dispos'
+
+    for stop, blocchi in (("max_tokens", [Tronco()]), ("refusal", []), ("end_turn", [])):
+        with pytest.raises(RuntimeError):
+            m.mappa_pagina(client(stop, blocchi), b"png")
 
 
 # --- Task 22, G5 (diagnosi budget_671): pagina di Rendiconto Finanziario mai una pagina SP; ---

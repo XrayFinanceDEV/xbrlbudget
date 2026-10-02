@@ -74,13 +74,75 @@ class Struttura:
         return pagine or None
 
     def report(self) -> dict:
+        if self.fonte == "deterministico":
+            # Nessuna fase di struttura e' girata (Task 24): la lettura deterministica ha deciso
+            # senza vision. Le pagine, quando ci sono, le ha derivate il testo, mai un modello.
+            return {"stato": "non_richiesta", "fonte": "deterministico", "chiamate_vision": 0,
+                    "modo": self.modo, "pagine_sp": self.pagine_sp, "pagine_ce": self.pagine_ce,
+                    "pagine_dettaglio": self.pagine_dettaglio, "colonne_sp": self.colonne_sp,
+                    "colonne_ce": self.colonne_ce}
+        # Il voto della vision pagina per pagina, a parte dal modo scelto: il banco misura quante
+        # volte la classificazione della vision concorda col modo deciso (Task 24).
+        schemi: dict[str, int] = {}
+        tipi: dict[str, int] = {}
+        for m in self.mappe:
+            tipi[m.get("tipo_pagina", "?")] = tipi.get(m.get("tipo_pagina", "?"), 0) + 1
+            if m.get("tipo_pagina") in TIPI_SP | TIPI_CE:
+                schemi[m.get("schema") or "?"] = schemi.get(m.get("schema") or "?", 0) + 1
         return {"stato": "ok", "fonte": self.fonte, "route_struttura": self.route,
+                "schemi": schemi, "tipi_pagina": tipi,
                 "pagine_sp": self.pagine_sp, "pagine_ce": self.pagine_ce,
                 "pagine_dettaglio": self.pagine_dettaglio,
                 "chiamate_vision": self.chiamate_vision, "secondi": round(self.secondi, 1),
                 "modo": self.modo, "colonne_sp": self.colonne_sp, "colonne_ce": self.colonne_ce,
                 "intestazioni_sp": self.intestazioni_sp, "intestazioni_ce": self.intestazioni_ce,
                 "pagine_senza_testo": self.pagine_senza_testo}
+
+
+# Importo con decimali, oppure intero con separatore delle migliaia ("2.216.822"): i bilanci in
+# euro interi (budget_297, 247, 253) non stampano decimali. Un anno ("2025") o un numero di
+# pagina non hanno separatori e non contano.
+_IMPORTO = re.compile(r"\d{1,3}(?:\.\d{3})*,\d{2}|\d{1,3}(?:\.\d{3})+(?![\d,])")
+_MIN_IMPORTI_PAGINA = 3
+_TITOLO_CE = re.compile(r"^\s*conto economico\s*$", re.I | re.M)
+
+
+def pagine_dettagli_da_testo(pdf: str) -> list[int]:
+    """Le pagine che portano lo SP e il suo dettaglio, dal solo testo (nessuna chiamata a un
+    modello): dalla prima pagina con "STATO PATRIMONIALE" fino alla pagina dove comincia il
+    titolo "CONTO ECONOMICO" (compresa: lo SP puo' finire a meta' pagina), piu' le tabelle di
+    nota integrativa. Serve a ``enrich_pdf_details`` quando la struttura non e' girata: stesso
+    ruolo di ``Struttura.pagine_dettagli`` senza la vision. Vuoto = nessuna restrizione."""
+    import fitz
+    with fitz.open(pdf) as doc:
+        testi = [p.get_text() for p in doc]
+    # Una pagina di indice o di copertina che nomina i titoli non e' il prospetto: l'inizio e' la
+    # prima pagina con "stato patrimoniale" che porta importi veri.
+    inizio = next((i for i, t in enumerate(testi)
+                   if "stato patrimoniale" in t.casefold() and len(_IMPORTO.findall(t)) >= _MIN_IMPORTI_PAGINA),
+                  None)
+    if inizio is None:
+        return []
+    fine, include_fine = len(testi) - 1, True
+    for i in range(inizio, len(testi)):
+        m = _TITOLO_CE.search(testi[i])
+        if m:
+            fine = i
+            # La pagina dove comincia il CE appartiene allo SP solo se SOPRA il titolo ci sono
+            # importi (lo SP finisce a meta' pagina: budget_313, budget_352); se il titolo e' in
+            # testa, la pagina e' tutta CE (AMBIENTA verifica, pagina 4: falso positivo prima).
+            include_fine = len(_IMPORTO.findall(testi[i][:m.start()])) >= _MIN_IMPORTI_PAGINA
+            break
+    ultima = fine if include_fine else fine - 1
+    return sorted(set(range(inizio + 1, ultima + 2)) | set(pagine_tabelle_nota(pdf)))
+
+
+def struttura_deterministica(pdf: str, *, modo: str) -> Struttura:
+    """Il segnaposto di una lettura deterministica adottata prima di ogni vision (Task 24):
+    nessuna mappa di pagina, ``pagine_dettaglio`` dal testo, chiamate_vision a zero."""
+    return Struttura(fonte="deterministico", route=None, pagine_sp=[], pagine_ce=[],
+                     pagine_dettaglio=pagine_dettagli_da_testo(pdf), chiamate_vision=0,
+                     secondi=0.0, mappe=[], modo=modo)
 
 
 def _porta_captions_legali_con_totali(pdf: str | None) -> bool:
@@ -237,13 +299,21 @@ def analizza_struttura(pdf: str, *, mappa_pagina_fn=None, route_hint: str | None
     dettaglio = {m["pagina"] for m in mappe if m.get("tipo_pagina") == "dettaglio_conti"}
     dettaglio |= set(pagine_tabelle_nota(pdf))
     modo = modo_da_mappe(mappe, route_hint=route_hint, pdf=pdf)
+    # Task 24: il modo "legge_con_dettaglio" si decide dal TESTO (didascalie di legge con importo e
+    # righe-conto sotto), mai dal voto della vision, che qui resta un'indicazione: 4 schemi della
+    # vision si collassavano in due modi e il "riclassificato con codici IVCEE" copriva due
+    # documenti diversi.
+    from importers.standard_ivcee_parser import riconosci_schema_con_dettaglio
+    con_dettaglio = riconosci_schema_con_dettaglio(pdf) is not None
+    if con_dettaglio:
+        modo = "legge_con_dettaglio"
     # Stesso segnale che ha scelto "legge" sopra (Task 18, ruling c addendum): un
     # "riclassificato con codici IVCEE" che e' anche schema di legge coi totali stampati non
     # e' un piano dei conti piatto, e le sue pagine_dettaglio possono portare macro-voci
     # intere (owner, dopo la diagnosi AMBIENTA §7-8) - import_snello le include allora anche
     # nel prompt macro, non solo nel recupero dettaglio a valle.
     prospetti_mappe = [m for m in mappe if m.get("tipo_pagina") in TIPI_SP | TIPI_CE]
-    macro_include_dettaglio = _riclassificato_con_captions_legali(prospetti_mappe, pdf)
+    macro_include_dettaglio = con_dettaglio or _riclassificato_con_captions_legali(prospetti_mappe, pdf)
     colonne_sp, intestazioni_sp = _colonne_di(mappe, TIPI_SP)
     colonne_ce, intestazioni_ce = _colonne_di(mappe, TIPI_CE)
     import fitz

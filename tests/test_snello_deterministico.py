@@ -318,7 +318,9 @@ def test_standard_ivcee_parser_non_riconciliato_e_oltre_soglia(tmp_path):
 
     assert esito["adottato"] is False
     assert esito["parser"] == "standard_ivcee_parser"
-    assert esito["esito"] == "oltre_soglia"
+    # Task 25: il parser non restituisce nulla (nessuna colonna riconcilia): "vuoto", non
+    # "oltre_soglia" (che dichiarerebbe una quadratura mancata dove non c'e' stata lettura).
+    assert esito["esito"] == "vuoto"
 
 
 def test_situazione_contabile_riconosce_un_bilancio_di_verifica(tmp_path):

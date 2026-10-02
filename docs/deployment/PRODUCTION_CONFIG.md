@@ -60,7 +60,7 @@ della variabile (default), lascia l'importatore attuale invariato. Vedi
 
 `STRUTTURA_MODEL` — modello Anthropic per la fase di struttura (F1): quali pagine sono SP/CE/di
 dettaglio, schema (di legge / riclassificato / piano dei conti) e disposizione. Default
-`claude-sonnet-5`. **Le pagine intere del documento vanno ad Anthropic per questa fase**,
+`claude-sonnet-5-5` (dal 2026-10-02; la mappa si chiede con l'uscita strutturata, non con uno strumento forzato). **Le pagine intere del documento vanno ad Anthropic per questa fase**,
 indipendentemente da `PDF_LLM_PROVIDER_*`: la struttura non gira mai su gx10.
 
 `GX10_CONCORRENZA` — richieste gx10 in parallelo per processo (un solo semaforo, condiviso da

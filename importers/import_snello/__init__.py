@@ -6,6 +6,18 @@ from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from decimal import Decimal
 
+# I modi di lettura che leggono lo schema di legge (macro voci dai totali stampati) invece di
+# un elenco di conti. "legge_con_dettaglio" (Task 24): le macro voci vengono dalle didascalie
+# senza codice conto, i dettagli dalle righe-conto che stanno sotto.
+_MODI_LEGGE = ("legge", "legge_con_dettaglio")
+
+# Parser deterministico -> modo con cui il documento risulta letto quando nessuna struttura e'
+# girata. La situazione contabile e' un elenco di conti, gli altri due leggono lo schema di legge.
+_MODO_DA_PARSER = {"standard_ivcee_parser": "legge",
+                   "schema_legge_con_dettaglio": "legge_con_dettaglio",
+                   "xbrl_reso_parser": "legge",
+                   "situazione_contabile_parser": "conti"}
+
 _IMMOBILIZZAZIONI_CAMPI = ("sp02_immob_immateriali", "sp03_immob_materiali", "sp04_immob_finanziarie")
 
 # Nota aggiunta alla chiamata combinata di una pagina "prospetto_sp_e_ce" (Task lotto-b, fix 8):
@@ -69,9 +81,111 @@ def _causa_stampati(m: dict, s) -> bool:
     return abs(m["scarto_sp"]) <= s and abs(m["scarto_ce"]) <= s and m["scarto_stampati"] > s
 
 
+def _documento_sbilanciato(m: dict, s, stampati: dict | None, deterministici: bool) -> bool:
+    """Task 25 fix round 1 (decisione del proprietario, 2026-10-02): il documento contraddice
+    se' stesso. Le voci lette riproducono i totali stampati (scarto sui totali stampati entro
+    soglia) e il Totale Attivo e il Totale Passivo stampati differiscono, fra loro, dello
+    stesso importo dello scarto Attivo/Passivo misurato: la lettura e' fedele, ne' una
+    rilettura ne' un tappo possono aiutare. Con uno dei due totali assenti: falso (come oggi)."""
+    if not deterministici or not stampati:
+        # i totali riportati dal modello vengono dalla stessa chiamata che ha letto le voci:
+        # non sono il documento (round 2, N4)
+        return False
+    ta, tp = stampati.get("totale_attivo"), stampati.get("totale_passivo")
+    if ta is None or tp is None:
+        return False
+    if abs(m["scarto_sp"]) <= s or m["scarto_stampati"] > s:
+        return False
+    return abs(abs(Decimal(ta) - Decimal(tp)) - abs(m["scarto_sp"])) <= s
+
+
+def _negativi_stampati(bs: dict | None, parser: str, anno: int | None = None) -> list:
+    """Reso XBRL (Task 25): un importo SP negativo che il documento stampa davvero (fuori da
+    patrimonio netto e immobilizzazioni, gia' coperte da ``_anomalie``) si tiene col suo segno ma
+    non passa in silenzio: l'utente lo vede fra le anomalie e lo corregge in Rettifiche. Per la
+    colonna dell'anno precedente la voce porta l'anno come terzo elemento. Il CE resta fuori: un
+    segno negativo e' ordinario su ce02/ce03/ce10/ce16, rettifiche, imposte con credito e sul
+    risultato, e un elenco rumoroso e' peggio di uno corto."""
+    if parser != "xbrl_reso_parser" or not bs:
+        return []
+    return [[k, str(v)] + ([str(anno)] if anno is not None else []) for k, v in bs.items()
+            if k.startswith("sp") and isinstance(v, Decimal) and v < 0
+            and not k.startswith(("sp02", "sp03", "sp04", "sp12", "sp13"))]
+
+
+def _risultato_deterministico(_det: dict, struttura, modo: str, t0: float) -> "Risultato":
+    """Il risultato di un candidato deterministico adottato (nessuna chiamata al modello).
+
+    Task 16 (b): deterministico prima di Qwen; Task 24: prima ancora della struttura. Mai un
+    secondo tentativo dopo l'adozione, mai i due candidati sommati. Il candidato che non quadra
+    e' SEMPRE rifiutato a monte (``tentativo``): non diventa mai "squadrato", solo Qwen puo'
+    importare con sbilancio dichiarato (decisione del proprietario, Task 17)."""
+    _bs_det = dict(_det["bs"])
+    # Il plug del tappo lean si AGGIUNGE alla massa/plug che il parser sottostante
+    # ha gia' dichiarato (mai l'uno al posto dell'altro): quella e' diagnostica
+    # dell'ESTRATTORE (un fallback lecito che ha giа contato la massa una volta),
+    # questo e' il rammendo che il percorso lean applica DOPO — sono due cose
+    # diverse, e sommarle e' l'unico modo di non farne sparire una (review round 1).
+    _plug_parser = Decimal(_det["bs"].get("_plug_residual", 0) or 0)
+    _plug_lean = (Decimal(_det["tappo"]["importo"])
+                  if _det["tappo"] and "importo" in _det["tappo"] else Decimal(0))
+    _bs_det["_plug_residual"] = _plug_parser + _plug_lean
+    # Mai un hardcoded zero: la massa non classificata e' quella che il parser ha
+    # DICHIARATO (anche a zero, quando davvero non ne ha trovata) - un estrattore
+    # dichiara sempre le proprie chiavi diagnostiche, e tacere equivarrebbe a
+    # dichiararsi pulito (CLAUDE.md).
+    _massa_det = Decimal(_det["bs"].get("_unclassified_mass", 0) or 0)
+    _bs_det["_unclassified_mass"] = _massa_det
+    # diag non e' uno scheletro fabbricato che pare pulito: porta le stesse chiavi
+    # di da_foglie/da_coppie (nessun KeyError a valle) e dichiara la fonte - la
+    # massa non classificata vive su bs (sopra), non su diag["lato_irrisolti"],
+    # che qui non si applica per costruzione (nessun voto di lato e' girato).
+    _diag_det = {"non_mappati": [], "escluse": [], "risultato_stampato": None,
+                 "lato_corretti": 0, "lato_irrisolti": [], "risultato_duplicato": [],
+                 "padri_esclusi": [], "fonte": _det["parser"]}
+    report = {
+        "esito": _det["esito"], "modo": modo, "fonte": f"deterministico:{_det['parser']}",
+        "struttura": struttura.report(),
+        "misura": {"corrente": {k: str(v) for k, v in _det["misura"].items()}},
+        "tappo": {"corrente": _det["tappo"]},
+        "letture": {"chiamate": 0, "saltate_prima": 0, "senza_percorso": 0},
+        "diag": _diag_det,
+        "deterministico": {"parser": _det["parser"], "esito": _det["esito"],
+                           "unclassified_mass": str(_massa_det),
+                           # Task 25: un anno precedente scartato si vede nel report persistito
+                           **{k: _det[k] for k in ("prior_stato", "prior_rifiuto") if _det.get(k)}},
+        # Task 25: i dettagli del reso XBRL stanno gia' nel risultato (prospetto e tabelle di
+        # nota); il report dice da dove vengono e cosa si e' potuto applicare.
+        **({"dettagli": {"fonte": "prospetto_e_nota_xbrl", **_det["dettagli"]}}
+           if _det.get("dettagli") is not None else {}),
+        **({"ignoti": _det["ignoti"]} if _det.get("ignoti") else {}),
+        "anomalie": _anomalie(_bs_det, _diag_det) + _negativi_stampati(_bs_det, _det["parser"])
+        + _negativi_stampati(_det.get("prior_bs"), _det["parser"], _det.get("anno_precedente")),
+        "secondi": round(time.monotonic() - t0, 1),
+    }
+    return Risultato(bs=_bs_det, ce=dict(_det["ce"]), prior_bs=_det.get("prior_bs"),
+                     prior_ce=_det.get("prior_ce"), report=report, struttura=struttura)
+
+
 def importa(file_path: str, *, ocr_text: str | None = None, analizza=None, leggi_conti=None,
             leggi_voci=None, trascrivi=None, route_hint: str | None = None) -> Risultato:
     t0 = time.monotonic()
+
+    # Task 24 (owner: "la vision si attiva solo quando la struttura del bilancio non si capisce"):
+    # il deterministico gira PRIMA della struttura. Non legge nulla dalla struttura: il parser
+    # standard e quello dello schema con dettaglio lavorano sul testo e sulla geometria del PDF,
+    # la situazione contabile sul testo. Se un candidato quadra (stesse regole di sempre) lo si
+    # adotta a zero chiamate al modello, vision compresa: nessuna mappa di pagina serve a un
+    # risultato che il documento stesso ha gia' dichiarato. Solo senza adozione parte la struttura
+    # (titoli xbrl, poi vision) e il percorso di oggi, invariato. Le pagine per il recupero dei
+    # dettagli (enrich_pdf_details) le deriva il testo, mai un modello.
+    from importers.import_snello.deterministico import tentativo as _tenta_deterministico
+    _det = _tenta_deterministico(file_path, ocr_text)
+    if _det["adottato"]:
+        from importers.struttura_documento.analisi import struttura_deterministica
+        modo = _MODO_DA_PARSER.get(_det["parser"], "legge")
+        struttura = struttura_deterministica(file_path, modo=modo)
+        return _risultato_deterministico(_det, struttura, modo, t0)
 
     from importers.struttura_documento.analisi import analizza_struttura
     analizza_fn = analizza or analizza_struttura
@@ -88,64 +202,17 @@ def importa(file_path: str, *, ocr_text: str | None = None, analizza=None, leggi
         raise SnelloNonRiuscito({"esito": "ripiego", "fase": "struttura", "errore": "nessun prospetto"})
 
     modo = struttura.modo
-    forma = "bilancio" if modo == "legge" else None
+    forma = "bilancio" if modo in _MODI_LEGGE else None
 
-    # Task 16 (b): deterministico prima di Qwen. Nessuna lettura del modello finora (la
-    # struttura e' un altro fornitore, non gx10): se un parser deterministico del vecchio
-    # importatore riconosce il documento e il suo risultato quadra con le regole di
-    # questo percorso, si adotta a zero chiamate a Qwen — mai un secondo tentativo
-    # dopo, mai i due sommati. Se non si applica, solleva o non quadra, non si tocca
-    # nulla: il percorso Qwen di oggi resta l'unico che segue, invariato. Restato
-    # deliberatamente separato dall'ancora "totali_stampati" del Task 17 sotto (quella
-    # e' un contraddittorio per il percorso Qwen; questa e' un risultato alternativo
-    # che lo scavalca del tutto) — e un candidato deterministico che non quadra e'
-    # SEMPRE rifiutato: non diventa mai "squadrato", solo Qwen puo' importare con
-    # sbilancio dichiarato (decisione del proprietario, Task 17).
-    from importers.import_snello.deterministico import tentativo as _tenta_deterministico
-    _det = _tenta_deterministico(file_path, ocr_text)
-    if _det["adottato"]:
-        _bs_det = dict(_det["bs"])
-        # Il plug del tappo lean si AGGIUNGE alla massa/plug che il parser sottostante
-        # ha gia' dichiarato (mai l'uno al posto dell'altro): quella e' diagnostica
-        # dell'ESTRATTORE (un fallback lecito che ha giа contato la massa una volta),
-        # questo e' il rammendo che il percorso lean applica DOPO — sono due cose
-        # diverse, e sommarle e' l'unico modo di non farne sparire una (review round 1).
-        _plug_parser = Decimal(_det["bs"].get("_plug_residual", 0) or 0)
-        _plug_lean = (Decimal(_det["tappo"]["importo"])
-                      if _det["tappo"] and "importo" in _det["tappo"] else Decimal(0))
-        _bs_det["_plug_residual"] = _plug_parser + _plug_lean
-        # Mai un hardcoded zero: la massa non classificata e' quella che il parser ha
-        # DICHIARATO (anche a zero, quando davvero non ne ha trovata) - un estrattore
-        # dichiara sempre le proprie chiavi diagnostiche, e tacere equivarrebbe a
-        # dichiararsi pulito (CLAUDE.md).
-        _massa_det = Decimal(_det["bs"].get("_unclassified_mass", 0) or 0)
-        _bs_det["_unclassified_mass"] = _massa_det
-        # diag non e' uno scheletro fabbricato che pare pulito: porta le stesse chiavi
-        # di da_foglie/da_coppie (nessun KeyError a valle) e dichiara la fonte - la
-        # massa non classificata vive su bs (sopra), non su diag["lato_irrisolti"],
-        # che qui non si applica per costruzione (nessun voto di lato e' girato).
-        _diag_det = {"non_mappati": [], "escluse": [], "risultato_stampato": None,
-                     "lato_corretti": 0, "lato_irrisolti": [], "risultato_duplicato": [],
-                     "padri_esclusi": [], "fonte": _det["parser"]}
-        report = {
-            "esito": _det["esito"], "modo": modo, "fonte": f"deterministico:{_det['parser']}",
-            "struttura": struttura.report(),
-            "misura": {"corrente": {k: str(v) for k, v in _det["misura"].items()}},
-            "tappo": {"corrente": _det["tappo"]},
-            "letture": {"chiamate": 0, "saltate_prima": 0, "senza_percorso": 0},
-            "diag": _diag_det,
-            "deterministico": {"parser": _det["parser"], "esito": _det["esito"],
-                               "unclassified_mass": str(_massa_det)},
-            "anomalie": _anomalie(_bs_det, _diag_det), "secondi": round(time.monotonic() - t0, 1),
-        }
-        return Risultato(bs=_bs_det, ce=dict(_det["ce"]), prior_bs=None, prior_ce=None,
-                         report=report, struttura=struttura)
     _report_deterministico = {"parser": _det["parser"], "esito": _det["esito"]}
     if "unclassified_mass" in _det:
         # Ruling (a), Task 18: la massa che ha impedito l'adozione resta dichiarata nel
         # report anche quando si prosegue col percorso Qwen - mai un silenzio che
         # sembrerebbe "nessun problema" (CLAUDE.md, chiavi diagnostiche sempre dichiarate).
         _report_deterministico["unclassified_mass"] = _det["unclassified_mass"]
+    if "xbrl_reso" in _det:
+        # Task 25: un reso XBRL riconosciuto ma non adottato dichiara quale controllo e' fallito.
+        _report_deterministico["xbrl_reso"] = _det["xbrl_reso"]
 
     from importers.import_snello.verifica import misura, normalizza_forma, soglia, tappa, totali_stampati
 
@@ -163,6 +230,8 @@ def importa(file_path: str, *, ocr_text: str | None = None, analizza=None, leggi
                           else {"totale_attivo": None, "totale_passivo": None})
     else:
         deterministici = totali_stampati(file_path)
+    # Provenienza esplicita dei totali stampati: letti dal testo (entrambi) o no.
+    _totali_dal_testo = all(deterministici.get(k) is not None for k in ("totale_attivo", "totale_passivo"))
 
     # Task 21: la massa grezza per lato (SP, prima di applica_lato/netting dei fondi), sola
     # base di confronto valida per lo stampato quando il prospetto e' a sezioni
@@ -251,6 +320,15 @@ def importa(file_path: str, *, ocr_text: str | None = None, analizza=None, leggi
             leggi_voci_fn = leggi_voci or voci_di_legge
             trascrivi_fn = trascrivi or trascrivi_pagine
             righe_documento = collect_source_rows(file_path, ocr_text=ocr_text)
+            if modo == "legge_con_dettaglio":
+                # Le righe con codice conto non entrano nella lettura delle macro voci: le
+                # didascalie portano gia' il valore netto stampato, i conti sotto il lordo e i
+                # fondi, e il modello li sommerebbe due volte (budget_313: sp13 612.540 dal
+                # conto economico letto sui conti; budget_352: attivo 3,45 M contro 1.675.141,10
+                # stampato). Stessa regola del lettore deterministico (``_ACCOUNT_CODE``).
+                from importers.standard_ivcee_parser import riga_conto
+
+                righe_documento = [r for r in righe_documento if not riga_conto(r.text, bool(r.amounts))]
             letture = {"sp": 1, "ce": 1}
 
             # Ruling (c) addendum, Task 18 (owner, dopo la diagnosi AMBIENTA §7-8): un
@@ -323,7 +401,8 @@ def importa(file_path: str, *, ocr_text: str | None = None, analizza=None, leggi
         fase = "verifica"
         bs, ce, tappo, esito, m, s = _verifica(bs, ce, stampati)
 
-        if modo == "legge" and esito in ("oltre_soglia", "vuoto"):
+        if (modo in _MODI_LEGGE and esito in ("oltre_soglia", "vuoto")
+                and not _documento_sbilanciato(m, s, stampati, _totali_dal_testo)):
             fase = "lettura"
             if abs(m["scarto_sp"]) > s or m["scarto_stampati"] > s:
                 sezione = "sp"
@@ -388,12 +467,13 @@ def importa(file_path: str, *, ocr_text: str | None = None, analizza=None, leggi
             # misurati (scarto_sp/scarto_ce/scarto_stampati) restano in "misura", letti
             # da pdf_importer per costruire l'avviso mostrato all'utente.
             esito = "squadrato"
-            causa = "stampati" if _causa_stampati(m, s) else None
+            causa = ("documento_sbilanciato" if modo in _MODI_LEGGE and _documento_sbilanciato(m, s, stampati, _totali_dal_testo)
+                     else "stampati" if _causa_stampati(m, s) else None)
 
         prior_bs = prior_ce = prior_diag = None
         m_prec = tappo_prec = None
         precedente_stato = None
-        if modo == "legge" and prior is not None:
+        if modo in _MODI_LEGGE and prior is not None:
             pbs, pce, pdiag = prior
             pbs, pce, tappo_prec, esito_prec, m_prec, _ = _verifica(pbs, pce, None)
             if esito_prec in ("oltre_soglia", "vuoto"):
@@ -412,7 +492,7 @@ def importa(file_path: str, *, ocr_text: str | None = None, analizza=None, leggi
 
     misura_report = {"corrente": {k: str(v) for k, v in m.items()}}
     tappo_report = {"corrente": tappo}
-    if modo == "legge" and m_prec is not None:
+    if modo in _MODI_LEGGE and m_prec is not None:
         misura_report["precedente"] = {k: str(v) for k, v in m_prec.items()}
         tappo_report["precedente"] = tappo_prec
 
@@ -422,7 +502,7 @@ def importa(file_path: str, *, ocr_text: str | None = None, analizza=None, leggi
         "anomalie": _anomalie(bs, diag), "secondi": round(time.monotonic() - t0, 1),
         "deterministico": _report_deterministico,
     }
-    if modo == "legge" and precedente_stato is not None:
+    if modo in _MODI_LEGGE and precedente_stato is not None:
         report["precedente"] = precedente_stato
     if causa:
         # Squadrato solo contro il totale stampato (SP e CE interni entro soglia).

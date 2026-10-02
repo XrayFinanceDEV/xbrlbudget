@@ -632,3 +632,60 @@ def test_conti_colonna_ambigua_non_da_ancora(tmp_path, monkeypatch):
     r = S.importa(pdf, analizza=struttura, leggi_conti=_leggi_conti_finti)
     assert r.report["esito"] == "ok"
     assert r.report["misura"]["corrente"]["scarto_stampati"] == "0.00"
+
+
+def _voci_sbilanciate(chiamate):
+    def voci(testo, intestazioni, nota=""):
+        chiamate.append(nota)
+        return {"corrente": [("SPA.C.IV.1", D("5000")), ("SPP.A.I", D("1000"))],
+                "precedente": [], "totali": {}}
+    return voci
+
+
+def test_documento_sbilanciato_non_spende_la_rilettura_e_lo_dichiara(tmp_path):
+    """Task 25 fix round 1, addizione B (decisione del proprietario, 2026-10-02): le voci lette
+    riproducono i totali che il documento stampa (scarto sui totali stampati entro soglia) e i
+    due totali stampati, fra loro, differiscono dello stesso importo: la lettura e' fedele, una
+    rilettura costa una chiamata e non puo' aiutare. Si importa com'e', con causa dichiarata."""
+    pdf = _pdf_con_totali(str(tmp_path / "c.pdf"), "5.000,00", "1.000,00")
+    chiamate = []
+    r = S.importa(pdf, analizza=lambda p: _struttura("legge"), leggi_voci=_voci_sbilanciate(chiamate))
+    assert len(chiamate) == 2                                  # SP e CE, nessuna rilettura
+    assert r.report["esito"] == "squadrato"
+    assert r.report["causa"] == "documento_sbilanciato"
+    assert r.report["misura"]["corrente"]["scarto_sp"] == "4000.00"
+    assert r.report["misura"]["corrente"]["scarto_stampati"] == "0.00"
+
+
+def test_totali_stampati_concordi_fra_loro_rileggono_come_oggi(tmp_path):
+    pdf = _pdf_con_totali(str(tmp_path / "c.pdf"), "5.000,00", "5.000,00")
+    chiamate = []
+    r = S.importa(pdf, analizza=lambda p: _struttura("legge"), leggi_voci=_voci_sbilanciate(chiamate))
+    assert len(chiamate) == 3                                  # SP, CE, una rilettura
+    assert r.report["esito"] == "squadrato"
+    assert r.report.get("causa") != "documento_sbilanciato"
+
+
+def test_senza_totali_stampati_il_comportamento_resta_quello_di_oggi(tmp_path):
+    pdf = _pdf_vuoto(str(tmp_path / "c.pdf"))
+    chiamate = []
+    r = S.importa(pdf, analizza=lambda p: _struttura("legge"), leggi_voci=_voci_sbilanciate(chiamate))
+    assert len(chiamate) == 3
+    assert r.report.get("causa") != "documento_sbilanciato"
+
+
+def test_totali_riportati_dal_modello_non_attivano_la_scorciatoia(tmp_path):
+    """Round 2 (N4): i totali che il MODELLO riporta nella stessa chiamata che legge le voci non
+    sono quelli del documento: una lettura sbagliata e coerente non deve saltare la rilettura ne'
+    dare la colpa al documento. Solo i totali letti deterministicamente dal testo autorizzano."""
+    pdf = _pdf_vuoto(str(tmp_path / "c.pdf"))               # nessun totale deterministico
+    chiamate = []
+
+    def voci(testo, intestazioni, nota=""):
+        chiamate.append(nota)
+        return {"corrente": [("SPA.C.IV.1", D("5000")), ("SPP.A.I", D("1000"))], "precedente": [],
+                "totali": {"totale_attivo": D("5000"), "totale_passivo": D("1000")}}
+    r = S.importa(pdf, analizza=lambda p: _struttura("legge"), leggi_voci=voci)
+    assert len(chiamate) == 3                                # SP, CE, una rilettura
+    assert r.report["esito"] == "squadrato"
+    assert r.report.get("causa") != "documento_sbilanciato"

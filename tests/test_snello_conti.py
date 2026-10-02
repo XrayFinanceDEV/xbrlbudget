@@ -886,3 +886,24 @@ def test_g3_grezzo_sp_massa_vera_mancante_resta_nello_scarto_stampati():
               forma="bilancio",
               grezzo={"attivo": diag["grezzo_sp"]["L"], "passivo": diag["grezzo_sp"]["R"]})
     assert m["scarto_stampati"] == D("400000.00")     # 1.000.000 stampato - 600.000 letto davvero
+
+
+# --- Task 24 fix round 1, F2: ce02/ce03 seguono la convenzione dei RICAVI, ce10 quella dei costi.
+def test_f2_budget_297_ce02_resta_positivo_con_costi_stampati_negativi():
+    coppie = [("CE.A.1", D("2216822")), ("CE.A.2", D("30077")), ("CE.A.5", D("4557")),
+              ("CE.B.6", D("-138665")), ("CE.B.7", D("-897132")), ("CE.B.11", D("-7831"))]
+    bs, ce, diag = da_coppie(coppie)
+    assert ce["ce02_variazioni_rimanenze"] == D("30077.00")
+    assert ce["ce10_var_rimanenze_mat_prime"] == D("7831.00")       # costo: convenzione dei costi
+
+
+def test_f2_rimanenze_diminuite_stampate_negative_fra_ricavi_positivi_restano_negative():
+    coppie = [("CE.A.1", D("1000")), ("CE.A.2", D("-30")), ("CE.A.5", D("20")), ("CE.B.7", D("-300"))]
+    bs, ce, diag = da_coppie(coppie)
+    assert ce["ce02_variazioni_rimanenze"] == D("-30.00")
+
+
+def test_f2_ricavi_stampati_negativi_ribaltano_ce02():
+    coppie = [("CE.A.1", D("-1000")), ("CE.A.5", D("-20")), ("CE.A.2", D("-30")), ("CE.B.7", D("300"))]
+    bs, ce, diag = da_coppie(coppie)
+    assert ce["ce02_variazioni_rimanenze"] == D("30.00")

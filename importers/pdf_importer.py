@@ -131,6 +131,19 @@ def _snello_squadrato_reason(report: Dict[str, Any]) -> str:
         except Exception:
             return str(valore)
 
+    if report.get("causa") == "documento_sbilanciato":
+        # Nessuna rilettura e' avvenuta: i totali che il documento stampa si contraddicono fra
+        # loro e le voci lette li riproducono (Task 25, round 2).
+        try:
+            scarto = f"€{_euro_it(abs(Decimal(str(misura.get('scarto_sp')))))}"
+        except Exception:
+            scarto = "n/d"
+        return (
+            f"{_UNBALANCED_WARNING_PREFIX}: il Totale Attivo e il Totale Passivo stampati dal "
+            f"documento differiscono di {scarto}, e le voci lette li riproducono. Il bilancio è "
+            f"stato importato così com'è: correggilo in Rettifiche oppure carica una versione "
+            f"quadrata del bilancio."
+        )
     return (
         f"{_UNBALANCED_WARNING_PREFIX}: il percorso snello resta oltre soglia dopo "
         f"l'unica rilettura (scarto Attivo/Passivo {_fmt('scarto_sp')}, scarto CE/SP "
@@ -1706,13 +1719,21 @@ def import_pdf_balance_sheet(
         # may move short/long portions but preserves combined credits/debts.
         # Controls, CE and period results cannot be changed by the LLM.
         from importers.detail_enrichment import enrich_pdf_details
-        balance_sheet_data, prior_bs_data, _detail_report = enrich_pdf_details(
-            file_path, balance_sheet_data, prior_bs_data, fiscal_year=fiscal_year,
-            ocr_text=ocr_text,
-            pagine=(_snello.struttura.pagine_dettagli()
-                    if _snello is not None and _snello.report.get("modo") == "legge" else None),
-            usa_llm=not (_snello is not None and _snello.report.get("modo") == "conti"),
-        )
+        if _snello is not None and _snello.report.get("fonte") == "deterministico:xbrl_reso_parser":
+            # Reso XBRL adottato (Task 25): i dettagli sono gia' quelli del prospetto e delle
+            # tabelle di nota (riconciliati al centesimo, o dichiarati non applicati nel report
+            # snello): nessun secondo passaggio, e di sicuro nessuna lettura del modello.
+            _detail_report = {"status": "skipped", "reason": "dettagli_letti_dal_prospetto_xbrl",
+                              "warnings": []}
+        else:
+            balance_sheet_data, prior_bs_data, _detail_report = enrich_pdf_details(
+                file_path, balance_sheet_data, prior_bs_data, fiscal_year=fiscal_year,
+                ocr_text=ocr_text,
+                pagine=(_snello.struttura.pagine_dettagli()
+                        if _snello is not None
+                        and _snello.report.get("modo") in ("legge", "legge_con_dettaglio") else None),
+                usa_llm=not (_snello is not None and _snello.report.get("modo") == "conti"),
+            )
         sc_quadratura_warnings.extend(_detail_report.get('warnings', []))
 
         # Diagnose the CE/SP result gap for PDF routes. The helper records
@@ -1853,9 +1874,27 @@ def import_pdf_balance_sheet(
                 "(anche soci o altri finanziatori) oltre 12 mesi. "
                 "Le scadenze documentate prevalgono; consultare la provenienza dell'importazione."
             )
-        if balance_sheet_data.get("_source_maturity_unspecified") and 'sp16_debiti_breve' not in _maturity_audit:
+        # Un messaggio per ciascun caso: la dicitura ORIGINALE (solo debiti) resta byte per byte per
+        # ogni rotta che solleva il flag dei debiti; quella che nomina i crediti compare solo quando
+        # l'estrattore dello schema con dettaglio ha davvero appiattito i crediti (Task 24, N4).
+        _deb_piatti = bool(balance_sheet_data.get("_source_maturity_unspecified")) \
+            and 'sp16_debiti_breve' not in _maturity_audit
+        _cred_piatti = bool(balance_sheet_data.get("_source_credit_maturity_unspecified"))
+        if _deb_piatti and _cred_piatti:
+            warnings.append(
+                "SCADENZA DEBITI E CREDITI NON DISTINTA NEL PDF: i totali Debiti e Crediti "
+                "e le loro sottovoci sono stati conservati nel breve termine; verificare la "
+                "quota oltre 12 mesi in Rettifiche se disponibile."
+            )
+        elif _deb_piatti:
             warnings.append(
                 "SCADENZA DEBITI NON DISTINTA NEL PDF: il totale Debiti e le sue "
+                "sottovoci sono stati conservati nel breve termine; verificare la "
+                "quota oltre 12 mesi in Rettifiche se disponibile."
+            )
+        elif _cred_piatti:
+            warnings.append(
+                "SCADENZA CREDITI NON DISTINTA NEL PDF: il totale Crediti e le sue "
                 "sottovoci sono stati conservati nel breve termine; verificare la "
                 "quota oltre 12 mesi in Rettifiche se disponibile."
             )
@@ -1864,6 +1903,11 @@ def import_pdf_balance_sheet(
         warnings.extend(sc_quadratura_warnings)
         if unbalanced_reason:
             warnings.insert(0, unbalanced_reason)
+        if _snello is not None:
+            # Percorso snello (Task 25 fix round 1): lo stesso avviso arriva da piu' fonti
+            # (validate_hierarchy e la quadratura unificata); ogni avviso distinto esce una
+            # volta sola. Il percorso di produzione (_snello None) non cambia.
+            warnings = list(dict.fromkeys(warnings))
         if warnings:
             logger.warning(f"Balance sheet hierarchy warnings: {warnings}")
 

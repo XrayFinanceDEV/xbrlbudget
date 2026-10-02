@@ -588,6 +588,15 @@ def _overlap(a: SourceRow, b: SourceRow) -> bool:
     return ca == cb or ca.startswith(cb + ".") or cb.startswith(ca + ".")
 
 
+# Le famiglie di debito il cui segno di stampa puo' essere quello avere (dettagli negativi sotto un
+# aggregato positivo). Il patrimonio netto (sp12) ammette per natura righe negative (riserve
+# negative, perdite a nuovo) e non entra nel voto.
+_FAMIGLIE_DEBITO = ("sp16_debiti_breve", "sp17_debiti_lungo")
+_DEBITI_FINANZIARI = ("sp16a_debiti_banche_breve", "sp16b_debiti_altri_finanz_breve",
+                      "sp16c_debiti_obbligazioni_breve", "sp17a_debiti_banche_lungo",
+                      "sp17b_debiti_altri_finanz_lungo", "sp17c_debiti_obbligazioni_lungo")
+
+
 def apply_details(bs: dict, proposals: list[DetailProposal], rows: list[SourceRow],
                   *, _maturity_neutral: bool = False) -> tuple[dict, dict]:
     """Pure conservative reducer. Every original aggregate stays byte-for-byte.
@@ -598,7 +607,9 @@ def apply_details(bs: dict, proposals: list[DetailProposal], rows: list[SourceRo
     """
     result = dict(bs)
     source = {row.id: row for row in rows}
-    report = {"families": {}, "rejected": []}
+    # "famiglie_segno_invertito" e' SEMPRE presente, vuota quando nulla e' stato invertito.
+    report = {"families": {}, "rejected": [], "famiglie_segno_invertito": [],
+              "famiglie_segno_rifiutato": []}
     grouped = defaultdict(list)
     for proposal in proposals:
         grouped[proposal.aggregate].extend(proposal.items)
@@ -659,17 +670,38 @@ def apply_details(bs: dict, proposals: list[DetailProposal], rows: list[SourceRo
             used_rows.append(row)
             selected[item.field].append((item, row))
 
+        # Il segno si decide per FAMIGLIA e per IMPORTO, non per riga ne' per conteggio (Task 24,
+        # fix round 2, N2): un gestionale che stampa i conti di debito col segno avere rende i
+        # dettagli negativi sotto un aggregato positivo. Si inverte la famiglia solo se la SOMMA
+        # algebrica delle righe lette e' negativa (un'unica banca +5.000 con tre anticipi -100 ha
+        # somma +4.700: nessuna inversione). Tutto o niente: se l'inversione lasciasse negativo un
+        # sotto-campo di debito finanziario (sp16a/b/c, sp17a/b/c) si ripristina lo stato di
+        # partenza e lo si dichiara. L'aggregato non cambia mai.
+        sgn = 1
+        if aggregate in _FAMIGLIE_DEBITO:
+            letti = [r.amounts[i.column] for f in selected for i, r in selected[f]]
+            if letti and sum(letti, ZERO) < 0:
+                finanziari_negativi = any(
+                    f in _DEBITI_FINANZIARI
+                    and sum((-r.amounts[i.column] for i, r in selected[f]), ZERO) < 0
+                    for f in selected)
+                if finanziari_negativi:
+                    report["famiglie_segno_rifiutato"].append(aggregate)
+                else:
+                    sgn = -1
+                    report["famiglie_segno_invertito"].append(aggregate)
+
         merged = dict(baseline)
         accepted = []
         # Signed contra-details first, the bucket last. E.g. reserves +120/-20
         # explain 100 without discarding either of the printed signs.
         def order(field):
-            value = sum((r.amounts[i.column] for i, r in selected[field]), ZERO)
+            value = sum((sgn * r.amounts[i.column] for i, r in selected[field]), ZERO)
             return (field == bucket, value >= 0)
 
         for field in sorted(selected, key=order):
             evidence = selected[field]
-            value = sum((r.amounts[i.column] for i, r in evidence), ZERO)
+            value = sum((sgn * r.amounts[i.column] for i, r in evidence), ZERO)
             reason = None
             if field == bucket:
                 # The residual remains here; record only the portion actually
@@ -689,7 +721,7 @@ def apply_details(bs: dict, proposals: list[DetailProposal], rows: list[SourceRo
             for item, row in evidence:
                 claimed.add((row.id, item.column))
                 accepted.append({"field": field, "row": row.id, "page": row.page,
-                                 "column": item.column, "amount": str(row.amounts[item.column]),
+                                 "column": item.column, "amount": str(sgn * row.amounts[item.column]),
                                  "text": row.text})
         if not accepted:
             continue

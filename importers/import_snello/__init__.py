@@ -81,6 +81,17 @@ def _causa_stampati(m: dict, s) -> bool:
     return abs(m["scarto_sp"]) <= s and abs(m["scarto_ce"]) <= s and m["scarto_stampati"] > s
 
 
+def _negativi_stampati(bs: dict, parser: str) -> list:
+    """Reso XBRL (Task 25): un importo SP negativo che il documento stampa davvero (fuori da
+    patrimonio netto e immobilizzazioni, gia' coperte da ``_anomalie``) si tiene col suo segno ma
+    non passa in silenzio: l'utente lo vede fra le anomalie e lo corregge in Rettifiche."""
+    if parser != "xbrl_reso_parser":
+        return []
+    return [[k, str(v)] for k, v in bs.items()
+            if k.startswith("sp") and isinstance(v, Decimal) and v < 0
+            and not k.startswith(("sp02", "sp03", "sp04", "sp12", "sp13"))]
+
+
 def _risultato_deterministico(_det: dict, struttura, modo: str, t0: float) -> "Risultato":
     """Il risultato di un candidato deterministico adottato (nessuna chiamata al modello).
 
@@ -127,7 +138,8 @@ def _risultato_deterministico(_det: dict, struttura, modo: str, t0: float) -> "R
         **({"dettagli": {"fonte": "prospetto_e_nota_xbrl", **_det["dettagli"]}}
            if _det.get("dettagli") is not None else {}),
         **({"ignoti": _det["ignoti"]} if _det.get("ignoti") else {}),
-        "anomalie": _anomalie(_bs_det, _diag_det), "secondi": round(time.monotonic() - t0, 1),
+        "anomalie": _anomalie(_bs_det, _diag_det) + _negativi_stampati(_bs_det, _det["parser"]),
+        "secondi": round(time.monotonic() - t0, 1),
     }
     return Risultato(bs=_bs_det, ce=dict(_det["ce"]), prior_bs=_det.get("prior_bs"),
                      prior_ce=_det.get("prior_ce"), report=report, struttura=struttura)

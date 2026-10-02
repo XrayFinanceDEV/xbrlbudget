@@ -766,3 +766,25 @@ def test_resto_degli_ammortamenti_va_su_ce09c_non_su_un_confine_di_kpi(tmp_path)
     assert r["ce"]["ce09c_svalutazioni"] == D("500")
     assert r["ce"]["ce09b_ammort_materiali"] == D("34114")
     assert r["ignoti"][0][1] == "ce09c"
+
+
+# ---- fix round 1: gli importi negativi stampati fuori dalle immobilizzazioni si dichiarano -----
+
+def test_importo_negativo_stampato_e_dichiarato_nelle_anomalie(tmp_path, monkeypatch):
+    from importers import import_snello
+    _vieta_modelli(monkeypatch)
+    # attivita' finanziarie negative stampate (come 247): il valore si tiene, l'utente lo vede
+    sp = _sostituisci(SP_ABBREVIATO,
+                      "III - Attività finanziarie che non costituiscono immobilizzazioni\n12.502\n12.502",
+                      "III - Attività finanziarie che non costituiscono immobilizzazioni\n(55.000)\n12.502")
+    sp = _sostituisci(sp, "IV - Disponibilità liquide\n1.758\n55.886", "IV - Disponibilità liquide\n69.260\n55.886")
+    ris = import_snello.importa(_abbreviato(tmp_path, sp=sp))
+    assert ris.bs["sp08_attivita_finanziarie"] == D("-55000")
+    assert ["sp08_attivita_finanziarie", "-55000.00"] in ris.report["anomalie"]
+
+
+def test_nessuna_anomalia_senza_negativi(tmp_path, monkeypatch):
+    from importers import import_snello
+    _vieta_modelli(monkeypatch)
+    ris = import_snello.importa(_abbreviato(tmp_path))
+    assert ris.report["anomalie"] == []

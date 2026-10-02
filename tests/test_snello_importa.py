@@ -672,3 +672,20 @@ def test_senza_totali_stampati_il_comportamento_resta_quello_di_oggi(tmp_path):
     r = S.importa(pdf, analizza=lambda p: _struttura("legge"), leggi_voci=_voci_sbilanciate(chiamate))
     assert len(chiamate) == 3
     assert r.report.get("causa") != "documento_sbilanciato"
+
+
+def test_totali_riportati_dal_modello_non_attivano_la_scorciatoia(tmp_path):
+    """Round 2 (N4): i totali che il MODELLO riporta nella stessa chiamata che legge le voci non
+    sono quelli del documento: una lettura sbagliata e coerente non deve saltare la rilettura ne'
+    dare la colpa al documento. Solo i totali letti deterministicamente dal testo autorizzano."""
+    pdf = _pdf_vuoto(str(tmp_path / "c.pdf"))               # nessun totale deterministico
+    chiamate = []
+
+    def voci(testo, intestazioni, nota=""):
+        chiamate.append(nota)
+        return {"corrente": [("SPA.C.IV.1", D("5000")), ("SPP.A.I", D("1000"))], "precedente": [],
+                "totali": {"totale_attivo": D("5000"), "totale_passivo": D("1000")}}
+    r = S.importa(pdf, analizza=lambda p: _struttura("legge"), leggi_voci=voci)
+    assert len(chiamate) == 3                                # SP, CE, una rilettura
+    assert r.report["esito"] == "squadrato"
+    assert r.report.get("causa") != "documento_sbilanciato"

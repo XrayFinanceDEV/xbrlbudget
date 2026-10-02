@@ -81,13 +81,15 @@ def _causa_stampati(m: dict, s) -> bool:
     return abs(m["scarto_sp"]) <= s and abs(m["scarto_ce"]) <= s and m["scarto_stampati"] > s
 
 
-def _documento_sbilanciato(m: dict, s, stampati: dict | None) -> bool:
+def _documento_sbilanciato(m: dict, s, stampati: dict | None, deterministici: bool) -> bool:
     """Task 25 fix round 1 (decisione del proprietario, 2026-10-02): il documento contraddice
     se' stesso. Le voci lette riproducono i totali stampati (scarto sui totali stampati entro
     soglia) e il Totale Attivo e il Totale Passivo stampati differiscono, fra loro, dello
     stesso importo dello scarto Attivo/Passivo misurato: la lettura e' fedele, ne' una
     rilettura ne' un tappo possono aiutare. Con uno dei due totali assenti: falso (come oggi)."""
-    if not stampati:
+    if not deterministici or not stampati:
+        # i totali riportati dal modello vengono dalla stessa chiamata che ha letto le voci:
+        # non sono il documento (round 2, N4)
         return False
     ta, tp = stampati.get("totale_attivo"), stampati.get("totale_passivo")
     if ta is None or tp is None:
@@ -224,6 +226,8 @@ def importa(file_path: str, *, ocr_text: str | None = None, analizza=None, leggi
                           else {"totale_attivo": None, "totale_passivo": None})
     else:
         deterministici = totali_stampati(file_path)
+    # Provenienza esplicita dei totali stampati: letti dal testo (entrambi) o no.
+    _totali_dal_testo = all(deterministici.get(k) is not None for k in ("totale_attivo", "totale_passivo"))
 
     # Task 21: la massa grezza per lato (SP, prima di applica_lato/netting dei fondi), sola
     # base di confronto valida per lo stampato quando il prospetto e' a sezioni
@@ -394,7 +398,7 @@ def importa(file_path: str, *, ocr_text: str | None = None, analizza=None, leggi
         bs, ce, tappo, esito, m, s = _verifica(bs, ce, stampati)
 
         if (modo in _MODI_LEGGE and esito in ("oltre_soglia", "vuoto")
-                and not _documento_sbilanciato(m, s, stampati)):
+                and not _documento_sbilanciato(m, s, stampati, _totali_dal_testo)):
             fase = "lettura"
             if abs(m["scarto_sp"]) > s or m["scarto_stampati"] > s:
                 sezione = "sp"
@@ -459,7 +463,7 @@ def importa(file_path: str, *, ocr_text: str | None = None, analizza=None, leggi
             # misurati (scarto_sp/scarto_ce/scarto_stampati) restano in "misura", letti
             # da pdf_importer per costruire l'avviso mostrato all'utente.
             esito = "squadrato"
-            causa = ("documento_sbilanciato" if modo in _MODI_LEGGE and _documento_sbilanciato(m, s, stampati)
+            causa = ("documento_sbilanciato" if modo in _MODI_LEGGE and _documento_sbilanciato(m, s, stampati, _totali_dal_testo)
                      else "stampati" if _causa_stampati(m, s) else None)
 
         prior_bs = prior_ce = prior_diag = None

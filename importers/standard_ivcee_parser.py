@@ -200,6 +200,61 @@ def _column_layout(
     return max(candidates, key=lambda item: item[0]) if candidates else None
 
 
+_YEAR_RE = re.compile(r"(?:19|20)\d{2}")
+
+
+def _year_header_layout(
+    document: fitz.Document,
+) -> Optional[Tuple[float, float, Optional[float]]]:
+    """(current_x, prior_x, bound_x) per l'intestazione a SOLI ANNI ("2025 | 2024") sotto
+    etichette ESERCIZIO/ESERCIZIO/DIFFERENZA/SCOST. (budget_313): ``_column_layout`` cerca date
+    complete e non la vede, e il ramo a colonna singola leggerebbe l'ultimo importo della riga,
+    cioe' lo scostamento percentuale.
+
+    Solo per ``extract_ivcee_didascalie``: i parser esistenti non la chiamano, il loro output
+    non puo' cambiare. L'anno corrente e' quello piu' a sinistra e il precedente e' esattamente
+    quello prima (2025, 2024): due anni qualunque non bastano. Il confine ``bound_x`` viene dai
+    DATI (la terza colonna stabile su almeno tre righe) e solo se un marcatore noto di scarto
+    (Differenza/Scost.) sta nella banda d'intestazione: mai indovinare quale sia la terza."""
+    for page in document:
+        words = page.get_text("words", sort=True)
+        years = [w for w in words if _YEAR_RE.fullmatch(str(w[4]).strip())]
+        for first in years:
+            peers = [
+                w for w in years
+                if float(w[0]) > float(first[0]) + 25 and abs(float(w[1]) - float(first[1])) <= 1.5
+                and int(str(w[4])) == int(str(first[4])) - 1
+            ]
+            if not peers:
+                continue
+            second = min(peers, key=lambda w: float(w[0]))
+            cx = (float(first[0]) + float(first[2])) / 2
+            px = (float(second[0]) + float(second[2])) / 2
+            if not (cx > 300 and px - cx >= 25):
+                continue
+            header_y = float(second[1])
+            cutoff = (cx + px) / 2
+            below = [w for w in words if float(w[1]) > header_y + 1.5]
+            third: Dict[int, float] = {}
+            for w in below:
+                if _amount(str(w[4]).strip()) is None:
+                    continue
+                centre = (float(w[0]) + float(w[2])) / 2
+                if centre > px + (px - cx) * 0.5:
+                    key = round(float(w[1]))
+                    third[key] = min(third.get(key, centre), centre)
+            if len(third) < 3:
+                return cx, px, None
+            if not any(
+                _is_excluded_column_header(str(w[4]))
+                for w in words if float(w[1]) <= header_y + 1.5 and float(w[0]) > cx
+            ):
+                return None
+            bound = (px + min(third.values())) / 2
+            return cx, px, bound
+    return None
+
+
 def _column_centres(document: fitz.Document) -> Optional[Tuple[float, float]]:
     layout = _column_layout(document)
     return None if layout is None else (layout[0], layout[1])
@@ -387,6 +442,66 @@ def _single_column_rows(document: fitz.Document) -> List[_Row]:
     return rows
 
 
+# Un codice di conto in testa alla riga (budget_313 "03/15/015 SPESE DI COSTITUZIONE",
+# budget_352 "050101010 Spese di costituzione"): cifre, barre e punti, e abbastanza lungo da
+# non essere il numero d'ordine di una voce di legge ("5 TOTALE Altri ricavi", "1)", "14").
+# Mai dedotto da prefissi o lunghezze fra conti: serve solo a dire "questa riga e' un conto,
+# non una didascalia dello schema".
+_ACCOUNT_CODE = re.compile(r"^(?:\d{5,}|\d+(?:[/.]\d+){1,})$")
+
+
+# Il "riclassificato con codici IVCEE" (AMBIENTA) mette davanti al conto la sua voce di legge
+# ("CII1A  208.00121 CLIENTI C/FATTURE DA EMETTERE"): il codice conto e' il secondo token.
+_IVCEE_TAG = re.compile(r"^[a-e](?:[ivx]+\d*[a-z]?|\d+[a-z]?)?$")
+
+
+# Un importo italiano a gruppi di tre cifre ("1.671.195") non e' un codice conto: nei prospetti
+# dove l'importo e' spezzato in token (FORMETAL_701) la sua forma coincide con "cifre e punti".
+_AMOUNT_LIKE = re.compile(r"^\d{1,3}(?:\.\d{3})+$")
+
+
+def _is_account_row(row: "_Row") -> bool:
+    tokens = row.label.split()
+    if not tokens:
+        return False
+    if _AMOUNT_LIKE.match(tokens[0]) or _DATE_RE.fullmatch(tokens[0]):
+        return False
+    if _ACCOUNT_CODE.match(tokens[0]):
+        return True
+    return len(tokens) > 1 and bool(_IVCEE_TAG.match(tokens[0])) and bool(_ACCOUNT_CODE.match(tokens[1]))
+
+
+def _is_page_footer(row: "_Row") -> bool:
+    """Il piede di pagina "Pagina 4 di 10" (budget_352): il numero di pagina cade a destra di
+    x=300 e verrebbe letto come importo, sommandosi ai debiti (30 euro di scarto)."""
+    return bool(re.match(r"^pagina(?: \d+)? di(?: \d+)?$", row.label))
+
+
+def _caption_label(label: str) -> str:
+    """"STATO PATRIMONIALE - ATTIVO" e "TOTALE STATO PATRIMONIALE - PASSIVO" (budget_313) sono le
+    didascalie di sempre con un trattino di stampa: si riportano alla forma che il parser legge
+    ("stato patrimoniale attivo", "totale passivo")."""
+    for lato in ("attivo", "passivo"):
+        label = label.replace(f"totale stato patrimoniale - {lato}", f"totale {lato}")
+        label = label.replace(f"stato patrimoniale - {lato}", f"stato patrimoniale {lato}")
+    return label
+
+
+def _caption_rows(rows: List["_Row"]) -> Tuple[List["_Row"], int]:
+    """Le sole righe di didascalia (senza codice conto) e quante righe-conto sono state tolte.
+
+    Lo schema di legge con dettaglio conti (budget_313, budget_352): le didascalie portano il
+    valore netto stampato, i conti sotto portano il lordo e i fondi. Le macro voci si leggono
+    dalle didascalie; i conti non entrano mai nella lettura, o le sommerebbero due volte."""
+    kept = [
+        # "STATO PATRIMONIALE - ATTIVO" (budget_313) e' la stessa didascalia di "Stato
+        # patrimoniale attivo": il trattino e' solo punteggiatura di stampa.
+        _Row(r.page, r.y, _caption_label(r.label), r.values)
+        for r in rows if not _is_account_row(r) and not _is_page_footer(r)
+    ]
+    return kept, sum(1 for r in rows if _is_account_row(r))
+
+
 def _find(
     rows: Sequence[_Row],
     *terms: str,
@@ -509,7 +624,19 @@ def _block_value(
     ]
     if candidates:
         return candidates[-1]
-    return rows[start].value(column) or Decimal("0")
+    own = rows[start].value(column)
+    if own is None:
+        # Il totale sta su una riga "<numero> TOTALE <voce>" dopo i figli e la didascalia
+        # non porta alcun importo (budget_313: "10) ammortamenti e svalutazioni:" poi
+        # "10 totale ammortamenti e svalutazioni:", "II) CREDITI :" poi "II TOTALE CREDITI :").
+        # Prima era zero, che un controllo incrociato respingeva: ora si legge il totale
+        # stampato con lo stesso numero d'ordine, mai un'altra riga.
+        numero = rows[start].label.split(" ", 1)[0].rstrip(")")
+        if numero:
+            for row in rows[start + 1:end]:
+                if row.label.startswith(f"{numero} totale ") and row.value(column) is not None:
+                    return row.value(column)
+    return own or Decimal("0")
 
 
 def _section_total_value(
@@ -519,6 +646,7 @@ def _section_total_value(
     total_terms: Tuple[str, ...],
     column: int,
     search_start: Optional[int] = None,
+    alt_terms: Sequence[Tuple[str, ...]] = (),
 ) -> Decimal:
     """A legal section's displayed total.
 
@@ -529,9 +657,9 @@ def _section_total_value(
     when the caption row carries the amount directly, or an anonymous
     subtotal row when that is what the source prints instead.
     """
-    if total_terms:
+    for terms in ((total_terms,) if total_terms else ()) + tuple(alt_terms):
         total_i = _find_opt(
-            rows, *total_terms,
+            rows, *terms,
             start=caption_index + 1 if search_start is None else search_start,
             end=next_index,
         )
@@ -628,6 +756,7 @@ def _parse_column(rows: Sequence[_Row], column: int) -> Optional[Dict[str, Decim
                 ("i. immobilizzazioni immateriali",),
                 ("b.i) immobilizzazioni immateriali",),
                 ("i - immobilizzazioni immateriali",),
+                ("i) immobilizzazioni immateriali",),
             ),
             start=b_imm + 1,
         )
@@ -638,6 +767,7 @@ def _parse_column(rows: Sequence[_Row], column: int) -> Optional[Dict[str, Decim
                 ("ii. immobilizzazioni materiali",),
                 ("b.ii) immobilizzazioni materiali",),
                 ("ii - immobilizzazioni materiali",),
+                ("ii) immobilizzazioni materiali",),
             ),
             start=(imm_i if imm_i is not None else b_imm) + 1,
         )
@@ -648,6 +778,7 @@ def _parse_column(rows: Sequence[_Row], column: int) -> Optional[Dict[str, Decim
                 ("iii. immobilizzazioni finanziarie",),
                 ("b.iii) immobilizzazioni finanziarie",),
                 ("iii - immobilizzazioni finanziarie",),
+                ("iii) immobilizzazioni finanziarie",),
             ),
             start=imm_ii + 1,
         )
@@ -670,7 +801,7 @@ def _parse_column(rows: Sequence[_Row], column: int) -> Optional[Dict[str, Decim
         # ("I - Rimanenze", budget_297) added alongside the dotted one.
         rim_i = _find_variant_opt(
             asset_rows,
-            (("i. rimanenze",), ("i - rimanenze",)),
+            (("i. rimanenze",), ("i - rimanenze",), ("i) rimanenze",)),
             start=c_att + 1,
         )
         cred_i = _find_variant(
@@ -683,7 +814,8 @@ def _parse_column(rows: Sequence[_Row], column: int) -> Optional[Dict[str, Decim
         # the crediti section's own boundary becomes "IV. Disponibilità liquide".
         fin_i = _find_variant_opt(
             asset_rows,
-            (("iii. attivita finanziarie",), ("iii) attivita finanziarie",), ("iii - attivita finanziarie",)),
+            (("iii. attivita finanziarie",), ("iii) attivita finanziarie",), ("iii - attivita finanziarie",),
+             ("iii) attivita' finanziarie",)),
             start=cred_i + 1,
         )
         liq_i = _find_variant(
@@ -692,6 +824,7 @@ def _parse_column(rows: Sequence[_Row], column: int) -> Optional[Dict[str, Decim
                 ("iv. disponibilita liquide",),
                 ("iv. disponibilita' liquide",),
                 ("iv) disponibilita liquide",),
+                ("iv) disponibilita' liquide",),
                 ("iv - disponibilita liquide",),
             ),
             start=(fin_i if fin_i is not None else cred_i) + 1,
@@ -751,7 +884,11 @@ def _parse_column(rows: Sequence[_Row], column: int) -> Optional[Dict[str, Decim
         # on AMBIENTA, not a 0,00 row) — "C) Trattamento di fine rapporto"
         # always follows it (or A) Patrimonio netto when it is missing too).
         pn_end = total_pn_i if total_pn_i is not None else utile_i
-        tfr_i = _find(pass_rows, "c) trattamento di fine rapporto", start=pn_end + 1)
+        tfr_i = _find_variant(
+            pass_rows,
+            (("c) trattamento di fine rapporto",), ("c) trattamento fine rapporto",)),
+            start=pn_end + 1,
+        )
         fondi_total_i = _find_opt(
             pass_rows, "totale fondi per rischi e oneri", start=pn_end + 1, end=tfr_i
         )
@@ -1292,25 +1429,35 @@ def _parse_income_column(
         )
         # Singular "costo" on AMBIENTA, plural "costi" on the already-supported
         # layout (#19 diagnosis §4): a term missing the final vowel matches both.
-        difference_i = _find(ce_rows, "differenza tra valore e cost", start=b14 + 1)
+        difference_i = _find_variant(
+            ce_rows,
+            (("differenza tra valore e cost",), ("totale diff. tra valore e cost",)),
+            start=b14 + 1,
+        )
 
         c_i = _find_re(ce_rows, _P + r"c\) (?:totale )?proventi e oneri finanziari", start=difference_i + 1)
         c15 = _find_re_opt(ce_rows, _P + r"15\) proventi da partecipazioni", start=c_i + 1)
-        c16 = _find_re(ce_rows, _P + r"16\) altri proventi finanziari", start=(c15 if c15 is not None else c_i) + 1)
-        c17 = _find_re(ce_rows, _P + r"17\) interessi e altri oneri", start=c16 + 1)
+        # "16) Altri proventi finanziari" non stampato quando e' a zero (budget_313: dopo
+        # "C)" passa direttamente a "17)"): assente vale zero, come le altre didascalie opzionali.
+        c16 = _find_re_opt(ce_rows, _P + r"16\) altri proventi finanziari", start=(c15 if c15 is not None else c_i) + 1)
+        c17 = _find_re(
+            ce_rows, _P + r"17\) interessi e altri oneri",
+            start=(c16 if c16 is not None else (c15 if c15 is not None else c_i)) + 1,
+        )
         c17b = _find_re_opt(ce_rows, _P + r"17 bis\) utili e perdite", start=c17 + 1)
 
         d_i = _find_re_opt(ce_rows, _P + r"d\) rettifiche di valore", start=(c17b if c17b is not None else c17) + 1)
-        pretax_i = _find(
-            ce_rows, "risultato prima delle imposte",
+        pretax_i = _find_variant(
+            ce_rows,
+            (("risultato prima delle imposte",), ("totale ris. prima delle imposte",)),
             start=(d_i if d_i is not None else (c17b if c17b is not None else c17)) + 1,
         )
         # "20) Imposte sul reddito" is printed only when non-zero (#23
         # diagnosis: absent on budget_379, a loss year — same "absent means
         # zero" convention as every other optional caption in this module).
-        tax_i = _find_re_opt(ce_rows, _P + r"20\) imposte sul reddito", start=pretax_i + 1)
+        tax_i = _find_re_opt(ce_rows, _P + r"20\) imposte (?:sul reddito|redd\.)", start=pretax_i + 1)
         result_i = _find_re(
-            ce_rows, _P + r"21\) utile \(perdita\)",
+            ce_rows, _P + r"21\) utile \(perdit[ae]\)",
             start=(tax_i if tax_i is not None else pretax_i) + 1,
         )
 
@@ -1353,12 +1500,13 @@ def _parse_income_column(
         d_or_pretax = d_i if d_i is not None else pretax_i
         c_chain = (c15, c16, c17, c17b, d_or_pretax)
         ce13 = _chain_value(c_chain, c15)
-        ce14 = _block_value(ce_rows, c16, c17, column)
+        ce14 = _block_value(ce_rows, c16, c17, column) if c16 is not None else Decimal("0")
         ce15 = _chain_value(c_chain, c17)
         ce16 = _chain_value(c_chain, c17b)
         declared_c = _section_total_value(
             ce_rows, c_i, d_or_pretax, ("totale proventi e oneri finanziari",), column,
             search_start=(c17b if c17b is not None else c17) + 1,
+            alt_terms=(("totale diff. proventi e oneri finanziari",),),
         )
         if d_i is not None:
             # Unlike the other declared totals this one is tolerant to a blank
@@ -1438,6 +1586,37 @@ def _parse_income_column(
         return None
 
 
+_ENUMERATOR = re.compile(r"^(?:\d+(?:-bis|-ter|-quater)?|[a-z]|[ivx]+)\)\s*")
+
+
+def _printed_total_row(rows: Sequence[_Row], caption: int, end: int) -> Optional[Decimal]:
+    """Il totale stampato di una didascalia che non porta importo: la riga "Totale <voce>"
+    dopo i figli (budget_352: "10) Ammortamenti e svalutazioni" vuota, poi "Totale ammortamenti
+    e svalutazioni"). L'uguaglianza e' sul testo intero della voce, non su una sottostringa: i
+    sotto-totali piu' lunghi ("Totale altri proventi finanziari da crediti iscritti...") non
+    possono prendere il posto del totale vero. None quando non c'e': mai un importo indovinato."""
+    core = _ENUMERATOR.sub("", rows[caption].label).strip()
+    if not core:
+        return None
+    ammessi = {f"totale {art}{core}" for art in ("", "delle ", "dei ", "degli ", "della ", "costi ")}
+    for row in rows[caption + 1:end]:
+        etichetta = row.label[:-2] if row.label.endswith(" -") else row.label
+        if etichetta in ammessi and row.value(0) is not None:
+            return row.value(0)
+    return None
+
+
+def _caption_or_total(rows: Sequence[_Row], caption: int, end: int) -> Decimal:
+    """Valore sulla riga della didascalia, altrimenti il suo totale stampato (vedi sopra),
+    altrimenti l'errore di sempre (importo mancante)."""
+    value = rows[caption].value(0)
+    if value is None:
+        value = _printed_total_row(rows, caption, end)
+    if value is None:
+        raise ValueError(f"IV-CEE source amount missing at {rows[caption].label!r}")
+    return value
+
+
 def _parse_compact_income(rows: Sequence[_Row]) -> Optional[Dict[str, Decimal]]:
     """Parse and cross-foot a one-column abbreviated IV-CEE income statement."""
     try:
@@ -1463,6 +1642,12 @@ def _parse_compact_income(rows: Sequence[_Row]) -> Optional[Dict[str, Decimal]]:
         )
         ce03 = _optional_direct_value_re(ce_rows, r"^4\) incrementi", a_i + 1, total_a_i)
         ce04 = _optional_direct_value_re(ce_rows, r"^5\) altri ricavi", a_i + 1, total_a_i)
+        if ce04 == 0:
+            a5_i = _find_re_opt(ce_rows, r"^5\) altri ricavi", start=a_i + 1, end=total_a_i)
+            if a5_i is not None and ce_rows[a5_i].value(0) is None:
+                _tot = _printed_total_row(ce_rows, a5_i, total_a_i)
+                if _tot is not None:
+                    ce04 = _tot
         declared_a = _value_at(ce_rows, total_a_i, 0)
 
         ce05 = _optional_direct_value_re(ce_rows, r"^6\) per materie", b_i + 1, total_b_i)
@@ -1471,6 +1656,15 @@ def _parse_compact_income(rows: Sequence[_Row]) -> Optional[Dict[str, Decimal]]:
         b9_i = _find_re(ce_rows, r"^9\) per il personale", start=b_i + 1, end=total_b_i)
         b10_i = _find_re(ce_rows, r"^10\) ammortamenti", start=b9_i + 1, end=total_b_i)
         ce08 = ce_rows[b9_i].value(0)
+        if ce08 is None:
+            # Il totale stampato del personale prima della somma delle foglie: una riga
+            # "c), d), e)" ripete la somma di c) ed e) e la somma la conterebbe due volte.
+            ce08 = next(
+                (row.value(0) for row in ce_rows[b9_i + 1:b10_i]
+                 if re.match(r"^totale (?:costi )?per il personale", row.label)
+                 and row.value(0) is not None),
+                None,
+            )
         if ce08 is None:
             ce08 = _sum_printed_values(ce_rows, b9_i + 1, b10_i)
         ce08b = _optional_direct_value_re(
@@ -1485,9 +1679,9 @@ def _parse_compact_income(rows: Sequence[_Row]) -> Optional[Dict[str, Decimal]]:
         ce08d = _optional_direct_value_re(
             ce_rows, r"^e\) altri costi", b9_i + 1, b10_i
         )
-        ce09 = _value_at(ce_rows, b10_i, 0)
+        ce09 = _caption_or_total(ce_rows, b10_i, total_b_i)
         ce10 = _optional_direct_value_re(
-            ce_rows, r"^11\) variazione", b10_i + 1, total_b_i
+            ce_rows, r"^11\) variazion[ei]", b10_i + 1, total_b_i
         )
         ce11 = _optional_direct_value_re(
             ce_rows, r"^12\) accantonament", b10_i + 1, total_b_i
@@ -1507,17 +1701,29 @@ def _parse_compact_income(rows: Sequence[_Row]) -> Optional[Dict[str, Decimal]]:
         ce14 = _optional_direct_value_re(
             ce_rows, r"^16\) altri proventi finanziari", c_i + 1, total_c_i
         )
+        if ce14 == 0:
+            c16_i = _find_re_opt(ce_rows, r"^16\) altri proventi finanziari", start=c_i + 1, end=total_c_i)
+            if c16_i is not None and ce_rows[c16_i].value(0) is None:
+                _tot = _printed_total_row(ce_rows, c16_i, total_c_i)
+                if _tot is not None:
+                    ce14 = _tot
         source_oneri = _optional_direct_value_re(
             ce_rows, r"^17\) interessi e altri oneri", c_i + 1, total_c_i
         )
+        if source_oneri == 0:
+            c17_i = _find_re_opt(ce_rows, r"^17\) interessi e altri oneri", start=c_i + 1, end=total_c_i)
+            if c17_i is not None and ce_rows[c17_i].value(0) is None:
+                _tot = _printed_total_row(ce_rows, c17_i, total_c_i)
+                if _tot is not None:
+                    source_oneri = _tot
         ce15 = abs(source_oneri)
         ce16 = _optional_direct_value_re(
             ce_rows, r"^17 bis\) utili e perdite", c_i + 1, total_c_i
         )
         declared_c = _value_at(ce_rows, total_c_i, 0)
-        ce17 = _value_at(ce_rows, d_i, 0)
+        ce17 = _caption_or_total(ce_rows, d_i, pretax_i)
         declared_pretax = _value_at(ce_rows, pretax_i, 0)
-        ce20 = _value_at(ce_rows, tax_i, 0)
+        ce20 = _caption_or_total(ce_rows, tax_i, result_i)
         declared_result = _value_at(ce_rows, result_i, 0)
 
         value_production = ce01 + ce02 + ce03 + ce04
@@ -1654,6 +1860,99 @@ def extract_standard_ivcee_income(
         return _parse_compact_income(_single_column_rows(document)), None
     finally:
         document.close()
+
+
+def _didascalie_rows(
+    document: fitz.Document,
+) -> Optional[Tuple[List[_Row], int, str]]:
+    """Righe di didascalia (senza codice conto), righe-conto escluse e struttura colonne.
+
+    Stessa scelta del layout dei parser standard (date affiancate, ancore a parole, colonna
+    singola), piu' l'intestazione a soli anni di ``_year_header_layout`` (budget_313). None
+    quando il documento non porta nemmeno i marcatori di uno schema di legge."""
+    text = "\n".join(page.get_text() for page in document).casefold()
+    if not all(m in text for m in ("stato patrimoniale", "attivo", "passivo", "conto economico")):
+        return None
+    layout = _column_layout(document)
+    anni = _year_header_layout(document) if layout is None else None
+    if anni is not None:
+        rows, kind = _physical_rows(document, (anni[0], anni[1]), bound=anni[2]), "anni"
+    elif layout is not None:
+        current_x, prior_x, _prior_ok, bound_x = layout
+        rows, kind = _physical_rows(document, (current_x, prior_x), bound=bound_x), "date"
+    else:
+        centres = _labelled_column_centres(document)
+        if centres is not None:
+            rows, kind = _physical_rows(document, centres), "parole"
+        else:
+            rows, kind = _single_column_rows(document), "singola"
+    kept, dropped = _caption_rows(rows)
+    return kept, dropped, kind
+
+
+# Una didascalia dello schema di legge: lettera, numero romano o numero arabo con la parentesi
+# (A) B) I) II) 1) 5-bis)), oppure "Totale ...". Contano solo quelle che portano un importo.
+_LEGAL_CAPTION = re.compile(r"^(?:[a-e]|[ivx]+|\d+(?:-bis|-ter|-quater)?)\)\s|^totale\s")
+
+
+def riconosci_schema_con_dettaglio(file_path: str) -> Optional[Dict[str, int]]:
+    """Riconoscimento deterministico dalla sola struttura del testo (mai dalla vision) del
+    documento «schema di legge con dettaglio conti» (budget_313, budget_352, AMBIENTA): righe di
+    didascalia senza codice conto che portano un importo e formano lo schema di legge, con righe
+    con codice conto sotto. ``{"didascalie": n, "conti": m}`` quando entrambe superano la soglia,
+    altrimenti None.
+
+    Un bilancio di verifica vero (nessuna didascalia di legge con importo: TM-BUSINESS_589/590,
+    FORMETAL-TEST, le contrapposte) ha righe-conto ma non didascalie: resta fuori. Un bilancio
+    di legge senza conti sotto ha didascalie ma niente righe-conto: resta fuori, e lo legge il
+    parser standard come sempre."""
+    try:
+        document = fitz.open(file_path)
+    except Exception:
+        return None
+    try:
+        letto = _didascalie_rows(document)
+    finally:
+        document.close()
+    if letto is None:
+        return None
+    kept, dropped, _kind = letto
+    didascalie = sum(1 for r in kept if r.values[0] is not None and _LEGAL_CAPTION.match(r.label))
+    if dropped >= _MIN_ACCOUNT_ROWS and didascalie >= _MIN_LEGAL_CAPTIONS:
+        return {"didascalie": didascalie, "conti": dropped}
+    return None
+
+
+_MIN_ACCOUNT_ROWS = 5
+_MIN_LEGAL_CAPTIONS = 12
+
+
+def extract_ivcee_didascalie(
+    file_path: str,
+) -> Tuple[Optional[Dict[str, Decimal]], Optional[Dict[str, Decimal]], int]:
+    """Macro voci (SP, CE) lette dalle sole didascalie dello schema di legge, con quante
+    righe-conto sono state escluse.
+
+    Per il documento «schema di legge con dettaglio conti» (budget_313, budget_352): le righe
+    con codice conto non entrano mai nella lettura (vedi ``_caption_rows``), cosi' i controlli
+    incrociati di ``_parse_column``/``_parse_compact_*`` girano sui soli totali stampati. Le
+    stesse regole del parser standard, nessuna nuova: se le didascalie non chiudono, ritorna
+    ``None`` come lui. Il terzo valore e' il numero di righe-conto escluse (zero = non e' questa
+    famiglia, e il chiamante non adotta nulla)."""
+    try:
+        document = fitz.open(file_path)
+    except Exception:
+        return None, None, 0
+    try:
+        letto = _didascalie_rows(document)
+    finally:
+        document.close()
+    if letto is None:
+        return None, None, 0
+    kept, dropped, kind = letto
+    if kind in ("anni", "date", "parole"):
+        return _parse_column(kept, 0), _parse_income_column(kept, 0), dropped
+    return _parse_compact_balance(kept), _parse_compact_income(kept), dropped
 
 
 def overlay_standard_ivcee_balance(

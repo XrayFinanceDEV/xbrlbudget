@@ -1710,7 +1710,8 @@ def import_pdf_balance_sheet(
             file_path, balance_sheet_data, prior_bs_data, fiscal_year=fiscal_year,
             ocr_text=ocr_text,
             pagine=(_snello.struttura.pagine_dettagli()
-                    if _snello is not None and _snello.report.get("modo") == "legge" else None),
+                    if _snello is not None
+                    and _snello.report.get("modo") in ("legge", "legge_con_dettaglio") else None),
             usa_llm=not (_snello is not None and _snello.report.get("modo") == "conti"),
         )
         sc_quadratura_warnings.extend(_detail_report.get('warnings', []))

@@ -113,6 +113,28 @@ def _prova_standard_ivcee(file_path: str) -> dict | None:
     return _esito("standard_ivcee_parser", bs_raw, ce_raw, stampati)
 
 
+def _prova_schema_con_dettaglio(file_path: str) -> dict | None:
+    """Schema di legge con dettaglio conti (Task 24; budget_313, budget_352): le macro voci si
+    leggono dalle sole didascalie con importo, le righe con codice conto non entrano mai nella
+    lettura (``extract_ivcee_didascalie``). Stesse regole di adozione dei parser standard (lo
+    stesso ``_esito``: quadratura entro soglia e massa non classificata sotto soglia), nessuna
+    nuova. None se il documento non porta righe-conto (non e' questa famiglia: lo leggono i
+    parser di sempre); non adottato se le didascalie non chiudono sui totali stampati."""
+    from importers.standard_ivcee_parser import _MIN_ACCOUNT_ROWS, extract_ivcee_didascalie
+
+    bs_raw, ce_raw, conti = extract_ivcee_didascalie(file_path)
+    if conti < _MIN_ACCOUNT_ROWS:
+        return None
+    if bs_raw is None or ce_raw is None:
+        return {"adottato": False, "parser": "schema_legge_con_dettaglio", "esito": "oltre_soglia",
+                "conti_esclusi": conti}
+    stampati = {"totale_attivo": bs_raw.get("totale_attivo"),
+                "totale_passivo": bs_raw.get("totale_passivo")}
+    esito = _esito("schema_legge_con_dettaglio", bs_raw, ce_raw, stampati)
+    esito["conti_esclusi"] = conti
+    return esito
+
+
 def _prova_situazione_contabile(file_path: str, ocr_text: str | None) -> dict | None:
     """Bilancio di verifica / situazione contabile (AGO, DEPI, TeamSystem, contrapposte,
     a colonna unica...): None se il documento non e' nemmeno riconosciuto come tale,
@@ -149,14 +171,30 @@ def tentativo(file_path: str, ocr_text: str | None = None) -> dict:
     "massa_non_classificata" (non adottato) - mai una terza via. Su "massa_non_classificata"
     il dict porta anche ``unclassified_mass`` (stringa Decimal): la massa non scompare, solo
     non basta a se stessa per l'adozione (ruling a, Task 18)."""
-    for nome, prova in (
-        ("standard_ivcee_parser", lambda: _prova_standard_ivcee(file_path)),
-        ("situazione_contabile_parser", lambda: _prova_situazione_contabile(file_path, ocr_text)),
-    ):
-        try:
-            esito = prova()
-        except Exception:
-            return {"adottato": False, "parser": nome, "esito": "errore"}
-        if esito is not None:
-            return esito
+    # Ordine (Task 24): parser standard, poi lo schema di legge con dettaglio conti, poi la
+    # situazione contabile. Il parser standard che SI APPLICA ma non quadra chiude la ricerca
+    # come prima (mai due candidati sommati); lo schema con dettaglio entra solo quando il
+    # parser standard non ha adottato, e se anch'esso non adotta la ricerca prosegue esattamente
+    # come prima verso la situazione contabile: un bilancio di verifica vero non ha didascalie
+    # di legge con importo e non lo vede mai.
+    try:
+        standard = _prova_standard_ivcee(file_path)
+    except Exception:
+        return {"adottato": False, "parser": "standard_ivcee_parser", "esito": "errore"}
+    if standard is not None and standard["adottato"]:
+        return standard
+    try:
+        con_dettaglio = _prova_schema_con_dettaglio(file_path)
+    except Exception:
+        con_dettaglio = None
+    if con_dettaglio is not None and con_dettaglio["adottato"]:
+        return con_dettaglio
+    if standard is not None:
+        return standard
+    try:
+        esito = _prova_situazione_contabile(file_path, ocr_text)
+    except Exception:
+        return {"adottato": False, "parser": "situazione_contabile_parser", "esito": "errore"}
+    if esito is not None:
+        return esito
     return {"adottato": False, "parser": None, "esito": "non_applicabile"}

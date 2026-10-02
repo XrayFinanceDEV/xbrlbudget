@@ -1854,10 +1854,28 @@ def import_pdf_balance_sheet(
                 "(anche soci o altri finanziatori) oltre 12 mesi. "
                 "Le scadenze documentate prevalgono; consultare la provenienza dell'importazione."
             )
-        if balance_sheet_data.get("_source_maturity_unspecified") and 'sp16_debiti_breve' not in _maturity_audit:
+        # Un messaggio per ciascun caso: la dicitura ORIGINALE (solo debiti) resta byte per byte per
+        # ogni rotta che solleva il flag dei debiti; quella che nomina i crediti compare solo quando
+        # l'estrattore dello schema con dettaglio ha davvero appiattito i crediti (Task 24, N4).
+        _deb_piatti = bool(balance_sheet_data.get("_source_maturity_unspecified")) \
+            and 'sp16_debiti_breve' not in _maturity_audit
+        _cred_piatti = bool(balance_sheet_data.get("_source_credit_maturity_unspecified"))
+        if _deb_piatti and _cred_piatti:
             warnings.append(
                 "SCADENZA DEBITI E CREDITI NON DISTINTA NEL PDF: i totali Debiti e Crediti "
                 "e le loro sottovoci sono stati conservati nel breve termine; verificare la "
+                "quota oltre 12 mesi in Rettifiche se disponibile."
+            )
+        elif _deb_piatti:
+            warnings.append(
+                "SCADENZA DEBITI NON DISTINTA NEL PDF: il totale Debiti e le sue "
+                "sottovoci sono stati conservati nel breve termine; verificare la "
+                "quota oltre 12 mesi in Rettifiche se disponibile."
+            )
+        elif _cred_piatti:
+            warnings.append(
+                "SCADENZA CREDITI NON DISTINTA NEL PDF: il totale Crediti e le sue "
+                "sottovoci sono stati conservati nel breve termine; verificare la "
                 "quota oltre 12 mesi in Rettifiche se disponibile."
             )
         # Surface the deterministic trial-balance plug flag to the user (Rettifiche cue),

@@ -592,6 +592,9 @@ def _overlap(a: SourceRow, b: SourceRow) -> bool:
 # aggregato positivo). Il patrimonio netto (sp12) ammette per natura righe negative (riserve
 # negative, perdite a nuovo) e non entra nel voto.
 _FAMIGLIE_DEBITO = ("sp16_debiti_breve", "sp17_debiti_lungo")
+_DEBITI_FINANZIARI = ("sp16a_debiti_banche_breve", "sp16b_debiti_altri_finanz_breve",
+                      "sp16c_debiti_obbligazioni_breve", "sp17a_debiti_banche_lungo",
+                      "sp17b_debiti_altri_finanz_lungo", "sp17c_debiti_obbligazioni_lungo")
 
 
 def apply_details(bs: dict, proposals: list[DetailProposal], rows: list[SourceRow],
@@ -605,7 +608,8 @@ def apply_details(bs: dict, proposals: list[DetailProposal], rows: list[SourceRo
     result = dict(bs)
     source = {row.id: row for row in rows}
     # "famiglie_segno_invertito" e' SEMPRE presente, vuota quando nulla e' stato invertito.
-    report = {"families": {}, "rejected": [], "famiglie_segno_invertito": []}
+    report = {"families": {}, "rejected": [], "famiglie_segno_invertito": [],
+              "famiglie_segno_rifiutato": []}
     grouped = defaultdict(list)
     for proposal in proposals:
         grouped[proposal.aggregate].extend(proposal.items)
@@ -666,18 +670,26 @@ def apply_details(bs: dict, proposals: list[DetailProposal], rows: list[SourceRo
             used_rows.append(row)
             selected[item.field].append((item, row))
 
-        # Il segno si decide per FAMIGLIA, non per riga (Task 24 fix round 1, F4; budget_313): un
-        # gestionale che stampa i conti di debito col segno avere (meno) rende i dettagli
-        # negativi sotto un aggregato positivo. Voto per CONTEGGIO delle righe lette della
-        # famiglia: se prevalgono le negative si inverte tutta la famiglia (una riga di segno
-        # opposto, un vero saldo dare dentro i debiti, resta di segno relativo opposto). Tutto o
-        # niente; parita' o una sola riga: nulla, come prima. L'aggregato non cambia mai.
+        # Il segno si decide per FAMIGLIA e per IMPORTO, non per riga ne' per conteggio (Task 24,
+        # fix round 2, N2): un gestionale che stampa i conti di debito col segno avere rende i
+        # dettagli negativi sotto un aggregato positivo. Si inverte la famiglia solo se la SOMMA
+        # algebrica delle righe lette e' negativa (un'unica banca +5.000 con tre anticipi -100 ha
+        # somma +4.700: nessuna inversione). Tutto o niente: se l'inversione lasciasse negativo un
+        # sotto-campo di debito finanziario (sp16a/b/c, sp17a/b/c) si ripristina lo stato di
+        # partenza e lo si dichiara. L'aggregato non cambia mai.
         sgn = 1
         if aggregate in _FAMIGLIE_DEBITO:
             letti = [r.amounts[i.column] for f in selected for i, r in selected[f]]
-            if len(letti) >= 2 and sum(1 for v in letti if v < 0) > sum(1 for v in letti if v > 0):
-                sgn = -1
-                report["famiglie_segno_invertito"].append(aggregate)
+            if letti and sum(letti, ZERO) < 0:
+                finanziari_negativi = any(
+                    f in _DEBITI_FINANZIARI
+                    and sum((-r.amounts[i.column] for i, r in selected[f]), ZERO) < 0
+                    for f in selected)
+                if finanziari_negativi:
+                    report["famiglie_segno_rifiutato"].append(aggregate)
+                else:
+                    sgn = -1
+                    report["famiglie_segno_invertito"].append(aggregate)
 
         merged = dict(baseline)
         accepted = []

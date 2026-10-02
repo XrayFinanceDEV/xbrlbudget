@@ -606,10 +606,42 @@ def test_f4_una_famiglia_tutta_positiva_non_si_tocca():
     assert report["famiglie_segno_invertito"] == []
 
 
-def test_f4_parita_o_riga_singola_non_inverte():
+def test_f4_parita_di_importo_non_inverte():
     p = proposal(DEBT, (BANK, "a", 0), (SUPPLIER, "b", 0))
     _, rep = de.apply_details({DEBT: D("100")}, [p], [row("a", "-20"), row("b", "30")])
     assert rep["famiglie_segno_invertito"] == []
-    p = proposal(DEBT, (BANK, "a", 0))
-    _, rep = de.apply_details({DEBT: D("100")}, [p], [row("a", "-20")])
-    assert rep["famiglie_segno_invertito"] == []
+
+
+def test_n2_una_banca_positiva_con_tre_anticipi_negativi_non_si_inverte():
+    rows = [row("banca", "5000"), row("a1", "-100"), row("a2", "-100"), row("a3", "-100")]
+    p = proposal(DEBT, (BANK, "banca", 0), (SUPPLIER, "a1", 0), (SUPPLIER, "a2", 0), (SUPPLIER, "a3", 0))
+    actual, rep = de.apply_details({DEBT: D("4700")}, [p], rows)
+    assert actual[BANK] == D("5000") and rep["famiglie_segno_invertito"] == []
+
+
+def test_n2_secondo_caso_dei_revisori():
+    rows = [row("banca", "10000"), row("a1", "-100"), row("a2", "-100")]
+    p = proposal(DEBT, (BANK, "banca", 0), (SUPPLIER, "a1", 0), (SUPPLIER, "a2", 0))
+    actual, rep = de.apply_details({DEBT: D("9800")}, [p], rows)
+    assert actual[BANK] == D("10000") and rep["famiglie_segno_invertito"] == []
+
+
+def test_n2_un_inversione_che_lascia_negativa_una_banca_si_rifiuta_e_lo_stato_e_quello_di_partenza():
+    rows = [row("banca", "300"), row("a", "-800")]          # somma -500, ma la banca diventerebbe -300
+    p = proposal(DEBT, (BANK, "banca", 0), (SUPPLIER, "a", 0))
+    bs = {DEBT: D("500")}
+    senza, _ = de.apply_details(dict(bs), [p], rows)        # stato "come prima": nessuna inversione
+    actual, rep = de.apply_details(dict(bs), [p], rows)
+    assert rep["famiglie_segno_invertito"] == [] and rep["famiglie_segno_rifiutato"] == [DEBT]
+    assert actual[BANK] == D("300") and actual[SUPPLIER] == D("-800")
+    assert actual == senza
+
+
+def test_n2_l_avviso_all_utente_c_e_solo_su_inversione():
+    from importers import detail_search as ds
+    base = {"periods": {"current": {"families": {}, "rejected": [], "famiglie_segno_invertito": [DEBT]}}}
+    rep = ds.finish_search_report(dict(base), {"current": {DEBT: D("10")}, "prior": None})
+    assert any("SEGNO DEBITI INVERTITO" in w for w in rep["warnings"])
+    base["periods"]["current"]["famiglie_segno_invertito"] = []
+    rep = ds.finish_search_report(dict(base), {"current": {DEBT: D("10")}, "prior": None})
+    assert not any("SEGNO DEBITI" in w for w in rep["warnings"])

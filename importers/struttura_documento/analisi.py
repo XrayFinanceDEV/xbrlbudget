@@ -99,7 +99,10 @@ class Struttura:
                 "pagine_senza_testo": self.pagine_senza_testo}
 
 
-_IMPORTO = re.compile(r"\d{1,3}(?:\.\d{3})*,\d{2}")
+# Importo con decimali, oppure intero con separatore delle migliaia ("2.216.822"): i bilanci in
+# euro interi (budget_297, 247, 253) non stampano decimali. Un anno ("2025") o un numero di
+# pagina non hanno separatori e non contano.
+_IMPORTO = re.compile(r"\d{1,3}(?:\.\d{3})*,\d{2}|\d{1,3}(?:\.\d{3})+(?![\d,])")
 _MIN_IMPORTI_PAGINA = 3
 _TITOLO_CE = re.compile(r"^\s*conto economico\s*$", re.I | re.M)
 

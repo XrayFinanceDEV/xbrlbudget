@@ -196,5 +196,9 @@ def finish_search_report(report, balances, proposals=()):
             if proposed and not accepted:
                 warnings.append(f'DETTAGLI NON APPLICATI [{period}/{aggregate}]: proposte non riconciliate; consultare i motivi di rifiuto.')
         period_report['search_families'] = outcomes
+        if period_report.get('famiglie_segno_invertito'):
+            warnings.append(
+                f'SEGNO DEBITI INVERTITO [{period}]: il documento stampa i debiti con segno negativo, '
+                'il dettaglio e\' stato letto con il segno invertito; verificare in Rettifiche.')
     report['warnings'] = warnings
     return report

@@ -1324,7 +1324,7 @@ def _parse_compact_balance(rows: Sequence[_Row]) -> Optional[Dict[str, Decimal]]
         # entro + oltre chiude sul totale stampato e la ripartizione per categoria e'
         # leggibile: altrimenti resta l'appiattimento dichiarato di sempre.
         sp17a = Decimal("0")
-        scadenze_lette = False
+        crediti_letti = debiti_letti = False
         if _VARIANTI.get():
             e_cr = _optional_direct_value_re(
                 asset_rows, r"^crediti esigibili entro l'esercizio successivo", cred_i + 1, total_c_i)
@@ -1343,7 +1343,7 @@ def _parse_compact_balance(rows: Sequence[_Row]) -> Optional[Dict[str, Decimal]]
                     sp06a = sp06a_pre
                     if sp06a + sp06e == 0:
                         sp06a, sp06g = sp06g, Decimal("0")
-                    scadenze_lette = True
+                    crediti_letti = True
             e_de = _optional_direct_value_re(
                 pass_rows, r"^debiti esigibili entro l'esercizio successivo", debiti_i + 1, total_deb_i)
             o_de = _optional_direct_value_re(
@@ -1359,7 +1359,7 @@ def _parse_compact_balance(rows: Sequence[_Row]) -> Optional[Dict[str, Decimal]]
                     g = e_de - nuovo_16a - sp16b - sp16d - sp16e - sp16f
                     if nuovo_16a >= 0 and g >= 0:
                         sp16, sp17, sp16a, sp16g = e_de, o_de, nuovo_16a, g
-                        scadenze_lette = True
+                        debiti_letti = True
 
         checks = (
             _close(sp02 + sp03 + sp04, total_imm),
@@ -1430,8 +1430,12 @@ def _parse_compact_balance(rows: Sequence[_Row]) -> Optional[Dict[str, Decimal]]
             "totale_crediti": sp06 + sp07,
             "totale_debiti": total_deb,
             "_source_standard_ivcee": Decimal("1"),
-            **({"_source_maturity_read": Decimal("1")} if scadenze_lette
-               else {"_source_maturity_unspecified": Decimal("1")}),
+            # Un flag per LATO (fix round 2, N1): un lato appiattito e' sempre dichiarato, anche se
+            # l'altro e' stato letto come stampato. Senza ``varianti`` resta il flag di sempre.
+            **({"_source_maturity_unspecified": Decimal("1")} if not debiti_letti else {}),
+            **({"_source_credit_maturity_unspecified": Decimal("1")}
+               if _VARIANTI.get() and not crediti_letti else {}),
+            **({"_source_maturity_read": Decimal("1")} if (crediti_letti or debiti_letti) else {}),
             **({"sp17a_debiti_banche_lungo": sp17a} if sp17a else {}),
         }
     except (ValueError, IndexError):

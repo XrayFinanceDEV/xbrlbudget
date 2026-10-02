@@ -140,7 +140,7 @@ def _pdf_313(path, *, righe_sp=None, righe_ce=None) -> str:
 
 
 # --------------------------------------------------------------------------- budget_352
-def _pdf_352(path, *, utile_ce="200,00", scadenze=False) -> str:
+def _pdf_352(path, *, utile_ce="200,00", scadenze=False, oltre_crediti="100,00") -> str:
     """Colonna singola, conti "050101010" con flag "A", «Totale X» dopo i figli."""
     righe = [
         ("BILANCIO AL 31/12/2025", None, False),
@@ -228,7 +228,7 @@ def _pdf_352(path, *, utile_ce="200,00", scadenze=False) -> str:
             if label in sost:
                 nuove.append((label, sost[label][1], conto))
                 if label.startswith("   Crediti"):
-                    nuove.append(("   Crediti esigibili oltre l'esercizio successivo", "100,00", False))
+                    nuove.append(("   Crediti esigibili oltre l'esercizio successivo", oltre_crediti, False))
                 else:
                     nuove.append(("   Debiti esigibili oltre l'esercizio successivo", "100,00", False))
             elif label.startswith("     a) Debiti verso fornitori"):
@@ -663,3 +663,49 @@ def test_un_estrazione_vuota_non_si_adotta(tmp_path):
                                               for l, vals in _RIGHE_313_SP],
                  righe_ce=[(l, ["0,00", "0,00", "0,00", ""] if vals else None) for l, vals in _RIGHE_313_CE])
     assert not DET.tentativo(f)["adottato"]
+
+
+# --------------------------------------------------------------------------- N1 / N4
+def test_n1_debiti_letti_e_crediti_appiattiti_il_lato_appiattito_e_dichiarato(tmp_path):
+    bs, _, _ = extract_ivcee_didascalie(_pdf_352(tmp_path / "m.pdf", scadenze=True, oltre_crediti="150,00"))
+    assert bs["sp17_debiti_lungo"] == D("100.00")                 # debiti letti come stampato
+    assert bs["sp07_crediti_lungo"] == D("0")                     # crediti: 300+150 != 400, appiattiti
+    assert bs["_source_credit_maturity_unspecified"] == D("1")
+    assert "_source_maturity_unspecified" not in bs
+
+
+def test_n1_tutto_letto_nessun_flag_di_appiattimento(tmp_path):
+    bs, _, _ = extract_ivcee_didascalie(_pdf_352(tmp_path / "s.pdf", scadenze=True))
+    assert "_source_maturity_unspecified" not in bs and "_source_credit_maturity_unspecified" not in bs
+
+
+def test_n1_tutto_appiattito_dichiara_entrambi_i_lati(tmp_path):
+    bs, _, _ = extract_ivcee_didascalie(_pdf_352(tmp_path / "b.pdf"))
+    assert bs["_source_maturity_unspecified"] == D("1") and bs["_source_credit_maturity_unspecified"] == D("1")
+
+
+def test_n4_il_flag_dei_crediti_non_compare_senza_varianti(tmp_path):
+    """Gli entry point storici non dichiarano mai il flag dei crediti: il messaggio originale resta."""
+    from importers.standard_ivcee_parser import _parse_compact_balance  # noqa: F401
+    bs, _, _ = extract_ivcee_didascalie(_pdf_352(tmp_path / "b.pdf"))
+    assert "_source_credit_maturity_unspecified" in bs     # solo il nuovo estrattore lo scrive
+
+
+def test_n3_un_bilancio_in_euro_interi_ha_le_pagine_dei_dettagli(tmp_path):
+    from importers.struttura_documento.analisi import pagine_dettagli_da_testo
+    interi = [f"voce {i} {i + 1}.{234:03d}" for i in range(6)]
+    f = _pdf_pagine(tmp_path / "e.pdf", [
+        ["Indice", "STATO PATRIMONIALE", "CONTO ECONOMICO", "anno 2025 pagina 3"],
+        ["STATO PATRIMONIALE ATTIVO"] + interi,
+        ["STATO PATRIMONIALE PASSIVO"] + interi,
+        ["CONTO ECONOMICO"] + interi,
+    ])
+    assert pagine_dettagli_da_testo(f) == [2, 3]
+
+
+def test_n4_la_dicitura_originale_dei_debiti_resta_byte_per_byte():
+    import pathlib
+    src = (pathlib.Path(__file__).resolve().parents[1] / "importers" / "pdf_importer.py").read_text()
+    assert ('"SCADENZA DEBITI NON DISTINTA NEL PDF: il totale Debiti e le sue "\n'
+            '                "sottovoci sono stati conservati nel breve termine; verificare la "\n'
+            '                "quota oltre 12 mesi in Rettifiche se disponibile."') in src

@@ -730,3 +730,39 @@ def test_il_reale_162_non_scrive_il_2023_sul_2024():
         pytest.skip("corpus locale assente")
     r = X.estrai(trovati[0])
     assert r["anni"] == [2025, 2023] and r["prior_bs"] is None
+
+
+# ---- fix round 1: il resto di un raggruppamento va sul sotto-campo esplicito, dichiarato -------
+
+def _ce_con_resto(gruppo_personale=None, gruppo_amm=None):
+    """Raggruppamento piu' grande dei suoi componenti stampati; il resto e' tolto da una riga
+    non toccata cosi' i totali restano quelli del documento."""
+    ce = list(CE_ABBREVIATO)
+    if gruppo_personale is not None:
+        # c), d), e) = 500 con componente c) = 0: il resto (500) e' stampato solo nel raggruppamento
+        ce = _sostituisci(ce, "c), d), e) trattamento di fine rapporto, trattamento di quiescenza, altri costi del personale\n-\n6.308",
+                          "c), d), e) trattamento di fine rapporto, trattamento di quiescenza, altri costi del personale\n500\n6.308")
+        ce = _sostituisci(ce, "c) trattamento di fine rapporto\n-\n6.308", "c) trattamento di fine rapporto\n-\n6.308")
+        ce = _sostituisci(ce, "Totale costi per il personale\n41.977\n80.785", "Totale costi per il personale\n42.477\n80.785")
+        ce = _sostituisci(ce, "7) per servizi\n226.212\n236.952", "7) per servizi\n225.712\n236.952")
+    return ce
+
+
+def test_resto_di_un_raggruppamento_va_su_ce08d_ed_e_dichiarato(tmp_path):
+    r = X.estrai(_abbreviato(tmp_path, ce=_ce_con_resto(gruppo_personale=True)))
+    assert r["adottabile"] is True, r["rifiuto"]
+    assert r["ce"]["ce08_costi_personale"] == D("42477")
+    assert r["ce"]["ce08d_altri_costi_personale"] == D("500")      # mai solo sull'aggregato
+    assert r["bs"]["_unclassified_mass"] == D("500")
+    assert r["ignoti"][0][1] == "ce08d"
+
+
+def test_resto_degli_ammortamenti_va_su_ce09c_non_su_un_confine_di_kpi(tmp_path):
+    ce = _sostituisci(CE_ABBREVIATO, "b) ammortamento delle immobilizzazioni materiali\n34.614\n34.551",
+                      "b) ammortamento delle immobilizzazioni materiali\n34.114\n34.551")
+    r = X.estrai(_abbreviato(tmp_path, ce=ce))
+    assert r["adottabile"] is True, r["rifiuto"]
+    assert r["ce"]["ce09_ammortamenti"] == D("35592")
+    assert r["ce"]["ce09c_svalutazioni"] == D("500")
+    assert r["ce"]["ce09b_ammort_materiali"] == D("34114")
+    assert r["ignoti"][0][1] == "ce09c"

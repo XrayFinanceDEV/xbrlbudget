@@ -493,12 +493,10 @@ def _importi_colonna(radici: list[_Nodo], colonna: int) -> _Colonna:
             valore_gruppo = g.valori[colonna]
             if g.gruppo:
                 resto = valore_gruppo - sum((c.valori[colonna] for c in g.gruppo), _ZERO)
-                if resto == 0:
-                    continue
-            else:
-                resto = valore_gruppo
-            if resto != 0:
-                _piazza_gruppo(g, resto, out)
+                if resto != 0:
+                    _piazza_resto(g, resto, out)
+            elif valore_gruppo != 0:
+                _piazza_gruppo(g, valore_gruppo, out)
     return out
 
 
@@ -532,6 +530,21 @@ def _piazza(foglia: _Nodo, v: Decimal, out: _Colonna) -> None:
         out.massa += abs(v)
         out.ignoti.append((foglia.didascalia, campo, str(v)))
     _aggiungi(out.importi, campo, v)
+
+
+# Il resto di un raggruppamento che i suoi componenti stampati non spiegano: sotto-campo esplicito
+# della voce (mai l'aggregato, mai un confine di KPI: ce09c "altre svalutazioni" e' dentro ce09).
+_RESTO_RAGGRUPPAMENTO = {"CE.B.9": "ce08d", "CE.B.10": "ce09c"}
+
+
+def _piazza_resto(g: _Nodo, v: Decimal, out: _Colonna) -> None:
+    padre = g.genitore
+    codice = _RESTO_RAGGRUPPAMENTO.get(padre.percorso) or _secchio(g)
+    if codice is None:
+        raise _Rifiuto("didascalia_non_collocabile", didascalia=g.didascalia, percorso=g.percorso)
+    _aggiungi(out.importi, codice, v)
+    out.massa += abs(v)
+    out.ignoti.append((g.didascalia, codice, str(v)))
 
 
 def _piazza_gruppo(g: _Nodo, v: Decimal, out: _Colonna) -> None:

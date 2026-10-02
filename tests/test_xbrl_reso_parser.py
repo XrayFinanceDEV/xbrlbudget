@@ -863,3 +863,17 @@ def test_intestazione_invertita_rifiuta_il_candidato(tmp_path):
     assert r["adottabile"] is False
     assert r["rifiuto"]["controllo"] == "anni_invertiti"
     assert r["rifiuto"]["anni_letti"] == [2024, 2025]
+
+
+def test_negativi_dell_anno_precedente_dichiarati_con_l_anno(tmp_path, monkeypatch):
+    from importers import import_snello
+    _vieta_modelli(monkeypatch)
+    sp = _sostituisci(SP_ABBREVIATO,
+                      "III - Attività finanziarie che non costituiscono immobilizzazioni\n12.502\n12.502",
+                      "III - Attività finanziarie che non costituiscono immobilizzazioni\n12.502\n(55.000)")
+    sp = _sostituisci(sp, "IV - Disponibilità liquide\n1.758\n55.886", "IV - Disponibilità liquide\n1.758\n123.388")
+    sp = _sostituisci(sp, "Totale attivo circolante (C)\n1.267.232\n1.254.156", "Totale attivo circolante (C)\n1.267.232\n1.254.156")
+    ris = import_snello.importa(_abbreviato(tmp_path, sp=sp))
+    assert ris.prior_bs["sp08_attivita_finanziarie"] == D("-55000")
+    assert ["sp08_attivita_finanziarie", "-55000.00", "2024"] in ris.report["anomalie"]
+    assert not [a for a in ris.report["anomalie"] if len(a) == 2]       # il corrente e' pulito

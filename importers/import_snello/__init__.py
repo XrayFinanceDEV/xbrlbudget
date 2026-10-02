@@ -99,13 +99,16 @@ def _documento_sbilanciato(m: dict, s, stampati: dict | None, deterministici: bo
     return abs(abs(Decimal(ta) - Decimal(tp)) - abs(m["scarto_sp"])) <= s
 
 
-def _negativi_stampati(bs: dict, parser: str) -> list:
+def _negativi_stampati(bs: dict | None, parser: str, anno: int | None = None) -> list:
     """Reso XBRL (Task 25): un importo SP negativo che il documento stampa davvero (fuori da
     patrimonio netto e immobilizzazioni, gia' coperte da ``_anomalie``) si tiene col suo segno ma
-    non passa in silenzio: l'utente lo vede fra le anomalie e lo corregge in Rettifiche."""
-    if parser != "xbrl_reso_parser":
+    non passa in silenzio: l'utente lo vede fra le anomalie e lo corregge in Rettifiche. Per la
+    colonna dell'anno precedente la voce porta l'anno come terzo elemento. Il CE resta fuori: un
+    segno negativo e' ordinario su ce02/ce03/ce10/ce16, rettifiche, imposte con credito e sul
+    risultato, e un elenco rumoroso e' peggio di uno corto."""
+    if parser != "xbrl_reso_parser" or not bs:
         return []
-    return [[k, str(v)] for k, v in bs.items()
+    return [[k, str(v)] + ([str(anno)] if anno is not None else []) for k, v in bs.items()
             if k.startswith("sp") and isinstance(v, Decimal) and v < 0
             and not k.startswith(("sp02", "sp03", "sp04", "sp12", "sp13"))]
 
@@ -156,7 +159,8 @@ def _risultato_deterministico(_det: dict, struttura, modo: str, t0: float) -> "R
         **({"dettagli": {"fonte": "prospetto_e_nota_xbrl", **_det["dettagli"]}}
            if _det.get("dettagli") is not None else {}),
         **({"ignoti": _det["ignoti"]} if _det.get("ignoti") else {}),
-        "anomalie": _anomalie(_bs_det, _diag_det) + _negativi_stampati(_bs_det, _det["parser"]),
+        "anomalie": _anomalie(_bs_det, _diag_det) + _negativi_stampati(_bs_det, _det["parser"])
+        + _negativi_stampati(_det.get("prior_bs"), _det["parser"], _det.get("anno_precedente")),
         "secondi": round(time.monotonic() - t0, 1),
     }
     return Risultato(bs=_bs_det, ce=dict(_det["ce"]), prior_bs=_det.get("prior_bs"),

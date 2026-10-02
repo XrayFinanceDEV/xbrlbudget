@@ -112,6 +112,8 @@ def _prova_xbrl_reso(file_path: str) -> dict | None:
         esito["prior_bs"] = _adatta(candidato["prior_bs"])
         esito["prior_ce"] = _adatta(candidato["prior_ce"])
     esito["prior_stato"] = candidato["prior_stato"]
+    if len(candidato["anni"]) > 1:
+        esito["anno_precedente"] = candidato["anni"][1]
     if candidato.get("prior_rifiuto"):
         esito["prior_rifiuto"] = candidato["prior_rifiuto"]
     return esito

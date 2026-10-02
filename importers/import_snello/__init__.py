@@ -81,6 +81,22 @@ def _causa_stampati(m: dict, s) -> bool:
     return abs(m["scarto_sp"]) <= s and abs(m["scarto_ce"]) <= s and m["scarto_stampati"] > s
 
 
+def _documento_sbilanciato(m: dict, s, stampati: dict | None) -> bool:
+    """Task 25 fix round 1 (decisione del proprietario, 2026-10-02): il documento contraddice
+    se' stesso. Le voci lette riproducono i totali stampati (scarto sui totali stampati entro
+    soglia) e il Totale Attivo e il Totale Passivo stampati differiscono, fra loro, dello
+    stesso importo dello scarto Attivo/Passivo misurato: la lettura e' fedele, ne' una
+    rilettura ne' un tappo possono aiutare. Con uno dei due totali assenti: falso (come oggi)."""
+    if not stampati:
+        return False
+    ta, tp = stampati.get("totale_attivo"), stampati.get("totale_passivo")
+    if ta is None or tp is None:
+        return False
+    if abs(m["scarto_sp"]) <= s or m["scarto_stampati"] > s:
+        return False
+    return abs(abs(Decimal(ta) - Decimal(tp)) - abs(m["scarto_sp"])) <= s
+
+
 def _negativi_stampati(bs: dict, parser: str) -> list:
     """Reso XBRL (Task 25): un importo SP negativo che il documento stampa davvero (fuori da
     patrimonio netto e immobilizzazioni, gia' coperte da ``_anomalie``) si tiene col suo segno ma
@@ -377,7 +393,8 @@ def importa(file_path: str, *, ocr_text: str | None = None, analizza=None, leggi
         fase = "verifica"
         bs, ce, tappo, esito, m, s = _verifica(bs, ce, stampati)
 
-        if modo in _MODI_LEGGE and esito in ("oltre_soglia", "vuoto"):
+        if (modo in _MODI_LEGGE and esito in ("oltre_soglia", "vuoto")
+                and not _documento_sbilanciato(m, s, stampati)):
             fase = "lettura"
             if abs(m["scarto_sp"]) > s or m["scarto_stampati"] > s:
                 sezione = "sp"
@@ -442,7 +459,8 @@ def importa(file_path: str, *, ocr_text: str | None = None, analizza=None, leggi
             # misurati (scarto_sp/scarto_ce/scarto_stampati) restano in "misura", letti
             # da pdf_importer per costruire l'avviso mostrato all'utente.
             esito = "squadrato"
-            causa = "stampati" if _causa_stampati(m, s) else None
+            causa = ("documento_sbilanciato" if modo in _MODI_LEGGE and _documento_sbilanciato(m, s, stampati)
+                     else "stampati" if _causa_stampati(m, s) else None)
 
         prior_bs = prior_ce = prior_diag = None
         m_prec = tappo_prec = None

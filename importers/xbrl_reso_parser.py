@@ -421,9 +421,7 @@ def _costruisci(righe: list[_Riga], colonne: int):
             # voce di patrimonio netto senza enumeratore, sempre a zero nel corpus: sul sotto-campo
             # degli utili/perdite portati; se non e' zero lo si dichiara come massa.
             padre.figli.append(_Nodo(r.didascalia, padre.livello + 1, "SPP.A.VIII", padre,
-                                     valori=r.valori, sezione=sezione, ignoto=False,
-                                     ereditato=False))
-            padre.figli[-1].didascalia = r.didascalia
+                                     valori=r.valori, sezione=sezione))
             continue
         if sezione == "sp" and _norm(r.didascalia) == "imposte anticipate" \
                 and padre.percorso == "SPA.C.II":
@@ -473,7 +471,8 @@ class _Colonna:
     massa: Decimal = _ZERO
     ignoti: list[tuple[str, str, str]] = field(default_factory=list)
     scadenze_lette: bool = False
-    scadenza_assente: bool = False
+    scadenza_assente: bool = False          # debiti
+    scadenza_crediti_assente: bool = False
 
 
 def _aggiungi(importi: dict[str, Decimal], codice: str, v: Decimal) -> None:
@@ -485,8 +484,6 @@ def _importi_colonna(radici: list[_Nodo], colonna: int) -> _Colonna:
     out = _Colonna()
     for radice in radici:
         for foglia in _foglie(radice):
-            if foglia.componente_di is not None:
-                pass
             v = foglia.valori[colonna]
             if foglia.gruppo is not None:
                 continue
@@ -516,9 +513,11 @@ def _piazza(foglia: _Nodo, v: Decimal, out: _Colonna) -> None:
     if foglia.sezione == "sp":
         if foglia.scadenza:
             out.scadenze_lette = True
-        elif (re.match(r"^(SPA\.C\.II|SPP\.D)(\.[\w-]+)*$", foglia.percorso)
-              and foglia.percorso != "SPA.C.II.5-ter"):
+        elif (re.match(r"^SPP\.D(\.[\w-]+)*$", foglia.percorso)):
             out.scadenza_assente = True
+        elif (re.match(r"^SPA\.C\.II(\.[\w-]+)*$", foglia.percorso)
+              and foglia.percorso != "SPA.C.II.5-ter"):
+            out.scadenza_crediti_assente = True
     campo = None if foglia.ignoto else _campo(foglia.percorso)
     if campo is None:
         secchio = _secchio(foglia)
@@ -877,9 +876,12 @@ def estrai(file_path: str) -> Optional[dict]:
         anomalie[c].extend(_verifica(c, bs, ce, stampati, calcolati, totali))
         bs["_unclassified_mass"] = dati.massa.quantize(_C)
         bs["_plug_residual"] = Decimal("0.00")
+        # un flag per lato (Task 24, fix round 2): debiti e crediti si dichiarano separatamente
         if dati.scadenza_assente:
             bs["_source_maturity_unspecified"] = Decimal("1")
-        elif dati.scadenze_lette:
+        if dati.scadenza_crediti_assente:
+            bs["_source_credit_maturity_unspecified"] = Decimal("1")
+        if not (dati.scadenza_assente or dati.scadenza_crediti_assente) and dati.scadenze_lette:
             bs["_source_maturity_read"] = Decimal("1")
         bs["_source_xbrl_reso"] = Decimal("1")
         risultati.append((bs, ce, [list(x) for x in dati.ignoti]))

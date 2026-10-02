@@ -667,3 +667,24 @@ def test_riconosci_un_file_senza_estensione_pdf(tmp_path):
     import shutil
     shutil.copy(path, str(tmp_path / "caricato"))
     assert X.riconosci(str(tmp_path / "caricato")) is True
+
+
+# ---- fix round 1: un flag di scadenza per lato -----------------------------------------------
+
+def test_flag_scadenza_per_lato(tmp_path):
+    r = X.estrai(_abbreviato(tmp_path))                       # entrambe le scadenze stampate
+    assert "_source_maturity_unspecified" not in r["bs"]
+    assert "_source_credit_maturity_unspecified" not in r["bs"]
+    assert r["bs"]["_source_maturity_read"] == D("1")
+    sp = list(SP_ABBREVIATO)                                  # solo i debiti senza scadenza
+    i = sp.index("D) Debiti")
+    sp[i + 1:i + 3] = ["debiti diversi\n793.146\n650.637"]
+    r = X.estrai(_abbreviato(tmp_path, sp=sp, nome="a.pdf"))
+    assert r["bs"]["_source_maturity_unspecified"] == D("1")
+    assert "_source_credit_maturity_unspecified" not in r["bs"]
+    sp = _sostituisci(SP_ABBREVIATO, "esigibili entro l'esercizio successivo\n1.252.972\n1.185.768",
+                      "crediti diversi\n1.252.972\n1.185.768")   # solo i crediti senza scadenza
+    r = X.estrai(_abbreviato(tmp_path, sp=sp, nome="b.pdf"))
+    assert r["adottabile"] is True, r["rifiuto"]
+    assert r["bs"]["_source_credit_maturity_unspecified"] == D("1")
+    assert "_source_maturity_unspecified" not in r["bs"]

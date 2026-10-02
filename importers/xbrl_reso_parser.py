@@ -831,6 +831,11 @@ def _rifiutato(anni, controllo: str, **dettaglio) -> dict:
             "dettagli": {}}
 
 
+def _anno_precedente_valido(anni: list, colonne: int) -> bool:
+    """Intestazioni leggibili per ogni colonna e seconda colonna = prima - 1."""
+    return len(anni) >= 2 and len(anni) == colonne and anni[1] == anni[0] - 1
+
+
 def _nome_anno(anni, col):
     return anni[col] if col < len(anni) else col
 
@@ -901,7 +906,15 @@ def estrai(file_path: str) -> Optional[dict]:
     prior_bs = prior_ce = None
     prior_stato = "assente"
     if colonne > 1:
-        if anomalie[1]:
+        if not _anno_precedente_valido(anni, colonne):
+            # La colonna si usa come anno precedente solo se l'intestazione dice esattamente
+            # corrente - 1: l'import la scrive sul FinancialYear fiscal_year - 1, e una colonna
+            # di un altro anno quadrerebbe lo stesso (difetto che nessun controllo vede).
+            prior_stato = "scartato"
+            prior_rifiuto = {"controllo": "anno_non_consecutivo", "anni": list(anni),
+                             "motivo": "l'intestazione della seconda colonna non e' l'anno "
+                                       "precedente a quello della prima"}
+        elif anomalie[1]:
             prior_stato = "scartato"
             prior_rifiuto = primo(1)
         else:

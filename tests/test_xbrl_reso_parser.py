@@ -688,3 +688,45 @@ def test_flag_scadenza_per_lato(tmp_path):
     assert r["adottabile"] is True, r["rifiuto"]
     assert r["bs"]["_source_credit_maturity_unspecified"] == D("1")
     assert "_source_maturity_unspecified" not in r["bs"]
+
+
+# ---- fix round 1: l'anno precedente si usa solo se l'intestazione e' esattamente corrente - 1 ----
+
+def test_colonna_precedente_con_anno_non_consecutivo_e_scartata_e_dichiarata(tmp_path):
+    sp = _sostituisci(SP_ABBREVIATO, DATE, "31-12-2025\n31-12-2023")
+    ce = _sostituisci(CE_ABBREVIATO, "31-12-2025 31-12-2024", "31-12-2025 31-12-2023")
+    r = X.estrai(_abbreviato(tmp_path, sp=sp, ce=ce))
+    assert r["adottabile"] is True
+    assert r["anni"] == [2025, 2023]
+    assert r["prior_bs"] is None and r["prior_ce"] is None
+    assert r["prior_stato"] == "scartato"
+    assert r["prior_rifiuto"]["controllo"] == "anno_non_consecutivo"
+    assert r["prior_rifiuto"]["anni"] == [2025, 2023]
+
+
+def test_intestazioni_illeggibili_o_incomplete_nessun_precedente():
+    assert X._anno_precedente_valido([2025, 2024], 2) is True
+    assert X._anno_precedente_valido([2025, 2023], 2) is False
+    assert X._anno_precedente_valido([2025], 2) is False
+    assert X._anno_precedente_valido([], 2) is False
+
+
+def test_precedente_scartato_arriva_nel_report_snello(tmp_path, monkeypatch):
+    from importers import import_snello
+    sp = _sostituisci(SP_ABBREVIATO, DATE, "31-12-2025\n31-12-2023")
+    ce = _sostituisci(CE_ABBREVIATO, "31-12-2025 31-12-2024", "31-12-2025 31-12-2023")
+    _vieta_modelli(monkeypatch)
+    ris = import_snello.importa(_abbreviato(tmp_path, sp=sp, ce=ce))
+    assert ris.prior_bs is None
+    det = ris.report["deterministico"]
+    assert det["prior_stato"] == "scartato"
+    assert det["prior_rifiuto"]["anni"] == [2025, 2023]
+
+
+def test_il_reale_162_non_scrive_il_2023_sul_2024():
+    import glob, os
+    trovati = glob.glob("/home/peter/DEV/budget/Test/**/budget_162_*.pdf", recursive=True)
+    if not trovati:
+        pytest.skip("corpus locale assente")
+    r = X.estrai(trovati[0])
+    assert r["anni"] == [2025, 2023] and r["prior_bs"] is None

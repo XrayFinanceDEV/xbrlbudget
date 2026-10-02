@@ -119,7 +119,9 @@ def _risultato_deterministico(_det: dict, struttura, modo: str, t0: float) -> "R
         "letture": {"chiamate": 0, "saltate_prima": 0, "senza_percorso": 0},
         "diag": _diag_det,
         "deterministico": {"parser": _det["parser"], "esito": _det["esito"],
-                           "unclassified_mass": str(_massa_det)},
+                           "unclassified_mass": str(_massa_det),
+                           # Task 25: un anno precedente scartato si vede nel report persistito
+                           **{k: _det[k] for k in ("prior_stato", "prior_rifiuto") if _det.get(k)}},
         # Task 25: i dettagli del reso XBRL stanno gia' nel risultato (prospetto e tabelle di
         # nota); il report dice da dove vengono e cosa si e' potuto applicare.
         **({"dettagli": {"fonte": "prospetto_e_nota_xbrl", **_det["dettagli"]}}

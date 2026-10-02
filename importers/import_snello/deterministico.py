@@ -242,11 +242,13 @@ def tentativo(file_path: str, ocr_text: str | None = None) -> dict:
     candidato che non ha restituito nulla."""
     try:
         reso = _prova_xbrl_reso(file_path)
-    except Exception:
-        reso = {"adottato": False, "parser": "xbrl_reso_parser", "esito": "errore"}
+    except Exception as exc:
+        # il ripiego resta, ma un difetto del lettore non deve essere invisibile
+        reso = {"adottato": False, "parser": "xbrl_reso_parser", "esito": "errore",
+                "errore": f"{type(exc).__name__}: {exc}"}
     if reso is not None and reso["adottato"]:
         return reso
     esito = _tentativo_classico(file_path, ocr_text)
     if reso is not None:
-        esito = {**esito, "xbrl_reso": {k: reso[k] for k in ("esito", "rifiuto", "unclassified_mass") if k in reso}}
+        esito = {**esito, "xbrl_reso": {k: reso[k] for k in ("esito", "rifiuto", "unclassified_mass", "errore") if k in reso}}
     return esito

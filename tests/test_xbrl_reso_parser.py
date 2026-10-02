@@ -647,7 +647,7 @@ def test_estrai_che_solleva_non_impedisce_il_percorso_di_sempre(tmp_path, monkey
     monkeypatch.setattr(X, "estrai", rotto)
     esito = DET.tentativo(_abbreviato(tmp_path))
     assert esito["adottato"] is False                       # il percorso classico non legge questo file
-    assert esito["xbrl_reso"] == {"esito": "errore"}
+    assert esito["xbrl_reso"] == {"esito": "errore", "errore": "RuntimeError: lettore rotto"}
 
 
 def test_massa_non_classificata_sopra_soglia_non_si_adotta_e_si_dichiara(tmp_path):

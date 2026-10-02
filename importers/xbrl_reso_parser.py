@@ -520,7 +520,13 @@ def _importi_colonna(radici: list[_Nodo], colonna: int) -> _Colonna:
                 if resto != 0:
                     _piazza_resto(g, resto, out)
             elif valore_gruppo != 0:
-                _piazza_gruppo(g, valore_gruppo, out)
+                fratelli = [f for f in g.genitore.figli if f is not g and f.gruppo is None]
+                if fratelli:
+                    # la voce ha figli stampati: l'importo che nessuno spiega va sul sotto-campo
+                    # esplicito, mai solo sull'aggregato (che resterebbe diverso dalla somma dei suoi)
+                    _piazza_resto(g, valore_gruppo, out)
+                else:
+                    _piazza_gruppo(g, valore_gruppo, out)
     return out
 
 
@@ -567,7 +573,11 @@ def _piazza_resto(g: _Nodo, v: Decimal, out: _Colonna) -> None:
     if codice is None:
         raise _Rifiuto("didascalia_non_collocabile", didascalia=g.didascalia, percorso=g.percorso)
     _aggiungi(out.importi, codice, v)
-    out.massa += abs(v)
+    # Massa non classificata solo se la destinazione e' una scommessa: "c), d), e) TFR,
+    # quiescenza, altri costi del personale" ha nell'«altro» di ce08d la sua casa per definizione
+    # (round 2, N1); un resto dopo componenti stampati resta massa.
+    if not (padre.percorso == "CE.B.9" and not g.gruppo and set(g.enumeratore[1]) == {"c", "d", "e"}):
+        out.massa += abs(v)
     out.ignoti.append((g.didascalia, codice, str(v)))
 
 

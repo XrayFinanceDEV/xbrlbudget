@@ -818,3 +818,38 @@ def test_testo_senza_piede_e_senza_la_struttura_non_e_riconosciuto(tmp_path):
     # un prospetto qualunque (importi sulla stessa riga della didascalia) non e' questa famiglia
     solo_sp = _pdf(tmp_path, [SP_ABBREVIATO], piede="pagina")
     assert X.riconosci(solo_sp) is False
+
+
+# ---- round 2 (N1): raggruppamento senza componenti ma con fratelli stampati ---------------------
+
+def _ce_personale(con_fratelli):
+    ce = list(CE_ABBREVIATO)
+    i = ce.index("9) per il personale")
+    j = ce.index("Totale costi per il personale\n41.977\n80.785")
+    if con_fratelli:
+        ce[i + 1:j] = ["a) salari e stipendi\n30.910\n58.975", "b) oneri sociali\n11.067\n15.502",
+                       "c), d), e) trattamento di fine rapporto, trattamento di quiescenza, altri costi del personale\n500\n6.308"]
+        ce = _sostituisci(ce, "Totale costi per il personale\n41.977\n80.785", "Totale costi per il personale\n42.477\n80.785")
+        ce = _sostituisci(ce, "7) per servizi\n226.212\n236.952", "7) per servizi\n225.712\n236.952")
+    else:
+        ce[i:j + 1] = ["9) per il personale\n42.477\n80.785"]
+        ce = _sostituisci(ce, "7) per servizi\n226.212\n236.952", "7) per servizi\n225.712\n236.952")
+    return ce
+
+
+def test_raggruppamento_senza_componenti_con_fratelli_va_su_ce08d_senza_massa(tmp_path):
+    r = X.estrai(_abbreviato(tmp_path, ce=_ce_personale(True)))
+    assert r["adottabile"] is True, r["rifiuto"]
+    assert r["ce"]["ce08_costi_personale"] == D("42477")
+    assert r["ce"]["ce08d_altri_costi_personale"] == D("500")      # mai solo sull'aggregato
+    assert r["ce"]["ce08b_salari_stipendi"] + r["ce"]["ce08c_oneri_sociali"] + r["ce"]["ce08d_altri_costi_personale"] == D("42477")
+    assert r["bs"]["_unclassified_mass"] == D("0")                  # la didascalia identifica la destinazione
+    assert r["ignoti"][0][1] == "ce08d"
+
+
+def test_voce_stampata_come_foglia_unica_resta_sull_aggregato(tmp_path):
+    r = X.estrai(_abbreviato(tmp_path, ce=_ce_personale(False)))
+    assert r["adottabile"] is True, r["rifiuto"]
+    assert r["ce"]["ce08_costi_personale"] == D("42477")
+    assert r["ce"].get("ce08d_altri_costi_personale", 0) == D("0")
+    assert r["ignoti"] == []

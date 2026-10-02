@@ -80,7 +80,15 @@ def _e_rettifica_esplicita(testo: str) -> bool:
     return any(k in t for k in _RETTIFICA_KEYWORDS)
 
 
-def _segno_ce_legge(codice: str, valore: Decimal, testo: str, convenzione: int) -> Decimal:
+# ce02 (variazione rimanenze prodotti) e ce03 (incrementi per lavori interni) stanno nella sezione A
+# (valore della produzione): seguono la convenzione di stampa dei RICAVI, mai quella dei costi.
+# ce10 (OIC B.11) sta fra i costi e segue la convenzione dei costi (fix round 1 Task 24, F2:
+# budget_297, ricavi positivi e costi negativi, ce02 +30.077 stampato letto -30.077, scarto 2x).
+_CE_SEGNO_LIBERO_RICAVI = {"ce02", "ce03"}
+
+
+def _segno_ce_legge(codice: str, valore: Decimal, testo: str, convenzione: int,
+                    convenzione_ricavi: int = 1) -> Decimal:
     """Segno di un campo CE in modo "legge" (da_coppie): un'unica colonna, un segno letterale.
     Un campo a segno fisso prende il valore assoluto, salvo una didascalia di rettifica
     esplicita (``_e_rettifica_esplicita``, mai vera qui: da_coppie non porta testo). Un campo a
@@ -89,6 +97,8 @@ def _segno_ce_legge(codice: str, valore: Decimal, testo: str, convenzione: int) 
     la stessa convenzione di stampa che riguarda ogni altro costo della sezione riguarda anche
     lui (budget_115/297: costi stampati negativi, quindi ce10 letto -30.517 diventa +30.517 -
     fix round 1 lo lasciava invariato, ignorando la convenzione)."""
+    if codice in _CE_SEGNO_LIBERO_RICAVI:
+        return valore * convenzione_ricavi
     if codice in _CE_SEGNO_LIBERO:
         return valore * convenzione
     if _e_rettifica_esplicita(testo):
@@ -705,6 +715,16 @@ def _convenzione_costi(voci) -> int:
     return -1 if segni.get(True, 0) > segni.get(False, 0) else 1
 
 
+def _convenzione_ricavi(voci) -> int:
+    """+1 se il documento stampa i ricavi a segno fisso (ce01, ce04) positivi, -1 se li stampa
+    negativi: voto per CONTEGGIO, come ``_convenzione_costi``. Decide il segno di ce02/ce03."""
+    segni = Counter()
+    for _, v, codice in voci:
+        if v != 0 and codice.startswith("ce") and famiglia(codice) == "ric" and codice not in _CE_SEGNO_LIBERO:
+            segni[v < 0] += 1
+    return -1 if segni.get(True, 0) > segni.get(False, 0) else 1
+
+
 def da_coppie(coppie):
     """Schema di legge: coppie (percorso, importo) come stampate. Un percorso che ha un discendente
     fra le coppie e' un totale e cade; una voce ripetuta conta una volta; un fondo si sottrae.
@@ -742,6 +762,7 @@ def da_coppie(coppie):
         voci.append((p, v, codice))
 
     convenzione = _convenzione_costi(voci)
+    convenzione_ricavi = _convenzione_ricavi(voci)
 
     importi = defaultdict(Decimal)
     for p, v, codice in voci:
@@ -749,7 +770,7 @@ def da_coppie(coppie):
             importi[codice] += -abs(v)
             continue
         if famiglia(codice) in ("cos", "ric"):
-            v_applicato = _segno_ce_legge(codice, v, "", convenzione)
+            v_applicato = _segno_ce_legge(codice, v, "", convenzione, convenzione_ricavi)
             if v_applicato != v:
                 diag["ce_segno_forzato"].append(
                     [p, codice, str(v.quantize(_C)), str(v_applicato.quantize(_C))])

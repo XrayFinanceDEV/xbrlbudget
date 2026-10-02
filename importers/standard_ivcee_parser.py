@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import re
 import unicodedata
+from contextvars import ContextVar
 from dataclasses import dataclass
 from decimal import Decimal
 from typing import Dict, List, Optional, Sequence, Tuple
@@ -56,6 +57,18 @@ def _normalise(value: str) -> str:
         if not unicodedata.combining(character)
     )
     return re.sub(r"\s+", " ", value).strip()
+
+
+# Le varianti di etichetta, il ripiego sul totale stampato e le altre estensioni del Task 24 sono
+# attive SOLO quando il chiamante le chiede (``varianti=True``): ogni punto d'ingresso storico
+# restituisce esattamente cio' che restituiva a d0b20d5 (fix round 1, F6).
+_VARIANTI: ContextVar[bool] = ContextVar("ivcee_varianti", default=False)
+
+
+
+def _extra(*varianti):
+    """Le varianti aggiuntive, solo con ``varianti=True``."""
+    return tuple(varianti) if _VARIANTI.get() else ()
 
 
 @dataclass(frozen=True)
@@ -460,8 +473,17 @@ _IVCEE_TAG = re.compile(r"^[a-e](?:[ivx]+\d*[a-z]?|\d+[a-z]?)?$")
 _AMOUNT_LIKE = re.compile(r"^\d{1,3}(?:\.\d{3})+$")
 
 
-def _is_account_row(row: "_Row") -> bool:
-    tokens = row.label.split()
+def riga_conto(testo: str, ha_importo: bool) -> bool:
+    """L'UNICO predicato «questa riga e' un conto» (fix round 1, F1/F5): lo usano il
+    riconoscimento, l'estrattore delle didascalie e il filtro del testo per Qwen.
+
+    Un conto porta un importo: una riga di testo che comincia con un riferimento di legge
+    ("173/2008 di recepimento...", budget_162) o un paragrafo numerato ("1.1 roe", budget_254)
+    ha la forma di un codice ma nessun importo, ed e' una didascalia o prosa, mai un conto.
+    Restano esclusi un importo italiano spezzato in token ("1.671.195") e una data."""
+    if not ha_importo:
+        return False
+    tokens = (testo or "").lower().split()
     if not tokens:
         return False
     if _AMOUNT_LIKE.match(tokens[0]) or _DATE_RE.fullmatch(tokens[0]):
@@ -469,6 +491,10 @@ def _is_account_row(row: "_Row") -> bool:
     if _ACCOUNT_CODE.match(tokens[0]):
         return True
     return len(tokens) > 1 and bool(_IVCEE_TAG.match(tokens[0])) and bool(_ACCOUNT_CODE.match(tokens[1]))
+
+
+def _is_account_row(row: "_Row") -> bool:
+    return riga_conto(row.label, any(v is not None for v in row.values))
 
 
 def _is_page_footer(row: "_Row") -> bool:
@@ -625,7 +651,7 @@ def _block_value(
     if candidates:
         return candidates[-1]
     own = rows[start].value(column)
-    if own is None:
+    if own is None and _VARIANTI.get():
         # Il totale sta su una riga "<numero> TOTALE <voce>" dopo i figli e la didascalia
         # non porta alcun importo (budget_313: "10) ammortamenti e svalutazioni:" poi
         # "10 totale ammortamenti e svalutazioni:", "II) CREDITI :" poi "II TOTALE CREDITI :").
@@ -657,7 +683,7 @@ def _section_total_value(
     when the caption row carries the amount directly, or an anonymous
     subtotal row when that is what the source prints instead.
     """
-    for terms in ((total_terms,) if total_terms else ()) + tuple(alt_terms):
+    for terms in ((total_terms,) if total_terms else ()) + (tuple(alt_terms) if _VARIANTI.get() else ()):
         total_i = _find_opt(
             rows, *terms,
             start=caption_index + 1 if search_start is None else search_start,
@@ -756,8 +782,7 @@ def _parse_column(rows: Sequence[_Row], column: int) -> Optional[Dict[str, Decim
                 ("i. immobilizzazioni immateriali",),
                 ("b.i) immobilizzazioni immateriali",),
                 ("i - immobilizzazioni immateriali",),
-                ("i) immobilizzazioni immateriali",),
-            ),
+            ) + _extra(("i) immobilizzazioni immateriali",)),
             start=b_imm + 1,
         )
         imm_ii = _find_variant(
@@ -767,8 +792,7 @@ def _parse_column(rows: Sequence[_Row], column: int) -> Optional[Dict[str, Decim
                 ("ii. immobilizzazioni materiali",),
                 ("b.ii) immobilizzazioni materiali",),
                 ("ii - immobilizzazioni materiali",),
-                ("ii) immobilizzazioni materiali",),
-            ),
+            ) + _extra(("ii) immobilizzazioni materiali",)),
             start=(imm_i if imm_i is not None else b_imm) + 1,
         )
         imm_iii = _find_variant(
@@ -778,8 +802,7 @@ def _parse_column(rows: Sequence[_Row], column: int) -> Optional[Dict[str, Decim
                 ("iii. immobilizzazioni finanziarie",),
                 ("b.iii) immobilizzazioni finanziarie",),
                 ("iii - immobilizzazioni finanziarie",),
-                ("iii) immobilizzazioni finanziarie",),
-            ),
+            ) + _extra(("iii) immobilizzazioni finanziarie",)),
             start=imm_ii + 1,
         )
         c_att = _find(asset_rows, "c) attivo circolante", start=imm_iii + 1)
@@ -801,7 +824,7 @@ def _parse_column(rows: Sequence[_Row], column: int) -> Optional[Dict[str, Decim
         # ("I - Rimanenze", budget_297) added alongside the dotted one.
         rim_i = _find_variant_opt(
             asset_rows,
-            (("i. rimanenze",), ("i - rimanenze",), ("i) rimanenze",)),
+            (("i. rimanenze",), ("i - rimanenze",)) + _extra(("i) rimanenze",)),
             start=c_att + 1,
         )
         cred_i = _find_variant(
@@ -814,8 +837,8 @@ def _parse_column(rows: Sequence[_Row], column: int) -> Optional[Dict[str, Decim
         # the crediti section's own boundary becomes "IV. Disponibilità liquide".
         fin_i = _find_variant_opt(
             asset_rows,
-            (("iii. attivita finanziarie",), ("iii) attivita finanziarie",), ("iii - attivita finanziarie",),
-             ("iii) attivita' finanziarie",)),
+            (("iii. attivita finanziarie",), ("iii) attivita finanziarie",), ("iii - attivita finanziarie",))
+            + _extra(("iii) attivita' finanziarie",)),
             start=cred_i + 1,
         )
         liq_i = _find_variant(
@@ -824,9 +847,8 @@ def _parse_column(rows: Sequence[_Row], column: int) -> Optional[Dict[str, Decim
                 ("iv. disponibilita liquide",),
                 ("iv. disponibilita' liquide",),
                 ("iv) disponibilita liquide",),
-                ("iv) disponibilita' liquide",),
                 ("iv - disponibilita liquide",),
-            ),
+            ) + _extra(("iv) disponibilita' liquide",)),
             start=(fin_i if fin_i is not None else cred_i) + 1,
         )
         ratei_att_i = _find(asset_rows, "d) ratei e risconti", start=liq_i + 1)
@@ -886,7 +908,7 @@ def _parse_column(rows: Sequence[_Row], column: int) -> Optional[Dict[str, Decim
         pn_end = total_pn_i if total_pn_i is not None else utile_i
         tfr_i = _find_variant(
             pass_rows,
-            (("c) trattamento di fine rapporto",), ("c) trattamento fine rapporto",)),
+            (("c) trattamento di fine rapporto",),) + _extra(("c) trattamento fine rapporto",)),
             start=pn_end + 1,
         )
         fondi_total_i = _find_opt(
@@ -1207,6 +1229,7 @@ def _parse_compact_balance(rows: Sequence[_Row]) -> Optional[Dict[str, Decimal]]
         sp06e = _optional_direct_value_re(
             asset_rows, r"^4-bis\) crediti tributari", cred_i + 1, fin_att_i
         )
+        sp06a_pre, sp06e_pre = sp06a, sp06e
         sp06g = sp06 - sp06a - sp06e
         if sp06a + sp06e == 0:
             sp06a, sp06g = sp06g, Decimal("0")
@@ -1295,6 +1318,49 @@ def _parse_compact_balance(rows: Sequence[_Row]) -> Optional[Dict[str, Decimal]]
         sp16f = _debiti_categoria(r"^13\) debiti verso istituti", r"^totale debiti verso istituti")
         sp16g = sp16 - sp16a - sp16b - sp16d - sp16e - sp16f
 
+        # Scadenze STAMPATE nelle didascalie (budget_352: "Crediti esigibili entro/oltre
+        # l'esercizio successivo", "Debiti esigibili entro/oltre ..."): si leggono, mai
+        # appiattite a breve (fix round 1 Task 24, F3). Solo con ``varianti``, e solo quando
+        # entro + oltre chiude sul totale stampato e la ripartizione per categoria e'
+        # leggibile: altrimenti resta l'appiattimento dichiarato di sempre.
+        sp17a = Decimal("0")
+        scadenze_lette = False
+        if _VARIANTI.get():
+            e_cr = _optional_direct_value_re(
+                asset_rows, r"^crediti esigibili entro l'esercizio successivo", cred_i + 1, total_c_i)
+            o_cr = _optional_direct_value_re(
+                asset_rows, r"^crediti esigibili oltre l'esercizio successivo", cred_i + 1, total_c_i)
+            # "5-ter) imposte anticipate" e' stampata fuori dalle due didascalie di scadenza e
+            # senza scadenza dichiarata: resta a breve (prudenza), mai spostata a lungo.
+            anticipate = _optional_direct_value_re(
+                asset_rows, r"^5-ter\) imposte anticipate", cred_i + 1, total_c_i)
+            if o_cr != 0 and e_cr + o_cr + anticipate == sp06:
+                nuovo06 = e_cr + anticipate
+                g = nuovo06 - sp06a_pre - sp06e_pre
+                if g >= 0:
+                    sp06, sp07 = nuovo06, o_cr
+                    sp06g = g
+                    sp06a = sp06a_pre
+                    if sp06a + sp06e == 0:
+                        sp06a, sp06g = sp06g, Decimal("0")
+                    scadenze_lette = True
+            e_de = _optional_direct_value_re(
+                pass_rows, r"^debiti esigibili entro l'esercizio successivo", debiti_i + 1, total_deb_i)
+            o_de = _optional_direct_value_re(
+                pass_rows, r"^debiti esigibili oltre l'esercizio successivo", debiti_i + 1, total_deb_i)
+            if o_de != 0 and e_de + o_de == total_deb:
+                oltre_cat = [r for r in pass_rows[debiti_i + 1:total_deb_i]
+                             if re.match(r"^[a-z]\) debiti .*esigibili oltre", r.label)
+                             and r.value(0) is not None]
+                banche = [r for r in oltre_cat if "verso banche" in r.label]
+                if sum((r.value(0) for r in oltre_cat), Decimal("0")) == o_de and len(banche) == len(oltre_cat):
+                    sp17a = sum((r.value(0) for r in banche), Decimal("0"))
+                    nuovo_16a = sp16a - sp17a
+                    g = e_de - nuovo_16a - sp16b - sp16d - sp16e - sp16f
+                    if nuovo_16a >= 0 and g >= 0:
+                        sp16, sp17, sp16a, sp16g = e_de, o_de, nuovo_16a, g
+                        scadenze_lette = True
+
         checks = (
             _close(sp02 + sp03 + sp04, total_imm),
             _close(sp05 + sp06 + sp07 + sp08 + sp09, total_c),
@@ -1364,7 +1430,9 @@ def _parse_compact_balance(rows: Sequence[_Row]) -> Optional[Dict[str, Decimal]]
             "totale_crediti": sp06 + sp07,
             "totale_debiti": total_deb,
             "_source_standard_ivcee": Decimal("1"),
-            "_source_maturity_unspecified": Decimal("1"),
+            **({"_source_maturity_read": Decimal("1")} if scadenze_lette
+               else {"_source_maturity_unspecified": Decimal("1")}),
+            **({"sp17a_debiti_banche_lungo": sp17a} if sp17a else {}),
         }
     except (ValueError, IndexError):
         return None
@@ -1431,7 +1499,7 @@ def _parse_income_column(
         # layout (#19 diagnosis §4): a term missing the final vowel matches both.
         difference_i = _find_variant(
             ce_rows,
-            (("differenza tra valore e cost",), ("totale diff. tra valore e cost",)),
+            (("differenza tra valore e cost",),) + _extra(("totale diff. tra valore e cost",)),
             start=b14 + 1,
         )
 
@@ -1439,7 +1507,10 @@ def _parse_income_column(
         c15 = _find_re_opt(ce_rows, _P + r"15\) proventi da partecipazioni", start=c_i + 1)
         # "16) Altri proventi finanziari" non stampato quando e' a zero (budget_313: dopo
         # "C)" passa direttamente a "17)"): assente vale zero, come le altre didascalie opzionali.
-        c16 = _find_re_opt(ce_rows, _P + r"16\) altri proventi finanziari", start=(c15 if c15 is not None else c_i) + 1)
+        _c16_pat = _P + r"16\) altri proventi finanziari"
+        _c16_start = (c15 if c15 is not None else c_i) + 1
+        c16 = (_find_re_opt(ce_rows, _c16_pat, start=_c16_start) if _VARIANTI.get()
+               else _find_re(ce_rows, _c16_pat, start=_c16_start))
         c17 = _find_re(
             ce_rows, _P + r"17\) interessi e altri oneri",
             start=(c16 if c16 is not None else (c15 if c15 is not None else c_i)) + 1,
@@ -1449,15 +1520,15 @@ def _parse_income_column(
         d_i = _find_re_opt(ce_rows, _P + r"d\) rettifiche di valore", start=(c17b if c17b is not None else c17) + 1)
         pretax_i = _find_variant(
             ce_rows,
-            (("risultato prima delle imposte",), ("totale ris. prima delle imposte",)),
+            (("risultato prima delle imposte",),) + _extra(("totale ris. prima delle imposte",)),
             start=(d_i if d_i is not None else (c17b if c17b is not None else c17)) + 1,
         )
         # "20) Imposte sul reddito" is printed only when non-zero (#23
         # diagnosis: absent on budget_379, a loss year — same "absent means
         # zero" convention as every other optional caption in this module).
-        tax_i = _find_re_opt(ce_rows, _P + r"20\) imposte (?:sul reddito|redd\.)", start=pretax_i + 1)
+        tax_i = _find_re_opt(ce_rows, _P + (r"20\) imposte (?:sul reddito|redd\.)" if _VARIANTI.get() else r"20\) imposte sul reddito"), start=pretax_i + 1)
         result_i = _find_re(
-            ce_rows, _P + r"21\) utile \(perdit[ae]\)",
+            ce_rows, _P + (r"21\) utile \(perdit[ae]\)" if _VARIANTI.get() else r"21\) utile \(perdita\)"),
             start=(tax_i if tax_i is not None else pretax_i) + 1,
         )
 
@@ -1642,7 +1713,7 @@ def _parse_compact_income(rows: Sequence[_Row]) -> Optional[Dict[str, Decimal]]:
         )
         ce03 = _optional_direct_value_re(ce_rows, r"^4\) incrementi", a_i + 1, total_a_i)
         ce04 = _optional_direct_value_re(ce_rows, r"^5\) altri ricavi", a_i + 1, total_a_i)
-        if ce04 == 0:
+        if ce04 == 0 and _VARIANTI.get():
             a5_i = _find_re_opt(ce_rows, r"^5\) altri ricavi", start=a_i + 1, end=total_a_i)
             if a5_i is not None and ce_rows[a5_i].value(0) is None:
                 _tot = _printed_total_row(ce_rows, a5_i, total_a_i)
@@ -1656,7 +1727,7 @@ def _parse_compact_income(rows: Sequence[_Row]) -> Optional[Dict[str, Decimal]]:
         b9_i = _find_re(ce_rows, r"^9\) per il personale", start=b_i + 1, end=total_b_i)
         b10_i = _find_re(ce_rows, r"^10\) ammortamenti", start=b9_i + 1, end=total_b_i)
         ce08 = ce_rows[b9_i].value(0)
-        if ce08 is None:
+        if ce08 is None and _VARIANTI.get():
             # Il totale stampato del personale prima della somma delle foglie: una riga
             # "c), d), e)" ripete la somma di c) ed e) e la somma la conterebbe due volte.
             ce08 = next(
@@ -1679,9 +1750,10 @@ def _parse_compact_income(rows: Sequence[_Row]) -> Optional[Dict[str, Decimal]]:
         ce08d = _optional_direct_value_re(
             ce_rows, r"^e\) altri costi", b9_i + 1, b10_i
         )
-        ce09 = _caption_or_total(ce_rows, b10_i, total_b_i)
+        ce09 = (_caption_or_total(ce_rows, b10_i, total_b_i) if _VARIANTI.get()
+                else _value_at(ce_rows, b10_i, 0))
         ce10 = _optional_direct_value_re(
-            ce_rows, r"^11\) variazion[ei]", b10_i + 1, total_b_i
+            ce_rows, r"^11\) variazion[ei]" if _VARIANTI.get() else r"^11\) variazione", b10_i + 1, total_b_i
         )
         ce11 = _optional_direct_value_re(
             ce_rows, r"^12\) accantonament", b10_i + 1, total_b_i
@@ -1701,7 +1773,7 @@ def _parse_compact_income(rows: Sequence[_Row]) -> Optional[Dict[str, Decimal]]:
         ce14 = _optional_direct_value_re(
             ce_rows, r"^16\) altri proventi finanziari", c_i + 1, total_c_i
         )
-        if ce14 == 0:
+        if ce14 == 0 and _VARIANTI.get():
             c16_i = _find_re_opt(ce_rows, r"^16\) altri proventi finanziari", start=c_i + 1, end=total_c_i)
             if c16_i is not None and ce_rows[c16_i].value(0) is None:
                 _tot = _printed_total_row(ce_rows, c16_i, total_c_i)
@@ -1710,7 +1782,7 @@ def _parse_compact_income(rows: Sequence[_Row]) -> Optional[Dict[str, Decimal]]:
         source_oneri = _optional_direct_value_re(
             ce_rows, r"^17\) interessi e altri oneri", c_i + 1, total_c_i
         )
-        if source_oneri == 0:
+        if source_oneri == 0 and _VARIANTI.get():
             c17_i = _find_re_opt(ce_rows, r"^17\) interessi e altri oneri", start=c_i + 1, end=total_c_i)
             if c17_i is not None and ce_rows[c17_i].value(0) is None:
                 _tot = _printed_total_row(ce_rows, c17_i, total_c_i)
@@ -1721,9 +1793,11 @@ def _parse_compact_income(rows: Sequence[_Row]) -> Optional[Dict[str, Decimal]]:
             ce_rows, r"^17 bis\) utili e perdite", c_i + 1, total_c_i
         )
         declared_c = _value_at(ce_rows, total_c_i, 0)
-        ce17 = _caption_or_total(ce_rows, d_i, pretax_i)
+        ce17 = (_caption_or_total(ce_rows, d_i, pretax_i) if _VARIANTI.get()
+                else _value_at(ce_rows, d_i, 0))
         declared_pretax = _value_at(ce_rows, pretax_i, 0)
-        ce20 = _caption_or_total(ce_rows, tax_i, result_i)
+        ce20 = (_caption_or_total(ce_rows, tax_i, result_i) if _VARIANTI.get()
+                else _value_at(ce_rows, tax_i, 0))
         declared_result = _value_at(ce_rows, result_i, 0)
 
         value_production = ce01 + ce02 + ce03 + ce04
@@ -1785,6 +1859,18 @@ def _parse_compact_income(rows: Sequence[_Row]) -> Optional[Dict[str, Decimal]]:
 
 
 def extract_standard_ivcee_balances(
+    file_path: str, *, varianti: bool = False,
+) -> Tuple[Optional[Dict[str, Decimal]], Optional[Dict[str, Decimal]]]:
+    """Vedi ``_extract_balances``. ``varianti=False`` (default) e' il comportamento di d0b20d5;
+    ``True`` abilita le varianti di etichetta e i ripieghi sul totale stampato del Task 24."""
+    token = _VARIANTI.set(varianti)
+    try:
+        return _extract_balances(file_path)
+    finally:
+        _VARIANTI.reset(token)
+
+
+def _extract_balances(
     file_path: str,
 ) -> Tuple[Optional[Dict[str, Decimal]], Optional[Dict[str, Decimal]]]:
     """Return source-validated (current, prior) balance sheets, or ``None``.
@@ -1836,6 +1922,17 @@ def extract_standard_ivcee_balances(
 
 
 def extract_standard_ivcee_income(
+    file_path: str, *, varianti: bool = False,
+) -> Tuple[Optional[Dict[str, Decimal]], Optional[Dict[str, Decimal]]]:
+    """Vedi ``extract_standard_ivcee_balances``: ``varianti`` default spento."""
+    token = _VARIANTI.set(varianti)
+    try:
+        return _extract_income(file_path)
+    finally:
+        _VARIANTI.reset(token)
+
+
+def _extract_income(
     file_path: str,
 ) -> Tuple[Optional[Dict[str, Decimal]], Optional[Dict[str, Decimal]]]:
     """Return source-validated (current, prior) income statements, or ``None``."""
@@ -1950,9 +2047,20 @@ def extract_ivcee_didascalie(
     if letto is None:
         return None, None, 0
     kept, dropped, kind = letto
-    if kind in ("anni", "date", "parole"):
-        return _parse_column(kept, 0), _parse_income_column(kept, 0), dropped
-    return _parse_compact_balance(kept), _parse_compact_income(kept), dropped
+    token = _VARIANTI.set(True)
+    try:
+        if kind in ("anni", "date", "parole"):
+            bs, ce = _parse_column(kept, 0), _parse_income_column(kept, 0)
+        else:
+            bs, ce = _parse_compact_balance(kept), _parse_compact_income(kept)
+    finally:
+        _VARIANTI.reset(token)
+    if bs is not None:
+        # Un estrattore dichiara sempre le proprie chiavi diagnostiche, anche a zero (CLAUDE.md):
+        # qui nessuna massa e' ripescata ne' tappata, le didascalie chiudono sui totali stampati.
+        bs.setdefault("_unclassified_mass", Decimal("0"))
+        bs.setdefault("_plug_residual", Decimal("0"))
+    return bs, ce, dropped
 
 
 def overlay_standard_ivcee_balance(

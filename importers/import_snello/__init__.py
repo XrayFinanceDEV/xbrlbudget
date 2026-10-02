@@ -279,17 +279,9 @@ def importa(file_path: str, *, ocr_text: str | None = None, analizza=None, leggi
                 # fondi, e il modello li sommerebbe due volte (budget_313: sp13 612.540 dal
                 # conto economico letto sui conti; budget_352: attivo 3,45 M contro 1.675.141,10
                 # stampato). Stessa regola del lettore deterministico (``_ACCOUNT_CODE``).
-                from importers.standard_ivcee_parser import _ACCOUNT_CODE, _AMOUNT_LIKE, _IVCEE_TAG
+                from importers.standard_ivcee_parser import riga_conto
 
-                def _e_conto(testo: str) -> bool:
-                    toks = testo.split()
-                    if not toks or _AMOUNT_LIKE.match(toks[0]):
-                        return False
-                    if _ACCOUNT_CODE.match(toks[0]):
-                        return True
-                    return len(toks) > 1 and bool(_IVCEE_TAG.match(toks[0].lower())) and bool(_ACCOUNT_CODE.match(toks[1]))
-
-                righe_documento = [r for r in righe_documento if not _e_conto(r.text)]
+                righe_documento = [r for r in righe_documento if not riga_conto(r.text, bool(r.amounts))]
             letture = {"sp": 1, "ce": 1}
 
             # Ruling (c) addendum, Task 18 (owner, dopo la diagnosi AMBIENTA §7-8): un

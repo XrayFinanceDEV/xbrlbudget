@@ -140,7 +140,7 @@ def _pdf_313(path, *, righe_sp=None, righe_ce=None) -> str:
 
 
 # --------------------------------------------------------------------------- budget_352
-def _pdf_352(path, *, utile_ce="200,00") -> str:
+def _pdf_352(path, *, utile_ce="200,00", scadenze=False) -> str:
     """Colonna singola, conti "050101010" con flag "A", «Totale X» dopo i figli."""
     righe = [
         ("BILANCIO AL 31/12/2025", None, False),
@@ -217,6 +217,32 @@ def _pdf_352(path, *, utile_ce="200,00") -> str:
         ("Totale delle imposte sul reddito dell'esercizio, correnti, differite e anticipate", "200,00", False),
         ("21) Utile (perdita) dell'esercizio", utile_ce, False),
     ]
+    if scadenze:
+        # crediti 300 entro + 100 oltre; debiti 600 entro + 100 oltre (banche)
+        sost = {
+            "   Crediti esigibili entro l'esercizio successivo": ("   Crediti esigibili entro l'esercizio successivo", "300,00"),
+            "   Debiti esigibili entro l'esercizio successivo": ("   Debiti esigibili entro l'esercizio successivo", "600,00"),
+        }
+        nuove = []
+        for label, valore, conto in righe:
+            if label in sost:
+                nuove.append((label, sost[label][1], conto))
+                if label.startswith("   Crediti"):
+                    nuove.append(("   Crediti esigibili oltre l'esercizio successivo", "100,00", False))
+                else:
+                    nuove.append(("   Debiti esigibili oltre l'esercizio successivo", "100,00", False))
+            elif label.startswith("     a) Debiti verso fornitori"):
+                nuove.append(("   4) Debiti verso banche", None, False))
+                nuove.append(("     b) Debiti verso banche esigibili oltre l'esercizio successivo", "100,00", False))
+                nuove.append(("   Totale debiti verso banche", "100,00", False))
+                nuove.append((label, "600,00", conto))
+            elif label == "   Totale debiti verso fornitori":
+                nuove.append((label, "600,00", conto))
+            elif label.startswith("200101010"):
+                nuove.append((label, "600,00", conto))
+            else:
+                nuove.append((label, valore, conto))
+        righe = nuove
     doc = fitz.open()
     page = doc.new_page(width=595, height=2000)
     y = 40
@@ -284,13 +310,43 @@ def test_313_la_colonna_differenza_non_e_mai_un_saldo(tmp_path):
     assert bs["sp13_utile_perdita"] == D("150.00") != D("30.00")
 
 
-def test_313_il_parser_standard_senza_filtro_non_lo_legge_corretto(tmp_path):
-    """Il parser di sempre (senza filtro) non legge questo documento come prima: ne' il suo
-    output cambia — l'estrazione filtrata e' un punto d'ingresso a parte."""
-    f = _pdf_313(tmp_path / "a.pdf")
-    bs, _ = extract_standard_ivcee_balances(f)
-    # sulle sole intestazioni "2025 | 2024" il layout a date non c'e': nessun layout, nessuna lettura
-    assert bs is None or bs.get("sp02_immob_immateriali") != D("600.00")
+def _pdf_313_con_date(path) -> str:
+    """Lo stesso documento con l'intestazione a date complete (31/12/2025 | 31/12/2024) e due sole
+    colonne: il layout che il parser storico riconosce, con le etichette di 313 (varianti)."""
+    doc = fitz.open()
+    for righe in (_RIGHE_313_SP, _RIGHE_313_CE):
+        page = doc.new_page(width=595, height=842)
+        _dest(page, 373, 100, "31/12/2025")
+        _dest(page, 445, 100, "31/12/2024")
+        y = 140
+        for label, valori in righe:
+            _sx(page, 74, y, label)
+            if valori:
+                for x, v in zip((373, 445), valori[:2]):
+                    if v:
+                        _dest(page, x, y, v)
+            y += 10
+    doc.save(str(path))
+    return str(path)
+
+
+def test_i_punti_di_ingresso_storici_non_leggono_le_varianti(tmp_path):
+    """F6: senza ``varianti`` i due estrattori restituiscono cio' che restituivano a d0b20d5
+    (None su questo documento: etichette "i) immobilizzazioni", "totale diff. ...", conto
+    economico con totali "N totale ..."); con ``varianti=True`` lo stesso file si legge."""
+    from importers.standard_ivcee_parser import extract_standard_ivcee_income
+    f = _pdf_313_con_date(tmp_path / "d.pdf")
+    assert extract_standard_ivcee_balances(f) == (None, None)
+    assert extract_standard_ivcee_income(f) == (None, None)
+    bs, ce, _ = extract_ivcee_didascalie(f)
+    assert bs["totale_attivo"] == D("1000.00") and ce["ce20_imposte"] == D("100.00")
+
+
+def test_il_compatto_storico_non_legge_i_totali_stampati_senza_flag(tmp_path):
+    from importers.standard_ivcee_parser import extract_standard_ivcee_income
+    f = _pdf_352(tmp_path / "b.pdf")
+    assert extract_standard_ivcee_income(f)[0] is None          # "10) ammortamenti" senza importo
+    assert extract_standard_ivcee_income(f, varianti=True)[0] is not None
 
 
 def test_352_macro_voci_dalle_didascalie(tmp_path):
@@ -477,3 +533,133 @@ def test_in_modo_legge_ordinario_le_righe_conto_restano_nel_prompt(tmp_path):
     import_snello.importa(f, analizza=lambda p, **k: _struttura_stub("legge", macro_include_dettaglio=False),
                           leggi_voci=voci)
     assert any("03/15/015" in t for t in visti)
+
+
+# --------------------------------------------------------------------------- F1: falsi positivi
+def _pdf_note_con_riferimenti_di_legge(path) -> str:
+    """Uno schema di legge senza conti sotto, piu' una pagina di nota con righe che cominciano
+    come un codice ("173/2008 di recepimento...", "23/2020") ma senza importo (budget_162)."""
+    from tests.test_snello_deterministico import _pdf_comparativo_bilanciato
+    base = _pdf_comparativo_bilanciato(path)
+    doc = fitz.open(base)
+    pg = doc.new_page()
+    y = 50
+    for t in ("173/2008 di recepimento della direttiva", "23/2020 convertito in legge",
+              "139/2015 e relativo regolamento", "12/2025 delibera", "5.2 nota"):
+        pg.insert_text((40, y), t, fontname=FONT, fontsize=9)
+        y += 14
+    doc.saveIncr()
+    return base
+
+
+def test_riferimenti_di_legge_senza_importo_non_sono_conti(tmp_path):
+    assert riconosci_schema_con_dettaglio(_pdf_note_con_riferimenti_di_legge(tmp_path / "n.pdf")) is None
+
+
+def test_un_kpi_numerato_senza_importo_non_e_un_conto(tmp_path):
+    from tests.test_snello_deterministico import _pdf_comparativo_bilanciato
+    f = _pdf_comparativo_bilanciato(tmp_path / "k.pdf")
+    doc = fitz.open(f)
+    pg = doc.new_page()
+    for i, t in enumerate(("1.1 roe", "3.1 current ratio", "6.2 posizione finanziaria netta",
+                           "2.2 roi", "4.1 indice")):
+        pg.insert_text((40, 50 + 14 * i), t, fontname=FONT, fontsize=9)
+    doc.saveIncr()
+    assert riconosci_schema_con_dettaglio(f) is None
+
+
+def test_il_predicato_del_conto_e_uno_solo():
+    from importers.standard_ivcee_parser import riga_conto
+    assert riga_conto("03/15/015 SPESE DI COSTITUZIONE", True)
+    assert not riga_conto("03/15/015 SPESE DI COSTITUZIONE", False)       # senza importo
+    assert not riga_conto("31/12/2025 31/12/2024", True)                  # data
+    assert not riga_conto("1.671.195", True)                              # importo spezzato
+    assert riga_conto("CII1A 208.00121 CLIENTI", True)                    # riclassificato
+
+
+def test_una_riga_di_intestazione_con_date_sopravvive_al_filtro_per_qwen(tmp_path):
+    righe = list(_RIGHE_313_SP)
+    righe[-1] = ("TOTALE STATO PATRIMONIALE - PASSIVO", ["1.200,00", "1.150,00", "50,00", "4,000"])
+    f = _pdf_313(tmp_path / "x.pdf", righe_sp=righe)
+    doc = fitz.open(f)
+    doc[0].insert_text((74, 125), "31/12/2025 31/12/2024", fontname=FONT, fontsize=8)
+    doc[0].insert_text((400, 125), "1,00", fontname=FONT, fontsize=8)
+    doc.saveIncr()
+    visti = []
+
+    def voci(testo, intestazioni, nota=""):
+        visti.append(testo)
+        return {"corrente": [], "precedente": [], "totali": {}}
+
+    with pytest.raises(import_snello.SnelloNonRiuscito):
+        import_snello.importa(f, analizza=lambda p, **k: _struttura_stub("legge_con_dettaglio"), leggi_voci=voci)
+    assert any("31/12/2025 31/12/2024" in t for t in visti)
+
+
+# --------------------------------------------------------------------------- F3: scadenze stampate
+def test_352_le_scadenze_stampate_si_leggono(tmp_path):
+    bs, ce, _ = extract_ivcee_didascalie(_pdf_352(tmp_path / "s.pdf", scadenze=True))
+    assert bs is not None
+    assert bs["sp06_crediti_breve"] == D("300.00") and bs["sp07_crediti_lungo"] == D("100.00")
+    assert bs["sp16_debiti_breve"] == D("600.00") and bs["sp17_debiti_lungo"] == D("100.00")
+    assert bs["sp17a_debiti_banche_lungo"] == D("100.00")
+    assert bs["totale_attivo"] == bs["totale_passivo"] == D("2000.00")
+    assert "_source_maturity_unspecified" not in bs
+
+
+def test_352_senza_scadenze_stampate_resta_a_breve_e_dichiarato(tmp_path):
+    bs, _, _ = extract_ivcee_didascalie(_pdf_352(tmp_path / "b.pdf"))
+    assert bs["sp07_crediti_lungo"] == D("0") and bs["sp17_debiti_lungo"] == D("0")
+    assert bs["_source_maturity_unspecified"] == D("1")
+
+
+# --------------------------------------------------------------------------- F7 / F8 / vuoto
+def _pdf_pagine(path, pagine):
+    doc = fitz.open()
+    for righe in pagine:
+        pg = doc.new_page()
+        y = 50
+        for t in righe:
+            pg.insert_text((40, y), t, fontname=FONT, fontsize=9)
+            y += 14
+    doc.save(str(path))
+    return str(path)
+
+
+def _importi(n):
+    return [f"voce {i} {1000 + i},00" for i in range(n)]
+
+
+def test_pagine_dettagli_da_testo_salta_l_indice_che_nomina_i_titoli(tmp_path):
+    from importers.struttura_documento.analisi import pagine_dettagli_da_testo
+    f = _pdf_pagine(tmp_path / "p.pdf", [
+        ["Indice", "STATO PATRIMONIALE", "CONTO ECONOMICO"],           # indice: nessun importo
+        ["STATO PATRIMONIALE ATTIVO"] + _importi(6),
+        ["STATO PATRIMONIALE PASSIVO"] + _importi(6),
+        ["CONTO ECONOMICO"] + _importi(6),
+        ["Nota integrativa"] + _importi(1),
+    ])
+    assert pagine_dettagli_da_testo(f) == [2, 3]
+
+
+def test_pagine_dettagli_da_testo_include_la_pagina_dove_lo_sp_finisce_sopra_il_titolo_ce(tmp_path):
+    from importers.struttura_documento.analisi import pagine_dettagli_da_testo
+    f = _pdf_pagine(tmp_path / "q.pdf", [
+        ["STATO PATRIMONIALE ATTIVO"] + _importi(6),
+        ["STATO PATRIMONIALE PASSIVO"] + _importi(4) + ["CONTO ECONOMICO"] + _importi(4),
+        ["segue"] + _importi(6),
+    ])
+    assert pagine_dettagli_da_testo(f) == [1, 2]
+
+
+def test_il_nuovo_estrattore_dichiara_le_chiavi_diagnostiche_anche_a_zero(tmp_path):
+    bs, _, _ = extract_ivcee_didascalie(_pdf_313(tmp_path / "a.pdf"))
+    assert bs["_unclassified_mass"] == D("0") and bs["_plug_residual"] == D("0")
+
+
+def test_un_estrazione_vuota_non_si_adotta(tmp_path):
+    """Attivo = Passivo = 0 non e' una quadratura: didascalie tutte a zero + righe-conto."""
+    f = _pdf_313(tmp_path / "z.pdf", righe_sp=[(l, [("0,00" if v else v) for v in vals[:1]] + ["0,00", "0,00", ""] if vals else None)
+                                              for l, vals in _RIGHE_313_SP],
+                 righe_ce=[(l, ["0,00", "0,00", "0,00", ""] if vals else None) for l, vals in _RIGHE_313_CE])
+    assert not DET.tentativo(f)["adottato"]

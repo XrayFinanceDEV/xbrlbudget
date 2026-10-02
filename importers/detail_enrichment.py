@@ -588,6 +588,12 @@ def _overlap(a: SourceRow, b: SourceRow) -> bool:
     return ca == cb or ca.startswith(cb + ".") or cb.startswith(ca + ".")
 
 
+# Le famiglie di debito il cui segno di stampa puo' essere quello avere (dettagli negativi sotto un
+# aggregato positivo). Il patrimonio netto (sp12) ammette per natura righe negative (riserve
+# negative, perdite a nuovo) e non entra nel voto.
+_FAMIGLIE_DEBITO = ("sp16_debiti_breve", "sp17_debiti_lungo")
+
+
 def apply_details(bs: dict, proposals: list[DetailProposal], rows: list[SourceRow],
                   *, _maturity_neutral: bool = False) -> tuple[dict, dict]:
     """Pure conservative reducer. Every original aggregate stays byte-for-byte.
@@ -598,7 +604,8 @@ def apply_details(bs: dict, proposals: list[DetailProposal], rows: list[SourceRo
     """
     result = dict(bs)
     source = {row.id: row for row in rows}
-    report = {"families": {}, "rejected": []}
+    # "famiglie_segno_invertito" e' SEMPRE presente, vuota quando nulla e' stato invertito.
+    report = {"families": {}, "rejected": [], "famiglie_segno_invertito": []}
     grouped = defaultdict(list)
     for proposal in proposals:
         grouped[proposal.aggregate].extend(proposal.items)
@@ -659,17 +666,30 @@ def apply_details(bs: dict, proposals: list[DetailProposal], rows: list[SourceRo
             used_rows.append(row)
             selected[item.field].append((item, row))
 
+        # Il segno si decide per FAMIGLIA, non per riga (Task 24 fix round 1, F4; budget_313): un
+        # gestionale che stampa i conti di debito col segno avere (meno) rende i dettagli
+        # negativi sotto un aggregato positivo. Voto per CONTEGGIO delle righe lette della
+        # famiglia: se prevalgono le negative si inverte tutta la famiglia (una riga di segno
+        # opposto, un vero saldo dare dentro i debiti, resta di segno relativo opposto). Tutto o
+        # niente; parita' o una sola riga: nulla, come prima. L'aggregato non cambia mai.
+        sgn = 1
+        if aggregate in _FAMIGLIE_DEBITO:
+            letti = [r.amounts[i.column] for f in selected for i, r in selected[f]]
+            if len(letti) >= 2 and sum(1 for v in letti if v < 0) > sum(1 for v in letti if v > 0):
+                sgn = -1
+                report["famiglie_segno_invertito"].append(aggregate)
+
         merged = dict(baseline)
         accepted = []
         # Signed contra-details first, the bucket last. E.g. reserves +120/-20
         # explain 100 without discarding either of the printed signs.
         def order(field):
-            value = sum((r.amounts[i.column] for i, r in selected[field]), ZERO)
+            value = sum((sgn * r.amounts[i.column] for i, r in selected[field]), ZERO)
             return (field == bucket, value >= 0)
 
         for field in sorted(selected, key=order):
             evidence = selected[field]
-            value = sum((r.amounts[i.column] for i, r in evidence), ZERO)
+            value = sum((sgn * r.amounts[i.column] for i, r in evidence), ZERO)
             reason = None
             if field == bucket:
                 # The residual remains here; record only the portion actually
@@ -689,7 +709,7 @@ def apply_details(bs: dict, proposals: list[DetailProposal], rows: list[SourceRo
             for item, row in evidence:
                 claimed.add((row.id, item.column))
                 accepted.append({"field": field, "row": row.id, "page": row.page,
-                                 "column": item.column, "amount": str(row.amounts[item.column]),
+                                 "column": item.column, "amount": str(sgn * row.amounts[item.column]),
                                  "text": row.text})
         if not accepted:
             continue

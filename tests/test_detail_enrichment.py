@@ -566,3 +566,50 @@ def test_import_pipeline_persists_both_years_details_and_provenance(tmp_path, mo
             assert json.loads(years[0].validation_report)['detail_enrichment'] == before
     finally:
         engine.dispose()
+
+
+# --- Task 24 fix round 1, F4: segno dei dettagli di debito deciso per famiglia (budget_313).
+BANK_ = BANK
+TAX_DEBT = "sp16e_debiti_tributari_breve"
+WELFARE = "sp16f_debiti_previdenza_breve"
+
+
+def test_f4_gestionale_che_stampa_i_debiti_col_segno_avere_si_inverte_per_famiglia():
+    bs = {DEBT: D("44517.11")}
+    rows = [row("banca", "-40691.77"), row("fin", "-29870.18"), row("forn", "-3775.49"),
+            row("prev", "-13128.22"), row("trib", "-521.90"), row("rit", "39943.12"),
+            row("irap", "8384.23")]
+    p = proposal(DEBT, (BANK_, "banca", 0), (BANK_, "fin", 0), (SUPPLIER, "forn", 0),
+                 (WELFARE, "prev", 0), (TAX_DEBT, "trib", 0), (TAX_DEBT, "rit", 0), (TAX_DEBT, "irap", 0))
+    actual, report = de.apply_details(bs, [p], rows)
+    assert actual[DEBT] == D("44517.11")                         # l'aggregato non cambia mai
+    assert actual[BANK_] == D("70561.95")
+    assert actual[SUPPLIER] == D("3775.49")
+    assert actual[WELFARE] == D("13128.22")
+    assert actual[TAX_DEBT] == D("521.90") - D("39943.12") - D("8384.23")
+    assert report["famiglie_segno_invertito"] == [DEBT]
+    assert sum(actual[f] for f in (BANK_, SUPPLIER, WELFARE, TAX_DEBT, OTHER)) == D("44517.11")
+
+
+def test_f4_un_saldo_dare_di_minoranza_conserva_il_segno_relativo():
+    bs = {DEBT: D("100")}
+    rows = [row("a", "-60"), row("b", "-70"), row("c", "30")]
+    p = proposal(DEBT, (BANK_, "a", 0), (SUPPLIER, "b", 0), (TAX_DEBT, "c", 0))
+    actual, report = de.apply_details(bs, [p], rows)
+    assert actual[BANK_] == 60 and actual[SUPPLIER] == 70 and actual[TAX_DEBT] == -30
+
+
+def test_f4_una_famiglia_tutta_positiva_non_si_tocca():
+    p = proposal(DEBT, (BANK, "bank", 0), (SUPPLIER, "suppliers", 0))
+    actual, report = de.apply_details({DEBT: D("100")}, [p], [row("bank", "25"), row("suppliers", "60")])
+    assert actual[BANK] == 25 and actual[SUPPLIER] == 60 and actual[OTHER] == 15
+    assert report["famiglie_segno_invertito"] == []
+
+
+def test_f4_parita_o_riga_singola_non_inverte():
+    p = proposal(DEBT, (BANK, "a", 0), (SUPPLIER, "b", 0))
+    _, rep = de.apply_details({DEBT: D("100")}, [p], [row("a", "-20"), row("b", "30")])
+    assert rep["famiglie_segno_invertito"] == []
+    p = proposal(DEBT, (BANK, "a", 0))
+    _, rep = de.apply_details({DEBT: D("100")}, [p], [row("a", "-20")])
+    assert rep["famiglie_segno_invertito"] == []

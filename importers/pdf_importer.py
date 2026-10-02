@@ -1856,8 +1856,8 @@ def import_pdf_balance_sheet(
             )
         if balance_sheet_data.get("_source_maturity_unspecified") and 'sp16_debiti_breve' not in _maturity_audit:
             warnings.append(
-                "SCADENZA DEBITI NON DISTINTA NEL PDF: il totale Debiti e le sue "
-                "sottovoci sono stati conservati nel breve termine; verificare la "
+                "SCADENZA DEBITI E CREDITI NON DISTINTA NEL PDF: i totali Debiti e Crediti "
+                "e le loro sottovoci sono stati conservati nel breve termine; verificare la "
                 "quota oltre 12 mesi in Rettifiche se disponibile."
             )
         # Surface the deterministic trial-balance plug flag to the user (Rettifiche cue),

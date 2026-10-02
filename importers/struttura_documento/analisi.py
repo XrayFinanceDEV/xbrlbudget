@@ -99,6 +99,8 @@ class Struttura:
                 "pagine_senza_testo": self.pagine_senza_testo}
 
 
+_IMPORTO = re.compile(r"\d{1,3}(?:\.\d{3})*,\d{2}")
+_MIN_IMPORTI_PAGINA = 3
 _TITOLO_CE = re.compile(r"^\s*conto economico\s*$", re.I | re.M)
 
 
@@ -111,11 +113,25 @@ def pagine_dettagli_da_testo(pdf: str) -> list[int]:
     import fitz
     with fitz.open(pdf) as doc:
         testi = [p.get_text() for p in doc]
-    inizio = next((i for i, t in enumerate(testi) if "stato patrimoniale" in t.casefold()), None)
+    # Una pagina di indice o di copertina che nomina i titoli non e' il prospetto: l'inizio e' la
+    # prima pagina con "stato patrimoniale" che porta importi veri.
+    inizio = next((i for i, t in enumerate(testi)
+                   if "stato patrimoniale" in t.casefold() and len(_IMPORTO.findall(t)) >= _MIN_IMPORTI_PAGINA),
+                  None)
     if inizio is None:
         return []
-    fine = next((i for i in range(inizio, len(testi)) if _TITOLO_CE.search(testi[i])), len(testi) - 1)
-    return sorted(set(range(inizio + 1, fine + 2)) | set(pagine_tabelle_nota(pdf)))
+    fine, include_fine = len(testi) - 1, True
+    for i in range(inizio, len(testi)):
+        m = _TITOLO_CE.search(testi[i])
+        if m:
+            fine = i
+            # La pagina dove comincia il CE appartiene allo SP solo se SOPRA il titolo ci sono
+            # importi (lo SP finisce a meta' pagina: budget_313, budget_352); se il titolo e' in
+            # testa, la pagina e' tutta CE (AMBIENTA verifica, pagina 4: falso positivo prima).
+            include_fine = len(_IMPORTO.findall(testi[i][:m.start()])) >= _MIN_IMPORTI_PAGINA
+            break
+    ultima = fine if include_fine else fine - 1
+    return sorted(set(range(inizio + 1, ultima + 2)) | set(pagine_tabelle_nota(pdf)))
 
 
 def struttura_deterministica(pdf: str, *, modo: str) -> Struttura:

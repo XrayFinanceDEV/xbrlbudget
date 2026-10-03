@@ -224,26 +224,12 @@ def _tentativo_classico(file_path: str, ocr_text: str | None = None) -> dict:
         con_dettaglio = None
     if con_dettaglio is not None and con_dettaglio["adottato"]:
         return con_dettaglio
-    # Task 26 (fix 3): un candidato ``vuoto`` (il parser si e' applicato ma non ha restituito
-    # nulla: tipico il falso comparativo da "dal 01/01/2025 al 31/12/2025") non chiude la
-    # ricerca, si salta e si prova il successivo. Un candidato che ha LETTO e non quadra chiude
-    # come prima. Solo se si e' saltato qualcosa il report elenca i candidati provati.
-    if standard is not None and standard["esito"] != "vuoto":
+    if standard is not None:
         return standard
     try:
         esito = _prova_situazione_contabile(file_path, ocr_text)
     except Exception:
-        esito = {"adottato": False, "parser": "situazione_contabile_parser", "esito": "errore"}
-        if standard is None:
-            return esito
-    if standard is not None:
-        # standard e' "vuoto": se il successivo non si applica o non adotta, il verdetto resta
-        # quello di prima (vuoto dello standard) salvo che il successivo abbia letto qualcosa.
-        candidati = [{"parser": standard["parser"], "esito": standard["esito"]}]
-        if esito is None:
-            return standard
-        candidati.append({"parser": esito["parser"], "esito": esito["esito"]})
-        return {**esito, "candidati": candidati}
+        return {"adottato": False, "parser": "situazione_contabile_parser", "esito": "errore"}
     if esito is not None:
         return esito
     return {"adottato": False, "parser": None, "esito": "non_applicabile"}

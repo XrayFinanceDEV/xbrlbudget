@@ -667,37 +667,3 @@ def test_parse_compact_balance_rifiuta_un_estrazione_tutta_a_zero(tmp_path):
     current, _prior = extract_standard_ivcee_balances(pdf)
 
     assert current is None
-
-
-def test_un_vuoto_del_parser_standard_non_ferma_la_ricerca(tmp_path, monkeypatch):
-    # Task 26 fix 3: un candidato ``vuoto`` (il parser standard si e' applicato per un falso
-    # positivo, es. l'intestazione "dal 01/01/2025 al 31/12/2025" letta come due colonne data,
-    # ma non ha restituito nulla) viene saltato: la ricerca prosegue verso la situazione
-    # contabile, e il report elenca ogni candidato provato col suo esito.
-    pdf = str(tmp_path / "verifica-dopo-vuoto.pdf")
-    _pdf_situazione_contabile(pdf)
-    monkeypatch.setattr(DET, "_prova_standard_ivcee",
-                        lambda f: {"adottato": False, "parser": "standard_ivcee_parser", "esito": "vuoto"})
-
-    esito = DET.tentativo(pdf, ocr_text=_TESTO_BILANCIO_DI_VERIFICA)
-
-    assert esito["adottato"] is True
-    assert esito["parser"] == "situazione_contabile_parser"
-    assert esito["candidati"] == [
-        {"parser": "standard_ivcee_parser", "esito": "vuoto"},
-        {"parser": "situazione_contabile_parser", "esito": esito["esito"]},
-    ]
-
-
-def test_un_standard_che_si_applica_e_non_quadra_chiude_ancora_la_ricerca(tmp_path, monkeypatch):
-    # Solo il ``vuoto`` e' saltato: un candidato che ha letto e non quadra chiude come prima.
-    pdf = str(tmp_path / "verifica-dopo-oltre.pdf")
-    _pdf_situazione_contabile(pdf)
-    monkeypatch.setattr(DET, "_prova_standard_ivcee",
-                        lambda f: {"adottato": False, "parser": "standard_ivcee_parser", "esito": "oltre_soglia"})
-
-    esito = DET.tentativo(pdf, ocr_text=_TESTO_BILANCIO_DI_VERIFICA)
-
-    assert esito["parser"] == "standard_ivcee_parser"
-    assert esito["esito"] == "oltre_soglia"
-    assert "candidati" not in esito

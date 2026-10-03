@@ -66,8 +66,14 @@ def _esito(nome: str, bs_raw: dict, ce_raw: dict, stampati_raw: dict | None) -> 
     stampati = {k: v for k, v in (stampati_raw or {}).items() if v is not None} or None
     bs, ce, tappo, esito, m = _verifica_bilancio(bs, ce, stampati)
     if esito not in ("ok", "tappo"):
-        return {"adottato": False, "parser": nome,
-                "esito": "vuoto" if esito == "vuoto" else "oltre_soglia"}
+        if esito == "vuoto":
+            return {"adottato": False, "parser": nome, "esito": "vuoto"}
+        # Task 28: una lettura che c'e' stata ma sfora il limite del tappo tiene le sue voci,
+        # SENZA tappo (tappa() non le ha toccate): se il modello poi chiude peggio, ``importa``
+        # salva questa, squadrata. Solo qui: "vuoto", "massa_non_classificata" ed "errore"
+        # significano che la lettura stessa non e' fidata, e non portano nulla.
+        return {"adottato": False, "parser": nome, "esito": "oltre_soglia",
+                "lettura": {"bs": bs, "ce": ce, "misura": m}}
     # Ruling (a), Task 18 (2026-09-27): quadrare da solo non basta piu'. Un candidato
     # bilanciato la cui massa non classificata (dichiarata dal parser sottostante, mai un
     # hardcoded zero) supera la STESSA soglia che verifica.tappa() usa per lo scarto

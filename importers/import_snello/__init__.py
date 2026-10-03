@@ -6,7 +6,7 @@ from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from decimal import Decimal
 
-from importers.import_snello.verifica import limite_tappo
+from importers.import_snello.verifica import limite_tappo, soglia
 
 # I modi di lettura che leggono lo schema di legge (macro voci dai totali stampati) invece di
 # un elenco di conti. "legge_con_dettaglio" (Task 24): le macro voci vengono dalle didascalie
@@ -246,6 +246,58 @@ def importa(file_path: str, *, ocr_text: str | None = None, analizza=None, leggi
         struttura = struttura_deterministica(file_path, modo=modo)
         return _risultato_deterministico(_det, struttura, modo, t0)
 
+    try:
+        return _importa_modello(file_path, _det, t0, ocr_text=ocr_text, analizza=analizza,
+                                leggi_conti=leggi_conti, leggi_voci=leggi_voci,
+                                trascrivi=trascrivi, route_hint=route_hint)
+    except SnelloNonRiuscito as e:
+        # Task 28: il modello ripiega o cade, ma un candidato deterministico ha letto davvero
+        # (respinto solo dal limite del tappo): meglio la sua lettura squadrata, dichiarata,
+        # che buttare tutto sull'importatore vecchio.
+        if not _det.get("lettura"):
+            raise
+        try:
+            from importers.struttura_documento.analisi import struttura_deterministica
+            modo_det = _MODO_DA_PARSER.get(_det["parser"], "legge")
+            struttura_det = struttura_deterministica(file_path, modo=modo_det)
+        except Exception:
+            raise e
+        return _salva_deterministico_squadrato(
+            _det, struttura_det, t0, letture=e.report.get("letture"),
+            extra={"ripiego_evitato": {k: e.report[k] for k in ("esito", "fase", "errore")
+                                       if k in e.report}})
+
+
+def _scarto_massimo(m: dict) -> Decimal:
+    """Il peggiore dei tre scarti misurati: lo SP, il CE e il totale stampato (Task 28)."""
+    return max(abs(Decimal(m["scarto_sp"])), abs(Decimal(m["scarto_ce"])),
+               abs(Decimal(m["scarto_stampati"])))
+
+
+def _salva_deterministico_squadrato(_det: dict, struttura, t0: float, *, letture: dict | None,
+                                    extra: dict) -> "Risultato":
+    """Task 28: la lettura del candidato deterministico respinto solo per il limite del tappo
+    (``_det["lettura"]``), salvata com'e', squadrata e senza tappo (il limite di 10 euro resta):
+    stessa forma del risultato di un candidato adottato, con esito ``squadrato`` e l'avviso
+    costruito dalla sua misura. Le chiamate al modello gia' fatte restano nel report."""
+    lettura = _det["lettura"]
+    m = lettura["misura"]
+    modo = _MODO_DA_PARSER.get(_det["parser"], "legge")
+    adottato = {"parser": _det["parser"], "esito": "squadrato", "bs": lettura["bs"],
+                "ce": lettura["ce"], "tappo": None, "misura": m,
+                **{k: _det[k] for k in ("prior_bs", "prior_ce", "anno_precedente") if k in _det}}
+    r = _risultato_deterministico(adottato, struttura, modo, t0)
+    r.report["deterministico"]["esito"] = _det["esito"]
+    if letture is not None:
+        r.report["letture"] = letture
+    if _causa_stampati(m, soglia(m["attivo"])):
+        r.report["causa"] = "stampati"
+    r.report.update(extra)
+    return r
+
+
+def _importa_modello(file_path: str, _det: dict, t0: float, *, ocr_text, analizza, leggi_conti,
+                     leggi_voci, trascrivi, route_hint) -> Risultato:
     from importers.struttura_documento.analisi import analizza_struttura
     analizza_fn = analizza or analizza_struttura
     try:
@@ -576,6 +628,20 @@ def importa(file_path: str, *, ocr_text: str | None = None, analizza=None, leggi
     except Exception as e:
         raise SnelloNonRiuscito({"esito": "ripiego", "fase": fase, "errore": type(e).__name__}) from e
 
+    _confronto = None
+    if esito == "squadrato" and not contraddizioni and _det.get("lettura"):
+        # Task 28: il modello non e' riuscito a quadrare; se la lettura deterministica che aveva
+        # sfiorato il limite e' piu' vicina (peggiore scarto minore), si salva quella. Mai un
+        # mix: l'anno precedente segue la lettura che vince (qui non c'e' quello deterministico).
+        _m_det = _det["lettura"]["misura"]
+        _peggio_det, _peggio_mod = _scarto_massimo(_m_det), _scarto_massimo(m)
+        _vince = "deterministica" if _peggio_det < _peggio_mod else "modello"
+        _confronto = {"deterministica": str(_peggio_det), "modello": str(_peggio_mod),
+                      "vince": _vince, "parser": _det["parser"]}
+        if _vince == "deterministica":
+            return _salva_deterministico_squadrato(_det, struttura, t0, letture=letture,
+                                                   extra={"confronto_letture": _confronto})
+
     bs["_plug_residual"] = Decimal(tappo["importo"]) if tappo and "importo" in tappo else Decimal(0)
     bs["_unclassified_mass"] = _unclassified_mass(diag)
 
@@ -594,6 +660,8 @@ def importa(file_path: str, *, ocr_text: str | None = None, analizza=None, leggi
     report.update(_coppie_nel_report(_coppie_lette, esito))
     if modo in _MODI_LEGGE and precedente_stato is not None:
         report["precedente"] = precedente_stato
+    if _confronto:
+        report["confronto_letture"] = _confronto
     if causa:
         # Squadrato solo contro il totale stampato (SP e CE interni entro soglia).
         report["causa"] = causa

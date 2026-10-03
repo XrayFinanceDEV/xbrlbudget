@@ -32,8 +32,11 @@ PROMPT_VOCI = (
     "percorso con la sintassi della legenda, importo come stampato (negativo se tra parentesi o col meno). "
     "Solo le voci piu' di dettaglio stampate: non i totali ('Totale immobilizzazioni', 'Totale crediti', "
     "'Totale attivo'); una voce stampata solo al livello romano (schema abbreviato) si scrive a quel livello "
-    "(es. 'SPA.B.I'); crediti o debiti stampati solo come 'esigibili entro/oltre' senza numero arabo: "
-    "'SPA.C.II.E', 'SPP.D.O'. Fondi stampati a parte: percorso del bene con '.F'. "
+    "(es. 'SPA.B.I'). Crediti e debiti con gli importi 'esigibili entro' e 'esigibili oltre l'esercizio "
+    "successivo' stampati sotto la voce: una coppia per scadenza col suffisso '.E' o '.O' "
+    "(es. 'SPP.D.4.E', 'SPP.D.4.O', 'SPA.C.II.1.O', 'SPA.B.III.2.O'), non il totale della voce; "
+    "stampati solo come 'esigibili entro/oltre' senza numero arabo: 'SPA.C.II.E', 'SPP.D.O'; "
+    "nessun suffisso se la scadenza non e' stampata. Fondi stampati a parte: percorso del bene con '.F'. "
     "Il risultato dell'esercizio va sia come 'SPP.A.IX' nello SP sia come 'CE.21' nel CE. "
     "In 'totali' riporta i totali stampati (totale attivo, totale passivo, utile), null se non stampati."
     "\n\nLEGENDA DEI PERCORSI:\n" + LEGENDA)

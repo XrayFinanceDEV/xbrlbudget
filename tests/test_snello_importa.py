@@ -798,3 +798,39 @@ def test_risultati_stampati_con_codice_davanti_alla_riga_non_lo_scambiano_per_im
     assert risultati_stampati(righe[:1]) is None                          # manca il CE
     assert risultati_stampati([N(statement="bs", text="Utile (perdita) prima delle imposte 1.000,00 900,00"),
                                righe[1]]) is None
+
+
+# --- Task 27, item 7: le coppie (percorso, importo) del modello restano nel report ---
+
+def test_report_porta_le_coppie_dell_anno_corrente_come_stringhe(tmp_path):
+    import json
+
+    pdf = _pdf_vuoto(str(tmp_path / "c.pdf"))
+    r = S.importa(pdf, analizza=lambda p: _struttura("legge"), leggi_voci=_voci_quadrate)
+    coppie = r.report["coppie_corrente"]
+    assert coppie and all(isinstance(c, str) for c in coppie)
+    assert any(c.startswith("SPA.") and "=" in c for c in coppie)
+    json.dumps(r.report["coppie_corrente"])                                     # serializzabile come il resto
+
+
+def test_report_squadrato_porta_le_coppie_e_ok_grande_no(tmp_path, monkeypatch):
+    pdf = _pdf_vuoto(str(tmp_path / "c.pdf"))
+    grandi = [(f"CE.B.7.{i}", D("1")) for i in range(S._MAX_COPPIE_SE_OK + 10)]
+
+    def voci(testo, intestazioni, nota=""):
+        if intestazioni and intestazioni[0].startswith("SP"):
+            return {"corrente": [("SPA.C.IV.1", D("1000")), ("SPP.A.I", D("1000"))], "precedente": [], "totali": {}}
+        return {"corrente": [("CE.A.1", D("100"))] + grandi, "precedente": [], "totali": {}}
+    struttura = lambda p: _struttura("legge", intestazioni_sp=["SP-2025"], intestazioni_ce=["CE-2025"])
+    r = S.importa(pdf, analizza=struttura, leggi_voci=voci)
+    assert r.report["esito"] != "ok" and len(r.report["coppie_corrente"]) == len(grandi) + 3   # SP 2 + CE.A.1
+
+    # un esito ok con troppe coppie non le porta nel report (finisce nel DB con il rapporto)
+    def voci_ok(testo, intestazioni, nota=""):
+        if intestazioni and intestazioni[0].startswith("SP"):
+            return {"corrente": [("SPA.C.IV.1", D("1000")), ("SPP.A.I", D("1000"))], "precedente": [], "totali": {}}
+        return {"corrente": [("CE.A.1", D("0"))] + [(f"CE.B.7.{i}", D("0")) for i in range(S._MAX_COPPIE_SE_OK + 10)],
+                "precedente": [], "totali": {}}
+    r = S.importa(pdf, analizza=struttura, leggi_voci=voci_ok)
+    assert r.report["esito"] == "ok" and "coppie_corrente" not in r.report
+    assert r.report["coppie_corrente_n"] > S._MAX_COPPIE_SE_OK

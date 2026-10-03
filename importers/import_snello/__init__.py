@@ -72,6 +72,25 @@ def _unclassified_mass(diag: dict) -> Decimal:
     return sum((Decimal(v) for _, _, v in diag.get("lato_irrisolti", [])), Decimal(0))
 
 
+# Task 27, item 7: le coppie (percorso, importo) che il modello ha restituito per l'anno corrente
+# restano nel report, cosi' un errore di lettura (debiti «entro» salvati a sp17...) si diagnostica
+# da un record del banco senza rilanciare il modello. Il report finisce nel DB con l'upload:
+# un esito "ok" porta le coppie solo se sono poche; con un esito diverso da "ok" fino a _MAX_COPPIE.
+_MAX_COPPIE_SE_OK = 120
+_MAX_COPPIE = 600
+
+
+def _coppie_nel_report(coppie, esito: str) -> dict:
+    if not coppie:
+        return {}
+    righe = [f"{p}={Decimal(v).quantize(Decimal('0.01'))}" for p, v in coppie]
+    if esito == "ok" and len(righe) > _MAX_COPPIE_SE_OK:
+        return {"coppie_corrente_n": len(righe)}
+    if len(righe) > _MAX_COPPIE:
+        return {"coppie_corrente": righe[:_MAX_COPPIE], "coppie_corrente_n": len(righe)}
+    return {"coppie_corrente": righe, "coppie_corrente_n": len(righe)}
+
+
 def _limite_interno(s):
     """Lo scarto interno (SP e CE) oltre il quale non c'e' tappo: 10 euro (2026-10-03), mai oltre
     la soglia relativa ``s``, che resta la tolleranza sul totale stampato."""
@@ -293,6 +312,7 @@ def importa(file_path: str, *, ocr_text: str | None = None, analizza=None, leggi
         return bs, ce, tappo, esito, m, s
 
     _risultati_letti: list = []
+    _coppie_lette: list = []          # le coppie dell'anno corrente dell'ultima lettura (modi di legge)
 
     def _contraddizioni(m: dict, s, stampati: dict | None) -> list:
         """Le contraddizioni che il documento stampa da solo e che le voci lette riproducono:
@@ -444,6 +464,7 @@ def importa(file_path: str, *, ocr_text: str | None = None, analizza=None, leggi
                 for chiave in ("totale_attivo", "totale_passivo"):
                     if deterministici.get(chiave) is not None:
                         stampati[chiave] = deterministici[chiave]
+                _coppie_lette[:] = list(coppie_corrente)
                 bs, ce, diag = da_coppie(coppie_corrente)
                 prior = da_coppie(coppie_precedente) if coppie_precedente else None
                 return bs, ce, diag, prior, stampati
@@ -508,6 +529,7 @@ def importa(file_path: str, *, ocr_text: str | None = None, analizza=None, leggi
                 "tappo": {"corrente": tappo}, "letture": letture, "diag": diag,
                 "anomalie": _anomalie(bs, diag), "secondi": round(time.monotonic() - t0, 1),
                 "deterministico": _report_deterministico,
+                **_coppie_nel_report(_coppie_lette, "vuoto"),
             }
             raise SnelloNonRiuscito(report)
 
@@ -559,6 +581,7 @@ def importa(file_path: str, *, ocr_text: str | None = None, analizza=None, leggi
         "anomalie": _anomalie(bs, diag), "secondi": round(time.monotonic() - t0, 1),
         "deterministico": _report_deterministico,
     }
+    report.update(_coppie_nel_report(_coppie_lette, esito))
     if modo in _MODI_LEGGE and precedente_stato is not None:
         report["precedente"] = precedente_stato
     if causa:

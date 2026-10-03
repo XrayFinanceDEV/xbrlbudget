@@ -1486,3 +1486,12 @@ Revisione di ogni task: sonnet. Revisione finale del branch: opus. Il Task 9 toc
 è stato portato a default **6** dal commit `91624a57` (decisione del proprietario 2026-09-26, «6
 richieste parallele»): questo verbale lo dava 4. Stato attuale in
 `docs/deployment/PRODUCTION_CONFIG.md` e in `importers/llm_provider.py`.
+
+**Superato (annotazione del 2026-10-03, secondo giro di riallineamento).** Il passo 6 di pagina 1317
+(«resta oltre soglia, o modo `conti` → `SnelloNonRiuscito` con esito `ripiego`») è stato smentito
+due volte dopo che questo verbale è stato scritto: il Task 17 (2026-09-27) ha deciso che un bilancio
+oltre il limite **si importa comunque con avviso** (esito `squadrato`, nessun tappo applicato), e il
+Task 28 (`1f3486f`, `bf1e9e5`, 2026-10-03) ha aggiunto che quando un candidato deterministico ha
+letto davvero e non quadra solo per il limite del tappo, si salva **quella** lettura e il ripiego non
+avviene (`ripiego_evitato`). Stato attuale in `docs/import/REGOLE-IMPORT-02-ESTRAZIONE.md` §F3 e in
+`importers/import_snello/__init__.py`.

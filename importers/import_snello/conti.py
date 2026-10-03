@@ -746,10 +746,13 @@ def da_coppie(coppie):
     diag = {"non_mappati": [], "escluse": [], "risultato_stampato": None, "lato_corretti": 0,
             "lato_irrisolti": [], "risultato_duplicato": [], "padri_esclusi": [],
             "ce_segno_forzato": []}
+    # Si scarta solo la coppia IDENTICA (la stessa voce letta due volte, es. una pagina condivisa
+    # fra lettura SP e CE). Lo stesso percorso con importi diversi sono voci distinte che la
+    # legenda non separa (le sotto-lettere di B.III.2: budget_597 ne perdeva 26.268) e si sommano.
     viste, uniche = set(), []
     for p, v in coppie:
-        if p not in viste:
-            viste.add(p)
+        if (p, Decimal(v)) not in viste:
+            viste.add((p, Decimal(v)))
             uniche.append((p, Decimal(v)))
     tutti = [p for p, _ in uniche]
     voci: list[tuple[str, Decimal, str]] = []

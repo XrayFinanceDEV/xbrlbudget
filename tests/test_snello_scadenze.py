@@ -32,3 +32,15 @@ def test_il_totale_della_voce_insieme_alle_scadenze_non_si_somma_due_volte():
     bs, _, diag = da_coppie([("SPP.D.4", "1222480"), ("SPP.D.4.E", "580481"), ("SPP.D.4.O", "641999")])
     assert bs["sp16a_debiti_banche_breve"] == Decimal("580481")
     assert bs["sp17a_debiti_banche_lungo"] == Decimal("641999")
+
+
+def test_piu_voci_sotto_lo_stesso_percorso_si_sommano_un_doppione_identico_no():
+    """budget_597: B.III.2 ha sotto-lettere (controllate, collegate, altri) che la legenda non
+    distingue, e Qwen restituisce tre 'SPA.B.III.2.O' con importi diversi. Tenere solo la prima
+    perdeva 26.268 e il foglio non quadrava; la stessa coppia letta due volte resta una."""
+    bs, _, _ = da_coppie([("SPA.B.III.2.O", "645000"), ("SPA.B.III.2.O", "6000"),
+                          ("SPA.B.III.2.O", "20268"), ("SPA.B.III.2.E", "41857"),
+                          ("SPP.D.7.E", "2305814"), ("SPP.D.7.E", "2305814")])
+    assert bs["sp04c_crediti_immob_lungo"] == Decimal("671268")
+    assert bs["sp04b_crediti_immob_breve"] == Decimal("41857")
+    assert bs["sp16d_debiti_fornitori_breve"] == Decimal("2305814")

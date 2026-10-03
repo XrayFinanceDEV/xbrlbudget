@@ -37,9 +37,12 @@ class SnelloNonRiuscito(Exception):
     """Il percorso snello non e' arrivato a un risultato utilizzabile: ``report`` dichiara fase ed
     errore, mai un dato inventato al loro posto."""
 
-    def __init__(self, report: dict):
+    def __init__(self, report: dict, struttura=None):
         super().__init__(report.get("errore") or report.get("fase") or "ripiego")
         self.report = report
+        # La struttura gia' chiesta al modello, quando il fallimento viene dopo: chi salva una
+        # lettura al posto del ripiego (Task 28) dichiara quella vera, non un segnaposto.
+        self.struttura = struttura
 
 
 @dataclass
@@ -257,12 +260,17 @@ def importa(file_path: str, *, ocr_text: str | None = None, analizza=None, leggi
         # che buttare tutto sull'importatore vecchio.
         if not _det.get("lettura"):
             raise
-        try:
-            from importers.struttura_documento.analisi import struttura_deterministica
-            modo_det = _MODO_DA_PARSER.get(_det["parser"], "legge")
-            struttura_det = struttura_deterministica(file_path, modo=modo_det)
-        except Exception:
-            raise e
+        # La struttura vera quando il modello l'aveva gia' chiesta (rilievo 5 del riallineamento
+        # 2026-10-03: il segnaposto dichiarava zero chiamate vision dopo averle fatte); il
+        # segnaposto solo quando la struttura stessa e' fallita.
+        struttura_det = e.struttura
+        if struttura_det is None:
+            try:
+                from importers.struttura_documento.analisi import struttura_deterministica
+                modo_det = _MODO_DA_PARSER.get(_det["parser"], "legge")
+                struttura_det = struttura_deterministica(file_path, modo=modo_det)
+            except Exception:
+                raise e
         return _salva_deterministico_squadrato(
             _det, struttura_det, t0, letture=e.report.get("letture"),
             extra={"ripiego_evitato": {k: e.report[k] for k in ("esito", "fase", "errore")
@@ -311,7 +319,8 @@ def _importa_modello(file_path: str, _det: dict, t0: float, *, ocr_text, analizz
 
     pagine_sp, pagine_ce = struttura.pagine_sp, struttura.pagine_ce
     if not pagine_sp and not pagine_ce:
-        raise SnelloNonRiuscito({"esito": "ripiego", "fase": "struttura", "errore": "nessun prospetto"})
+        raise SnelloNonRiuscito({"esito": "ripiego", "fase": "struttura", "errore": "nessun prospetto"},
+                                struttura)
 
     modo = struttura.modo
     forma = "bilancio" if modo in _MODI_LEGGE else None
@@ -594,7 +603,7 @@ def _importa_modello(file_path: str, _det: dict, t0: float, *, ocr_text, analizz
                 "deterministico": _report_deterministico,
                 **_coppie_nel_report(_coppie_lette, "vuoto"),
             }
-            raise SnelloNonRiuscito(report)
+            raise SnelloNonRiuscito(report, struttura)
 
         causa = None
         contraddizioni: list = []
@@ -624,10 +633,13 @@ def _importa_modello(file_path: str, _det: dict, t0: float, *, ocr_text, analizz
             else:
                 precedente_stato = "incluso"
                 prior_bs, prior_ce, prior_diag = pbs, pce, pdiag
-    except SnelloNonRiuscito:
+    except SnelloNonRiuscito as e:
+        if e.struttura is None:
+            e.struttura = struttura
         raise
     except Exception as e:
-        raise SnelloNonRiuscito({"esito": "ripiego", "fase": fase, "errore": type(e).__name__}) from e
+        raise SnelloNonRiuscito({"esito": "ripiego", "fase": fase, "errore": type(e).__name__},
+                                struttura) from e
 
     _confronto = None
     if esito == "squadrato" and not contraddizioni and _det.get("lettura"):

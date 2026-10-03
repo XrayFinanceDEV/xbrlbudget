@@ -168,3 +168,33 @@ def test_anno_precedente_non_letto_dalla_lettura_deterministica_e_dichiarato(tmp
     assert r.prior_bs is None
     assert r.report["precedente"] == "non_letto_dalla_lettura_deterministica"
     assert "anno precedente" in _snello_squadrato_reason(r.report)
+
+
+def test_ripiego_evitato_dichiara_la_struttura_chiamata_davvero(tmp_path, monkeypatch):
+    """Riallineamento 2026-10-03, rilievo 5: la via ``ripiego_evitato`` costruiva il risultato con
+    la struttura segnaposto del deterministico (stato ``non_richiesta``, zero chiamate vision)
+    dopo che la vision era stata chiamata davvero: il report contava male i costi."""
+    _det_949(monkeypatch)
+    struttura = _struttura("legge", chiamate_vision=3)
+    def vuoto(testo, intestazioni, nota=""):
+        return {"corrente": [], "precedente": [], "totali": {}}
+    pdf = str(tmp_path / "v.pdf")
+    _pdf_situazione_contabile(pdf)
+    r = S.importa(pdf, ocr_text=_TESTO_BILANCIO_DI_VERIFICA,
+                  analizza=lambda p, route_hint=None: struttura, leggi_voci=vuoto)
+    assert r.report["ripiego_evitato"]["esito"] == "ripiego"
+    assert r.report["fonte"] == "deterministico:situazione_contabile_parser"
+    assert r.report["struttura"] == struttura.report()
+    assert r.report["struttura"]["chiamate_vision"] == 3
+
+
+def test_ripiego_evitato_senza_struttura_resta_non_richiesta(tmp_path, monkeypatch):
+    """Se la struttura stessa e' fallita non c'e' nulla di vero da dichiarare: resta il segnaposto."""
+    _det_949(monkeypatch)
+    def rotta(p, route_hint=None):
+        raise RuntimeError("vision non raggiungibile")
+    pdf = str(tmp_path / "v.pdf")
+    _pdf_situazione_contabile(pdf)
+    r = S.importa(pdf, ocr_text=_TESTO_BILANCIO_DI_VERIFICA, analizza=rotta, leggi_voci=_modello("3000000"))
+    assert r.report["ripiego_evitato"]["fase"] == "struttura"
+    assert r.report["struttura"]["stato"] == "non_richiesta"

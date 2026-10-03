@@ -110,7 +110,7 @@ def _causa_stampati(m: dict, s) -> bool:
     devono dire "voci mancanti, doppie...", un messaggio pensato per l'altro caso (review
     round 1, 2026-09-27)."""
     t = _limite_interno(s)
-    return abs(m["scarto_sp"]) <= t and abs(m["scarto_ce"]) <= t and m["scarto_stampati"] > s
+    return abs(m["scarto_sp"]) <= t and abs(m["scarto_ce"]) <= t and m["scarto_stampati"] > t
 
 
 def _documento_sbilanciato(m: dict, s, stampati: dict | None, deterministici: bool) -> bool:
@@ -131,7 +131,7 @@ def _documento_sbilanciato(m: dict, s, stampati: dict | None, deterministici: bo
     # Fix round 1 (review Task 27): il documento deve DAVVERO stampare due totali diversi (oltre il
     # limite interno) e lo scarto misurato deve coincidere con quella differenza entro lo stesso
     # limite: con totali uguali e uno scarto di lettura di 60 euro la colpa e' della lettura.
-    if abs(m["scarto_sp"]) <= t or m["scarto_stampati"] > s or differenza <= t:
+    if abs(m["scarto_sp"]) <= t or m["scarto_stampati"] > t or differenza <= t:
         return False
     return abs(differenza - abs(m["scarto_sp"])) <= t
 
@@ -490,7 +490,7 @@ def importa(file_path: str, *, ocr_text: str | None = None, analizza=None, leggi
         if (modo in _MODI_LEGGE and esito in ("oltre_soglia", "vuoto")
                 and not _contraddizioni(m, s, stampati)):
             fase = "lettura"
-            if abs(m["scarto_sp"]) > _limite_interno(s) or m["scarto_stampati"] > s:
+            if abs(m["scarto_sp"]) > _limite_interno(s) or m["scarto_stampati"] > _limite_interno(s):
                 sezione = "sp"
             else:
                 sezione = "ce"

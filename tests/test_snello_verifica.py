@@ -67,14 +67,22 @@ def test_tappo_massimo_dieci_euro_decisione_proprietario_2026_10_03():
     assert tappa(_bs(), ce, misura(_bs(), ce), D("100"))[3] == "tappo"
 
 
-def test_scarto_sui_totali_stampati_resta_sulla_soglia_relativa():
-    """Il tappo non tocca il confronto col totale stampato: 50 euro di scarto su un attivo
-    che pareggia da solo non e' un tappo (nessun plug) e resta entro la soglia relativa."""
+def test_scarto_sui_totali_stampati_al_massimo_dieci_euro_decisione_proprietario_2026_10_03():
+    """Decisione del proprietario (2026-10-03): anche il confronto con il totale che il documento
+    stampa tollera al massimo 10 euro, come il tappo. Prima restava sulla soglia relativa (almeno
+    100 euro): 50 euro di attivo stampato non letti passavano come "ok". Oltre i 10 euro si
+    rilegge e, se non torna, si salva squadrato con avviso: l'utente corregge in Rettifiche."""
     bs = _bs()
     m = misura(bs, CE, {"totale_attivo": D("1550")})
     assert m["scarto_stampati"] == D("50.00")
+    assert tappa(bs, CE, m, D("100"))[3] == "oltre_soglia"
+    m = misura(bs, CE, {"totale_attivo": D("1510")})
     assert tappa(bs, CE, m, D("100"))[3] == "ok"
-    assert tappa(bs, CE, m, D("40"))[3] == "oltre_soglia"
+    m = misura(bs, CE, {"totale_attivo": D("1511")})
+    assert tappa(bs, CE, m, D("100"))[3] == "oltre_soglia"
+    # mai oltre la soglia relativa quando questa e' piu' bassa (mai il caso reale: minimo 100)
+    m = misura(bs, CE, {"totale_attivo": D("1508")})
+    assert tappa(bs, CE, m, D("5"))[3] == "oltre_soglia"
 
 
 def test_tappo_ce_su_servizi():

@@ -185,10 +185,11 @@ def _aggiungi(d: dict, campo: str, aggregato: str, v: Decimal) -> None:
 def tappa(bs: dict, ce: dict, m: dict, s: Decimal):
     if m["attivo"] == 0 and m["passivo"] == 0:   # estrazione vuota: mai "ok"
         return bs, ce, None, "vuoto"
-    # Il tappo chiude al massimo ``soglia_tappo()`` per controllo (mai oltre ``s``); il totale
-    # stampato resta sulla soglia relativa ``s``: non e' un plug.
+    # Il tappo chiude al massimo ``soglia_tappo()`` per controllo (mai oltre ``s``), e lo stesso
+    # limite vale per il confronto col totale stampato dal documento (decisione del proprietario
+    # 2026-10-03): oltre, si rilegge e poi si salva squadrato con avviso.
     massimo = limite_tappo(s)
-    if abs(m["scarto_sp"]) > massimo or abs(m["scarto_ce"]) > massimo or m["scarto_stampati"] > s:
+    if abs(m["scarto_sp"]) > massimo or abs(m["scarto_ce"]) > massimo or m["scarto_stampati"] > massimo:
         return bs, ce, None, "oltre_soglia"
     if m["scarto_sp"] == 0 and m["scarto_ce"] == 0:
         return bs, ce, None, "ok"

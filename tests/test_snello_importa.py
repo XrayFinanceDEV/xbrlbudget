@@ -727,3 +727,74 @@ def test_documento_sbilanciato_di_50_euro_si_riconosce_col_tappo_a_10_euro(tmp_p
     r = S.importa(pdf, analizza=lambda p: _struttura("legge"), leggi_voci=voci)
     assert len(chiamate) == 2
     assert r.report["esito"] == "squadrato" and r.report["causa"] == "documento_sbilanciato"
+
+
+# --- Task 27, decisione 3 (2026-10-03): il risultato stampato nello SP differisce da quello del CE ---
+
+def _pdf_con_risultati(path: str, risultato_sp: str, risultato_ce: str, colonne: int = 2) -> str:
+    """Un PDF a due prospetti che stampa 'Utile (perdita) dell'esercizio' in entrambi, con la
+    colonna corrente e il comparativo (le righe fisiche che ``collect_source_rows`` legge)."""
+    doc = fitz.open()
+    page = doc.new_page()
+    comparativo = " 3.000,00" if colonne == 2 else ""
+    page.insert_text((50, 50), "STATO PATRIMONIALE")
+    page.insert_text((50, 70), f"IX) Utile (perdita) dell'esercizio {risultato_sp}{comparativo}")
+    page.insert_text((50, 100), "CONTO ECONOMICO")
+    page.insert_text((50, 120), f"23) Utile (perdite) dell'esercizio {risultato_ce}{comparativo}")
+    doc.save(path)
+    return path
+
+
+def _voci_con_risultati_diversi(chiamate):
+    def voci(testo, intestazioni, nota=""):
+        chiamate.append(nota)
+        # SP: attivo 5000 = capitale 1000 + utile SP 4000; CE: ricavi 1500 => utile CE 1500
+        return {"corrente": [("SPA.C.IV.1", D("5000")), ("SPP.A.I", D("1000")), ("SPP.A.IX", D("4000")),
+                             ("CE.A.1", D("1500"))],
+                "precedente": [], "totali": {}}
+    return voci
+
+
+def test_risultati_stampati_diversi_non_spendono_la_rilettura_e_si_dichiarano(tmp_path):
+    pdf = _pdf_con_risultati(str(tmp_path / "c.pdf"), "4.000,00", "1.500,00")
+    chiamate = []
+    r = S.importa(pdf, analizza=lambda p: _struttura("legge"), leggi_voci=_voci_con_risultati_diversi(chiamate))
+    assert len(chiamate) == 2                                   # SP e CE, nessuna rilettura
+    assert r.report["esito"] == "squadrato" and r.report["causa"] == "documento_sbilanciato"
+    assert r.report["tappo"]["corrente"] is None and r.bs["_plug_residual"] == D("0")
+    assert r.report["contraddizioni"] == [
+        {"tipo": "risultato", "sp": "4000.00", "ce": "1500.00", "differenza": "2500.00"}]
+
+
+def test_risultati_stampati_non_riprodotti_dalle_voci_rileggono_come_oggi(tmp_path):
+    """Il documento stampa due risultati diversi ma le voci lette NON li riproducono: la lettura
+    e' sospetta, non il documento. Una rilettura, nessuna causa dichiarata."""
+    pdf = _pdf_con_risultati(str(tmp_path / "c.pdf"), "4.300,00", "1.500,00")   # sp13 letto 4.000 != 4.300
+    chiamate = []
+    r = S.importa(pdf, analizza=lambda p: _struttura("legge"), leggi_voci=_voci_con_risultati_diversi(chiamate))
+    assert len(chiamate) == 3
+    assert r.report.get("causa") != "documento_sbilanciato" and "contraddizioni" not in r.report
+
+
+def test_risultati_stampati_uguali_o_con_una_colonna_sola_non_dichiarano_nulla(tmp_path):
+    chiamate = []
+    pdf = _pdf_con_risultati(str(tmp_path / "a.pdf"), "4.000,00", "4.000,00")
+    r = S.importa(pdf, analizza=lambda p: _struttura("legge"), leggi_voci=_voci_con_risultati_diversi(chiamate))
+    assert r.report.get("causa") != "documento_sbilanciato" and len(chiamate) == 3
+    # una riga con un solo importo: non si sa quale anno sia, quindi non e' un'ancora
+    chiamate.clear()
+    pdf = _pdf_con_risultati(str(tmp_path / "b.pdf"), "4.000,00", "1.500,00", colonne=1)
+    r = S.importa(pdf, analizza=lambda p: _struttura("legge"), leggi_voci=_voci_con_risultati_diversi(chiamate))
+    assert r.report.get("causa") != "documento_sbilanciato" and len(chiamate) == 3
+
+
+def test_risultati_stampati_con_codice_davanti_alla_riga_non_lo_scambiano_per_importo():
+    from types import SimpleNamespace as N
+    from importers.import_snello.risultati_stampati import risultati_stampati
+
+    righe = [N(statement="bs", text="2086 A.IX) Utile (Perdita) dell'esercizio 76.336,97 212.835,92"),
+             N(statement="ce", text="4934 21) Utile (Perdita) dell'esercizio 76.336,97 212.835,92")]
+    assert risultati_stampati(righe) == {"sp": D("76336.97"), "ce": D("76336.97")}
+    assert risultati_stampati(righe[:1]) is None                          # manca il CE
+    assert risultati_stampati([N(statement="bs", text="Utile (perdita) prima delle imposte 1.000,00 900,00"),
+                               righe[1]]) is None

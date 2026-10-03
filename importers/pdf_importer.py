@@ -132,18 +132,35 @@ def _snello_squadrato_reason(report: Dict[str, Any]) -> str:
             return str(valore)
 
     if report.get("causa") == "documento_sbilanciato":
-        # Nessuna rilettura e' avvenuta: i totali che il documento stampa si contraddicono fra
-        # loro e le voci lette li riproducono (Task 25, round 2).
-        try:
-            scarto = f"€{_euro_it(abs(Decimal(str(misura.get('scarto_sp')))))}"
-        except Exception:
-            scarto = "n/d"
-        return (
-            f"{_UNBALANCED_WARNING_PREFIX}: il Totale Attivo e il Totale Passivo stampati dal "
-            f"documento differiscono di {scarto}, e le voci lette li riproducono. Il bilancio è "
-            f"stato importato così com'è: correggilo in Rettifiche oppure carica una versione "
-            f"quadrata del bilancio."
-        )
+        # Nessuna rilettura e' avvenuta: il documento si contraddice da solo e le voci lette lo
+        # riproducono (Task 25 round 2: i totali; Task 27: il risultato SP/CE). Una frase per
+        # contraddizione; un rapporto senza ``contraddizioni`` e' quello dei totali, come prima.
+        tipi = report.get("contraddizioni") or [{"tipo": "totali"}]
+        frasi = []
+        for c in tipi:
+            if c.get("tipo") == "risultato":
+                try:
+                    sp, ce, diff = (f"€{_euro_it(Decimal(str(c[k])))}" for k in ("sp", "ce", "differenza"))
+                except Exception:
+                    sp = ce = diff = "n/d"
+                frasi.append(
+                    f"il risultato dell'esercizio stampato nello Stato Patrimoniale ({sp}) e quello "
+                    f"stampato nel Conto Economico ({ce}) differiscono di {diff}, e le voci lette "
+                    f"li riproducono.")
+            else:
+                try:
+                    scarto = f"€{_euro_it(abs(Decimal(str(misura.get('scarto_sp')))))}"
+                except Exception:
+                    scarto = "n/d"
+                frasi.append(
+                    f"il Totale Attivo e il Totale Passivo stampati dal documento differiscono di "
+                    f"{scarto}, e le voci lette li riproducono.")
+        solo_totali = all(c.get("tipo") != "risultato" for c in tipi)
+        chiusura = ("Il bilancio è stato importato così com'è: correggilo in Rettifiche oppure "
+                    "carica una versione quadrata del bilancio." if solo_totali else
+                    "Il bilancio è stato importato così com'è (bilancio squadrato di partenza): "
+                    "correggilo in Rettifiche oppure carica una versione coerente del bilancio.")
+        return f"{_UNBALANCED_WARNING_PREFIX}: {' '.join(frasi)} {chiusura}"
     return (
         f"{_UNBALANCED_WARNING_PREFIX}: il percorso snello resta oltre soglia dopo "
         f"l'unica rilettura (scarto Attivo/Passivo {_fmt('scarto_sp')}, scarto CE/SP "

@@ -107,6 +107,28 @@ def _documento_sbilanciato(m: dict, s, stampati: dict | None, deterministici: bo
     return abs(abs(Decimal(ta) - Decimal(tp)) - abs(m["scarto_sp"])) <= s
 
 
+def _risultato_contraddittorio(m: dict, s, risultati: dict | None, totali_spiegano_lo_sp: bool) -> dict | None:
+    """Task 27, decisione 3 (2026-10-03): il risultato d'esercizio stampato nello SP differisce da
+    quello stampato nel CE, e le voci lette riproducono entrambi (sp13 = risultato dello SP, utile
+    ricostruito dal CE = risultato del CE, ciascuno entro il limite del tappo): la lettura e' fedele,
+    la contraddizione e' del documento, ne' una rilettura ne' un tappo possono aiutare.
+    ``risultati`` viene dalle righe del documento (``risultati_stampati``), mai dal modello; None
+    (non letti con certezza) o un divario SP non spiegato (ne' entro il limite, ne' dai totali
+    stampati): falso. Restituisce la contraddizione dichiarata, altrimenti None."""
+    if not risultati:
+        return None
+    t = _limite_interno(s)
+    sp, ce = Decimal(risultati["sp"]), Decimal(risultati["ce"])
+    if abs(sp - ce) <= t or abs(m["scarto_ce"]) <= t:
+        return None
+    if abs(m["scarto_sp"]) > t and not totali_spiegano_lo_sp:
+        return None
+    if abs(Decimal(m["sp13"]) - sp) > t or abs(Decimal(m["utile_ce"]) - ce) > t:
+        return None
+    return {"tipo": "risultato", "sp": str(sp.quantize(Decimal("0.01"))),
+            "ce": str(ce.quantize(Decimal("0.01"))), "differenza": str(abs(sp - ce).quantize(Decimal("0.01")))}
+
+
 def _negativi_stampati(bs: dict | None, parser: str, anno: int | None = None) -> list:
     """Reso XBRL (Task 25): un importo SP negativo che il documento stampa davvero (fuori da
     patrimonio netto e immobilizzazioni, gia' coperte da ``_anomalie``) si tiene col suo segno ma
@@ -270,6 +292,31 @@ def importa(file_path: str, *, ocr_text: str | None = None, analizza=None, leggi
         bs, ce, tappo, esito = tappa(bs, ce, m, s)
         return bs, ce, tappo, esito, m, s
 
+    _risultati_letti: list = []
+
+    def _contraddizioni(m: dict, s, stampati: dict | None) -> list:
+        """Le contraddizioni che il documento stampa da solo e che le voci lette riproducono:
+        totali (Task 25) e risultato SP/CE (Task 27). Solo per i modi di legge, e solo da cio' che
+        il documento stampa (mai importi riportati dal modello)."""
+        if modo not in _MODI_LEGGE:
+            return []
+        out = []
+        totali = _documento_sbilanciato(m, s, stampati, _totali_dal_testo)
+        if totali:
+            out.append({"tipo": "totali"})
+        if abs(m["scarto_ce"]) > _limite_interno(s):
+            if not _risultati_letti:               # righe fisiche del documento, lette una volta sola
+                try:
+                    from importers.detail_enrichment import collect_source_rows
+                    from importers.import_snello.risultati_stampati import risultati_stampati
+                    _risultati_letti.append(risultati_stampati(collect_source_rows(file_path, ocr_text=ocr_text)))
+                except Exception:
+                    _risultati_letti.append(None)
+            risultato = _risultato_contraddittorio(m, s, _risultati_letti[0], totali)
+            if risultato:
+                out.append(risultato)
+        return out
+
     fase = "lettura"
     try:
         if modo == "conti":
@@ -410,7 +457,7 @@ def importa(file_path: str, *, ocr_text: str | None = None, analizza=None, leggi
         bs, ce, tappo, esito, m, s = _verifica(bs, ce, stampati)
 
         if (modo in _MODI_LEGGE and esito in ("oltre_soglia", "vuoto")
-                and not _documento_sbilanciato(m, s, stampati, _totali_dal_testo)):
+                and not _contraddizioni(m, s, stampati)):
             fase = "lettura"
             if abs(m["scarto_sp"]) > _limite_interno(s) or m["scarto_stampati"] > s:
                 sezione = "sp"
@@ -465,6 +512,7 @@ def importa(file_path: str, *, ocr_text: str | None = None, analizza=None, leggi
             raise SnelloNonRiuscito(report)
 
         causa = None
+        contraddizioni: list = []
         if esito == "oltre_soglia":
             # Task 17 (decisione del proprietario, 2026-09-27): «se il bilancio non e'
             # quadrato deve essere comunque importato con avviso, l'utente lo correggera'
@@ -475,7 +523,8 @@ def importa(file_path: str, *, ocr_text: str | None = None, analizza=None, leggi
             # misurati (scarto_sp/scarto_ce/scarto_stampati) restano in "misura", letti
             # da pdf_importer per costruire l'avviso mostrato all'utente.
             esito = "squadrato"
-            causa = ("documento_sbilanciato" if modo in _MODI_LEGGE and _documento_sbilanciato(m, s, stampati, _totali_dal_testo)
+            contraddizioni = _contraddizioni(m, s, stampati)
+            causa = ("documento_sbilanciato" if contraddizioni
                      else "stampati" if _causa_stampati(m, s) else None)
 
         prior_bs = prior_ce = prior_diag = None
@@ -515,5 +564,9 @@ def importa(file_path: str, *, ocr_text: str | None = None, analizza=None, leggi
     if causa:
         # Squadrato solo contro il totale stampato (SP e CE interni entro soglia).
         report["causa"] = causa
+    if contraddizioni:
+        # Una voce per contraddizione che il documento stampa da solo (Task 27): l'avviso
+        # dice una frase per ciascuna, mai due volte la stessa.
+        report["contraddizioni"] = contraddizioni
 
     return Risultato(bs=bs, ce=ce, prior_bs=prior_bs, prior_ce=prior_ce, report=report, struttura=struttura)

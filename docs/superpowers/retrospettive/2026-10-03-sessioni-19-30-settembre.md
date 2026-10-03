@@ -157,7 +157,11 @@ revisione finale) sono le due che non hanno ancora un artefatto che le ricordi a
 ## 4. Che cosa ha funzionato
 
 **4.1 Il banco sul corpus prima del modello: il percorso snello è la campagna meglio misurata del
-progetto.** Quattro passate da 50 file (10.118s → 2.513s totali, mediana 91s → 27s) e ogni decisione
+progetto.** Quattro passate da 50 file, con le due famiglie di cifre tenute distinte come il registro
+le scrive: i **totali** passano da 10.118 s (il riferimento prima della passata3, riga 175) a
+2.609 s alla passata3 e 2.513 s alla passata4; le **mediane** sono 91 s dell'importatore vecchio in
+ripiego contro 25 s dello snello alla passata1 (riga 102) e 27,1 s alla passata4 (riga 213) — non
+una «mediana 91→27» dello stesso percorso. E ogni decisione
 di codice nasce da una misura: la pre-classificazione deterministica dei conti **non si costruisce**
 perché la misura dice «risparmio piccolo, e un conto classificato male in silenzio non passa più da
 nessun controllo» (`misura-preclassificazione.md` + Ruling). È l'invariante di CLAUDE.md
@@ -220,15 +224,20 @@ finestra: Task 24-28, dove un **Critical del fix 3 del Task 26** — la situazio
 adotta 238/338 con voci sbagliate — emerge solo in revisione, a branch già in marcia, e viene
 revertito).
 
-### 5.3 L'infrastruttura di misura vive fuori dal repo, e viene cancellata due volte
+### 5.3 Nota sul periodo successivo: l'infrastruttura di misura viveva nello scratchpad
 
-Il 30/09 e di nuovo il 2/10 il ledger annota: «Scratchpad cancellato: **persi harness, JSONL di
-passata1-4, cache vision**». L'harness del banco viene ricostruito a mano (banco.sh + banco.py +
-elenco.txt), la cache vision ripagata rilanciando 76-106 chiamate. Il costo è **inferito**: mezza
-giornata di riavvio del banco a ricostruzione; ed è misurato l'effetto, che le passate 1-4 restano
-verificabili solo **per cifra nel registro** — l'esatto contrario di ciò che la raccomandazione 6 del
-19/09 predica. Che un tool di produzione-dipendente (il banco) non stia in git è un difetto con
-nome: i `scripts/` ci stanno, il banco no.
+Nel periodo **non è successo nulla**: le quattro passate del banco girano, e i loro JSONL stanno in
+cartelle dichiarate «volatile» dal registro stesso (riga 229). È a ottobre, **fuori finestra**, che
+la scelta mostra il conto, due volte: il 2/10 «Lo scratchpad era stato svuotato… i JSONL delle
+passate 1-4 sono persi, restano i numeri in questo registro» (riga 218) e il 3/10 «**Scratchpad di
+nuovo cancellato**: persi harness, JSONL di passata6/t24\*, cache vision, script della diagnosi»
+(riga 274; la cache vision era nata quel giro lì). L'harness viene ricostruito a mano due volte; il
+costo è **inferito** (mezza giornata di riavvio del banco a ricostruzione), ed è misurato
+l'effetto: le passate 1-4 restano verificabili solo **per cifra nel registro** — l'esatto contrario
+di ciò che la raccomandazione 6 del 19/09 predica. Che gli script del banco non stiano in git è un
+difetto con nome: i `scripts/` ci stanno, il banco no; i **dati** del banco (elenco dei file dei
+clienti, cache vision, JSONL) in git **non ci devono stare** — regola del proprietario — e la loro
+casa è `.superpowers/sdd/`, non lo scratchpad (ric. 2).
 
 ### 5.4 Due campagne in una sessione sola, per dieci giorni e mezzo
 
@@ -241,12 +250,14 @@ ledger (307 righe di registro coprono ciò che la sessione non ricorda), non un 
 
 ### 5.5 Il blocco di credito come singolo punto di fallimento
 
-Il 26/09 il registro si ferma con «**BLOCCO: credito Anthropic esaurito durante la diagnosi**. Il
-banco successivo non può girare finché non si ricarica». Due giorni dopo, la sessione ancora aperta
-sulla stessa fattura è la prova che la campagna è partita con il contatore che fa da gate. Costo
-reale: un'attesa nel giorno più denso del mese. Rimedio a forma di artefatto (sempre ric. 6): una
-soglia di credito residuo dichiarata prima di lanciare un banco, o la cache vision già dentro
-l'harness — che però esiste **solo** nell'harness ricostruito, cioè fuori dal repo: §5.3.
+Il **27/09**, subito dopo la passata1 (snapshot `8f7a488`, 00:53), il registro si ferma con
+«**BLOCCO: credito Anthropic esaurito durante la diagnosi**. Il banco successivo non può girare
+finché non si ricarica, o la struttura non passa a un altro modello» (riga 111). Costo: una
+giornata di campagna in attesa (il rilancio arriva il 27/09 stesso, «credito ricaricato, rilancia il
+banco»), e il rimedio improvvisato a ottobre (la cache vision dell'harness, §5.3) è un pezzo di
+infrastruttura che serve proprio a non spendere chiamate per misurare. Rimedio a forma di artefatto
+— è la meta-regola di §3, riga 6: una soglia di credito residuo dichiarata prima di lanciare un
+banco.
 
 ---
 
@@ -258,12 +269,16 @@ Ognuna con la metrica con cui la prossima puntata la controllerà.
    Impatto se salta: un merge che impegna main davanti all'ultimo sguardo (29/09). → *Metrica: ogni
    branch con ≥10 task mergiato con una riga «Final review: …» nel registro **prima** del merge
    commit; a settembre: 22/23 task del snello revisionati, il branch no.*
-2. **Il banco va in git come i `scripts/`: harness, elenco file, cache opzionale, output in
-   `.superpowers/`.** §5.3. Impatto: due ricostruzioni a memoria in cinque giorni, e quattro passate
-   di 50 file verificabili solo «per cifra nel registro». → *Metrica: `git log` su
-   `tools/banco/` (o `scripts/banco*`) al prossimo mese: ≥1 commit; JSONL di passata nel registro
-   stesso, non nello scratchpad.*
-3. **Il collegamento tracciamento↔commit si decide, una volta per tutte.** §3.5. Le issue sono
+2. **Gli script del banco in git, i dati del banco in `.superpowers/sdd/` — mai in git.** §5.3.
+   Impatto (fuori finestra, ma è la misura che conta): due ricostruzioni a mano dello harness, e le
+   passate 1-4 verificabili solo «per cifra nel registro». Distinzione dovuta, non estetica:
+   `banco.sh`, `banco.py`, `riepilogo.py` sono codice e vanno tracciati; `elenco.txt` (i nomi dei
+   file dei clienti), la cache vision e i JSONL contengono **dati dei clienti** e per regola del
+   proprietario non si committano mai — la loro casa è `.superpowers/sdd/<registro>/`.
+   → *Metrica: `git ls-files` trova gli script del banco (≥3 file); e la prossima misura non deve
+   ricostruire nulla a memoria: ogni passata ha il suo JSONL sotto `.superpowers/sdd/`, lo
+   scratchpad non è più l'archivio di niente.*
+3. **Il collegamento tracciamento↔commit si decide, una volta per tutte.** §3, riga 5. Le issue sono
    morte il 16/09 senza verdetto e i `Parcheggiati` le sostituiscono senza numeri. → *Metrica: o il
    canale torna (≥10 issue create a ottobre, con `Closes #NN` ≥30% dei fix commit), o CLAUDE.md
    dice in una riga che il tracciamento è il registro; la prossima retrospettiva grep-pa la riga

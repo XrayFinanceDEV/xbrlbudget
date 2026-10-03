@@ -236,3 +236,84 @@ def test_totale_di_terzo_livello_non_scavalca_un_totale_intermedio_non_ancora_ri
     tot = {r.id for r in righe if r.totale}
     assert tot == {"I", "II", "III", "B", "Totale"}
     assert sum(r.valore for r in R.foglie(righe)) == D(str(Totale))
+
+
+# --- Task 27, item 5 (diagnosi budget_243): un importo dentro la descrizione non e' un importo ---
+
+def _riga_fisica(id_, testo, importi, posizioni, pagina=1, lato="L", sezione="ce"):
+    from types import SimpleNamespace as N
+    return N(id=id_, page=pagina, side=lato, text=testo, amounts=tuple(D(i) for i in importi),
+             positions=tuple(posizioni), code="", kinds=(), statement=sezione)
+
+
+def _righe_243(monkeypatch):
+    """Come la pagina 4 di budget_243: i conti hanno l'importo in colonna (x ~ 250-270), e la
+    descrizione di 622407 va a capo su una riga fisica propria ('inferiore euro 516,46') il cui
+    numero sta a x = 123, dentro la descrizione."""
+    from importers import detail_enrichment as DE
+    from importers.import_snello import righe as R
+
+    fisiche = [
+        _riga_fisica("r1", "622301 Ammortamento attrezzatura 26.870,85", ["26870.85"], [252.0]),
+        _riga_fisica("r2", "622401 Ammortamento mobili 1.893,43", ["1893.43"], [256.9]),
+        _riga_fisica("r3", "622402 Ammortamento macchine ufficio 2.855,77", ["2855.77"], [256.9]),
+        _riga_fisica("r4", "622406 Ammortamento autoveicoli 14.720,18", ["14720.18"], [252.0]),
+        _riga_fisica("r5", "622407 Ammortamento altri beni valore 339,34", ["339.34"], [263.7]),
+        _riga_fisica("r6", "inferiore euro 516,46", ["516.46"], [123.1]),
+        _riga_fisica("r7", "640102 Imposta di bollo 10,00", ["10.00"], [268.5]),
+        _riga_fisica("r8", "640301 Imposta di registro 738,50", ["738.50"], [263.7]),
+        _riga_fisica("r9", "640501 Diritti camerali 198,79", ["198.79"], [263.7]),
+        _riga_fisica("r10", "650219 Sanzioni 2.090,05", ["2090.05"], [256.9]),
+    ]
+    monkeypatch.setattr(DE, "collect_source_rows", lambda *a, **k: fisiche)
+    return R
+
+
+def test_importo_preceduto_da_euro_e_fuori_colonna_resta_nella_descrizione(monkeypatch):
+    R = _righe_243(monkeypatch)
+    righe = R.righe_da_pdf("x.pdf", None, ["saldo_finale"])
+    r6 = next(r for r in righe if r.id == "r6")
+    assert r6.valore is None                       # non e' un importo
+    assert "euro 516,46" in r6.testo               # la descrizione resta intera
+    assert sum(1 for r in righe if r.valore is not None) == 9
+    assert [r.valore for r in R.foglie(righe)].count(D("516.46")) == 0
+
+
+def test_importo_dopo_euro_ma_in_colonna_resta_un_importo(monkeypatch):
+    """«Rettifiche per arrotondamento Euro 393,82» e «Cassa Euro 239.126,40»: la valuta e'
+    il prefisso della colonna, allineata alle altre righe - non una descrizione."""
+    from importers import detail_enrichment as DE
+    from importers.import_snello import righe as R
+
+    fisiche = [_riga_fisica(f"r{i}", f"6{i}00 Conto {i} 1.0{i},00", [f"10{i}"], [252.0]) for i in range(1, 9)]
+    fisiche.append(_riga_fisica("rx", "7000 Cassa Euro 239.126,40", ["239126.40"], [250.0]))
+    monkeypatch.setattr(DE, "collect_source_rows", lambda *a, **k: fisiche)
+    righe = R.righe_da_pdf("x.pdf", None, ["saldo_finale"])
+    assert next(r for r in righe if r.id == "rx").valore == D("239126.40")
+
+
+def test_importo_dopo_euro_con_altri_importi_nella_riga_non_si_tocca(monkeypatch):
+    """Piu' importi nella riga: quello dopo «Euro» e' la prima colonna, mai una descrizione."""
+    from importers import detail_enrichment as DE
+    from importers.import_snello import righe as R
+
+    fisiche = [_riga_fisica(f"r{i}", f"6{i}00 Conto {i} 1.0{i},00", [f"10{i}"], [252.0]) for i in range(1, 9)]
+    fisiche.append(_riga_fisica("rz", "3650 Rettifiche per arrotondamento Euro 393,82 1.027,37",
+                                ["393.82", "1027.37"], [120.0, 190.0]))
+    monkeypatch.setattr(DE, "collect_source_rows", lambda *a, **k: fisiche)
+    righe = R.righe_da_pdf("x.pdf", None, ["saldo_corrente", "saldo_precedente"])
+    assert next(r for r in righe if r.id == "rz").valore == D("393.82")
+
+
+def test_riga_con_saldo_sporco_dopo_la_descrizione_con_euro_non_si_tocca(monkeypatch):
+    """budget_615: «beni di costo unitario inf. euro 516,46» seguito dal saldo scritto con
+    sottolineature (che il lettore fisico non vede come importo): il saldo e' l'ultimo, non il 516,46."""
+    from importers import detail_enrichment as DE
+    from importers.import_snello import righe as R
+
+    fisiche = [_riga_fisica(f"r{i}", f"6{i}00 Conto {i} 1.0{i},00", [f"10{i}"], [252.0]) for i in range(1, 9)]
+    fisiche.append(_riga_fisica("rs", "703115 000 - beni di costo unitario inf. euro 516,46 _1_.46_1_,_8_6_",
+                                ["516.46"], [60.0]))
+    monkeypatch.setattr(DE, "collect_source_rows", lambda *a, **k: fisiche)
+    righe = R.righe_da_pdf("x.pdf", None, ["saldo_finale"])
+    assert next(r for r in righe if r.id == "rs").valore == D("1461.86")

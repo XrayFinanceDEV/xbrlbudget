@@ -907,3 +907,45 @@ def test_f2_ricavi_stampati_negativi_ribaltano_ce02():
     coppie = [("CE.A.1", D("-1000")), ("CE.A.5", D("-20")), ("CE.A.2", D("-30")), ("CE.B.7", D("300"))]
     bs, ce, diag = da_coppie(coppie)
     assert ce["ce02_variazioni_rimanenze"] == D("30.00")
+
+
+# --- Task 27, item 6 (diagnosi budget_397): 17-bis (utili e perdite su cambi) e' a segno libero. ---
+def test_t27_17bis_negativo_e_una_perdita_con_costi_positivi():
+    coppie = [("CE.A.1", D("3000")), ("CE.B.7", D("2000")), ("CE.C.17-bis", D("-1059"))]
+    bs, ce, diag = da_coppie(coppie)
+    assert ce["ce16_utili_perdite_cambi"] == D("-1059.00")
+    assert diag["ce_segno_forzato"] == []                    # nessun segno ribaltato
+
+
+def test_t27_17bis_positivo_resta_un_utile():
+    coppie = [("CE.A.1", D("3000")), ("CE.B.7", D("2000")), ("CE.C.17-bis", D("300"))]
+    bs, ce, diag = da_coppie(coppie)
+    assert ce["ce16_utili_perdite_cambi"] == D("300.00")
+
+
+def test_t27_17bis_negativo_con_costi_stampati_negativi_resta_una_perdita():
+    coppie = [("CE.A.1", D("3000")), ("CE.B.7", D("-2000")), ("CE.B.6", D("-100")), ("CE.C.17-bis", D("-1059"))]
+    bs, ce, diag = da_coppie(coppie)
+    assert ce["ce16_utili_perdite_cambi"] == D("-1059.00")
+
+
+def test_t27_17bis_segue_la_convenzione_dei_ricavi_come_ce02():
+    coppie = [("CE.A.1", D("-3000")), ("CE.A.5", D("-20")), ("CE.B.7", D("2000")), ("CE.C.17-bis", D("-1059"))]
+    bs, ce, diag = da_coppie(coppie)
+    assert ce["ce16_utili_perdite_cambi"] == D("1059.00")    # ricavi negativi: il segno si ribalta
+
+
+def test_t27_il_risultato_ce_conta_la_perdita_su_cambi_una_volta_sola():
+    """budget_397: 17-bis (1.059) letto +1.059 spostava il risultato di 2x il suo importo."""
+    coppie = [("CE.A.1", D("3126474")), ("CE.B.7", D("2826200")), ("CE.C.16.d", D("4")),
+              ("CE.C.17", D("48")), ("CE.C.17-bis", D("-1059"))]
+    bs, ce, diag = da_coppie(coppie)
+    assert ce["ce16_utili_perdite_cambi"] == D("-1059.00")
+
+
+def test_t27_ce14_e_ce13_restano_a_segno_fisso():
+    """I proventi finanziari (16 e 15) non sono mai negativi: un negativo letto e' un errore di
+    segno di stampa e prende il valore assoluto, come prima."""
+    coppie = [("CE.A.1", D("3000")), ("CE.B.7", D("2000")), ("CE.C.16.d", D("-4"))]
+    bs, ce, diag = da_coppie(coppie)
+    assert ce.get("ce14_altri_proventi_finanziari") == D("4.00")

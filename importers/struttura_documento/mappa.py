@@ -212,6 +212,43 @@ def _importi_pagina(page) -> int:
     return sum(1 for w in page.get_text("words") if NUM_SEP.match(w[4]))
 
 
+# Una pagina che CONTINUA un prospetto aperto e ne porta la chiusura (Task 27, item 4, diagnosi
+# budget_115): l'ultima pagina di un CE con pochi importi con separatore (36.929, 41.504) ma la
+# riga del risultato, e in mezzo zeri e interi sotto 1.000 (426, -610, 0) che NUM_SEP non conta.
+# Persa, la pagina porta via con se' 16)/17): il CE esce corto di quanto contengono.
+_NUM_CONTINUAZIONE = re.compile(r"^-?\d{1,3}(?:\.\d{3})*(?:,\d{1,2})?-?$|^\(-?\d{1,3}(?:\.\d{3})*(?:,\d{1,2})?\)$")
+# La chiusura sta a INIZIO riga (dopo l'eventuale numero di didascalia): una frase di nota che
+# cita "la perdita dell'esercizio di Euro 5.570" non e' la riga del risultato (misurato sul corpus:
+# budget_272, pagina di nota con 31 righe di prosa).
+_INIZIO = r"(?im)^\s*(?:(?:\d{1,2}|[a-z])\)\s*)?"
+_CHIUSURA_CE = re.compile(
+    _INIZIO + r"(?:utile\s*\(\s*perdit|perdita\s+(?:dell|d)['’]?\s*esercizio\b|risultato\s+(?:prima|netto|dell|d['’]))")
+_CHIUSURA_SP = re.compile(_INIZIO + r"(?:totale\s+passivo\b|totale\s+passivit[aà]\b|ratei\s+e\s+risconti\s+passiv)")
+
+
+def _numeri_continuazione(page) -> int:
+    """Token numerici di colonna, zeri e interi sotto 1.000 compresi (mai un anno: 2025 non e'
+    un importo, ne' un numero di didascalia: '17)' ha la parentesi chiusa senza l'aperta)."""
+    return sum(1 for w in page.get_text("words") if _NUM_CONTINUAZIONE.match(w[4]))
+
+
+def pagina_continua_prospetto(page, tipo_pagina: str) -> bool:
+    """Vero se la pagina ha importi per essere la continuazione di un prospetto (SP o CE) aperto:
+    almeno MIN_IMPORTI importi con separatore (come sempre) oppure, sotto quella soglia, la
+    chiusura del prospetto (risultato d'esercizio per il CE, Totale passivo per lo SP) e almeno
+    MIN_IMPORTI numeri di colonna contando anche zeri e interi sotto 1.000. La chiusura da sola
+    non basta (una nota puo' citare il risultato), e nemmeno i numeri da soli."""
+    if _importi_pagina(page) >= MIN_IMPORTI:
+        return True
+    testo = page.get_text()
+    chiusure = []
+    if tipo_pagina in ("prospetto_ce", "prospetto_sp_e_ce"):
+        chiusure.append(_CHIUSURA_CE)
+    if tipo_pagina in ("prospetto_sp", "prospetto_sp_e_ce"):
+        chiusure.append(_CHIUSURA_SP)
+    return any(c.search(testo) for c in chiusure) and _numeri_continuazione(page) >= MIN_IMPORTI
+
+
 def _titolo_pagina(page) -> str | None:
     # Task 22, G5 (diagnosi budget_671): una pagina che apre una sezione diversa dal prospetto
     # (Rendiconto finanziario, Nota integrativa, Relazione, Verbale - lo stesso controllo che
@@ -296,7 +333,8 @@ def mappa_xbrl(pdf: str) -> list[dict]:
                             anno_precedente=anno_precedente)
                 blocco_aperto = (tipo, date)
                 continuazioni = 0
-            elif (not oltre_nota and blocco_aperto is not None and not titolo and importi_ok
+            elif (not oltre_nota and blocco_aperto is not None and not titolo
+                  and (importi_ok or pagina_continua_prospetto(page, blocco_aperto[0]))
                   and not _apre_sezione_nuova(page)
                   and (continuazioni < MAX_PAGINE_CONTINUAZIONE
                        or (continuazioni == MAX_PAGINE_CONTINUAZIONE and blocco_aperto[0] == "prospetto_sp"

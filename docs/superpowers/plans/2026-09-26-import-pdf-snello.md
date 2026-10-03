@@ -1479,3 +1479,10 @@ def test_struttura_in_errore_ripiega(tmp_path):
 | 8 | Task 11 (banco, controllore) | 10 |
 
 Revisione di ogni task: sonnet. Revisione finale del branch: opus. Il Task 9 tocca `pdf_importer.py` (2.100 righe, ramificazioni per route): se l'agente pi resta oltre un'ora senza modificare file, spostarlo su sonnet.
+
+---
+
+**Superato (annotazione del 2026-10-02, giro di riallineamento 2026-10-03).** `GX10_CONCORRENZA`
+è stato portato a default **6** dal commit `91624a57` (decisione del proprietario 2026-09-26, «6
+richieste parallele»): questo verbale lo dava 4. Stato attuale in
+`docs/deployment/PRODUCTION_CONFIG.md` e in `importers/llm_provider.py`.

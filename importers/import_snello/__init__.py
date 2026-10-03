@@ -177,8 +177,9 @@ def _risultato_deterministico(_det: dict, struttura, modo: str, t0: float) -> "R
 
     Task 16 (b): deterministico prima di Qwen; Task 24: prima ancora della struttura. Mai un
     secondo tentativo dopo l'adozione, mai i due candidati sommati. Il candidato che non quadra
-    e' SEMPRE rifiutato a monte (``tentativo``): non diventa mai "squadrato", solo Qwen puo'
-    importare con sbilancio dichiarato (decisione del proprietario, Task 17)."""
+    e' rifiutato a monte (``tentativo``) e non arriva qui: l'import squadrato e' del percorso
+    del modello (decisione del proprietario, Task 17); la lettura deterministica vicina al
+    quadrare entra come squadrata solo da ``_salva_deterministico_squadrato`` (Task 28)."""
     _bs_det = dict(_det["bs"])
     # Il plug del tappo lean si AGGIUNGE alla massa/plug che il parser sottostante
     # ha gia' dichiarato (mai l'uno al posto dell'altro): quella e' diagnostica
@@ -639,8 +640,12 @@ def _importa_modello(file_path: str, _det: dict, t0: float, *, ocr_text, analizz
         _confronto = {"deterministica": str(_peggio_det), "modello": str(_peggio_mod),
                       "vince": _vince, "parser": _det["parser"]}
         if _vince == "deterministica":
+            _extra = {"confronto_letture": _confronto}
+            if modo in _MODI_LEGGE and prior is not None and not _det.get("prior_bs"):
+                # fix 3: il modello leggeva anche l'anno precedente, la lettura salvata no
+                _extra["precedente"] = "non_letto_dalla_lettura_deterministica"
             return _salva_deterministico_squadrato(_det, struttura, t0, letture=letture,
-                                                   extra={"confronto_letture": _confronto})
+                                                   extra=_extra)
 
     bs["_plug_residual"] = Decimal(tappo["importo"]) if tappo and "importo" in tappo else Decimal(0)
     bs["_unclassified_mass"] = _unclassified_mass(diag)

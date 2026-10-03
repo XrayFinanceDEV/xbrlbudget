@@ -161,11 +161,14 @@ def _snello_squadrato_reason(report: Dict[str, Any]) -> str:
                     "Il bilancio è stato importato così com'è (bilancio squadrato di partenza): "
                     "correggilo in Rettifiche oppure carica una versione coerente del bilancio.")
         return f"{_UNBALANCED_WARNING_PREFIX}: {' '.join(frasi)} {chiusura}"
+    _precedente = (" L'anno precedente (colonna comparativa) non è stato importato: "
+                   "puoi inserirlo in Rettifiche."
+                   if report.get("precedente") == "non_letto_dalla_lettura_deterministica" else "")
     return (
         f"{_UNBALANCED_WARNING_PREFIX}: il percorso snello resta oltre soglia dopo "
         f"l'unica rilettura (scarto Attivo/Passivo {_fmt('scarto_sp')}, scarto CE/SP "
         f"{_fmt('scarto_ce')}, scarto sui totali stampati dal documento "
-        f"{_fmt('scarto_stampati')}). {_UNBALANCED_WARNING_SUFFIX}"
+        f"{_fmt('scarto_stampati')}). {_UNBALANCED_WARNING_SUFFIX}{_precedente}"
     )
 
 

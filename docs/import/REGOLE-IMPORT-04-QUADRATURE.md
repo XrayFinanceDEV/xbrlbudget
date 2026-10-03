@@ -282,22 +282,26 @@ validazione è **ricalcolato**.
 
 Richiede `semantic_valid` **sulla proiezione**. Non è una soglia in euro (vedi indice §5 D5).
 
-## 12. Il percorso snello: soglia relativa e tappo dichiarato
+## 12. Il percorso snello: tappo di 10 € dichiarato
 
 > Motore: `importers/import_snello/verifica.py`. Solo sotto `IMPORT_MOTORE=snello` — vedi
 > [REGOLE-IMPORT-02-ESTRAZIONE.md §10](REGOLE-IMPORT-02-ESTRAZIONE.md).
 
-Il percorso snello non usa le tolleranze fisse di questa pagina: la sua soglia è **relativa**,
-`max(IMPORT_SNELLO_SOGLIA_MIN, IMPORT_SNELLO_SOGLIA_PCT% del totale attivo)` — di default
-`max(100 €, 0,1% dell'attivo)`, per esercizio.
+Il percorso snello non usa le tolleranze fisse di questa pagina. Il tappo e il confronto con i
+totali stampati dal documento tollerano **al massimo 10 €** per controllo (`verifica.limite_tappo`,
+decisione del proprietario, 2026-10-03 — prima `max(100 €, 0,1% dell'attivo)`: su tre casi
+controllati il tappo grande copriva una riga non letta o un importo inesistente). La soglia relativa
+`max(IMPORT_SNELLO_SOGLIA_MIN, IMPORT_SNELLO_SOGLIA_PCT% del totale attivo)` resta solo per il
+cancello sulla massa non classificata dei candidati deterministici e per la lettura di riserva
+(REGOLE-IMPORT-02 §10, «La lettura più vicina»).
 
-**Entro soglia, un tappo dichiarato — l'unica eccezione al divieto di plug di questa pagina**,
-decisione del proprietario (2026-09-26): lo scarto si chiude, non solo si dichiara, su un campo
+**Entro 10 €, un tappo dichiarato — l'unica eccezione al divieto di plug di questa pagina**,
+decisione del proprietario (2026-09-26, limite del 2026-10-03): lo scarto si chiude, non solo si dichiara, su un campo
 esplicito — `sp06g_crediti_altri_breve` o `sp16g_altri_debiti_breve` sullo SP, `ce06_servizi` fra
 CE e SP — mai su un campo `TIER0`. Un tappo che porterebbe `ce06_servizi` sotto zero **non si
 applica**: l'esito diventa "oltre soglia" invece di un tappo negativo.
 
-**Oltre soglia, si salva con lo sbilancio dichiarato — decisione del proprietario (Task 17,
+**Oltre i 10 €, si salva con lo sbilancio dichiarato — decisione del proprietario (Task 17,
 2026-09-27): «se il bilancio non è quadrato deve essere comunque importato con avviso, l'utente
 lo correggerà nella tab rettifiche».** Nessun tappo si applica in questo caso (lo SP/CE restano
 quelli letti, invariati): l'esito diventato `"squadrato"` porta comunque `misura` con lo scarto
@@ -330,9 +334,9 @@ diventa `"squadrato"` (sopra). Il ripiego si dichiara con
 scansionato o letto da OCR non tenta nemmeno il percorso snello: `"non_applicabile"`, con
 `motivo`, deciso prima di leggere una sola riga.
 
-**La chiusura al centesimo resta la regola dell'importatore attuale.** La soglia relativa e il
+**La chiusura al centesimo resta la regola dell'importatore attuale.** Il limite di 10 € e il
 tappo governano solo il **percorso snello** (F3, prima del punto di convergenza): non toccano
 `arithmetic_balanced` (§8, **€0,01 fisso**, indipendente da qualunque tolleranza di runtime) né
 il gate contabile duro di questa pagina (§2, `quadra`), che restano quelli di sempre e continuano
-a girare sul foglio consegnato — un tappo entro soglia non è una licenza a saltare la quadratura
+a girare sul foglio consegnato — un tappo entro 10 € non è una licenza a saltare la quadratura
 al centesimo che l'importatore attuale misura dopo.

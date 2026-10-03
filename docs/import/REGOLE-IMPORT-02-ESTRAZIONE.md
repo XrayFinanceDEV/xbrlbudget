@@ -509,6 +509,17 @@ Anthropic (`STRUTTURA_MODEL`, Sonnet) solo per la struttura, e **non sceglie mai
 elenco lungo**: il modello nomina la voce di legge (il percorso, es. `SPP.D.4.E`), il codice la
 traduce nel campo `sp`/`ce` con una tabella fissa.
 
+**F0 — Prima i lettori deterministici, prima della struttura** (`importers/import_snello/deterministico.py`,
+`tentativo()`). Prima di qualunque chiamata di modello si prova, nell'ordine: il PDF reso dall'XBRL
+depositato (`importers/xbrl_reso_parser.py`: prospetti e tabelle di scadenza della nota integrativa,
+ogni totale stampato riprodotto al centesimo, letto anche per posizione quando il testo a blocchi
+non chiude), lo schema di legge IV-CEE (`standard_ivcee_parser`), lo schema di legge con dettaglio
+conti (`extract_ivcee_didascalie`), la situazione contabile. Un candidato si adotta solo se quadra
+entro il tappo e la sua massa non classificata sta entro `soglia()`: allora la struttura **non si
+chiede** (`struttura.stato = "non_richiesta"`, zero chiamate vision, zero gx10). Prima ancora, un
+riepilogo di poche macro-voci (`importers/import_snello/riepilogo.py`, tipo export xlsx) si rifiuta
+con `PDFImportError`: non è un bilancio (decisione del proprietario, 2026-10-03).
+
 **F1 — Struttura.** Riusa la mappa del branch struttura (vision Sonnet, un blocco per chiamata):
 per ogni pagina, quali sono SP/CE/dettaglio, lo `schema` (di legge / riclassificato / piano dei
 conti), la `disposizione` (colonna unica / sezioni contrapposte), colonne per ruolo e totali
@@ -544,18 +555,19 @@ possibili — `"bilancio"` (il risultato corrente sta nel netto, come lo schema 
 `"conti"` lascia `forma=None` e la sceglie da sé (la forma che minimizza lo scarto), perché un
 bilancio di verifica può avere o no il risultato in un conto di netto.
 
-`tappa()` confronta gli scarti con la soglia (`soglia()`, `max(IMPORT_SNELLO_SOGLIA_MIN,
-IMPORT_SNELLO_SOGLIA_PCT% del totale attivo)`, per esercizio) e restituisce uno tra quattro
-esiti:
+`tappa()` confronta gli scarti con il limite del tappo (`limite_tappo()`: **10 €** per controllo,
+SP, CE e confronto con i totali stampati — decisione del proprietario, 2026-10-03; mai oltre
+`soglia()`, `max(IMPORT_SNELLO_SOGLIA_MIN, IMPORT_SNELLO_SOGLIA_PCT% del totale attivo)`, che resta
+la soglia del cancello sulla massa non classificata) e restituisce uno tra quattro esiti:
 
 | Esito | Quando |
 |---|---|
 | `"ok"` | nessuno scarto |
-| `"tappo"` | scarto entro soglia: si chiude su un campo dichiarato (sotto) |
+| `"tappo"` | scarto entro 10 €: si chiude su un campo dichiarato (sotto) |
 | `"vuoto"` | attivo e passivo entrambi zero — **mai** `"ok"`: un'estrazione vuota non è una quadratura |
 | `"oltre_soglia"` | scarto oltre soglia, oppure un tappo sul CE che porterebbe `ce06_servizi` sotto zero (non si applica: si dichiara oltre soglia invece di un tappo negativo) |
 
-**Il tappo** (solo entro soglia): attivo in eccesso rispetto al passivo → manca passivo, si
+**Il tappo** (solo entro 10 €): attivo in eccesso rispetto al passivo → manca passivo, si
 aggiunge a `sp16g_altri_debiti_breve`; passivo in eccesso rispetto all'attivo → manca attivo, si
 aggiunge a `sp06g_crediti_altri_breve`; utile CE diverso da `sp13` → lo scarto va su
 `ce06_servizi` (in più o in meno). Mai su un campo `TIER0`. Dettagli su campi, soglia e dove si
@@ -563,7 +575,18 @@ legge nel report → [REGOLE-IMPORT-04-QUADRATURE.md §12](REGOLE-IMPORT-04-QUAD
 
 **La rilettura, unica — solo nel modo `"legge"`.** `"vuoto"` e `"oltre_soglia"` innescano, **solo
 in modo `"legge"`**, una sola rilettura mirata della sola sezione (SP o CE, quella con lo scarto
-maggiore) in `forma="bilancio"` esplicita; il modo `"conti"` non rilegge mai.
+maggiore) in `forma="bilancio"` esplicita; il modo `"conti"` non rilegge mai. **Due eccezioni,
+nessuna rilettura** (`causa: "documento_sbilanciato"`): il documento stampa Totale attivo e Totale
+passivo diversi di oltre 10 € e le voci lette riproducono quella differenza; oppure stampa un
+utile nello SP diverso da quello del CE e le voci lette li riproducono entrambi. In entrambi i casi
+i numeri stampati devono essere letti dal testo del documento, mai riferiti dal modello; l'avviso
+li cita e dice «bilancio squadrato di partenza» (decisione del proprietario, 2026-10-03).
+
+**La lettura più vicina (Task 28).** Se il modello chiude `"squadrato"`, o ripiegherebbe, e un
+candidato deterministico era stato scartato solo perché oltre i 10 € (scarto peggiore entro
+`soglia()`, massa non classificata entro soglia), si salva la lettura col peggiore scarto minore,
+sempre `"squadrato"` e senza tappo; il report dichiara `confronto_letture` (o `ripiego_evitato`) e,
+se la lettura salvata non ha l'anno precedente che il modello aveva letto, un avviso lo dice.
 
 **Task 17 (decisione del proprietario, 2026-09-27): «se il bilancio non è quadrato deve essere
 comunque importato con avviso, l'utente lo correggerà nella tab rettifiche».** Se l'esito resta
@@ -608,8 +631,9 @@ verità sul lato (mai il contrario — vedi `applica_lato` sopra), netting cespi
 sottoconto (all'aggregato se manca il dettaglio), compensazioni sulle voci minori, debito senza
 scadenza dichiarata → a breve.
 
-**F4 — Dettagli per il budget, sempre attraversata.** `enrich_pdf_details` gira **sempre** dopo un
-successo snello, in entrambi i modi: in modo `"legge"` con le pagine di dettaglio della struttura
+**F4 — Dettagli per il budget.** `enrich_pdf_details` gira dopo un successo snello, in entrambi i
+modi, **tranne** quando ha letto il PDF reso da XBRL (`fonte: "deterministico:xbrl_reso_parser"`):
+lì i dettagli vengono già dalle tabelle di scadenza della nota integrativa. Negli altri casi: in modo `"legge"` con le pagine di dettaglio della struttura
 (`struttura.pagine_dettagli()`) e l'LLM di dettaglio **attivo**; in modo `"conti"` **senza** LLM
 (`usa_llm=False`), perché i dettagli sono già usciti dalle foglie classificate in F2-C. La sua
 riclassificazione deterministica di maturità (entro/oltre l'esercizio) può spostare massa fra il

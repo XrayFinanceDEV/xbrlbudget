@@ -184,7 +184,9 @@ Split each line at the midpoint and process left (ATTIVO) and right (PASSIVO) in
 ## Implementation Notes
 
 - Keep existing `situazione_contabile_parser.py` for DEPI format (it works well)
-- Add new `trial_balance_parser.py` with the universal description-based approach
+- Add a new parser with the universal description-based approach — *superato (2026-10-03): il file
+  proposto non è mai nato; la logica universale vive in `situazione_contabile_parser.py` e in
+  `extract_trial_balance_with_llm`.*
 - Auto-detection in `pdf_importer.py` already routes trial balances away from LLM
 - No API key needed — fully deterministic
 - Should handle partial-year (infrannuale) trial balances too (same format, shorter period)

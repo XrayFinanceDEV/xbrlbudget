@@ -215,15 +215,24 @@ ciò che non si può non sapere. Ogni voce dice la regola e **cosa si rompe** a 
   sbilanciata che diventa il generico «Balance sheet does not balance». È l'ultima risorsa **solo**
   quando il deterministico esce davvero vuoto. Ricablarlo come fallback di route C è una tentazione
   ricorrente; l'estrattore giusto per le liste CoGe è il pass CoGe dedicato.
-- **Percorso snello (`IMPORT_MOTORE=snello`)**: il modello nomina il percorso di legge e, sugli
-  schemi di legge, restituisce l'importo; il codice verifica con soglia `max(100 €, 0,1%
-  dell'attivo)` e chiude lo scarto entro soglia con un tappo dichiarato su `sp06g`, `sp16g`, `ce06`
-  (decisione del proprietario, 2026-09-26); oltre soglia una rilettura, poi si salva con lo
-  sbilancio dichiarato (esito `"squadrato"`, nessun tappo — decisione del proprietario, Task 17,
-  2026-09-27: «se il bilancio non è quadrato deve essere comunque importato con avviso, l'utente
-  lo correggerà nella tab rettifiche»). Il ripiego sull'importatore attuale resta solo per
-  un'estrazione vuota, una struttura non riconosciuta o un'eccezione imprevista.
-  Il divieto di plug e il contratto "riferimenti, non importi" valgono per l'importatore attuale.
+- **Percorso snello (`IMPORT_MOTORE=snello`)**: prima i lettori deterministici (PDF reso da XBRL
+  depositato, schema di legge con o senza dettaglio conti, situazione contabile), **prima** della
+  struttura: se uno quadra si adotta a zero chiamate di modello. Altrimenti il modello nomina il
+  percorso di legge e, sugli schemi di legge, restituisce l'importo. Il codice chiude con un tappo
+  dichiarato su `sp06g`, `sp16g`, `ce06` solo uno scarto di **al massimo 10 €** per controllo, e
+  10 € è anche la tolleranza contro i totali stampati dal documento (decisioni del proprietario,
+  2026-10-03: oltre, il tappo copriva righe non lette); oltre, una rilettura, poi si salva con lo
+  sbilancio dichiarato (esito `"squadrato"`, nessun tappo — Task 17, 2026-09-27: «se il bilancio
+  non è quadrato deve essere comunque importato con avviso, l'utente lo correggerà nella tab
+  rettifiche»), salvando la lettura **più vicina** fra quella del modello e una deterministica
+  vicina ma oltre i 10 € (Task 28). Un documento che si contraddice da solo (attivo ≠ passivo
+  stampati, o utile SP ≠ utile CE stampati, entrambi letti dal testo) si importa com'è con la nota
+  «bilancio squadrato di partenza», senza rilettura. Un riepilogo di poche macro-voci tipo export
+  xlsx non è un bilancio e si rifiuta (`PDFImportError`). Su uno schema di legge uno squadrato è un
+  difetto del lettore da correggere; resta ammesso per bilanci di verifica e sezioni contrapposte.
+  Il ripiego sull'importatore attuale resta solo per un'estrazione vuota, una struttura non
+  riconosciuta o un'eccezione imprevista. Il divieto di plug e il contratto "riferimenti, non
+  importi" valgono per l'importatore attuale.
 
 ### Quadratura, diagnostica e verdetti
 - **Attivo = Passivo = 0 non è una quadratura.** Un'estrazione vuota ha sbilancio zero: senza il
@@ -1030,7 +1039,7 @@ Projects a partial year (say 9 months) to a full 12 months, against a reference 
   **deriva** uno stato patrimoniale da un conto economico — rotazioni, quote residue, imposte,
   rimborso del debito, plug di cassa — sta in `calculations/intra_year_engine.py`. Il gemello
   TypeScript che girava fino al 2026-09-02 (`computeProjectedBS` in `lib/pratica-projected-bs.ts`, più
-  `lib/pratica-turnover.ts`, cancellato) era divergito su quattro punti e faceva mostrare a Proiezione,
+  lib/pratica-turnover.ts, cancellato) era divergito su quattro punti e faceva mostrare a Proiezione,
   Indicatori e Stampa **tre bilanci diversi della stessa azienda**. `lib/pratica-projected-bs.ts` esiste
   ancora ed è importato, ma ormai solo per **leggere** il forecast persistito
   (`projectedItemsFromForecast`); `calculateProjectedBS` in `app/pratica/page.tsx` salva le ipotesi, fa

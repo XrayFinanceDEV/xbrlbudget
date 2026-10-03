@@ -6,6 +6,8 @@ from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from decimal import Decimal
 
+from importers.import_snello.verifica import limite_tappo
+
 # I modi di lettura che leggono lo schema di legge (macro voci dai totali stampati) invece di
 # un elenco di conti. "legge_con_dettaglio" (Task 24): le macro voci vengono dalle didascalie
 # senza codice conto, i dettagli dalle righe-conto che stanno sotto.
@@ -81,21 +83,24 @@ _MAX_COPPIE = 600
 
 
 def _coppie_nel_report(coppie, esito: str) -> dict:
-    if not coppie:
+    """Diagnostica pura: un'eccezione qui (importo non numerico...) non deve mai far fallire un
+    import riuscito, quindi il risultato e' vuoto."""
+    try:
+        if not coppie:
+            return {}
+        righe = [f"{p}={Decimal(v).quantize(Decimal('0.01'))}" for p, v in coppie]
+        if esito == "ok" and len(righe) > _MAX_COPPIE_SE_OK:
+            return {"coppie_corrente_n": len(righe)}
+        if len(righe) > _MAX_COPPIE:
+            return {"coppie_corrente": righe[:_MAX_COPPIE], "coppie_corrente_n": len(righe)}
+        return {"coppie_corrente": righe, "coppie_corrente_n": len(righe)}
+    except Exception:
         return {}
-    righe = [f"{p}={Decimal(v).quantize(Decimal('0.01'))}" for p, v in coppie]
-    if esito == "ok" and len(righe) > _MAX_COPPIE_SE_OK:
-        return {"coppie_corrente_n": len(righe)}
-    if len(righe) > _MAX_COPPIE:
-        return {"coppie_corrente": righe[:_MAX_COPPIE], "coppie_corrente_n": len(righe)}
-    return {"coppie_corrente": righe, "coppie_corrente_n": len(righe)}
 
 
 def _limite_interno(s):
-    """Lo scarto interno (SP e CE) oltre il quale non c'e' tappo: 10 euro (2026-10-03), mai oltre
-    la soglia relativa ``s``, che resta la tolleranza sul totale stampato."""
-    from importers.import_snello.verifica import soglia_tappo
-    return min(s, soglia_tappo())
+    """Lo scarto interno (SP e CE) oltre il quale non c'e' tappo (``verifica.limite_tappo``)."""
+    return limite_tappo(s)
 
 
 def _causa_stampati(m: dict, s) -> bool:
@@ -121,9 +126,14 @@ def _documento_sbilanciato(m: dict, s, stampati: dict | None, deterministici: bo
     ta, tp = stampati.get("totale_attivo"), stampati.get("totale_passivo")
     if ta is None or tp is None:
         return False
-    if abs(m["scarto_sp"]) <= _limite_interno(s) or m["scarto_stampati"] > s:
+    t = _limite_interno(s)
+    differenza = abs(Decimal(ta) - Decimal(tp))
+    # Fix round 1 (review Task 27): il documento deve DAVVERO stampare due totali diversi (oltre il
+    # limite interno) e lo scarto misurato deve coincidere con quella differenza entro lo stesso
+    # limite: con totali uguali e uno scarto di lettura di 60 euro la colpa e' della lettura.
+    if abs(m["scarto_sp"]) <= t or m["scarto_stampati"] > s or differenza <= t:
         return False
-    return abs(abs(Decimal(ta) - Decimal(tp)) - abs(m["scarto_sp"])) <= s
+    return abs(differenza - abs(m["scarto_sp"])) <= t
 
 
 def _risultato_contraddittorio(m: dict, s, risultati: dict | None, totali_spiegano_lo_sp: bool) -> dict | None:

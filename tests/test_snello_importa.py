@@ -834,3 +834,24 @@ def test_report_squadrato_porta_le_coppie_e_ok_grande_no(tmp_path, monkeypatch):
     r = S.importa(pdf, analizza=struttura, leggi_voci=voci_ok)
     assert r.report["esito"] == "ok" and "coppie_corrente" not in r.report
     assert r.report["coppie_corrente_n"] > S._MAX_COPPIE_SE_OK
+
+
+def test_totali_stampati_uguali_con_passivo_letto_60_euro_sotto_rilegge(tmp_path):
+    """Fix round 1 (review Task 27): il documento stampa Totale Attivo = Totale Passivo; uno scarto
+    di lettura di 60 euro (entro la soglia relativa, oltre il limite di 10) NON e' un documento
+    sbilanciato: si rilegge e non si dichiara alcuna causa."""
+    for passivo in ("4940", "4900", "4989"):
+        pdf = _pdf_con_totali(str(tmp_path / f"c{passivo}.pdf"), "5.000,00", "5.000,00")
+        chiamate = []
+
+        def voci(testo, intestazioni, nota="", passivo=passivo):
+            chiamate.append(nota)
+            return {"corrente": [("SPA.C.IV.1", D("5000")), ("SPP.A.I", D(passivo))],
+                    "precedente": [], "totali": {}}
+        r = S.importa(pdf, analizza=lambda p: _struttura("legge"), leggi_voci=voci)
+        assert len(chiamate) == 3, passivo
+        assert r.report.get("causa") != "documento_sbilanciato" and "contraddizioni" not in r.report
+
+
+def test_coppie_nel_report_non_fa_fallire_un_import_riuscito():
+    assert S._coppie_nel_report([("SPA.B", "non numerico")], "ok") == {}

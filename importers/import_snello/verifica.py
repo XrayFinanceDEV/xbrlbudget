@@ -27,6 +27,12 @@ def soglia_tappo() -> Decimal:
     return Decimal(str(config.IMPORT_SNELLO_TAPPO_MAX)).quantize(_C)
 
 
+def limite_tappo(s: Decimal) -> Decimal:
+    """Il limite di scarto interno (SP e CE) per un tappo, sotto la soglia relativa ``s``: l'unico
+    posto dove si decide (``tappa`` e il percorso snello lo usano entrambi)."""
+    return min(s, soglia_tappo())
+
+
 def _coerente(letti: dict, tolleranza: Decimal) -> bool:
     """Attivo e passivo dichiarati si tengono in piedi da soli: presenti entro
     ``tolleranza`` l'uno dall'altro, o dall'altro PIU' l'utile dichiarato (una situazione a
@@ -181,7 +187,7 @@ def tappa(bs: dict, ce: dict, m: dict, s: Decimal):
         return bs, ce, None, "vuoto"
     # Il tappo chiude al massimo ``soglia_tappo()`` per controllo (mai oltre ``s``); il totale
     # stampato resta sulla soglia relativa ``s``: non e' un plug.
-    massimo = min(s, soglia_tappo())
+    massimo = limite_tappo(s)
     if abs(m["scarto_sp"]) > massimo or abs(m["scarto_ce"]) > massimo or m["scarto_stampati"] > s:
         return bs, ce, None, "oltre_soglia"
     if m["scarto_sp"] == 0 and m["scarto_ce"] == 0:

@@ -90,6 +90,14 @@ def _e_rettifica_esplicita(testo: str) -> bool:
 # budget_297, ricavi positivi e costi negativi, ce02 +30.077 stampato letto -30.077, scarto 2x).
 _CE_SEGNO_LIBERO_RICAVI = {"ce02", "ce03", "ce16"}
 
+# Costi della produzione (B.6-B.14) a segno fisso: stampati contro la convenzione dei costi del
+# documento sono una riduzione VERA, non un refuso da raddrizzare (budget_253: «14) Oneri diversi
+# di gestione -1.239» fra costi positivi, confermato dal Totale costi della produzione stampato;
+# con abs l'utile CE si spostava di 2x). Restano a valore assoluto gli oneri finanziari (la sezione
+# C li stampa spesso col meno per presentazione, budget_289), le imposte e le svalutazioni B.10.c/d.
+_CE_COSTI_PRODUZIONE = {"ce05", "ce06", "ce07", "ce08", "ce08a", "ce08b", "ce08c", "ce08d",
+                        "ce09", "ce09a", "ce09b", "ce11", "ce11b", "ce12"}
+
 
 def _segno_ce_legge(codice: str, valore: Decimal, testo: str, convenzione: int,
                     convenzione_ricavi: int = 1) -> Decimal:
@@ -103,7 +111,7 @@ def _segno_ce_legge(codice: str, valore: Decimal, testo: str, convenzione: int,
     fix round 1 lo lasciava invariato, ignorando la convenzione)."""
     if codice in _CE_SEGNO_LIBERO_RICAVI:
         return valore * convenzione_ricavi
-    if codice in _CE_SEGNO_LIBERO:
+    if codice in _CE_SEGNO_LIBERO or codice in _CE_COSTI_PRODUZIONE:
         return valore * convenzione
     if _e_rettifica_esplicita(testo):
         return -abs(valore)
@@ -746,10 +754,13 @@ def da_coppie(coppie):
     diag = {"non_mappati": [], "escluse": [], "risultato_stampato": None, "lato_corretti": 0,
             "lato_irrisolti": [], "risultato_duplicato": [], "padri_esclusi": [],
             "ce_segno_forzato": []}
+    # Si scarta solo la coppia IDENTICA (la stessa voce letta due volte, es. una pagina condivisa
+    # fra lettura SP e CE). Lo stesso percorso con importi diversi sono voci distinte che la
+    # legenda non separa (le sotto-lettere di B.III.2: budget_597 ne perdeva 26.268) e si sommano.
     viste, uniche = set(), []
     for p, v in coppie:
-        if p not in viste:
-            viste.add(p)
+        if (p, Decimal(v)) not in viste:
+            viste.add((p, Decimal(v)))
             uniche.append((p, Decimal(v)))
     tutti = [p for p, _ in uniche]
     voci: list[tuple[str, Decimal, str]] = []

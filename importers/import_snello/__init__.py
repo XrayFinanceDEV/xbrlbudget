@@ -6,6 +6,8 @@ from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from decimal import Decimal
 
+from importers.import_snello.verifica import limite_tappo, soglia
+
 # I modi di lettura che leggono lo schema di legge (macro voci dai totali stampati) invece di
 # un elenco di conti. "legge_con_dettaglio" (Task 24): le macro voci vengono dalle didascalie
 # senza codice conto, i dettagli dalle righe-conto che stanno sotto.
@@ -72,13 +74,43 @@ def _unclassified_mass(diag: dict) -> Decimal:
     return sum((Decimal(v) for _, _, v in diag.get("lato_irrisolti", [])), Decimal(0))
 
 
+# Task 27, item 7: le coppie (percorso, importo) che il modello ha restituito per l'anno corrente
+# restano nel report, cosi' un errore di lettura (debiti «entro» salvati a sp17...) si diagnostica
+# da un record del banco senza rilanciare il modello. Il report finisce nel DB con l'upload:
+# un esito "ok" porta le coppie solo se sono poche; con un esito diverso da "ok" fino a _MAX_COPPIE.
+_MAX_COPPIE_SE_OK = 120
+_MAX_COPPIE = 600
+
+
+def _coppie_nel_report(coppie, esito: str) -> dict:
+    """Diagnostica pura: un'eccezione qui (importo non numerico...) non deve mai far fallire un
+    import riuscito, quindi il risultato e' vuoto."""
+    try:
+        if not coppie:
+            return {}
+        righe = [f"{p}={Decimal(v).quantize(Decimal('0.01'))}" for p, v in coppie]
+        if esito == "ok" and len(righe) > _MAX_COPPIE_SE_OK:
+            return {"coppie_corrente_n": len(righe)}
+        if len(righe) > _MAX_COPPIE:
+            return {"coppie_corrente": righe[:_MAX_COPPIE], "coppie_corrente_n": len(righe)}
+        return {"coppie_corrente": righe, "coppie_corrente_n": len(righe)}
+    except Exception:
+        return {}
+
+
+def _limite_interno(s):
+    """Lo scarto interno (SP e CE) oltre il quale non c'e' tappo (``verifica.limite_tappo``)."""
+    return limite_tappo(s)
+
+
 def _causa_stampati(m: dict, s) -> bool:
     """Vero quando lo scarto interno (SP e CE) e' entro soglia ma il totale che il documento
     stampa da solo non concorda con le voci lette: la causa e' il contraddittorio del totale
     stampato, non un vero sbilancio interno - la nota della rilettura e il report finale non
     devono dire "voci mancanti, doppie...", un messaggio pensato per l'altro caso (review
     round 1, 2026-09-27)."""
-    return abs(m["scarto_sp"]) <= s and abs(m["scarto_ce"]) <= s and m["scarto_stampati"] > s
+    t = _limite_interno(s)
+    return abs(m["scarto_sp"]) <= t and abs(m["scarto_ce"]) <= t and m["scarto_stampati"] > t
 
 
 def _documento_sbilanciato(m: dict, s, stampati: dict | None, deterministici: bool) -> bool:
@@ -94,9 +126,36 @@ def _documento_sbilanciato(m: dict, s, stampati: dict | None, deterministici: bo
     ta, tp = stampati.get("totale_attivo"), stampati.get("totale_passivo")
     if ta is None or tp is None:
         return False
-    if abs(m["scarto_sp"]) <= s or m["scarto_stampati"] > s:
+    t = _limite_interno(s)
+    differenza = abs(Decimal(ta) - Decimal(tp))
+    # Fix round 1 (review Task 27): il documento deve DAVVERO stampare due totali diversi (oltre il
+    # limite interno) e lo scarto misurato deve coincidere con quella differenza entro lo stesso
+    # limite: con totali uguali e uno scarto di lettura di 60 euro la colpa e' della lettura.
+    if abs(m["scarto_sp"]) <= t or m["scarto_stampati"] > t or differenza <= t:
         return False
-    return abs(abs(Decimal(ta) - Decimal(tp)) - abs(m["scarto_sp"])) <= s
+    return abs(differenza - abs(m["scarto_sp"])) <= t
+
+
+def _risultato_contraddittorio(m: dict, s, risultati: dict | None, totali_spiegano_lo_sp: bool) -> dict | None:
+    """Task 27, decisione 3 (2026-10-03): il risultato d'esercizio stampato nello SP differisce da
+    quello stampato nel CE, e le voci lette riproducono entrambi (sp13 = risultato dello SP, utile
+    ricostruito dal CE = risultato del CE, ciascuno entro il limite del tappo): la lettura e' fedele,
+    la contraddizione e' del documento, ne' una rilettura ne' un tappo possono aiutare.
+    ``risultati`` viene dalle righe del documento (``risultati_stampati``), mai dal modello; None
+    (non letti con certezza) o un divario SP non spiegato (ne' entro il limite, ne' dai totali
+    stampati): falso. Restituisce la contraddizione dichiarata, altrimenti None."""
+    if not risultati:
+        return None
+    t = _limite_interno(s)
+    sp, ce = Decimal(risultati["sp"]), Decimal(risultati["ce"])
+    if abs(sp - ce) <= t or abs(m["scarto_ce"]) <= t:
+        return None
+    if abs(m["scarto_sp"]) > t and not totali_spiegano_lo_sp:
+        return None
+    if abs(Decimal(m["sp13"]) - sp) > t or abs(Decimal(m["utile_ce"]) - ce) > t:
+        return None
+    return {"tipo": "risultato", "sp": str(sp.quantize(Decimal("0.01"))),
+            "ce": str(ce.quantize(Decimal("0.01"))), "differenza": str(abs(sp - ce).quantize(Decimal("0.01")))}
 
 
 def _negativi_stampati(bs: dict | None, parser: str, anno: int | None = None) -> list:
@@ -118,8 +177,9 @@ def _risultato_deterministico(_det: dict, struttura, modo: str, t0: float) -> "R
 
     Task 16 (b): deterministico prima di Qwen; Task 24: prima ancora della struttura. Mai un
     secondo tentativo dopo l'adozione, mai i due candidati sommati. Il candidato che non quadra
-    e' SEMPRE rifiutato a monte (``tentativo``): non diventa mai "squadrato", solo Qwen puo'
-    importare con sbilancio dichiarato (decisione del proprietario, Task 17)."""
+    e' rifiutato a monte (``tentativo``) e non arriva qui: l'import squadrato e' del percorso
+    del modello (decisione del proprietario, Task 17); la lettura deterministica vicina al
+    quadrare entra come squadrata solo da ``_salva_deterministico_squadrato`` (Task 28)."""
     _bs_det = dict(_det["bs"])
     # Il plug del tappo lean si AGGIUNGE alla massa/plug che il parser sottostante
     # ha gia' dichiarato (mai l'uno al posto dell'altro): quella e' diagnostica
@@ -187,6 +247,58 @@ def importa(file_path: str, *, ocr_text: str | None = None, analizza=None, leggi
         struttura = struttura_deterministica(file_path, modo=modo)
         return _risultato_deterministico(_det, struttura, modo, t0)
 
+    try:
+        return _importa_modello(file_path, _det, t0, ocr_text=ocr_text, analizza=analizza,
+                                leggi_conti=leggi_conti, leggi_voci=leggi_voci,
+                                trascrivi=trascrivi, route_hint=route_hint)
+    except SnelloNonRiuscito as e:
+        # Task 28: il modello ripiega o cade, ma un candidato deterministico ha letto davvero
+        # (respinto solo dal limite del tappo): meglio la sua lettura squadrata, dichiarata,
+        # che buttare tutto sull'importatore vecchio.
+        if not _det.get("lettura"):
+            raise
+        try:
+            from importers.struttura_documento.analisi import struttura_deterministica
+            modo_det = _MODO_DA_PARSER.get(_det["parser"], "legge")
+            struttura_det = struttura_deterministica(file_path, modo=modo_det)
+        except Exception:
+            raise e
+        return _salva_deterministico_squadrato(
+            _det, struttura_det, t0, letture=e.report.get("letture"),
+            extra={"ripiego_evitato": {k: e.report[k] for k in ("esito", "fase", "errore")
+                                       if k in e.report}})
+
+
+def _scarto_massimo(m: dict) -> Decimal:
+    """Il peggiore dei tre scarti misurati: lo SP, il CE e il totale stampato (Task 28)."""
+    return max(abs(Decimal(m["scarto_sp"])), abs(Decimal(m["scarto_ce"])),
+               abs(Decimal(m["scarto_stampati"])))
+
+
+def _salva_deterministico_squadrato(_det: dict, struttura, t0: float, *, letture: dict | None,
+                                    extra: dict) -> "Risultato":
+    """Task 28: la lettura del candidato deterministico respinto solo per il limite del tappo
+    (``_det["lettura"]``), salvata com'e', squadrata e senza tappo (il limite di 10 euro resta):
+    stessa forma del risultato di un candidato adottato, con esito ``squadrato`` e l'avviso
+    costruito dalla sua misura. Le chiamate al modello gia' fatte restano nel report."""
+    lettura = _det["lettura"]
+    m = lettura["misura"]
+    modo = _MODO_DA_PARSER.get(_det["parser"], "legge")
+    adottato = {"parser": _det["parser"], "esito": "squadrato", "bs": lettura["bs"],
+                "ce": lettura["ce"], "tappo": None, "misura": m,
+                **{k: _det[k] for k in ("prior_bs", "prior_ce", "anno_precedente") if k in _det}}
+    r = _risultato_deterministico(adottato, struttura, modo, t0)
+    r.report["deterministico"]["esito"] = _det["esito"]
+    if letture is not None:
+        r.report["letture"] = letture
+    if _causa_stampati(m, soglia(m["attivo"])):
+        r.report["causa"] = "stampati"
+    r.report.update(extra)
+    return r
+
+
+def _importa_modello(file_path: str, _det: dict, t0: float, *, ocr_text, analizza, leggi_conti,
+                     leggi_voci, trascrivi, route_hint) -> Risultato:
     from importers.struttura_documento.analisi import analizza_struttura
     analizza_fn = analizza or analizza_struttura
     try:
@@ -261,6 +373,32 @@ def importa(file_path: str, *, ocr_text: str | None = None, analizza=None, leggi
         m = misura(bs, ce, stampati, forma="bilancio")
         bs, ce, tappo, esito = tappa(bs, ce, m, s)
         return bs, ce, tappo, esito, m, s
+
+    _risultati_letti: list = []
+    _coppie_lette: list = []          # le coppie dell'anno corrente dell'ultima lettura (modi di legge)
+
+    def _contraddizioni(m: dict, s, stampati: dict | None) -> list:
+        """Le contraddizioni che il documento stampa da solo e che le voci lette riproducono:
+        totali (Task 25) e risultato SP/CE (Task 27). Solo per i modi di legge, e solo da cio' che
+        il documento stampa (mai importi riportati dal modello)."""
+        if modo not in _MODI_LEGGE:
+            return []
+        out = []
+        totali = _documento_sbilanciato(m, s, stampati, _totali_dal_testo)
+        if totali:
+            out.append({"tipo": "totali"})
+        if abs(m["scarto_ce"]) > _limite_interno(s):
+            if not _risultati_letti:               # righe fisiche del documento, lette una volta sola
+                try:
+                    from importers.detail_enrichment import collect_source_rows
+                    from importers.import_snello.risultati_stampati import risultati_stampati
+                    _risultati_letti.append(risultati_stampati(collect_source_rows(file_path, ocr_text=ocr_text)))
+                except Exception:
+                    _risultati_letti.append(None)
+            risultato = _risultato_contraddittorio(m, s, _risultati_letti[0], totali)
+            if risultato:
+                out.append(risultato)
+        return out
 
     fase = "lettura"
     try:
@@ -389,6 +527,7 @@ def importa(file_path: str, *, ocr_text: str | None = None, analizza=None, leggi
                 for chiave in ("totale_attivo", "totale_passivo"):
                     if deterministici.get(chiave) is not None:
                         stampati[chiave] = deterministici[chiave]
+                _coppie_lette[:] = list(coppie_corrente)
                 bs, ce, diag = da_coppie(coppie_corrente)
                 prior = da_coppie(coppie_precedente) if coppie_precedente else None
                 return bs, ce, diag, prior, stampati
@@ -402,9 +541,9 @@ def importa(file_path: str, *, ocr_text: str | None = None, analizza=None, leggi
         bs, ce, tappo, esito, m, s = _verifica(bs, ce, stampati)
 
         if (modo in _MODI_LEGGE and esito in ("oltre_soglia", "vuoto")
-                and not _documento_sbilanciato(m, s, stampati, _totali_dal_testo)):
+                and not _contraddizioni(m, s, stampati)):
             fase = "lettura"
-            if abs(m["scarto_sp"]) > s or m["scarto_stampati"] > s:
+            if abs(m["scarto_sp"]) > _limite_interno(s) or m["scarto_stampati"] > _limite_interno(s):
                 sezione = "sp"
             else:
                 sezione = "ce"
@@ -453,10 +592,12 @@ def importa(file_path: str, *, ocr_text: str | None = None, analizza=None, leggi
                 "tappo": {"corrente": tappo}, "letture": letture, "diag": diag,
                 "anomalie": _anomalie(bs, diag), "secondi": round(time.monotonic() - t0, 1),
                 "deterministico": _report_deterministico,
+                **_coppie_nel_report(_coppie_lette, "vuoto"),
             }
             raise SnelloNonRiuscito(report)
 
         causa = None
+        contraddizioni: list = []
         if esito == "oltre_soglia":
             # Task 17 (decisione del proprietario, 2026-09-27): «se il bilancio non e'
             # quadrato deve essere comunque importato con avviso, l'utente lo correggera'
@@ -467,7 +608,8 @@ def importa(file_path: str, *, ocr_text: str | None = None, analizza=None, leggi
             # misurati (scarto_sp/scarto_ce/scarto_stampati) restano in "misura", letti
             # da pdf_importer per costruire l'avviso mostrato all'utente.
             esito = "squadrato"
-            causa = ("documento_sbilanciato" if modo in _MODI_LEGGE and _documento_sbilanciato(m, s, stampati, _totali_dal_testo)
+            contraddizioni = _contraddizioni(m, s, stampati)
+            causa = ("documento_sbilanciato" if contraddizioni
                      else "stampati" if _causa_stampati(m, s) else None)
 
         prior_bs = prior_ce = prior_diag = None
@@ -487,6 +629,24 @@ def importa(file_path: str, *, ocr_text: str | None = None, analizza=None, leggi
     except Exception as e:
         raise SnelloNonRiuscito({"esito": "ripiego", "fase": fase, "errore": type(e).__name__}) from e
 
+    _confronto = None
+    if esito == "squadrato" and not contraddizioni and _det.get("lettura"):
+        # Task 28: il modello non e' riuscito a quadrare; se la lettura deterministica che aveva
+        # sfiorato il limite e' piu' vicina (peggiore scarto minore), si salva quella. Mai un
+        # mix: l'anno precedente segue la lettura che vince (qui non c'e' quello deterministico).
+        _m_det = _det["lettura"]["misura"]
+        _peggio_det, _peggio_mod = _scarto_massimo(_m_det), _scarto_massimo(m)
+        _vince = "deterministica" if _peggio_det < _peggio_mod else "modello"
+        _confronto = {"deterministica": str(_peggio_det), "modello": str(_peggio_mod),
+                      "vince": _vince, "parser": _det["parser"]}
+        if _vince == "deterministica":
+            _extra = {"confronto_letture": _confronto}
+            if modo in _MODI_LEGGE and prior is not None and not _det.get("prior_bs"):
+                # fix 3: il modello leggeva anche l'anno precedente, la lettura salvata no
+                _extra["precedente"] = "non_letto_dalla_lettura_deterministica"
+            return _salva_deterministico_squadrato(_det, struttura, t0, letture=letture,
+                                                   extra=_extra)
+
     bs["_plug_residual"] = Decimal(tappo["importo"]) if tappo and "importo" in tappo else Decimal(0)
     bs["_unclassified_mass"] = _unclassified_mass(diag)
 
@@ -502,10 +662,17 @@ def importa(file_path: str, *, ocr_text: str | None = None, analizza=None, leggi
         "anomalie": _anomalie(bs, diag), "secondi": round(time.monotonic() - t0, 1),
         "deterministico": _report_deterministico,
     }
+    report.update(_coppie_nel_report(_coppie_lette, esito))
     if modo in _MODI_LEGGE and precedente_stato is not None:
         report["precedente"] = precedente_stato
+    if _confronto:
+        report["confronto_letture"] = _confronto
     if causa:
         # Squadrato solo contro il totale stampato (SP e CE interni entro soglia).
         report["causa"] = causa
+    if contraddizioni:
+        # Una voce per contraddizione che il documento stampa da solo (Task 27): l'avviso
+        # dice una frase per ciascuna, mai due volte la stessa.
+        report["contraddizioni"] = contraddizioni
 
     return Risultato(bs=bs, ce=ce, prior_bs=prior_bs, prior_ce=prior_ce, report=report, struttura=struttura)

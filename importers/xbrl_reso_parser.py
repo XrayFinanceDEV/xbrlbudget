@@ -40,7 +40,7 @@ _ZERO = Decimal(0)
 _PIEDE = re.compile(r"Conforme alla tassonomia itcc-ci-\d{4}-\d{2}-\d{2}")
 _IMPORTO = re.compile(r"^-?\(?\d{1,3}(?:\.\d{3})*\)?(?:\s+\(\d{1,2}\))?$|^-$")
 _RE_NOTA_PIEDE = re.compile(r"^\(\d{1,2}\)$")
-_DATA = re.compile(r"^\d{2}-\d{2}-(\d{4})$")
+_DATA = re.compile(r"^\d{2}[-/]\d{2}[-/](\d{4})$")
 _ENUM_ARABO = r"\d+(?:-bis|-ter|-quater)?"
 _ENUM_LETTERA = r"[a-z](?:-bis|-ter)?"
 _RE_CAPITALE = re.compile(r"^([A-E])\)\s")
@@ -98,7 +98,7 @@ _STRUTTURA = tuple(re.compile(rx, re.M) for rx in (
     r"^\s*Differenza tra valore e costi della produzione[^\n]*$",
     r"^\s*21\) Utile \(perdita\) dell'esercizio\s*$",
 ))
-_RE_DATA_RIGA = re.compile(r"^\s*\d{2}-\d{2}-\d{4}\s*$", re.M)
+_RE_DATA_RIGA = re.compile(r"^\s*\d{2}[-/]\d{2}[-/]\d{4}\s*$", re.M)
 
 
 def _ha_struttura(testo: str) -> bool:
@@ -230,6 +230,205 @@ def _leggi_righe(documento: fitz.Document) -> tuple[list[_Riga], int, list[int]]
     return righe, colonne, anni
 
 
+# Distanza massima (punti) fra il bordo destro di un importo e quello della sua intestazione di
+# colonna: oltre, l'importo non sta in nessuna colonna-anno e il prospetto non si legge.
+_TOLLERANZA_COLONNA = 30.0
+# Due righe di testo sono la stessa riga fisica se i loro centri verticali distano meno di cosi'.
+_TOLLERANZA_RIGA = 3.0
+# Una didascalia che va a capo: il passo fra le sue righe e' al piu' questa frazione dell'altezza
+# della riga (misurato: capoverso 0,84-1,14; passo fra due righe di tabella >= 1,27).
+_PASSO_CONTINUAZIONE = 1.2
+# Un importo senza didascalia si attacca alla riga sopra solo entro questa distanza verticale.
+_DISTANZA_IMPORTO_ORFANO = 8.0
+
+
+@dataclass
+class _Linea:
+    testo: str
+    x0: float
+    x1: float
+    y0: float
+    y1: float
+    blocco: int
+
+    @property
+    def centro(self) -> float:
+        return (self.y0 + self.y1) / 2
+
+
+def _ancore_pagina(pagina: fitz.Page) -> list[tuple[float, list[float], list[int]]]:
+    """Le intestazioni a data della pagina: ``(y, [bordo destro di ogni colonna], [anni])`` per ogni
+    riga fisica che porta almeno due date (anche ``gg/mm/aaaa``). Le colonne-anno si leggono dalla
+    posizione, mai dall'ordine degli importi: una cella vuota e' uno zero NELLA SUA colonna."""
+    righe: list[list[tuple]] = []
+    parole = sorted(pagina.get_text("words"), key=lambda w: (float(w[1]), float(w[0])))
+    for w in parole:
+        if not _DATA.match(str(w[4]).strip()):
+            continue
+        if righe and abs(float(w[1]) - float(righe[-1][0][1])) <= _TOLLERANZA_RIGA:
+            righe[-1].append(w)
+        else:
+            righe.append([w])
+    out = []
+    for r in righe:
+        if len(r) < 2:
+            continue
+        r = sorted(r, key=lambda w: float(w[2]))
+        out.append((float(r[0][1]), [float(w[2]) for w in r],
+                    [int(_DATA.match(str(w[4]).strip()).group(1)) for w in r]))
+    return out
+
+
+def _linee_pagina(pagina: fitz.Page) -> list[_Linea]:
+    """Le righe di testo del prospetto di una pagina, con il loro riquadro: gli stessi filtri del
+    lettore a blocchi (piede di pagina, ragione sociale del piede, note a pie di tabella),
+    applicati blocco per blocco; le righe fatte di sole date (intestazioni di colonna) non sono
+    righe del prospetto."""
+    out: list[_Linea] = []
+    saltare_ragione_sociale = False
+    in_nota = False
+    for indice, blocco in enumerate(pagina.get_text("dict")["blocks"]):
+        if blocco.get("type") != 0:
+            continue
+        linee = []
+        for l in blocco["lines"]:
+            testo = "".join(sp["text"] for sp in l["spans"]).strip()
+            if testo:
+                x0, y0, x1, y1 = l["bbox"]
+                linee.append(_Linea(testo, x0, x1, y0, y1, indice))
+        if not linee:
+            continue
+        pulite = [l.testo for l in linee]
+        if _e_piede(pulite):
+            saltare_ragione_sociale = len(pulite) == 1 and bool(re.match(r"^v\.\d", pulite[0]))
+            continue
+        if saltare_ragione_sociale:
+            saltare_ragione_sociale = False
+            if len(pulite) == 1 and not _IMPORTO.match(pulite[0]):
+                continue
+        if len(pulite) == 1 and _RE_NOTA_PIEDE.match(pulite[0]):
+            in_nota = True
+        if in_nota:
+            continue
+        altezza = float(pagina.rect.height)
+        out.extend(
+            l for l in linee
+            if not all(_DATA.match(t) for t in l.testo.split())
+            # il numero di pagina nudo, in fondo (budget_143: "2" a y=798 su 842), non e' un importo
+            and not (re.fullmatch(r"\d{1,3}", l.testo) and l.y0 > 0.93 * altezza))
+    return out
+
+
+_CONNETTIVI = {"di", "e", "dei", "delle", "del", "della", "degli", "in", "su", "per", "da", "a",
+               "con", "o", "ed", "al", "alle", "nel", "nella", "che"}
+
+
+def _frase_aperta(didascalia: str) -> bool:
+    """La didascalia finisce a meta' frase (virgola o preposizione): la riga sotto la continua,
+    anche quando la tabella ha lo stesso passo fra le righe e fra le righe a capo."""
+    t = didascalia.rstrip()
+    return t.endswith(",") or t.rsplit(" ", 1)[-1].casefold() in _CONNETTIVI
+
+
+def _struttura(didascalia: str) -> bool:
+    """Una didascalia che comincia una voce propria: mai la continuazione di quella sopra."""
+    n = _norm(didascalia)
+    return bool(_enumeratore(didascalia) or _e_totale(didascalia) or _scadenza(didascalia)
+                or _calcolato(didascalia) or n.startswith(("stato patrimoniale", "conto economico",
+                                                           "attivo", "passivo")))
+
+
+def _leggi_righe_geometria(documento: fitz.Document) -> tuple[list[_Riga], int, list[int]]:
+    """Come ``_leggi_righe``, dalla geometria (Task 26, fix 2). Una riga e' tutto cio' che sta alla
+    stessa altezza: la didascalia a sinistra, gli importi a destra. Ogni importo va nella
+    colonna-anno il cui bordo destro (intestazione a data) e' piu' vicino, e una colonna senza
+    importo vale zero: con una cella vuota l'ordine degli importi non dice di che anno sono.
+    Il prospetto puo' cominciare in qualunque pagina, anche la copertina. Stessi totali, stesse
+    regole: cambia solo come si assegnano gli importi alle colonne."""
+    righe: list[_Riga] = []
+    colonne = 0
+    anni: list[int] = []
+    ancore_correnti: list[float] = []
+    iniziato = finito = False
+    blocco_riga: list[int] = []          # blocco dell'ultima riga di didascalia, per riga
+    for numero, pagina in enumerate(documento):
+        ancore = _ancore_pagina(pagina)
+        if ancore and not colonne:
+            colonne = len(ancore[0][1])
+            anni = list(ancore[0][2])
+        linee = sorted(_linee_pagina(pagina), key=lambda l: (l.centro, l.x0))
+        gruppi: list[list[_Linea]] = []
+        for l in linee:
+            if gruppi and abs(l.centro - gruppi[-1][0].centro) <= _TOLLERANZA_RIGA:
+                gruppi[-1].append(l)
+            else:
+                gruppi.append([l])
+        ultima_y = None
+        ultima_y0 = ultima_y1 = 0.0
+        for gruppo in gruppi:
+            gruppo.sort(key=lambda l: l.x0)
+            didascalie = [l for l in gruppo if not _IMPORTO.match(l.testo)]
+            importi = [l for l in gruppo if _IMPORTO.match(l.testo)]
+            y = gruppo[0].centro
+            attive = [a for a in ancore if a[0] <= y + _TOLLERANZA_RIGA]
+            if attive:
+                ancore_correnti = attive[-1][1]
+            if finito:
+                break
+            testo = " ".join(l.testo for l in didascalie)
+            if not iniziato:
+                if not _norm(testo).startswith("stato patrimoniale"):
+                    continue
+                iniziato = True
+            corrente: Optional[_Riga] = None
+            if didascalie:
+                if (righe and not importi and righe[-1].pagina == numero
+                        and not _scadenza(righe[-1].didascalia)
+                        and ultima_y is not None
+                        and ((blocco_riga and didascalie[0].blocco == blocco_riga[-1]
+                              and 0 < didascalie[0].y0 - ultima_y0
+                              <= _PASSO_CONTINUAZIONE * (ultima_y1 - ultima_y0))
+                             or (_frase_aperta(righe[-1].didascalia)
+                                 and 0 < didascalie[0].y0 - ultima_y1 + 4 <= 24))
+                        and testo[:1].islower() and not _struttura(testo)):
+                    righe[-1].didascalia += " " + testo
+                    ultima_y = y
+                    ultima_y0, ultima_y1 = didascalie[-1].y0, didascalie[-1].y1
+                    continue
+                corrente = _Riga(testo, [], numero)
+                righe.append(corrente)
+                blocco_riga.append(didascalie[0].blocco)
+                ultima_y = y
+                ultima_y0, ultima_y1 = didascalie[-1].y0, didascalie[-1].y1
+            elif righe and righe[-1].pagina == numero and not righe[-1].valori \
+                    and ultima_y is not None and 0 <= y - ultima_y <= _DISTANZA_IMPORTO_ORFANO:
+                corrente = righe[-1]
+            elif importi:
+                raise _Rifiuto("importo_senza_didascalia", importo=importi[0].testo)
+            if importi:
+                if not ancore_correnti:
+                    raise _Rifiuto("colonne_senza_intestazione", didascalia=corrente.didascalia)
+                valori = [_ZERO] * len(ancore_correnti)
+                presi: set[int] = set()
+                for l in importi:
+                    col = min(range(len(ancore_correnti)),
+                              key=lambda i: abs(l.x1 - ancore_correnti[i]))
+                    if abs(l.x1 - ancore_correnti[col]) > _TOLLERANZA_COLONNA:
+                        raise _Rifiuto("importo_fuori_colonna", didascalia=corrente.didascalia,
+                                       importo=l.testo)
+                    if col in presi:
+                        raise _Rifiuto("importo_doppio_nella_colonna", didascalia=corrente.didascalia,
+                                       importo=l.testo)
+                    presi.add(col)
+                    valori[col] = _importo(l.testo)
+                corrente.valori = valori
+            if righe and re.match(r"^21\)\s", righe[-1].didascalia) and righe[-1].valori:
+                finito = True       # la nota integrativa puo' cominciare sotto, sulla stessa pagina
+        if finito:
+            break
+    return righe, colonne, anni
+
+
 # --------------------------------------------------------------------------------------
 # Albero del prospetto
 # --------------------------------------------------------------------------------------
@@ -320,7 +519,7 @@ def _foglie(nodo: _Nodo):
         yield from _foglie(f)
 
 
-def _costruisci(righe: list[_Riga], colonne: int):
+def _costruisci(righe: list[_Riga], colonne: int, vuote_zero: bool = False):
     """Albero dei prospetti. Ritorna (radici, calcolati, totali, errori): i totali nell'ordine
     di stampa ``(didascalia, valori, nodo_chiuso)``, gli errori come ``(colonna, controllo,
     dettaglio)`` per ogni totale stampato che le righe sotto di lui non riproducono."""
@@ -364,7 +563,9 @@ def _costruisci(righe: list[_Riga], colonne: int):
         if _e_totale(r.didascalia):
             gruppo_aperto = None
             if not r.valori:
-                raise _Rifiuto("totale_senza_importi", didascalia=r.didascalia)
+                if not vuote_zero:
+                    raise _Rifiuto("totale_senza_importi", didascalia=r.didascalia)
+                r.valori = [_ZERO] * colonne
             chiuso = None
             for i in range(len(pila) - 1, -1, -1):
                 cand = pila[i]
@@ -395,17 +596,23 @@ def _costruisci(righe: list[_Riga], colonne: int):
                 and enum[0] == gruppo_aperto.enumeratore[0]
                 and enum[1][0] in gruppo_aperto.enumeratore[1]):
             padre = gruppo_aperto.genitore
+            if not r.valori:
+                if not vuote_zero:
+                    raise _Rifiuto("componente_senza_importi", didascalia=r.didascalia)
+                r.valori = [_ZERO] * colonne
             nodo = _Nodo(r.didascalia, _LIVELLO[enum[0]], f"{padre.percorso}.{enum[1][0]}", padre,
                          valori=r.valori or None, enumeratore=enum, sezione=sezione,
                          componente_di=gruppo_aperto)
-            if not r.valori:
-                raise _Rifiuto("componente_senza_importi", didascalia=r.didascalia)
             padre.figli.append(nodo)
             gruppo_aperto.gruppo.append(nodo)
             continue
         gruppo_aperto = None
         if enum:
             livello = _LIVELLO[enum[0]]
+            if sezione == "ce" and enum[0] == "N" and enum[1][0] in ("20", "21"):
+                # 20) imposte e 21) utile sono voci di primo livello dello schema (art. 2425), mai
+                # figlie di D): se la D) e' stampata vuota e senza totale resterebbe sulla pila.
+                pila = pila[:1]
             while len(pila) > 1 and pila[-1].livello >= livello:
                 pila.pop()
             padre = pila[-1]
@@ -417,7 +624,9 @@ def _costruisci(righe: list[_Riga], colonne: int):
             padre.figli.append(nodo)
             if len(enum[1]) > 1:
                 if not r.valori:
-                    raise _Rifiuto("raggruppamento_senza_importi", didascalia=r.didascalia)
+                    if not vuote_zero:
+                        raise _Rifiuto("raggruppamento_senza_importi", didascalia=r.didascalia)
+                    nodo.valori = [_ZERO] * colonne
                 nodo.gruppo = []
                 nodo.livello = livello
                 gruppo_aperto = nodo
@@ -427,7 +636,9 @@ def _costruisci(righe: list[_Riga], colonne: int):
         if scad:
             padre = pila[-1]
             if not r.valori:
-                raise _Rifiuto("scadenza_senza_importi", didascalia=r.didascalia)
+                if not vuote_zero:
+                    raise _Rifiuto("scadenza_senza_importi", didascalia=r.didascalia)
+                r.valori = [_ZERO] * colonne
             padre.figli.append(_Nodo(r.didascalia, padre.livello + 1, f"{padre.percorso}.{scad}",
                                      padre, valori=r.valori, scadenza=scad, sezione=sezione))
             continue
@@ -891,22 +1102,44 @@ def estrai(file_path: str) -> Optional[dict]:
     """None se il documento non e' un PDF reso da XBRL; altrimenti un candidato: adottabile solo
     quando OGNI controllo chiude al centesimo (totali stampati riprodotti dalle righe, attivo =
     passivo, risultato CE = ``sp13`` = utile stampato). Il candidato rifiutato nomina il controllo
-    fallito in ``rifiuto`` e non porta mai dati: il chiamante prosegue come prima."""
+    fallito in ``rifiuto`` e non porta mai dati: il chiamante prosegue come prima.
+
+    Due letture, nell'ordine (Task 26, fix 2): il testo a blocchi (importi in ordine di colonna) e,
+    solo se questa non chiude, la geometria (importi nella colonna che dice la loro posizione, la
+    cella vuota e' uno zero). Gli stessi controlli, nessuna tolleranza: la seconda lettura non
+    allarga nulla, e un file che la prima adotta resta quello della prima."""
     if not riconosci(file_path):
         return None
+    primo = _estrai_con(file_path, geometria=False)
+    if primo is None or primo["adottabile"]:
+        return primo
+    secondo = _estrai_con(file_path, geometria=True)
+    if secondo is not None and secondo["adottabile"]:
+        secondo["lettura"] = "geometria"
+        return secondo
+    if secondo is not None:
+        primo["rifiuto_geometria"] = secondo["rifiuto"]
+    return primo
+
+
+def _estrai_con(file_path: str, geometria: bool) -> Optional[dict]:
     try:
         documento = fitz.open(file_path)
     except Exception:
         return None
     with documento:
-        righe, colonne, anni = _leggi_righe(documento)
+        try:
+            righe, colonne, anni = (_leggi_righe_geometria(documento) if geometria
+                                    else _leggi_righe(documento))
+        except _Rifiuto as exc:
+            return _rifiutato([], exc.controllo, **exc.dettaglio)
         if not righe or not colonne:
             return _rifiutato(anni, "prospetto_non_letto")
         if len(anni) >= 2 and anni[1] > anni[0]:
             # intestazioni invertite (`2024 | 2025`): la prima colonna non e' l'anno corrente
             return _rifiutato(anni, "anni_invertiti", anni_letti=list(anni), motivo="la seconda colonna e' piu' recente della prima")
         try:
-            radici, calcolati, totali, errori = _costruisci(righe, colonne)
+            radici, calcolati, totali, errori = _costruisci(righe, colonne, vuote_zero=geometria)
             colonne_dati = [_importi_colonna(radici, c) for c in range(colonne)]
         except _Rifiuto as exc:
             return _rifiutato(anni, exc.controllo, **exc.dettaglio)

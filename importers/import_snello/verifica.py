@@ -1,5 +1,5 @@
 """Verifica del percorso snello: stesse formule dell'app (campi di quadratura, risultato CE canonico),
-soglia relativa, tappo dichiarato entro soglia su altri crediti, altri debiti, servizi (decisione del
+soglia relativa, tappo dichiarato (max 10 euro, 2026-10-03) su altri crediti, altri debiti, servizi (decisione del
 proprietario, 2026-09-26). Oltre soglia non si tocca nulla: decide il chiamante."""
 from __future__ import annotations
 
@@ -16,6 +16,21 @@ def soglia(totale_attivo: Decimal) -> Decimal:
     minimo = Decimal(str(config.IMPORT_SNELLO_SOGLIA_MIN))
     pct = Decimal(str(config.IMPORT_SNELLO_SOGLIA_PCT))
     return max(minimo, abs(Decimal(totale_attivo)) * pct / 100).quantize(_C)
+
+
+def soglia_tappo() -> Decimal:
+    """Il massimo scarto che un tappo dichiarato puo' chiudere, per controllo (SP e CE ciascuno):
+    10,00 euro assoluti (decisione del proprietario, 2026-10-03). Non e' ``soglia``: quella resta
+    la tolleranza relativa del confronto col totale stampato e del cancello sulla massa non
+    classificata dei candidati deterministici (Task 18). I due numeri coincidevano per costruzione
+    di ``tappa``; ora sono separati."""
+    return Decimal(str(config.IMPORT_SNELLO_TAPPO_MAX)).quantize(_C)
+
+
+def limite_tappo(s: Decimal) -> Decimal:
+    """Il limite di scarto interno (SP e CE) per un tappo, sotto la soglia relativa ``s``: l'unico
+    posto dove si decide (``tappa`` e il percorso snello lo usano entrambi)."""
+    return min(s, soglia_tappo())
 
 
 def _coerente(letti: dict, tolleranza: Decimal) -> bool:
@@ -170,7 +185,11 @@ def _aggiungi(d: dict, campo: str, aggregato: str, v: Decimal) -> None:
 def tappa(bs: dict, ce: dict, m: dict, s: Decimal):
     if m["attivo"] == 0 and m["passivo"] == 0:   # estrazione vuota: mai "ok"
         return bs, ce, None, "vuoto"
-    if abs(m["scarto_sp"]) > s or abs(m["scarto_ce"]) > s or m["scarto_stampati"] > s:
+    # Il tappo chiude al massimo ``soglia_tappo()`` per controllo (mai oltre ``s``), e lo stesso
+    # limite vale per il confronto col totale stampato dal documento (decisione del proprietario
+    # 2026-10-03): oltre, si rilegge e poi si salva squadrato con avviso.
+    massimo = limite_tappo(s)
+    if abs(m["scarto_sp"]) > massimo or abs(m["scarto_ce"]) > massimo or m["scarto_stampati"] > massimo:
         return bs, ce, None, "oltre_soglia"
     if m["scarto_sp"] == 0 and m["scarto_ce"] == 0:
         return bs, ce, None, "ok"
@@ -179,7 +198,7 @@ def tappa(bs: dict, ce: dict, m: dict, s: Decimal):
         nuovo_ce06 = (Decimal(ce.get("ce06_servizi", 0)) + m["scarto_ce"]).quantize(_C)
         if nuovo_ce06 < 0:        # ma non sotto zero: il tappo non si applica, nulla si tocca
             return bs, ce, None, "oltre_soglia"
-    bs, ce, tappo = dict(bs), dict(ce), {"soglia": str(s)}
+    bs, ce, tappo = dict(bs), dict(ce), {"soglia": str(massimo)}
     if m["scarto_sp"] > 0:        # attivo in piu': manca passivo
         _aggiungi(bs, "sp16g_altri_debiti_breve", "sp16_debiti_breve", m["scarto_sp"])
         tappo.update(campo="sp16g_altri_debiti_breve", importo=str(m["scarto_sp"]))

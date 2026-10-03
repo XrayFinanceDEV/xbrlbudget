@@ -220,6 +220,7 @@ GX10_MODEL = _os.environ.get("GX10_MODEL", "qwen3.8-flash-next")
 STRUTTURA_MODEL = _os.environ.get("STRUTTURA_MODEL", "claude-sonnet-5-5")  # mappa della struttura (vision)
 IMPORT_SNELLO_SOGLIA_MIN = _os.environ.get("IMPORT_SNELLO_SOGLIA_MIN", "100")    # euro
 IMPORT_SNELLO_SOGLIA_PCT = _os.environ.get("IMPORT_SNELLO_SOGLIA_PCT", "0.1")    # % del totale attivo
+IMPORT_SNELLO_TAPPO_MAX = _os.environ.get("IMPORT_SNELLO_TAPPO_MAX", "10")        # euro: massimo scarto chiuso da un tappo (2026-10-03)
 
 # Scenario Types
 SCENARIO_TYPE_BUDGET = "budget"

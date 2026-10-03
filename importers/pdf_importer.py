@@ -132,23 +132,43 @@ def _snello_squadrato_reason(report: Dict[str, Any]) -> str:
             return str(valore)
 
     if report.get("causa") == "documento_sbilanciato":
-        # Nessuna rilettura e' avvenuta: i totali che il documento stampa si contraddicono fra
-        # loro e le voci lette li riproducono (Task 25, round 2).
-        try:
-            scarto = f"€{_euro_it(abs(Decimal(str(misura.get('scarto_sp')))))}"
-        except Exception:
-            scarto = "n/d"
-        return (
-            f"{_UNBALANCED_WARNING_PREFIX}: il Totale Attivo e il Totale Passivo stampati dal "
-            f"documento differiscono di {scarto}, e le voci lette li riproducono. Il bilancio è "
-            f"stato importato così com'è: correggilo in Rettifiche oppure carica una versione "
-            f"quadrata del bilancio."
-        )
+        # Nessuna rilettura e' avvenuta: il documento si contraddice da solo e le voci lette lo
+        # riproducono (Task 25 round 2: i totali; Task 27: il risultato SP/CE). Una frase per
+        # contraddizione; un rapporto senza ``contraddizioni`` e' quello dei totali, come prima.
+        tipi = report.get("contraddizioni") or [{"tipo": "totali"}]
+        frasi = []
+        for c in tipi:
+            if c.get("tipo") == "risultato":
+                try:
+                    sp, ce, diff = (f"€{_euro_it(Decimal(str(c[k])))}" for k in ("sp", "ce", "differenza"))
+                except Exception:
+                    sp = ce = diff = "n/d"
+                frasi.append(
+                    f"il risultato dell'esercizio stampato nello Stato Patrimoniale ({sp}) e quello "
+                    f"stampato nel Conto Economico ({ce}) differiscono di {diff}, e le voci lette "
+                    f"li riproducono.")
+            else:
+                try:
+                    scarto = f"€{_euro_it(abs(Decimal(str(misura.get('scarto_sp')))))}"
+                except Exception:
+                    scarto = "n/d"
+                frasi.append(
+                    f"il Totale Attivo e il Totale Passivo stampati dal documento differiscono di "
+                    f"{scarto}, e le voci lette li riproducono.")
+        solo_totali = all(c.get("tipo") != "risultato" for c in tipi)
+        chiusura = ("Il bilancio è stato importato così com'è: correggilo in Rettifiche oppure "
+                    "carica una versione quadrata del bilancio." if solo_totali else
+                    "Il bilancio è stato importato così com'è (bilancio squadrato di partenza): "
+                    "correggilo in Rettifiche oppure carica una versione coerente del bilancio.")
+        return f"{_UNBALANCED_WARNING_PREFIX}: {' '.join(frasi)} {chiusura}"
+    _precedente = (" L'anno precedente (colonna comparativa) non è stato importato: "
+                   "puoi inserirlo in Rettifiche."
+                   if report.get("precedente") == "non_letto_dalla_lettura_deterministica" else "")
     return (
         f"{_UNBALANCED_WARNING_PREFIX}: il percorso snello resta oltre soglia dopo "
         f"l'unica rilettura (scarto Attivo/Passivo {_fmt('scarto_sp')}, scarto CE/SP "
         f"{_fmt('scarto_ce')}, scarto sui totali stampati dal documento "
-        f"{_fmt('scarto_stampati')}). {_UNBALANCED_WARNING_SUFFIX}"
+        f"{_fmt('scarto_stampati')}). {_UNBALANCED_WARNING_SUFFIX}{_precedente}"
     )
 
 
@@ -977,6 +997,13 @@ def import_pdf_balance_sheet(
                 }
             else:
                 from importers import import_snello
+                # Decisione del proprietario, 2026-10-03: un riepilogo a sole macro-voci non e'
+                # un bilancio e non si importa - ne' dal percorso snello ne' dal ripiego di
+                # oggi. Riconosciuto dal testo, PRIMA della struttura (nessuna chiamata modello);
+                # stessa uscita degli altri documenti rifiutati (PDFImportError, nulla salvato).
+                from importers.import_snello import riepilogo as _riepilogo
+                if _riepilogo.riconosci_riepilogo(file_path):
+                    raise PDFImportError(_riepilogo.MESSAGGIO)
                 try:
                     # Tutto in locali fino in fondo: un'eccezione IN QUALUNQUE punto di
                     # questo blocco (compreso il calcolo dei totali sotto) non deve

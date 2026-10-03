@@ -264,7 +264,7 @@ def test_legge_tappo_entro_soglia_plug_residual(tmp_path):
 
     def voci(testo, intestazioni, nota=""):
         if intestazioni and intestazioni[0].startswith("SP"):
-            return {"corrente": [("SPA.B.II", D("1000")), ("SPA.C.IV", D("550")),
+            return {"corrente": [("SPA.B.II", D("1000")), ("SPA.C.IV", D("505")),
                                  ("SPP.A.I", D("800")), ("SPP.A.IX", D("100")), ("SPP.D.7", D("600"))],
                     "precedente": [], "totali": {}}
         return {"corrente": [("CE.A.1", D("400")), ("CE.B.7", D("300"))], "precedente": [], "totali": {}}
@@ -273,7 +273,7 @@ def test_legge_tappo_entro_soglia_plug_residual(tmp_path):
     r = S.importa(pdf, analizza=struttura, leggi_voci=voci)
     assert r.report["esito"] == "tappo"
     assert r.report["tappo"]["corrente"]["campo"] == "sp16g_altri_debiti_breve"
-    assert r.bs["_plug_residual"] == D("50.00")
+    assert r.bs["_plug_residual"] == D("5.00")
 
 
 def test_conti_legge_anche_le_pagine_dettaglio(tmp_path, monkeypatch):
@@ -689,3 +689,169 @@ def test_totali_riportati_dal_modello_non_attivano_la_scorciatoia(tmp_path):
     assert len(chiamate) == 3                                # SP, CE, una rilettura
     assert r.report["esito"] == "squadrato"
     assert r.report.get("causa") != "documento_sbilanciato"
+
+
+def test_legge_scarto_di_50_euro_non_si_tappa_piu_rilegge_poi_squadrato(tmp_path):
+    """Decisione del proprietario, 2026-10-03: il tappo chiude al massimo 10,00 euro. Uno scarto
+    SP di 50 euro (entro la vecchia soglia di 100) non si tampona: una rilettura, poi squadrato
+    con lo sbilancio dichiarato, mai un plug."""
+    pdf = _pdf_vuoto(str(tmp_path / "c.pdf"))
+    chiamate = []
+
+    def voci(testo, intestazioni, nota=""):
+        chiamate.append(nota)
+        if intestazioni and intestazioni[0].startswith("SP"):
+            return {"corrente": [("SPA.B.II", D("1000")), ("SPA.C.IV", D("550")),
+                                 ("SPP.A.I", D("800")), ("SPP.A.IX", D("100")), ("SPP.D.7", D("600"))],
+                    "precedente": [], "totali": {}}
+        return {"corrente": [("CE.A.1", D("400")), ("CE.B.7", D("300"))], "precedente": [], "totali": {}}
+
+    struttura = lambda p: _struttura("legge", intestazioni_sp=["SP-2025"], intestazioni_ce=["CE-2025"])
+    r = S.importa(pdf, analizza=struttura, leggi_voci=voci)
+    assert len(chiamate) == 3
+    assert r.report["esito"] == "squadrato"
+    assert r.report["tappo"]["corrente"] is None and r.bs["_plug_residual"] == D("0")
+    assert r.report["misura"]["corrente"]["scarto_sp"] == "50.00"
+
+
+def test_documento_sbilanciato_di_50_euro_si_riconosce_col_tappo_a_10_euro(tmp_path):
+    """Con il tappo a 10 euro lo sbilancio di un documento di 50 euro non e' piu' 'entro
+    soglia': e' un vero sbilancio, e se il documento lo stampa da solo non si rilegge."""
+    pdf = _pdf_con_totali(str(tmp_path / "c.pdf"), "5.050,00", "5.000,00")
+    chiamate = []
+
+    def voci(testo, intestazioni, nota=""):
+        chiamate.append(nota)
+        return {"corrente": [("SPA.C.IV.1", D("5050")), ("SPP.A.I", D("5000"))],
+                "precedente": [], "totali": {}}
+    r = S.importa(pdf, analizza=lambda p: _struttura("legge"), leggi_voci=voci)
+    assert len(chiamate) == 2
+    assert r.report["esito"] == "squadrato" and r.report["causa"] == "documento_sbilanciato"
+
+
+# --- Task 27, decisione 3 (2026-10-03): il risultato stampato nello SP differisce da quello del CE ---
+
+def _pdf_con_risultati(path: str, risultato_sp: str, risultato_ce: str, colonne: int = 2) -> str:
+    """Un PDF a due prospetti che stampa 'Utile (perdita) dell'esercizio' in entrambi, con la
+    colonna corrente e il comparativo (le righe fisiche che ``collect_source_rows`` legge)."""
+    doc = fitz.open()
+    page = doc.new_page()
+    comparativo = " 3.000,00" if colonne == 2 else ""
+    page.insert_text((50, 50), "STATO PATRIMONIALE")
+    page.insert_text((50, 70), f"IX) Utile (perdita) dell'esercizio {risultato_sp}{comparativo}")
+    page.insert_text((50, 100), "CONTO ECONOMICO")
+    page.insert_text((50, 120), f"23) Utile (perdite) dell'esercizio {risultato_ce}{comparativo}")
+    doc.save(path)
+    return path
+
+
+def _voci_con_risultati_diversi(chiamate):
+    def voci(testo, intestazioni, nota=""):
+        chiamate.append(nota)
+        # SP: attivo 5000 = capitale 1000 + utile SP 4000; CE: ricavi 1500 => utile CE 1500
+        return {"corrente": [("SPA.C.IV.1", D("5000")), ("SPP.A.I", D("1000")), ("SPP.A.IX", D("4000")),
+                             ("CE.A.1", D("1500"))],
+                "precedente": [], "totali": {}}
+    return voci
+
+
+def test_risultati_stampati_diversi_non_spendono_la_rilettura_e_si_dichiarano(tmp_path):
+    pdf = _pdf_con_risultati(str(tmp_path / "c.pdf"), "4.000,00", "1.500,00")
+    chiamate = []
+    r = S.importa(pdf, analizza=lambda p: _struttura("legge"), leggi_voci=_voci_con_risultati_diversi(chiamate))
+    assert len(chiamate) == 2                                   # SP e CE, nessuna rilettura
+    assert r.report["esito"] == "squadrato" and r.report["causa"] == "documento_sbilanciato"
+    assert r.report["tappo"]["corrente"] is None and r.bs["_plug_residual"] == D("0")
+    assert r.report["contraddizioni"] == [
+        {"tipo": "risultato", "sp": "4000.00", "ce": "1500.00", "differenza": "2500.00"}]
+
+
+def test_risultati_stampati_non_riprodotti_dalle_voci_rileggono_come_oggi(tmp_path):
+    """Il documento stampa due risultati diversi ma le voci lette NON li riproducono: la lettura
+    e' sospetta, non il documento. Una rilettura, nessuna causa dichiarata."""
+    pdf = _pdf_con_risultati(str(tmp_path / "c.pdf"), "4.300,00", "1.500,00")   # sp13 letto 4.000 != 4.300
+    chiamate = []
+    r = S.importa(pdf, analizza=lambda p: _struttura("legge"), leggi_voci=_voci_con_risultati_diversi(chiamate))
+    assert len(chiamate) == 3
+    assert r.report.get("causa") != "documento_sbilanciato" and "contraddizioni" not in r.report
+
+
+def test_risultati_stampati_uguali_o_con_una_colonna_sola_non_dichiarano_nulla(tmp_path):
+    chiamate = []
+    pdf = _pdf_con_risultati(str(tmp_path / "a.pdf"), "4.000,00", "4.000,00")
+    r = S.importa(pdf, analizza=lambda p: _struttura("legge"), leggi_voci=_voci_con_risultati_diversi(chiamate))
+    assert r.report.get("causa") != "documento_sbilanciato" and len(chiamate) == 3
+    # una riga con un solo importo: non si sa quale anno sia, quindi non e' un'ancora
+    chiamate.clear()
+    pdf = _pdf_con_risultati(str(tmp_path / "b.pdf"), "4.000,00", "1.500,00", colonne=1)
+    r = S.importa(pdf, analizza=lambda p: _struttura("legge"), leggi_voci=_voci_con_risultati_diversi(chiamate))
+    assert r.report.get("causa") != "documento_sbilanciato" and len(chiamate) == 3
+
+
+def test_risultati_stampati_con_codice_davanti_alla_riga_non_lo_scambiano_per_importo():
+    from types import SimpleNamespace as N
+    from importers.import_snello.risultati_stampati import risultati_stampati
+
+    righe = [N(statement="bs", text="2086 A.IX) Utile (Perdita) dell'esercizio 76.336,97 212.835,92"),
+             N(statement="ce", text="4934 21) Utile (Perdita) dell'esercizio 76.336,97 212.835,92")]
+    assert risultati_stampati(righe) == {"sp": D("76336.97"), "ce": D("76336.97")}
+    assert risultati_stampati(righe[:1]) is None                          # manca il CE
+    assert risultati_stampati([N(statement="bs", text="Utile (perdita) prima delle imposte 1.000,00 900,00"),
+                               righe[1]]) is None
+
+
+# --- Task 27, item 7: le coppie (percorso, importo) del modello restano nel report ---
+
+def test_report_porta_le_coppie_dell_anno_corrente_come_stringhe(tmp_path):
+    import json
+
+    pdf = _pdf_vuoto(str(tmp_path / "c.pdf"))
+    r = S.importa(pdf, analizza=lambda p: _struttura("legge"), leggi_voci=_voci_quadrate)
+    coppie = r.report["coppie_corrente"]
+    assert coppie and all(isinstance(c, str) for c in coppie)
+    assert any(c.startswith("SPA.") and "=" in c for c in coppie)
+    json.dumps(r.report["coppie_corrente"])                                     # serializzabile come il resto
+
+
+def test_report_squadrato_porta_le_coppie_e_ok_grande_no(tmp_path, monkeypatch):
+    pdf = _pdf_vuoto(str(tmp_path / "c.pdf"))
+    grandi = [(f"CE.B.7.{i}", D("1")) for i in range(S._MAX_COPPIE_SE_OK + 10)]
+
+    def voci(testo, intestazioni, nota=""):
+        if intestazioni and intestazioni[0].startswith("SP"):
+            return {"corrente": [("SPA.C.IV.1", D("1000")), ("SPP.A.I", D("1000"))], "precedente": [], "totali": {}}
+        return {"corrente": [("CE.A.1", D("100"))] + grandi, "precedente": [], "totali": {}}
+    struttura = lambda p: _struttura("legge", intestazioni_sp=["SP-2025"], intestazioni_ce=["CE-2025"])
+    r = S.importa(pdf, analizza=struttura, leggi_voci=voci)
+    assert r.report["esito"] != "ok" and len(r.report["coppie_corrente"]) == len(grandi) + 3   # SP 2 + CE.A.1
+
+    # un esito ok con troppe coppie non le porta nel report (finisce nel DB con il rapporto)
+    def voci_ok(testo, intestazioni, nota=""):
+        if intestazioni and intestazioni[0].startswith("SP"):
+            return {"corrente": [("SPA.C.IV.1", D("1000")), ("SPP.A.I", D("1000"))], "precedente": [], "totali": {}}
+        return {"corrente": [("CE.A.1", D("0"))] + [(f"CE.B.7.{i}", D("0")) for i in range(S._MAX_COPPIE_SE_OK + 10)],
+                "precedente": [], "totali": {}}
+    r = S.importa(pdf, analizza=struttura, leggi_voci=voci_ok)
+    assert r.report["esito"] == "ok" and "coppie_corrente" not in r.report
+    assert r.report["coppie_corrente_n"] > S._MAX_COPPIE_SE_OK
+
+
+def test_totali_stampati_uguali_con_passivo_letto_60_euro_sotto_rilegge(tmp_path):
+    """Fix round 1 (review Task 27): il documento stampa Totale Attivo = Totale Passivo; uno scarto
+    di lettura di 60 euro (entro la soglia relativa, oltre il limite di 10) NON e' un documento
+    sbilanciato: si rilegge e non si dichiara alcuna causa."""
+    for passivo in ("4940", "4900", "4989"):
+        pdf = _pdf_con_totali(str(tmp_path / f"c{passivo}.pdf"), "5.000,00", "5.000,00")
+        chiamate = []
+
+        def voci(testo, intestazioni, nota="", passivo=passivo):
+            chiamate.append(nota)
+            return {"corrente": [("SPA.C.IV.1", D("5000")), ("SPP.A.I", D(passivo))],
+                    "precedente": [], "totali": {}}
+        r = S.importa(pdf, analizza=lambda p: _struttura("legge"), leggi_voci=voci)
+        assert len(chiamate) == 3, passivo
+        assert r.report.get("causa") != "documento_sbilanciato" and "contraddizioni" not in r.report
+
+
+def test_coppie_nel_report_non_fa_fallire_un_import_riuscito():
+    assert S._coppie_nel_report([("SPA.B", "non numerico")], "ok") == {}

@@ -328,3 +328,69 @@ def test_analizza_struttura_riclassificato_con_captions_legali_e_legge_con_macro
     s = analizza_struttura(pdf, mappa_pagina_fn=lambda client, png: MAPPA_COLONNA_UNICA)
     assert s.modo == "legge"
     assert s.macro_include_dettaglio is True
+
+
+def _pdf_ce_con_coda(tmp_path, righe_coda, nome="coda.pdf"):
+    doc = fitz.open()
+    doc.new_page(width=595, height=842).insert_text((30, 30), "voce 1  100,00", fontname="helv", fontsize=8)
+    p2 = doc.new_page(width=595, height=842)
+    for i, riga in enumerate(righe_coda):
+        p2.insert_text((30, 30 + i * 14), riga, fontname="helv", fontsize=8)
+    path = str(tmp_path / nome)
+    doc.save(path)
+    return path
+
+
+_MAPPE_CE_E_NOTA = [
+    {"pagina": 1, "tipo_pagina": "prospetto_ce", "schema": "iv_cee_di_legge",
+     "sezioni": [{"posizione": "unica", "contenuto": "misto", "colonne": []}], "continuazione": False},
+    {"pagina": 2, "tipo_pagina": "nota_o_testo", "schema": "elenco_piatto", "sezioni": [], "continuazione": False},
+]
+
+# Come l'ultima pagina del CE di budget_115: pochi importi con separatore, tanti zeri e interi < 1.000.
+_CODA_CE_115 = ["CONTO ECONOMICO", "iv) da altri 426 164", "17) Interessi e altri oneri finanziari -610 -986",
+                "17-bis) Utili e perdite su cambi 0 0", "TOTALE -184 -822",
+                "Risultato prima delle imposte 36.929 41.504",
+                "21) utile (perdita) dell'esercizio 36.929 41.504"]
+
+
+def test_continuazione_del_ce_con_il_risultato_si_tiene_anche_con_pochi_importi_con_separatore(tmp_path):
+    """Task 27, item 4 (diagnosi budget_115): l'ultima pagina del CE ha 4 importi con separatore
+    (< MIN_IMPORTI) ma continua la sezione aperta e porta la riga del risultato: zeri e interi
+    sotto 1.000 contano come importi su una pagina cosi', e non si perde 16)/17)."""
+    path = _pdf_ce_con_coda(tmp_path, _CODA_CE_115)
+    out = _assorbi_continuazioni_perse(_MAPPE_CE_E_NOTA, path)
+    assert out[1]["tipo_pagina"] == "prospetto_ce" and out[1]["continuazione"] is True
+
+
+def test_continuazione_senza_chiusura_o_con_pochi_numeri_non_si_assorbe(tmp_path):
+    senza_chiusura = [r for r in _CODA_CE_115 if "utile" not in r and "Risultato" not in r]
+    out = _assorbi_continuazioni_perse(_MAPPE_CE_E_NOTA, _pdf_ce_con_coda(tmp_path, senza_chiusura, "a.pdf"))
+    assert out[1]["tipo_pagina"] == "nota_o_testo"
+    poche = ["CONTO ECONOMICO", "21) utile (perdita) dell'esercizio 36.929 41.504"]
+    out = _assorbi_continuazioni_perse(_MAPPE_CE_E_NOTA, _pdf_ce_con_coda(tmp_path, poche, "b.pdf"))
+    assert out[1]["tipo_pagina"] == "nota_o_testo"
+
+
+def test_continuazione_con_chiusura_non_attraversa_una_sezione_diversa(tmp_path):
+    coda = ["Nota integrativa"] + _CODA_CE_115
+    out = _assorbi_continuazioni_perse(_MAPPE_CE_E_NOTA, _pdf_ce_con_coda(tmp_path, coda, "c.pdf"))
+    assert out[1]["tipo_pagina"] == "nota_o_testo"
+
+
+def test_continuazione_dello_sp_con_totale_passivo(tmp_path):
+    mappe = [dict(_MAPPE_CE_E_NOTA[0], tipo_pagina="prospetto_sp"), _MAPPE_CE_E_NOTA[1]]
+    coda = ["STATO PATRIMONIALE", "E) Ratei e risconti 0 0", "d) Debiti verso altri 905 810",
+            "Altri debiti 18 22", "Ratei e risconti passivi 4.518 3.900", "TOTALE PASSIVO 1.570.211 1.500.000"]
+    out = _assorbi_continuazioni_perse(mappe, _pdf_ce_con_coda(tmp_path, coda, "d.pdf"))
+    assert out[1]["tipo_pagina"] == "prospetto_sp" and out[1]["continuazione"] is True
+
+
+def test_nota_che_cita_la_perdita_dell_esercizio_in_prosa_non_e_una_continuazione(tmp_path):
+    """La chiusura e' una RIGA che comincia col risultato, non una frase di nota che lo cita
+    (budget_272, misurato sul corpus: una pagina di nota con importi sparsi e 'perdita
+    dell'esercizio di Euro 5.570' a meta' riga)."""
+    coda = ["CONTO ECONOMICO", "1 2 3 4 5 6 7 8", "Si propone di coprire la perdita dell'esercizio di",
+            "Euro 5.570 mediante impiego della riserva straordinaria 0 0 12"]
+    out = _assorbi_continuazioni_perse(_MAPPE_CE_E_NOTA, _pdf_ce_con_coda(tmp_path, coda, "e.pdf"))
+    assert out[1]["tipo_pagina"] == "nota_o_testo"

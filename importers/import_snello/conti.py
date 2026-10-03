@@ -59,7 +59,11 @@ def _corsia(f, due_lati: bool):
 # materie prime, convenzione OIC: un aumento di giacenza riduce il costo). Nessun'altra voce
 # IV-CEE e' una "variazione": ce09c/ce09d sono svalutazioni (sempre un costo, mai negative), gli
 # aggregati ce18/ce19 sono gia' separati per segno (proventi/oneri straordinari), non voci nette.
-_CE_SEGNO_LIBERO = {"ce02", "ce03", "ce10"}
+# Task 27, item 6 (diagnosi budget_397): anche ce16 (17-bis, utili e perdite su cambi) e' un netto a
+# segno libero - una perdita stampata (1.059) e' una perdita, non un utile: con ``abs`` il risultato
+# si spostava di 2x il suo importo. ce13/ce14 (proventi da partecipazioni, altri proventi
+# finanziari) restano a segno fisso: un provento non e' mai negativo.
+_CE_SEGNO_LIBERO = {"ce02", "ce03", "ce10", "ce16"}
 
 # Solo modo "legge" (da_coppie): RIMBORSO/RIMBORSI e RETTIFICA/RETTIFICHE sono state tolte dal
 # giro precedente (fix round 1) - "Rimborsi" e' spesso una voce di ricavo NORMALE (TM 589: un
@@ -84,7 +88,7 @@ def _e_rettifica_esplicita(testo: str) -> bool:
 # (valore della produzione): seguono la convenzione di stampa dei RICAVI, mai quella dei costi.
 # ce10 (OIC B.11) sta fra i costi e segue la convenzione dei costi (fix round 1 Task 24, F2:
 # budget_297, ricavi positivi e costi negativi, ce02 +30.077 stampato letto -30.077, scarto 2x).
-_CE_SEGNO_LIBERO_RICAVI = {"ce02", "ce03"}
+_CE_SEGNO_LIBERO_RICAVI = {"ce02", "ce03", "ce16"}
 
 
 def _segno_ce_legge(codice: str, valore: Decimal, testo: str, convenzione: int,
@@ -733,7 +737,7 @@ def da_coppie(coppie):
     dedurre un lato: il percorso e' gia' la voce di legge (non un mastro di ledger), quindi non
     c'e' mai una didascalia di rettifica da leggere (``_e_rettifica_esplicita`` non trova mai
     nulla: ``da_coppie`` non porta testo). Un campo CE a segno fisso prende il valore assoluto;
-    un campo a segno libero (``_CE_SEGNO_LIBERO``: ce02, ce03, ce10) prende il segno letto
+    un campo a segno libero (``_CE_SEGNO_LIBERO``: ce02, ce03, ce10, ce16) prende il segno letto
     MOLTIPLICATO per la convenzione di stampa del documento (``_convenzione_costi``, fix round 2,
     2026-09-28: il fix precedente lasciava il segno libero invariato, ignorando che la stessa
     convenzione che stampa i costi negativi riguarda anche un campo a segno libero -

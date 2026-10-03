@@ -332,13 +332,62 @@ def marca_totali(righe: list[Riga]) -> Counter:
     return Counter({direzione: trovati_totale}) if trovati_totale else Counter()
 
 
+_VALUTA = {"euro", "eur", "€"}
+_MIN_CAMPIONI_COLONNA = 8
+_DISTANZA_FUORI_COLONNA = 60.0
+
+
+def _importo_in_descrizione(r, riferimento: float | None) -> str | None:
+    """Task 27, item 5 (diagnosi budget_243): un importo che sta DENTRO la descrizione di un conto
+    («beni di valore inferiore euro 516,46») non e' un saldo. Il token e' quello che segue
+    «euro»/«eur»/«€» in una riga che stampa UN SOLO importo, e che sta ben a sinistra della colonna
+    degli importi della pagina (``riferimento``: il 25esimo percentile delle posizioni di tutti gli
+    importi di quella pagina e lato). Una riga con piu' importi («Rettifiche per arrotondamento Euro
+    393,82 1.027,37») ha la valuta come prefisso della prima colonna, e un importo allineato alle
+    altre righe («Cassa Euro 239.126,40») e' una colonna con la valuta davanti: nessuno dei due si
+    tocca. Senza un riferimento (pochi campioni) nessun verdetto: l'importo resta."""
+    if riferimento is None or len(r.amounts) != 1 or not r.positions or len(importi(r.text)) != 1:
+        # ``importi`` conta anche gli importi che il lettore fisico non vede (cifre sporche di
+        # sottolineature: '703115 000 - beni inf. euro 516,46 _1_.46_1_,_8_6_', budget_615): una
+        # riga che ne ha un secondo ha il saldo dopo la descrizione, mai dentro.
+        return None
+    toks = r.text.split()
+    for i, t in enumerate(toks[1:], 1):
+        if toks[i - 1].lower().strip(".:") in _VALUTA and (_AMT.match(t) or _MIGLIAIA.match(t)):
+            return t if r.positions[0] < riferimento - _DISTANZA_FUORI_COLONNA else None
+    return None
+
+
+def _riferimenti_colonna(rows) -> dict[tuple, float]:
+    """Per pagina e lato, il 25esimo percentile della posizione (x) degli importi: la colonna dei
+    saldi. Solo con abbastanza campioni."""
+    xs: dict[tuple, list[float]] = defaultdict(list)
+    for r in rows:
+        xs[(r.page, r.side)].extend(r.positions)
+    out = {}
+    for chiave, v in xs.items():
+        if len(v) >= _MIN_CAMPIONI_COLONNA:
+            v = sorted(v)
+            out[chiave] = v[len(v) // 4]
+    return out
+
+
 def righe_da_pdf(file_path: str, pagine: set[int] | None, ruoli: list[str],
                  ocr_text: str | None = None) -> list[Riga]:
     from importers.detail_enrichment import collect_source_rows
     regola = regola_colonna(ruoli)
     out = []
-    for r in collect_source_rows(file_path, ocr_text=ocr_text):
+    rows = collect_source_rows(file_path, ocr_text=ocr_text)
+    riferimenti = _riferimenti_colonna(rows)
+    for r in rows:
         if pagine and r.page not in pagine:
+            continue
+        in_descrizione = _importo_in_descrizione(r, riferimenti.get((r.page, r.side)))
+        if in_descrizione:
+            # L'importo resta nella descrizione, e il saldo della riga non c'e': ne' la
+            # lettura per colonna ne' la sottrazione dell'importo dall'etichetta lo vedono.
+            out.append(Riga(id=r.id, pagina=r.page, lato=r.side, testo=re.sub(r"\s+", " ", r.text).strip(),
+                            valore=None, sezione=r.statement))
             continue
         out.append(Riga(id=r.id, pagina=r.page, lato=r.side, testo=etichetta(r.text),
                         valore=saldo(r, regola), sezione=r.statement))

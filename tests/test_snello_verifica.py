@@ -3,7 +3,7 @@ from decimal import Decimal as D
 import fitz
 import pytest
 
-from importers.import_snello.verifica import misura, normalizza_forma, soglia, tappa, totali_stampati
+from importers.import_snello.verifica import misura, normalizza_forma, soglia, soglia_tappo, tappa, totali_stampati
 
 
 def _bs(**kw):
@@ -39,17 +39,54 @@ def test_forma_verifica_sposta_il_risultato_dell_anno_prima():
 
 
 def test_tappo_entro_soglia_su_altri_debiti_e_crediti():
-    bs = _bs(sp09_disponibilita_liquide="550")                   # attivo in piu' di 50
+    bs = _bs(sp09_disponibilita_liquide="508")                   # attivo in piu' di 8
     bs2, ce2, tappo, esito = tappa(bs, CE, misura(bs, CE), D("100"))
-    assert esito == "tappo" and tappo["campo"] == "sp16g_altri_debiti_breve" and tappo["importo"] == "50.00"
-    assert bs2["sp16g_altri_debiti_breve"] == D("50.00") and bs2["sp16_debiti_breve"] == D("650.00")
-    bs = _bs(sp09_disponibilita_liquide="470")                   # attivo in meno di 30
+    assert esito == "tappo" and tappo["campo"] == "sp16g_altri_debiti_breve" and tappo["importo"] == "8.00"
+    assert bs2["sp16g_altri_debiti_breve"] == D("8.00") and bs2["sp16_debiti_breve"] == D("608.00")
+    bs = _bs(sp09_disponibilita_liquide="495")                   # attivo in meno di 5
     bs3, _, tappo, _ = tappa(bs, CE, misura(bs, CE), D("100"))
-    assert tappo["campo"] == "sp06g_crediti_altri_breve" and bs3["sp06_crediti_breve"] == D("30.00")
+    assert tappo["campo"] == "sp06g_crediti_altri_breve" and bs3["sp06_crediti_breve"] == D("5.00")
+
+
+def test_tappo_massimo_dieci_euro_decisione_proprietario_2026_10_03():
+    """Il tappo chiude al massimo 10,00 euro per controllo (SP e CE ciascuno), qualunque sia
+    la soglia relativa: 10,00 si tampona, 10,01 no (oltre soglia: rilettura, poi squadrato)."""
+    assert soglia_tappo() == D("10.00")
+    bs = _bs(sp09_disponibilita_liquide="510")
+    assert tappa(bs, CE, misura(bs, CE), D("100"))[3] == "tappo"
+    bs = _bs(sp09_disponibilita_liquide="510.01")
+    bs2, _, tappo, esito = tappa(bs, CE, misura(bs, CE), D("100"))
+    assert esito == "oltre_soglia" and tappo is None and bs2 == bs
+    bs = _bs(sp09_disponibilita_liquide="490")
+    assert tappa(bs, CE, misura(bs, CE), D("100"))[3] == "tappo"
+    bs = _bs(sp09_disponibilita_liquide="489.99")
+    assert tappa(bs, CE, misura(bs, CE), D("100"))[3] == "oltre_soglia"
+    ce = {"ce01_ricavi_vendite": D("400"), "ce06_servizi": D("289.99")}   # utile CE 110,01: scarto 10,01
+    assert tappa(_bs(), ce, misura(_bs(), ce), D("100"))[3] == "oltre_soglia"
+    ce = {"ce01_ricavi_vendite": D("400"), "ce06_servizi": D("290")}      # scarto 10,00
+    assert tappa(_bs(), ce, misura(_bs(), ce), D("100"))[3] == "tappo"
+
+
+def test_scarto_sui_totali_stampati_al_massimo_dieci_euro_decisione_proprietario_2026_10_03():
+    """Decisione del proprietario (2026-10-03): anche il confronto con il totale che il documento
+    stampa tollera al massimo 10 euro, come il tappo. Prima restava sulla soglia relativa (almeno
+    100 euro): 50 euro di attivo stampato non letti passavano come "ok". Oltre i 10 euro si
+    rilegge e, se non torna, si salva squadrato con avviso: l'utente corregge in Rettifiche."""
+    bs = _bs()
+    m = misura(bs, CE, {"totale_attivo": D("1550")})
+    assert m["scarto_stampati"] == D("50.00")
+    assert tappa(bs, CE, m, D("100"))[3] == "oltre_soglia"
+    m = misura(bs, CE, {"totale_attivo": D("1510")})
+    assert tappa(bs, CE, m, D("100"))[3] == "ok"
+    m = misura(bs, CE, {"totale_attivo": D("1511")})
+    assert tappa(bs, CE, m, D("100"))[3] == "oltre_soglia"
+    # mai oltre la soglia relativa quando questa e' piu' bassa (mai il caso reale: minimo 100)
+    m = misura(bs, CE, {"totale_attivo": D("1508")})
+    assert tappa(bs, CE, m, D("5"))[3] == "oltre_soglia"
 
 
 def test_tappo_ce_su_servizi():
-    ce = {"ce01_ricavi_vendite": D("400"), "ce06_servizi": D("290")}   # utile CE 110 contro sp13 100
+    ce = {"ce01_ricavi_vendite": D("400"), "ce06_servizi": D("295")}   # utile CE 105 contro sp13 100
     bs2, ce2, tappo, esito = tappa(_bs(), ce, misura(_bs(), ce), D("100"))
     assert esito == "tappo" and ce2["ce06_servizi"] == D("300.00") and tappo["ce"]["campo"] == "ce06_servizi"
 
@@ -81,10 +118,10 @@ def test_forma_esplicita_non_maschera_lo_scarto_reale():
 
 
 def test_tappo_ce_negativo_si_rifiuta():
-    ce = {"ce01_ricavi_vendite": D("50"), "ce06_servizi": D("5")}   # utile CE 45 contro sp13 100 (scarto -55)
+    ce = {"ce01_ricavi_vendite": D("97"), "ce06_servizi": D("2")}   # utile CE 95 contro sp13 100 (scarto -5)
     m = misura(_bs(), ce, forma="bilancio")
     bs2, ce2, tappo, esito = tappa(_bs(), ce, m, D("100"))
-    assert esito == "oltre_soglia" and tappo is None and ce2["ce06_servizi"] == D("5")
+    assert esito == "oltre_soglia" and tappo is None and ce2["ce06_servizi"] == D("2")
 
 
 def test_forma_invalida_solleva():

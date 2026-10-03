@@ -65,9 +65,25 @@ def _esito(nome: str, bs_raw: dict, ce_raw: dict, stampati_raw: dict | None) -> 
         return {"adottato": False, "parser": nome, "esito": "vuoto"}
     stampati = {k: v for k, v in (stampati_raw or {}).items() if v is not None} or None
     bs, ce, tappo, esito, m = _verifica_bilancio(bs, ce, stampati)
+    massa = Decimal(bs.get("_unclassified_mass", 0) or 0)
+    s = soglia(m["attivo"])
     if esito not in ("ok", "tappo"):
-        return {"adottato": False, "parser": nome,
-                "esito": "vuoto" if esito == "vuoto" else "oltre_soglia"}
+        if esito == "vuoto":
+            return {"adottato": False, "parser": nome, "esito": "vuoto"}
+        if massa > s:
+            # Task 28 fix 1: la massa non classificata si controlla PRIMA - una lettura di cui
+            # non ci si fida non e' mai un ripiego, sbilanciata o no.
+            return {"adottato": False, "parser": nome, "esito": "massa_non_classificata",
+                    "unclassified_mass": str(massa.quantize(_C))}
+        out = {"adottato": False, "parser": nome, "esito": "oltre_soglia"}
+        # Task 28 (fix 2): ripiego solo per una lettura VICINA - il peggiore scarto entro la
+        # soglia relativa (il vecchio limite del tappo, max(100 euro, 0,1% dell'attivo)). Una
+        # lettura lontana non prende il posto del ripiego sull'importatore vecchio.
+        peggiore = max(abs(m["scarto_sp"]), abs(m["scarto_ce"]), abs(m["scarto_stampati"]))
+        if peggiore <= s:
+            # SENZA tappo (tappa() non l'ha toccata); vuoto/errore/reso falliti non portano nulla.
+            out["lettura"] = {"bs": bs, "ce": ce, "misura": m}
+        return out
     # Ruling (a), Task 18 (2026-09-27): quadrare da solo non basta piu'. Un candidato
     # bilanciato la cui massa non classificata (dichiarata dal parser sottostante, mai un
     # hardcoded zero) supera la STESSA soglia che verifica.tappa() usa per lo scarto
@@ -78,8 +94,6 @@ def _esito(nome: str, bs_raw: dict, ce_raw: dict, stampati_raw: dict | None) -> 
     # deterministico invece li dichiarava "puliti" a zero chiamate). La massa resta
     # dichiarata (mai scartata), solo non best-effort-adottata: il chiamante prosegue col
     # percorso Qwen di oggi, invariato.
-    massa = Decimal(bs.get("_unclassified_mass", 0) or 0)
-    s = soglia(m["attivo"])
     if massa > s:
         return {"adottato": False, "parser": nome, "esito": "massa_non_classificata",
                 "unclassified_mass": str(massa.quantize(_C))}

@@ -547,3 +547,31 @@ def test_avviso_del_documento_sbilanciato_ha_la_sua_frase():
     assert "Rettifiche" in testo
     altro = pdf_importer._snello_squadrato_reason({"misura": rapporto["misura"]})
     assert "rilettura" in altro                                  # le altre cause: invariate
+
+
+def test_avviso_del_risultato_sp_ce_diverso_nomina_le_due_cifre_e_la_differenza():
+    """Task 27 (decisione 3): una frase per contraddizione, con le due cifre stampate e la loro
+    differenza; dice che il bilancio e' stato importato com'e' («bilancio squadrato di partenza»)
+    e invita a correggere in Rettifiche o a caricare una versione coerente."""
+    rapporto = {"causa": "documento_sbilanciato",
+                "contraddizioni": [{"tipo": "risultato", "sp": "321232.51", "ce": "152355.30",
+                                    "differenza": "168877.21"}],
+                "misura": {"corrente": {"scarto_sp": "0.00", "scarto_ce": "-168877.21", "scarto_stampati": "0.00"}}}
+    testo = pdf_importer._snello_squadrato_reason(rapporto)
+    assert testo.startswith("BILANCIO SBILANCIATO")
+    assert "321.232,51" in testo and "152.355,30" in testo and "168.877,21" in testo
+    assert "Stato Patrimoniale" in testo and "Conto Economico" in testo
+    assert "squadrato di partenza" in testo and "Rettifiche" in testo and "coerente" in testo
+    assert "rilettura" not in testo and "Totale Attivo" not in testo
+    assert testo.count("168.877,21") == 1
+
+
+def test_avviso_con_due_contraddizioni_ha_una_frase_ciascuna_senza_duplicati():
+    rapporto = {"causa": "documento_sbilanciato",
+                "contraddizioni": [{"tipo": "totali"},
+                                   {"tipo": "risultato", "sp": "100.00", "ce": "40.00", "differenza": "60.00"}],
+                "misura": {"corrente": {"scarto_sp": "-24974.95", "scarto_ce": "-60.00", "scarto_stampati": "0.00"}}}
+    testo = pdf_importer._snello_squadrato_reason(rapporto)
+    assert testo.count("Totale Attivo") == 1 and testo.count("24.974,95") == 1
+    assert testo.count("€60,00") == 1 and testo.count("Rettifiche") == 1
+    assert testo.count("BILANCIO SBILANCIATO") == 1

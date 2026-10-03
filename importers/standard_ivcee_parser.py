@@ -795,27 +795,34 @@ def _parse_column(rows: Sequence[_Row], column: int) -> Optional[Dict[str, Decim
             ) + _extra(("ii) immobilizzazioni materiali",)),
             start=(imm_i if imm_i is not None else b_imm) + 1,
         )
-        imm_iii = _find_variant(
-            asset_rows,
-            (
-                ("iii. finanziarie",),
-                ("iii. immobilizzazioni finanziarie",),
-                ("b.iii) immobilizzazioni finanziarie",),
-                ("iii - immobilizzazioni finanziarie",),
-            ) + _extra(("iii) immobilizzazioni finanziarie",)),
-            start=imm_ii + 1,
+        _imm_iii_varianti = (
+            ("iii. finanziarie",),
+            ("iii. immobilizzazioni finanziarie",),
+            ("b.iii) immobilizzazioni finanziarie",),
+            ("iii - immobilizzazioni finanziarie",),
+        ) + _extra(("iii) immobilizzazioni finanziarie",))
+        # Task 26 (fix 1c): con ``varianti`` "III - Immobilizzazioni finanziarie" e' opzionale come
+        # le altre (stampata solo se non zero): assente vale zero, mai una posizione inventata.
+        imm_iii = (
+            _find_variant_opt(asset_rows, _imm_iii_varianti, start=imm_ii + 1)
+            if _VARIANTI.get()
+            else _find_variant(asset_rows, _imm_iii_varianti, start=imm_ii + 1)
         )
-        c_att = _find(asset_rows, "c) attivo circolante", start=imm_iii + 1)
+        imm_fine = imm_iii if imm_iii is not None else imm_ii
+        c_att = _find(asset_rows, "c) attivo circolante", start=imm_fine + 1)
 
         sp02 = (
             _block_value(asset_rows, imm_i, imm_ii, column)
             if imm_i is not None else Decimal("0")
         )
-        sp03 = _block_value(asset_rows, imm_ii, imm_iii, column)
-        sp04 = _block_value(asset_rows, imm_iii, c_att, column)
+        sp03 = _block_value(asset_rows, imm_ii, imm_iii if imm_iii is not None else c_att, column)
+        sp04 = (
+            _block_value(asset_rows, imm_iii, c_att, column)
+            if imm_iii is not None else Decimal("0")
+        )
         total_imm = _section_total_value(
             asset_rows, b_imm, c_att, ("totale immobilizzazioni",), column,
-            search_start=imm_iii + 1,
+            search_start=imm_fine + 1,
         )
 
         # "I. Rimanenze" is printed only when non-zero (#23 diagnosis: absent
@@ -862,6 +869,18 @@ def _parse_column(rows: Sequence[_Row], column: int) -> Optional[Dict[str, Decim
         sp06 = _sum_maturity(asset_rows, cred_i, cred_end, column, "entro")
         sp07 = _sum_maturity(asset_rows, cred_i, cred_end, column, "oltre")
         total_crediti = _block_value(asset_rows, cred_i, cred_end, column)
+        if _VARIANTI.get() and not _close(sp06 + sp07, total_crediti):
+            # Task 26 (fix 1a): "imposte anticipate" stampata a parte, a livello della didascalia
+            # dei crediti e fuori dal blocco "esigibili entro" (budget_320: 446,00). Non porta
+            # scadenza: si somma ai crediti a breve, per prudenza, e SOLO se cosi' i crediti
+            # chiudono al centesimo sul totale stampato (mai un importo che nessuno ha letto).
+            a_parte = sum(
+                (r.value(column) or Decimal("0") for r in asset_rows[cred_i + 1:cred_end]
+                 if re.match(r"^(?:\d+ )?imposte anticipate$", r.label)),
+                Decimal("0"),
+            )
+            if a_parte != 0 and _close(sp06 + sp07 + a_parte, total_crediti):
+                sp06 += a_parte
         sp08 = (
             _block_value(asset_rows, fin_i, liq_i, column)
             if fin_i is not None else Decimal("0")
@@ -1963,6 +1982,32 @@ def _extract_income(
         document.close()
 
 
+def _unisci_righe_codice(rows: List[_Row]) -> List[_Row]:
+    """Una didascalia che va a capo (budget_379: "a.5) altri ricavi e proventi, con separata
+    indicazione dei contributi in conto esercizio") stampa il codice e gli importi su una riga
+    poco piu' in basso, centrata in verticale: oltre la tolleranza di ``_physical_rows`` l'importo
+    resta su una riga che ha per etichetta il solo codice, e la didascalia sopra risulta a zero.
+    Si unisce la riga col solo codice numerico (e almeno un importo) alla riga precedente, della
+    stessa pagina, che non porta importi e che e' una didascalia (non un conto), a non piu' di 6 pt.
+    Solo per la lettura delle didascalie (``varianti``): i parser storici non la fanno."""
+    out: List[_Row] = []
+    for r in rows:
+        if (
+            out
+            and re.fullmatch(r"\d[\d.]*", r.label)
+            and any(v is not None for v in r.values)
+            and r.page == out[-1].page
+            and 0 < r.y - out[-1].y <= 6
+            and out[-1].label
+            and all(v is None for v in out[-1].values)
+            and not _is_account_row(out[-1])
+        ):
+            prev = out.pop()
+            r = _Row(r.page, prev.y, f"{prev.label} {r.label}", r.values)
+        out.append(r)
+    return out
+
+
 def _didascalie_rows(
     document: fitz.Document,
 ) -> Optional[Tuple[List[_Row], int, str]]:
@@ -1987,13 +2032,18 @@ def _didascalie_rows(
             rows, kind = _physical_rows(document, centres), "parole"
         else:
             rows, kind = _single_column_rows(document), "singola"
-    kept, dropped = _caption_rows(rows)
+    kept, dropped = _caption_rows(_unisci_righe_codice(rows))
     return kept, dropped, kind
 
 
 # Una didascalia dello schema di legge: lettera, numero romano o numero arabo con la parentesi
 # (A) B) I) II) 1) 5-bis)), oppure "Totale ...". Contano solo quelle che portano un importo.
-_LEGAL_CAPTION = re.compile(r"^(?:[a-e]|[ivx]+|\d+(?:-bis|-ter|-quater)?)\)\s|^totale\s")
+_LEGAL_CAPTION = re.compile(
+    r"^(?:[a-e]|[ivx]+|\d+(?:-bis|-ter|-quater)?)\)\s|^totale\s"
+    # Task 26 (fix 1): con il ``Cod.`` numerico davanti e la numerazione a punti della
+    # "riclassificata dettagliata" ("276 b.ii) ...", "c.ii.5 bis) ...", "d.4.1) ...").
+    r"|^(?:\d{1,4}\s+)?[a-e](?:\.(?:[ivx]+|\d+)(?: (?:bis|ter|quater|q))?)*\)\s"
+)
 
 
 def riconosci_schema_con_dettaglio(file_path: str) -> Optional[Dict[str, int]]:

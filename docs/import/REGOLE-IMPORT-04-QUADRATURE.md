@@ -290,10 +290,16 @@ Richiede `semantic_valid` **sulla proiezione**. Non è una soglia in euro (vedi 
 Il percorso snello non usa le tolleranze fisse di questa pagina. Il tappo e il confronto con i
 totali stampati dal documento tollerano **al massimo 10 €** per controllo (`verifica.limite_tappo`,
 decisione del proprietario, 2026-10-03 — prima `max(100 €, 0,1% dell'attivo)`: su tre casi
-controllati il tappo grande copriva una riga non letta o un importo inesistente). La soglia relativa
-`max(IMPORT_SNELLO_SOGLIA_MIN, IMPORT_SNELLO_SOGLIA_PCT% del totale attivo)` resta solo per il
-cancello sulla massa non classificata dei candidati deterministici e per la lettura di riserva
-(REGOLE-IMPORT-02 §10, «La lettura più vicina»).
+controllati il tappo grande copriva una riga non letta o un importo inesistente; manopola
+`IMPORT_SNELLO_TAPPO_MAX`). La soglia relativa `soglia()` =
+`max(IMPORT_SNELLO_SOGLIA_MIN, IMPORT_SNELLO_SOGLIA_PCT% del totale attivo)` non decide più un
+tappo, ma resta dove serve una tolleranza relativa:
+- il cancello sulla massa non classificata dei candidati deterministici;
+- la finestra della lettura di riserva (REGOLE-IMPORT-02 §10, «La lettura più vicina»);
+- la coerenza dei totali stampati letti dal testo (`verifica.totali_stampati`: se attivo e
+  passivo letti sono troppo distanti, si riprova sul testo ordinato per posizione);
+- nel modo `"conti"`, il verdetto sul risultato d'esercizio ambiguo (`conti.py`: un'assegnazione
+  corrente/precedente si accetta solo se lo scarto sta entro soglia).
 
 **Entro 10 €, un tappo dichiarato — l'unica eccezione al divieto di plug di questa pagina**,
 decisione del proprietario (2026-09-26, limite del 2026-10-03): lo scarto si chiude, non solo si dichiara, su un campo
@@ -329,7 +335,9 @@ valgono **tutte** le regole di questa pagina, comprese quelle che qui sopra il p
 supera (nessun plug, chiusura solo diagnostica). Si ripiega solo quando l'esito resta `"vuoto"`
 dopo la rilettura (un'estrazione vuota non ha nulla di sensato da salvare), quando la struttura
 del documento non si riconosce, o su un'eccezione imprevista — mai più su `"oltre_soglia"`, che
-diventa `"squadrato"` (sopra). Il ripiego si dichiara con
+diventa `"squadrato"` (sopra). Anche in quei tre casi non si ripiega se un candidato
+deterministico, scartato solo perché oltre i 10 €, aveva letto davvero: si salva quella lettura,
+`"squadrato"`, con `ripiego_evitato` nel report (Task 28). Il ripiego si dichiara con
 `validation_report["import_snello"]["esito"] = "ripiego"` (`fase`/`errore` accanto). Un documento
 scansionato o letto da OCR non tenta nemmeno il percorso snello: `"non_applicabile"`, con
 `motivo`, deciso prima di leggere una sola riga.

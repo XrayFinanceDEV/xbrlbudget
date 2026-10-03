@@ -226,8 +226,9 @@ ciò che non si può non sapere. Ogni voce dice la regola e **cosa si rompe** a 
   non è quadrato deve essere comunque importato con avviso, l'utente lo correggerà nella tab
   rettifiche»), salvando la lettura **più vicina** fra quella del modello e una deterministica
   vicina ma oltre i 10 € (Task 28). Un documento che si contraddice da solo (attivo ≠ passivo
-  stampati, o utile SP ≠ utile CE stampati, entrambi letti dal testo) si importa com'è con la nota
-  «bilancio squadrato di partenza», senza rilettura. Un riepilogo di poche macro-voci tipo export
+  stampati, o utile SP ≠ utile CE stampati, entrambi letti dal testo) si importa com'è con un
+  avviso che cita i numeri stampati, senza rilettura (sul risultato la nota dice «bilancio
+  squadrato di partenza»). Un riepilogo di poche macro-voci tipo export
   xlsx non è un bilancio e si rifiuta (`PDFImportError`). Su uno schema di legge uno squadrato è un
   difetto del lettore da correggere; resta ammesso per bilanci di verifica e sezioni contrapposte.
   Il ripiego sull'importatore attuale resta solo per un'estrazione vuota, una struttura non

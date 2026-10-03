@@ -2,9 +2,10 @@
 
 Il documento piu' standard che esista: ogni pagina porta il piede "Generato automaticamente -
 Conforme alla tassonomia itcc-ci-AAAA-MM-GG" e i prospetti (art. 2424/2425 c.c.) escono come un
-elenco di righe, una per didascalia, con un importo per anno. Nessun modello, nessuna geometria
-da indovinare: ogni riga e' un blocco del testo, la didascalia e' la prima riga, gli importi
-sono le righe che seguono (uno per colonna-anno, ``-`` e' uno zero nella SUA colonna).
+elenco di righe, una per didascalia, con un importo per anno. Nessun modello: ogni riga e' un
+blocco del testo, la didascalia e' la prima riga, gli importi sono le righe che seguono (uno
+per colonna-anno, ``-`` e' uno zero nella SUA colonna). Quando il testo a blocchi non chiude,
+le righe si ricostruiscono per posizione (``_leggi_righe_geometria``, Task 26).
 
 Regole (CLAUDE.md, «Invarianti e trappole»):
 

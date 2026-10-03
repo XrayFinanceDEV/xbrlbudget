@@ -516,7 +516,11 @@ ogni totale stampato riprodotto al centesimo, letto anche per posizione quando i
 non chiude), lo schema di legge IV-CEE (`standard_ivcee_parser`), lo schema di legge con dettaglio
 conti (`extract_ivcee_didascalie`), la situazione contabile. Un candidato si adotta solo se quadra
 entro il tappo e la sua massa non classificata sta entro `soglia()`: allora la struttura **non si
-chiede** (`struttura.stato = "non_richiesta"`, zero chiamate vision, zero gx10). Prima ancora, un
+chiede** (`struttura.stato = "non_richiesta"`, zero chiamate vision, zero gx10). Lo schema di
+legge che **si riconosce ma non legge nulla** (esito `"vuoto"`) chiude comunque la ricerca: la
+situazione contabile non si prova. È una scelta, non una svista: il commit `a72b8d4` aveva aperto
+quella porta e `a09e472` l'ha richiusa (2026-10-03), perché il parser delle situazioni contabili
+adottava budget_238 e budget_338 quadrati ma con le voci sbagliate. Prima ancora, un
 riepilogo di poche macro-voci (`importers/import_snello/riepilogo.py`, tipo export xlsx) si rifiuta
 con `PDFImportError`: non è un bilancio (decisione del proprietario, 2026-10-03).
 
@@ -530,7 +534,22 @@ stampati. Decide quale dei due modi seguenti usare.
 - **F2-L** (schema di legge: IV-CEE, abbreviato, micro, riclassificato) — una chiamata gx10 per
   sezione (SP, CE, in parallelo — `voci_di_legge` in `lettura.py`); il modello restituisce, per
   ciascun esercizio, le sole voci **stampate** come coppie `[percorso, importo]` — mai un totale,
-  mai un `enum` di campi.
+  mai un `enum` di campi. Il modo ha una variante, `"legge_con_dettaglio"` (Task 24): lo schema di
+  legge con i conti stampati sotto ogni voce; le righe con codice conto **non** entrano nel prompt
+  (le didascalie portano già il netto, i conti il lordo e i fondi: il modello li sommerebbe due
+  volte). Dove questa pagina dice modo `"legge"`, vale per entrambe.
+  - **Scadenze** (`PROMPT_VOCI`, 2026-10-03). Quando sotto una voce sono stampati gli importi
+    «esigibili entro» e «esigibili oltre l'esercizio successivo», il modello restituisce una coppia
+    per scadenza col suffisso `.E`/`.O` (`SPP.D.4.E`, `SPP.D.4.O`, `SPA.C.II.1.O`,
+    `SPA.B.III.2.O`), non il totale della voce; nessun suffisso se la scadenza non è stampata, e
+    allora il debito va a breve. La regola sta nel prompt, non in `legenda.txt`. Prima il prompt
+    chiedeva il suffisso solo per le voci senza numero arabo, e budget_597, 664, 289 e 297
+    salvavano a breve debiti che il documento dichiarava oltre l'esercizio: il foglio quadrava,
+    CCN e current ratio no.
+  - **Coppie ripetute** (`conti.da_coppie`). Si scarta solo la coppia identica (stesso percorso,
+    stesso importo: la stessa voce letta due volte). Lo stesso percorso con importi diversi sono
+    voci distinte che la legenda non separa, come le sotto-lettere di B.III.2, e si sommano:
+    budget_597 ne perdeva 26.268 quando si teneva la prima coppia di ogni percorso.
 - **F2-C** (elenco di conti: bilancio di verifica, situazione contabile, contrapposte, piano dei
   conti) — la struttura fisica delle righe viene da `collect_source_rows` (rotazione, righe
   fisiche, contrapposte, colonne SAP); `righe.py` (`marca_totali`, `foglie`) esclude i totali
@@ -551,21 +570,23 @@ impegnato l'import per minuti.
 SP (attivo − passivo) e lo scarto CE (utile CE ricalcolato contro `sp13`), in una delle due forme
 possibili — `"bilancio"` (il risultato corrente sta nel netto, come lo schema di legge) o
 `"verifica"` (il risultato è la riga di quadratura, come un bilancio di verifica, e `sp13` letto
-è quello dell'anno **prima**): il modo `"legge"` passa `forma="bilancio"` esplicita, il modo
-`"conti"` lascia `forma=None` e la sceglie da sé (la forma che minimizza lo scarto), perché un
-bilancio di verifica può avere o no il risultato in un conto di netto.
+è quello dell'anno **prima**). Entrambi i modi passano `forma="bilancio"` esplicita: il modo
+`"conti"` dal Task 14 (2026-09-26), perché il suo costruttore (`da_foglie`) porta già `sp13`
+all'utile del CE, e una forma scelta da sé poteva tornare su `"verifica"` e sottrarre l'utile una
+seconda volta, mascherando un vero sbilancio (budget_330).
 
-`tappa()` confronta gli scarti con il limite del tappo (`limite_tappo()`: **10 €** per controllo,
-SP, CE e confronto con i totali stampati — decisione del proprietario, 2026-10-03; mai oltre
-`soglia()`, `max(IMPORT_SNELLO_SOGLIA_MIN, IMPORT_SNELLO_SOGLIA_PCT% del totale attivo)`, che resta
-la soglia del cancello sulla massa non classificata) e restituisce uno tra quattro esiti:
+`tappa()` confronta gli scarti con il limite del tappo, **10 €** per controllo: SP, CE e confronto
+con i totali stampati (decisione del proprietario, 2026-10-03; manopola `IMPORT_SNELLO_TAPPO_MAX`).
+Il codice (`limite_tappo()`) prende il minore fra quei 10 € e `soglia()`, ma `soglia()` non scende
+mai sotto `IMPORT_SNELLO_SOGLIA_MIN` (100 € di default): in pratica il limite è 10 € su qualunque
+bilancio, e non si allarga con l'attivo. `tappa()` restituisce uno tra quattro esiti:
 
 | Esito | Quando |
 |---|---|
 | `"ok"` | nessuno scarto |
 | `"tappo"` | scarto entro 10 €: si chiude su un campo dichiarato (sotto) |
 | `"vuoto"` | attivo e passivo entrambi zero — **mai** `"ok"`: un'estrazione vuota non è una quadratura |
-| `"oltre_soglia"` | scarto oltre soglia, oppure un tappo sul CE che porterebbe `ce06_servizi` sotto zero (non si applica: si dichiara oltre soglia invece di un tappo negativo) |
+| `"oltre_soglia"` | scarto oltre il limite del tappo (10 €), oppure un tappo sul CE che porterebbe `ce06_servizi` sotto zero (non si applica: si dichiara oltre soglia invece di un tappo negativo). Il nome è storico: il grilletto è il limite del tappo, non `soglia()` |
 
 **Il tappo** (solo entro 10 €): attivo in eccesso rispetto al passivo → manca passivo, si
 aggiunge a `sp16g_altri_debiti_breve`; passivo in eccesso rispetto all'attivo → manca attivo, si
@@ -579,8 +600,11 @@ maggiore) in `forma="bilancio"` esplicita; il modo `"conti"` non rilegge mai. **
 nessuna rilettura** (`causa: "documento_sbilanciato"`): il documento stampa Totale attivo e Totale
 passivo diversi di oltre 10 € e le voci lette riproducono quella differenza; oppure stampa un
 utile nello SP diverso da quello del CE e le voci lette li riproducono entrambi. In entrambi i casi
-i numeri stampati devono essere letti dal testo del documento, mai riferiti dal modello; l'avviso
-li cita e dice «bilancio squadrato di partenza» (decisione del proprietario, 2026-10-03).
+i numeri stampati devono essere letti dal testo del documento, mai riferiti dal modello, e l'avviso
+li cita (decisione del proprietario, 2026-10-03). Le due frasi sono diverse
+(`pdf_importer._snello_squadrato_reason`): sui totali l'avviso chiude con «importato così com'è:
+correggilo in Rettifiche oppure carica una versione quadrata del bilancio»; sul risultato dice
+«importato così com'è (bilancio squadrato di partenza)».
 
 **La lettura più vicina (Task 28).** Se il modello chiude `"squadrato"`, o ripiegherebbe, e un
 candidato deterministico era stato scartato solo perché oltre i 10 € (scarto peggiore entro
@@ -597,7 +621,9 @@ applicare alcun tappo — `bs`/`ce` restano quelli letti, invariati — con gli 
 per costruire l'avviso "BILANCIO SBILANCIATO" mostrato all'utente (→
 [REGOLE-IMPORT-04-QUADRATURE.md §12](REGOLE-IMPORT-04-QUADRATURE.md)). Il ripiego resta l'unico
 esito per **`"vuoto"`** (un'estrazione vuota non ha nulla di sensato da salvare), per una
-struttura non riuscita e per un'eccezione imprevista: solo in questi casi l'orchestratore
+struttura non riuscita e per un'eccezione imprevista, **a meno che** un candidato deterministico
+scartato solo dal tappo abbia letto davvero (sopra, «La lettura più vicina»: si salva quella,
+`"squadrato"`, con `ripiego_evitato` nel report). Solo in questi casi l'orchestratore
 (`importers/import_snello/__init__.py`, `importa()`) solleva `SnelloNonRiuscito` e il chiamante
 **ripiega sull'importatore attuale**, intero e invariato, che decide da sé come oggi — compreso
 l'import squadrato e dichiarato descritto nelle sezioni precedenti di questa pagina.
@@ -609,8 +635,8 @@ un livello sopra quelli di `tappa()`:
 |---|---|---|
 | *(chiave assente)* | `IMPORT_MOTORE` spento o su un valore diverso da `"snello"` | — |
 | `"non_applicabile"` | il documento è una scansione o viene da OCR (RapidOCR locale o MinerU): il percorso snello **non si tenta nemmeno**, un testo OCR non è mai un text layer nativo | `motivo`: `"scansione"` \| `"ocr"` (mai `fase`/`errore`) |
-| `"ok"` / `"tappo"` | successo dell'orchestratore | `modo`, `struttura`, `misura`, `tappo`, `letture`, `diag`, `anomalie`, `secondi`, più `precedente` (`"incluso"` \| `"escluso_oltre_soglia"`) quando in modo `"legge"` c'è un anno precedente |
-| `"squadrato"` | scarto oltre soglia dopo l'unica rilettura (modo `"legge"`) o direttamente (modo `"conti"`): si adotta comunque, `tappo.corrente` resta `None` e `misura` dichiara lo scarto | stesse chiavi di `"ok"`/`"tappo"` |
+| `"ok"` / `"tappo"` | successo dell'orchestratore | `modo`, `struttura`, `misura`, `tappo`, `letture`, `diag`, `anomalie`, `secondi`, più `precedente` (`"incluso"` \| `"escluso_oltre_soglia"` \| `"non_letto_dalla_lettura_deterministica"`) quando in modo `"legge"` c'è un anno precedente |
+| `"squadrato"` | scarto oltre il limite del tappo dopo l'unica rilettura (modo `"legge"`), direttamente (modo `"conti"`), o lettura deterministica vicina salvata al posto di quella del modello o del ripiego (Task 28, nessuna rilettura): si adotta comunque, `tappo.corrente` resta `None` e `misura` dichiara lo scarto | stesse chiavi di `"ok"`/`"tappo"`, più `confronto_letture` o `ripiego_evitato` nel caso Task 28 |
 | `"ripiego"` | fallimento — dichiarato dall'orchestratore (solo su `"vuoto"`, o su una struttura non riuscita) o un'eccezione imprevista | `fase` (`"struttura"` \| `"lettura"` \| `"conti"` \| `"verifica"` \| `"eccezione"`), `errore` (il tipo di eccezione, o `"vuoto"` quando la causa è la verifica) |
 
 Un esito `"squadrato"` produce un `validation_status` diverso da `"verified"` (lo stesso
@@ -630,6 +656,38 @@ entrambe sempre dichiarate, anche a zero.
 verità sul lato (mai il contrario — vedi `applica_lato` sopra), netting cespite/fondo per
 sottoconto (all'aggregato se manca il dettaglio), compensazioni sulle voci minori, debito senza
 scadenza dichiarata → a breve.
+
+**Il segno delle voci di conto economico** (`importers/import_snello/conti.py`). Sbagliarlo sposta
+l'utile di **2×** l'importo della voce, e il foglio può quadrare lo stesso se l'errore è
+simmetrico. Ogni segno corretto finisce in `diag["ce_segno_forzato"]`
+(`[percorso o id, campo, letto, applicato]`), in entrambi i modi.
+
+- **Modo `"legge"`** (`_segno_ce_legge`, una colonna sola, nessun lato fisico da cui dedurre
+  nulla). Prima si vota per conteggio la convenzione di stampa del documento, separatamente per i
+  costi (`_convenzione_costi`) e per i ricavi (`_convenzione_ricavi`): +1 se li stampa positivi,
+  −1 se negativi, come fanno budget_115, 297 e 664. Poi:
+  - le variazioni e i cambi (`ce02`, `ce03`, `ce16`) prendono il segno letto per la convenzione
+    dei ricavi; `ce10` per quella dei costi. Una perdita su cambi stampata è una perdita (Task 27,
+    budget_397);
+  - i costi della produzione B.6–B.14 (`_CE_COSTI_PRODUZIONE`: `ce05`–`ce09b`, `ce11`, `ce11b`,
+    `ce12`, con le sotto-voci) prendono il segno letto per la convenzione dei costi: un costo
+    stampato contro la convenzione è una **riduzione vera**. budget_253 stampa «14) Oneri diversi
+    di gestione −1.239» fra costi positivi, e il Totale costi della produzione lo conferma; in
+    valore assoluto l'utile CE si allontanava da quello dello SP del doppio (2026-10-03);
+  - tutto il resto prende il **valore assoluto**: oneri finanziari (la sezione C stampa spesso
+    «17) interessi e altri oneri finanziari» col meno solo per presentazione, budget_289),
+    imposte, svalutazioni B.10.c/d, proventi e ricavi a segno fisso.
+- **Modo `"conti"`** (`da_foglie`). Con due colonne fisiche si vota per conteggio quale colonna è
+  normale per i costi e quale per i ricavi: una foglia sulla propria colonna porta il segno letto
+  così com'è, una foglia sulla colonna dell'altra famiglia è sempre una riduzione. Con una colonna
+  sola ogni voce prende il valore assoluto. Le regole a segno libero del modo `"legge"` qui non
+  esistono.
+
+Nel modo `"conti"` un importo **dentro la descrizione** di un conto non è un saldo
+(`righe._importo_in_descrizione`, Task 27, budget_243): «beni di valore inferiore euro 516,46» su
+una riga con un solo importo, ben a sinistra della colonna degli importi, si scarta. Una riga con
+più importi, o un importo allineato agli altri con la valuta davanti («Cassa Euro 239.126,40»),
+non si tocca.
 
 **F4 — Dettagli per il budget.** `enrich_pdf_details` gira dopo un successo snello, in entrambi i
 modi, **tranne** quando ha letto il PDF reso da XBRL (`fonte: "deterministico:xbrl_reso_parser"`):

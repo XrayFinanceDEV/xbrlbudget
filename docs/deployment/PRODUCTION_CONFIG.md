@@ -72,11 +72,18 @@ di richieste il prefill non rallenta, purché ciascuna resti sotto `GX10_CONTEST
 gx10. Default **100000**. Una chiamata che lo supererebbe solleva `ContestoEccessivo` prima
 dell'invio, invece di partire e farsi troncare.
 
-`IMPORT_SNELLO_SOGLIA_MIN` — soglia minima assoluta, in euro, della verifica F3 del percorso
-snello. Default **100**.
+`IMPORT_SNELLO_TAPPO_MAX` — limite, in euro, del tappo della verifica F3 del percorso snello:
+lo scarto massimo che si chiude su un campo dichiarato, per controllo (SP, CE, confronto con i
+totali stampati), e la tolleranza contro i totali stampati dal documento. Oltre, si salva
+`"squadrato"` con avviso. Default **10** (decisione del proprietario, 2026-10-03).
+
+`IMPORT_SNELLO_SOGLIA_MIN` — soglia minima assoluta, in euro, della tolleranza relativa del
+percorso snello (`soglia()`). Non decide il tappo: serve al cancello sulla massa non
+classificata, alla lettura di riserva e alla coerenza dei totali stampati letti (REGOLE-IMPORT-04
+§12). Default **100**.
 
 `IMPORT_SNELLO_SOGLIA_PCT` — soglia relativa, in percento del totale attivo, della stessa
-verifica. Default **0.1** (0,1%). La soglia effettiva per esercizio è
+tolleranza. Default **0.1** (0,1%). La soglia effettiva per esercizio è
 `max(IMPORT_SNELLO_SOGLIA_MIN, IMPORT_SNELLO_SOGLIA_PCT% × totale attivo)`.
 
 Nota operativa sul percorso snello: le sue chiamate gx10 (`importers/import_snello/lettura.py`)

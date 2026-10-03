@@ -11,7 +11,7 @@ from dataclasses import dataclass, field
 
 from importers.bilancio_classifier import ROUTE_IVCEE, ROUTE_TRIAL
 from importers.struttura_documento.mappa import (MAX_PAGINE_CONTINUAZIONE, MIN_IMPORTI, NOTA_INTEGRATIVA,
-                                                 _apre_sezione_nuova, _importi_pagina, _testo_di_testa,
+                                                 _apre_sezione_nuova, _importi_pagina, _testo_di_testa, pagina_continua_prospetto,
                                                  e_xbrl_di_legge, mappa_documento, mappa_xbrl)
 
 SCHEMI_CONTI = {"piano_dei_conti_gerarchico", "elenco_piatto"}
@@ -267,7 +267,7 @@ def _assorbi_continuazioni_perse(mappe: list[dict], pdf: str) -> list[dict]:
                 j, assorbite = i + 1, 0
                 while (j < n and assorbite < MAX_PAGINE_CONTINUAZIONE and j < len(pagine)
                        and out[j].get("tipo_pagina") == "nota_o_testo"
-                       and _importi_pagina(pagine[j]) >= MIN_IMPORTI
+                       and pagina_continua_prospetto(pagine[j], tipo)
                        and not _apre_sezione_nuova(pagine[j])):
                     # Lo schema della pagina assorbita e' quello del blocco, non quello stantio
                     # che portava da "nota_o_testo" (il default di una pagina mai vista dalla

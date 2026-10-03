@@ -72,13 +72,21 @@ def _unclassified_mass(diag: dict) -> Decimal:
     return sum((Decimal(v) for _, _, v in diag.get("lato_irrisolti", [])), Decimal(0))
 
 
+def _limite_interno(s):
+    """Lo scarto interno (SP e CE) oltre il quale non c'e' tappo: 10 euro (2026-10-03), mai oltre
+    la soglia relativa ``s``, che resta la tolleranza sul totale stampato."""
+    from importers.import_snello.verifica import soglia_tappo
+    return min(s, soglia_tappo())
+
+
 def _causa_stampati(m: dict, s) -> bool:
     """Vero quando lo scarto interno (SP e CE) e' entro soglia ma il totale che il documento
     stampa da solo non concorda con le voci lette: la causa e' il contraddittorio del totale
     stampato, non un vero sbilancio interno - la nota della rilettura e il report finale non
     devono dire "voci mancanti, doppie...", un messaggio pensato per l'altro caso (review
     round 1, 2026-09-27)."""
-    return abs(m["scarto_sp"]) <= s and abs(m["scarto_ce"]) <= s and m["scarto_stampati"] > s
+    t = _limite_interno(s)
+    return abs(m["scarto_sp"]) <= t and abs(m["scarto_ce"]) <= t and m["scarto_stampati"] > s
 
 
 def _documento_sbilanciato(m: dict, s, stampati: dict | None, deterministici: bool) -> bool:
@@ -94,7 +102,7 @@ def _documento_sbilanciato(m: dict, s, stampati: dict | None, deterministici: bo
     ta, tp = stampati.get("totale_attivo"), stampati.get("totale_passivo")
     if ta is None or tp is None:
         return False
-    if abs(m["scarto_sp"]) <= s or m["scarto_stampati"] > s:
+    if abs(m["scarto_sp"]) <= _limite_interno(s) or m["scarto_stampati"] > s:
         return False
     return abs(abs(Decimal(ta) - Decimal(tp)) - abs(m["scarto_sp"])) <= s
 
@@ -404,7 +412,7 @@ def importa(file_path: str, *, ocr_text: str | None = None, analizza=None, leggi
         if (modo in _MODI_LEGGE and esito in ("oltre_soglia", "vuoto")
                 and not _documento_sbilanciato(m, s, stampati, _totali_dal_testo)):
             fase = "lettura"
-            if abs(m["scarto_sp"]) > s or m["scarto_stampati"] > s:
+            if abs(m["scarto_sp"]) > _limite_interno(s) or m["scarto_stampati"] > s:
                 sezione = "sp"
             else:
                 sezione = "ce"

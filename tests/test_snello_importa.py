@@ -264,7 +264,7 @@ def test_legge_tappo_entro_soglia_plug_residual(tmp_path):
 
     def voci(testo, intestazioni, nota=""):
         if intestazioni and intestazioni[0].startswith("SP"):
-            return {"corrente": [("SPA.B.II", D("1000")), ("SPA.C.IV", D("550")),
+            return {"corrente": [("SPA.B.II", D("1000")), ("SPA.C.IV", D("505")),
                                  ("SPP.A.I", D("800")), ("SPP.A.IX", D("100")), ("SPP.D.7", D("600"))],
                     "precedente": [], "totali": {}}
         return {"corrente": [("CE.A.1", D("400")), ("CE.B.7", D("300"))], "precedente": [], "totali": {}}
@@ -273,7 +273,7 @@ def test_legge_tappo_entro_soglia_plug_residual(tmp_path):
     r = S.importa(pdf, analizza=struttura, leggi_voci=voci)
     assert r.report["esito"] == "tappo"
     assert r.report["tappo"]["corrente"]["campo"] == "sp16g_altri_debiti_breve"
-    assert r.bs["_plug_residual"] == D("50.00")
+    assert r.bs["_plug_residual"] == D("5.00")
 
 
 def test_conti_legge_anche_le_pagine_dettaglio(tmp_path, monkeypatch):
@@ -689,3 +689,41 @@ def test_totali_riportati_dal_modello_non_attivano_la_scorciatoia(tmp_path):
     assert len(chiamate) == 3                                # SP, CE, una rilettura
     assert r.report["esito"] == "squadrato"
     assert r.report.get("causa") != "documento_sbilanciato"
+
+
+def test_legge_scarto_di_50_euro_non_si_tappa_piu_rilegge_poi_squadrato(tmp_path):
+    """Decisione del proprietario, 2026-10-03: il tappo chiude al massimo 10,00 euro. Uno scarto
+    SP di 50 euro (entro la vecchia soglia di 100) non si tampona: una rilettura, poi squadrato
+    con lo sbilancio dichiarato, mai un plug."""
+    pdf = _pdf_vuoto(str(tmp_path / "c.pdf"))
+    chiamate = []
+
+    def voci(testo, intestazioni, nota=""):
+        chiamate.append(nota)
+        if intestazioni and intestazioni[0].startswith("SP"):
+            return {"corrente": [("SPA.B.II", D("1000")), ("SPA.C.IV", D("550")),
+                                 ("SPP.A.I", D("800")), ("SPP.A.IX", D("100")), ("SPP.D.7", D("600"))],
+                    "precedente": [], "totali": {}}
+        return {"corrente": [("CE.A.1", D("400")), ("CE.B.7", D("300"))], "precedente": [], "totali": {}}
+
+    struttura = lambda p: _struttura("legge", intestazioni_sp=["SP-2025"], intestazioni_ce=["CE-2025"])
+    r = S.importa(pdf, analizza=struttura, leggi_voci=voci)
+    assert len(chiamate) == 3
+    assert r.report["esito"] == "squadrato"
+    assert r.report["tappo"]["corrente"] is None and r.bs["_plug_residual"] == D("0")
+    assert r.report["misura"]["corrente"]["scarto_sp"] == "50.00"
+
+
+def test_documento_sbilanciato_di_50_euro_si_riconosce_col_tappo_a_10_euro(tmp_path):
+    """Con il tappo a 10 euro lo sbilancio di un documento di 50 euro non e' piu' 'entro
+    soglia': e' un vero sbilancio, e se il documento lo stampa da solo non si rilegge."""
+    pdf = _pdf_con_totali(str(tmp_path / "c.pdf"), "5.050,00", "5.000,00")
+    chiamate = []
+
+    def voci(testo, intestazioni, nota=""):
+        chiamate.append(nota)
+        return {"corrente": [("SPA.C.IV.1", D("5050")), ("SPP.A.I", D("5000"))],
+                "precedente": [], "totali": {}}
+    r = S.importa(pdf, analizza=lambda p: _struttura("legge"), leggi_voci=voci)
+    assert len(chiamate) == 2
+    assert r.report["esito"] == "squadrato" and r.report["causa"] == "documento_sbilanciato"

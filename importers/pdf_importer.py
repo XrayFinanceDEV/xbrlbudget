@@ -977,6 +977,13 @@ def import_pdf_balance_sheet(
                 }
             else:
                 from importers import import_snello
+                # Decisione del proprietario, 2026-10-03: un riepilogo a sole macro-voci non e'
+                # un bilancio e non si importa - ne' dal percorso snello ne' dal ripiego di
+                # oggi. Riconosciuto dal testo, PRIMA della struttura (nessuna chiamata modello);
+                # stessa uscita degli altri documenti rifiutati (PDFImportError, nulla salvato).
+                from importers.import_snello import riepilogo as _riepilogo
+                if _riepilogo.riconosci_riepilogo(file_path):
+                    raise PDFImportError(_riepilogo.MESSAGGIO)
                 try:
                     # Tutto in locali fino in fondo: un'eccezione IN QUALUNQUE punto di
                     # questo blocco (compreso il calcolo dei totali sotto) non deve

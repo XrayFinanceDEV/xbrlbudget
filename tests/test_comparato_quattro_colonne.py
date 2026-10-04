@@ -70,37 +70,45 @@ def _euro(value: Decimal) -> str:
     return ("-" if value < 0 else "") + testo
 
 
-def _celle(corrente: str, *, analisi: bool):
+def _celle(corrente: str, *, colonne: int):
     cur = Decimal(corrente.replace(".", "").replace(",", "."))
     prec = cur * 2
-    celle = [corrente, _euro(prec)]
-    if analisi:
-        celle += [_euro(cur - prec), "-50,00" if cur else "0,00"]
-    return celle
+    celle = [corrente, _euro(prec), _euro(cur - prec), "-50,00" if cur else "0,00"]
+    return celle[:colonne]
 
 
-def _scrivi(path: Path, *, intestazioni) -> None:
-    analisi = len(intestazioni) == 4
+def _scrivi(path: Path, *, intestazioni, righe_prima_pagina=None, numeri_pagina=False) -> None:
+    """``righe_prima_pagina``: quante righe di SP stanno sotto l'intestazione; le altre
+    vanno su una pagina di continuazione SENZA intestazione (revisione #60, C1)."""
 
     def destra(page, x, y, text):
         larghezza = fitz.get_text_length(text, fontname=_FONT, fontsize=_SIZE)
         page.insert_text((x - larghezza, y), text, fontname=_FONT, fontsize=_SIZE)
 
     document = fitz.open()
-    for righe, titolo in ((_SP, "BILANCIO RICLASSIFICATO UE dal 01/01/2026 al 30/06/2026"), (_CE, None)):
+    sp = _SP if righe_prima_pagina is None else _SP[:righe_prima_pagina]
+    resto = [] if righe_prima_pagina is None else _SP[righe_prima_pagina:]
+    blocchi = [(sp, "BILANCIO RICLASSIFICATO UE dal 01/01/2026 al 30/06/2026", True)]
+    if resto:
+        blocchi.append((resto, None, False))
+    blocchi.append((_CE, None, True))
+    for numero, (righe, titolo, intestata) in enumerate(blocchi, 1):
         page = document.new_page()
         if titolo:
             page.insert_text((30, 40), titolo, fontsize=11)
-        page.insert_text((20, 60), "Descrizione", fontsize=_SIZE)
-        for x, testo in zip(_COLONNE, intestazioni):
-            destra(page, x, 75, testo)
+        if intestata:
+            page.insert_text((20, 60), "Descrizione", fontsize=_SIZE)
+            for x, testo in zip(_COLONNE, intestazioni):
+                destra(page, x, 75, testo)
         y = 100
         for etichetta, corrente in righe:
             page.insert_text((20, y), etichetta, fontname=_FONT, fontsize=_SIZE)
             if corrente is not None:
-                for x, cella in zip(_COLONNE, _celle(corrente, analisi=analisi)):
+                for x, cella in zip(_COLONNE, _celle(corrente, colonne=len(intestazioni))):
                     destra(page, x, y, cella)
             y += 20
+        if numeri_pagina:
+            destra(page, 575, 800, str(numero))
     document.save(str(path))
     document.close()
 
@@ -147,6 +155,40 @@ def test_una_terza_colonna_senza_intestazione_di_analisi_lascia_il_comparato_non
     assert current is not None and current["totale_attivo"] == Decimal("1050.00")
     assert current_ce is not None
     assert prior is None and prior_ce is None
+
+
+def test_lo_scostamento_sulle_pagine_senza_intestazione_non_diventa_il_comparato(tmp_path):
+    """Revisione #60, C1: la pagina d'intestazione ha due sole righe, lo scostamento
+    compare (senza colonna %) solo sulla pagina di continuazione. Il comparato si
+    legge col confine, mai dallo scostamento (che varrebbe -1.050)."""
+    pdf = tmp_path / "intestazione-corta.pdf"
+    _scrivi(pdf, intestazioni=("corrente", "comparato", "Scostamento"), righe_prima_pagina=2)
+
+    _, prior = extract_standard_ivcee_balances(str(pdf))
+
+    assert prior is not None
+    assert prior["totale_attivo"] == Decimal("2100.00")
+    assert prior["sp05_rimanenze"] == Decimal("400.00")
+
+
+def test_una_terza_colonna_anonima_su_una_pagina_corta_lascia_il_comparato_non_letto(tmp_path):
+    pdf = tmp_path / "intestazione-corta-anonima.pdf"
+    _scrivi(pdf, intestazioni=("corrente", "comparato", "Var."), righe_prima_pagina=2)
+
+    current, prior = extract_standard_ivcee_balances(str(pdf))
+    _, prior_ce = extract_standard_ivcee_income(str(pdf))
+
+    assert current is not None and current["totale_attivo"] == Decimal("1050.00")
+    assert prior is None and prior_ce is None
+
+
+def test_il_numero_di_pagina_non_e_una_terza_colonna(tmp_path):
+    pdf = tmp_path / "numeri-pagina.pdf"
+    _scrivi(pdf, intestazioni=("corrente", "comparato"), numeri_pagina=True)
+
+    _, prior = extract_standard_ivcee_balances(str(pdf))
+
+    assert prior is not None and prior["totale_attivo"] == Decimal("2100.00")
 
 
 def test_il_percorso_snello_porta_il_comparato_letto(tmp_path):

@@ -305,43 +305,64 @@ def _labelled_layout(
     """(current_x, prior_x, prior_affidabile, bound_x) dell'intestazione a parole (#60).
 
     Stessa forma di `_column_layout`, sulle ancore di `_labelled_column_centres`
-    (bordi destri). La #27 non leggeva mai il comparato di questo layout perché,
-    senza confine, `_physical_rows` dava alla seconda colonna anche lo scostamento.
-    La decisione segue i DATI, come in `_column_layout`:
+    (bordi destri, prese dalla prima pagina che porta l'intestazione e applicate a
+    tutto il documento, come prima). La #27 non leggeva mai il comparato di questo
+    layout perché, senza confine, `_physical_rows` dava alla seconda colonna anche
+    lo scostamento — che è lineare e passa ogni controllo incrociato.
 
-    1. nessun importo stabile (almeno tre righe) col bordo destro oltre il
-       comparato: due colonne sole, il comparato si legge senza confine;
-    2. una terza colonna stabile sotto un'intestazione di analisi stampata
-       (Scostamento/Differenza/%): il comparato si legge, e ``bound_x`` subito
-       oltre il suo bordo destro esclude lo scostamento — purché nessun importo
-       della terza colonna abbia il centro prima del confine, altrimenti il
-       confine non separa le due colonne e il comparato non si legge;
-    3. una terza colonna che nessuna intestazione identifica: mai indovinare
-       quale sia il comparato (``prior_affidabile=False``).
+    Il confine è subito oltre il bordo destro del comparato. Decidono i DATI di
+    TUTTE le pagine (revisione #60: una pagina d'intestazione con due sole righe
+    non prova che lo scostamento non ci sia), contati sulle sole righe del
+    prospetto — quelle con un importo nelle colonne di saldo, quindi mai
+    un'intestazione o un piè di pagina:
+
+    1. nessun importo oltre il confine: due colonne sole, il comparato si legge;
+    2. importi oltre il confine, sotto un'intestazione di analisi stampata
+       (Scostamento/Differenza/%), e tutti col centro oltre il confine: il
+       comparato si legge e il confine esclude lo scostamento;
+    3. altrimenti — un solo importo basta: una terza colonna che nessuna
+       intestazione nomina, o che il confine non separa — il comparato non si
+       legge (``prior_affidabile=False``): mai indovinare.
 
     Un comparato letto passa comunque i controlli incrociati di `_parse_column`.
     """
     from importers.pdf_extractor_llm import _labelled_column_anchors
 
+    anchors = None
     for page in document:
         words = page.get_text("words", sort=True)
-        anchors = _labelled_column_anchors(words)
-        if anchors is None:
-            continue
-        if not _anchors_carry_amounts(words, anchors.current, anchors.prior):
-            continue
-        bound_x = anchors.prior + _ANCHOR_AMOUNT_TOL
-        oltre = [
-            word for word in words
-            if _amount(str(word[4]).strip()) is not None and float(word[2]) > bound_x
-        ]
-        if len({round(float(word[1])) for word in oltre}) < 3:
-            return anchors.current, anchors.prior, True, None
-        separate = all((float(word[0]) + float(word[2])) / 2 >= bound_x for word in oltre)
-        if anchors.others and separate:
-            return anchors.current, anchors.prior, True, bound_x
-        return anchors.current, anchors.prior, False, None
-    return None
+        found = _labelled_column_anchors(words)
+        if found is not None and _anchors_carry_amounts(words, found.current, found.prior):
+            anchors = found
+            break
+    if anchors is None:
+        return None
+    bound_x = anchors.prior + _ANCHOR_AMOUNT_TOL
+    oltre: List[Tuple] = []
+    for page in document:
+        righe: List[List[Tuple]] = []
+        for word in sorted(
+            page.get_text("words", sort=True),
+            key=lambda item: (float(item[1]), float(item[0])),
+        ):
+            if not righe or abs(float(word[1]) - float(righe[-1][0][1])) > 1.5:
+                righe.append([word])
+            else:
+                righe[-1].append(word)
+        for riga in righe:
+            importi = [w for w in riga if _amount(str(w[4]).strip()) is not None]
+            saldo = any(
+                (float(w[0]) + float(w[2])) / 2 > 300 and float(w[2]) <= bound_x
+                for w in importi
+            )
+            if saldo:
+                oltre.extend(w for w in importi if float(w[2]) > bound_x)
+    if not oltre:
+        return anchors.current, anchors.prior, True, bound_x
+    separate = all((float(w[0]) + float(w[2])) / 2 >= bound_x for w in oltre)
+    if anchors.others and separate:
+        return anchors.current, anchors.prior, True, bound_x
+    return anchors.current, anchors.prior, False, None
 
 
 # Quanto puo' discostarsi il bordo destro di un importo da quello della sua

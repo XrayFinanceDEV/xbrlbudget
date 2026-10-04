@@ -317,6 +317,36 @@ def _should_import_prior(
     return not has_existing
 
 
+def _avviso_comparato_non_letto(
+    prior_fiscal_year: Optional[int],
+    *,
+    stampa_comparato: bool,
+    prior_imported: bool,
+    gia_avvisato: bool,
+    has_existing: bool,
+) -> Optional[str]:
+    """L'avviso per un comparato stampato nel PDF che l'import non ha salvato (#60).
+
+    Un lettore che non sa leggere la colonna dell'anno precedente (es. il prospetto
+    a quattro colonne «corrente | comparato | scostamento | %», dove il parser
+    deterministico legge solo la corrente) non la inventa: ma tacere che c'era
+    farebbe sparire l'anno di riferimento senza che l'utente lo sappia. Niente
+    avviso se l'anno e' stato importato, se un avviso sul precedente c'e' gia', o
+    se il documento non stampa alcun comparato (un infrannuale monocolonna).
+    """
+    if prior_fiscal_year is None or not stampa_comparato or prior_imported or gia_avvisato:
+        return None
+    seguito = (
+        f"resta quello gia' presente per il {prior_fiscal_year}"
+        if has_existing
+        else f"importa il bilancio {prior_fiscal_year} a parte se ti serve come anno di riferimento"
+    )
+    return (
+        f"ANNO PRECEDENTE NON IMPORTATO [{prior_fiscal_year}]: il documento stampa una colonna "
+        f"comparativa, ma non e' stato possibile leggerla in modo affidabile; {seguito}."
+    )
+
+
 def _single_year_read_prior_column(
     single_bs: Optional[Dict[str, Decimal]],
     dual_current_bs: Optional[Dict[str, Decimal]],
@@ -2262,6 +2292,32 @@ def import_pdf_balance_sheet(
                         )
                         logger.warning(prior_profit_warning)
                         warnings.append(prior_profit_warning)
+
+        # #60: un comparato stampato che nessun lettore ha saputo leggere si dichiara.
+        if fiscal_year and not prior_year_imported:
+            from importers.standard_ivcee_parser import has_comparative_ivcee_columns
+            _avviso_comparato = _avviso_comparato_non_letto(
+                prior_fiscal_year,
+                stampa_comparato=has_comparative_ivcee_columns(file_path),
+                prior_imported=prior_year_imported,
+                gia_avvisato=any(
+                    str(w).startswith("ANNO PRECEDENTE NON IMPORTATO") for w in warnings
+                ),
+                has_existing=db.query(FinancialYear).filter(
+                    FinancialYear.company_id == company.id,
+                    FinancialYear.year == prior_fiscal_year,
+                    (FinancialYear.period_months == None) | (FinancialYear.period_months == 12),
+                ).first() is not None,
+            )
+            if _avviso_comparato:
+                logger.warning(_avviso_comparato)
+                warnings.append(_avviso_comparato)
+                # anche nel report persistito dell'anno corrente: il risultato dell'import
+                # sparisce al primo ricaricamento, il report no.
+                _validation_payload.setdefault("warnings", []).append(_avviso_comparato)
+                financial_year_obj.validation_report = json.dumps(
+                    _validation_payload, ensure_ascii=False
+                )
 
         # Step 8: Commit transaction
         db.commit()

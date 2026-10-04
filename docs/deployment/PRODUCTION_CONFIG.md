@@ -90,3 +90,32 @@ Nota operativa sul percorso snello: le sue chiamate gx10 (`importers/import_snel
 usano un timeout di **120 s**, più stretto del timeout generico di 900 s del pass CoGe di route C
 descritto sopra — un gx10 impantanato sul percorso snello non deve tenere impegnato l'import per
 minuti prima di ripiegare.
+
+### Accendere il percorso snello su un server (Jenkins)
+
+Il `Jenkinsfile` è lo stesso per staging e produzione: il percorso snello si accende **solo** sul
+Jenkins che dichiara, in *Manage Jenkins › System › Global properties › Environment variables*:
+
+| Variabile globale | Valore |
+|---|---|
+| `IMPORT_MOTORE` | `snello` |
+| `GX10_BASE_URL` | l'indirizzo con cui **quel** server raggiunge gx10 (obbligatoria: senza, la build si ferma con un errore) |
+| `GX10_CONCORRENZA` | facoltativa, default `3` |
+
+più la credenziale *secret text* **`budget-gx10-api-key`** (la chiave di gx10, mai in chiaro nel
+repo né nei log). Con `IMPORT_MOTORE=snello` lo stage *Generate env* aggiunge a `.env.docker`
+`IMPORT_MOTORE`, i tre `PDF_LLM_PROVIDER_*=gx10`, `GX10_BASE_URL`, `GX10_API_KEY` e
+`GX10_CONCORRENZA`; senza la variabile `.env.docker` resta quello di sempre e il server importa con
+l'importatore attuale. `ANTHROPIC_API_KEY` resta necessaria: la struttura (F1) e la vision girano su
+Anthropic.
+
+- **Concorrenza.** Il semaforo di `GX10_CONCORRENZA` è **per processo**, e il backend gira con
+  `--workers 2` (`backend/entrypoint.sh`): il default di Jenkins è quindi `3`, cioè al massimo 6
+  richieste in contemporanea su gx10. Il default del codice (6) vale per un processo solo.
+- **Trasporto.** Una `GX10_BASE_URL` in `http://` su rete pubblica fa viaggiare in chiaro sia la
+  chiave Bearer sia il testo dei bilanci: va servita in `https://` (o dentro una VPN), e la porta
+  aperta su gx10 va ristretta all'IP del server.
+- **Timeout.** Un import snello somma struttura (fino a 120 s), letture gx10 (120 s ciascuna) e
+  passata di dettaglio: il `proxy_read_timeout` del vhost nginx **dell'host** va portato allo
+  stesso valore del container (1200 s, `nginx/default.conf`), o l'utente riceve un 504 mentre
+  l'import prosegue.

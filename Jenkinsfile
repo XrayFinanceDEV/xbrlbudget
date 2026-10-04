@@ -34,7 +34,8 @@ pipeline {
 
         stage('Generate env') {
             steps {
-                writeFile file: '.env.docker', text: """\
+                script {
+                    def base = """\
 SUPABASE_JWT_SECRET=${SUPABASE_JWT_SECRET}
 ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
 ADMIN_API_KEY=${ADMIN_API_KEY}
@@ -43,6 +44,34 @@ ALLOWED_ORIGINS=https://app.formulafinance.it,https://app.kpsfinanciallab.it
 MAX_COMPANIES_PER_USER=50
 PORT=9090
 """.stripIndent()
+                    // Import PDF snello (IMPORT_MOTORE=snello + Qwen su gx10). Questo Jenkinsfile
+                    // lo usano staging E produzione: si accende SOLO dove il Jenkins dichiara
+                    // la variabile globale IMPORT_MOTORE=snello (Manage Jenkins > System >
+                    // Global properties), insieme a GX10_BASE_URL e alla credenziale
+                    // secret-text 'budget-gx10-api-key'. Senza, .env.docker resta quello di
+                    // sempre e l'import gira sull'importatore attuale.
+                    if (env.IMPORT_MOTORE == 'snello') {
+                        if (!env.GX10_BASE_URL?.trim()) {
+                            error('IMPORT_MOTORE=snello richiede la variabile globale GX10_BASE_URL')
+                        }
+                        withCredentials([string(credentialsId: 'budget-gx10-api-key', variable: 'GX10_API_KEY')]) {
+                            // GX10_CONCORRENZA: il semaforo e' per processo e uvicorn gira con
+                            // --workers 2 (backend/entrypoint.sh): 2 x 3 = 6, il massimo che
+                            // gx10 deve ricevere in contemporanea.
+                            writeFile file: '.env.docker', text: base + """\
+IMPORT_MOTORE=snello
+PDF_LLM_PROVIDER_COGE=gx10
+PDF_LLM_PROVIDER_IVCEE=gx10
+PDF_LLM_PROVIDER_DETTAGLI=gx10
+GX10_BASE_URL=${env.GX10_BASE_URL.trim()}
+GX10_API_KEY=${env.GX10_API_KEY}
+GX10_CONCORRENZA=${env.GX10_CONCORRENZA ?: '3'}
+""".stripIndent()
+                        }
+                    } else {
+                        writeFile file: '.env.docker', text: base
+                    }
+                }
             }
         }
 

@@ -293,7 +293,49 @@ POST /import/pdf-ocr                           # Upload PDF via MinerU OCR
 
 **Processing Time:** 3-10 seconds per PDF (first run: +model download time)
 
-**Note:** Requires `ANTHROPIC_API_KEY` environment variable.
+**Note:** Requires `ANTHROPIC_API_KEY` (Claude: vision, document structure, and every LLM pass
+left on its default provider). The text passes can run on a local Qwen instead — see below.
+
+#### Local Qwen on gx10 (optional)
+
+**gx10** is a local machine running **Qwen** (`qwen3.8-flash-next`) behind a vLLM
+OpenAI-compatible server (`/v1/chat/completions`). It reads **text only**, with output constrained
+to a JSON schema; it never sees page images. Three PDF-import passes can move from Claude to gx10,
+each with its own switch (only the exact value `gx10` changes the provider; anything else, or
+nothing, keeps `anthropic`):
+
+| Variable | Pass moved to gx10 |
+|---|---|
+| `PDF_LLM_PROVIDER_COGE` | route C CoGe pass (trial balances / situazioni contabili) |
+| `PDF_LLM_PROVIDER_IVCEE` | route A/B IV-CEE text extractor and macro-item reading |
+| `PDF_LLM_PROVIDER_DETTAGLI` | detail reading (note tables, sub-account classification) |
+
+The **lean import** (`IMPORT_MOTORE=snello`) is built around gx10: deterministic readers first
+(zero model calls when one of them balances), then the page structure on Claude Sonnet vision,
+then the accounts read on gx10, then a check that closes at most €10 on a declared field.
+Vision and the structure map **always** stay on Anthropic, so `ANTHROPIC_API_KEY` is still needed.
+
+- **Key.** `GX10_API_KEY`, read from the environment only and sent only as an
+  `Authorization: Bearer` header — never on a command line, never logged. Without the header gx10
+  answers 401; without the variable the gx10 provider is unavailable (route C keeps its
+  deterministic candidate). Quick reachability check, key kept out of argv:
+  `curl -s -H @- "$GX10_BASE_URL/v1/models" <<< "Authorization: Bearer $GX10_API_KEY"`
+- **Address.** `GX10_BASE_URL`, default `http://100.65.63.12:18300` — a Tailscale address,
+  reachable from tailnet machines only. A server outside the tailnet needs its own address; over
+  a public network serve it on `https://` and restrict the port to that server's IP, or the key
+  and the balance-sheet text travel in clear.
+- **Load.** `GX10_CONCORRENZA` (default 6) caps concurrent gx10 requests **per process**: with
+  `uvicorn --workers 2` (Docker) set it to 3 to keep gx10 at 6. `GX10_CONTESTO_MAX` (default
+  100000 tokens) refuses an oversized call before sending it.
+- **Timeouts.** 900 s per call on the route C CoGe pass, 120 s on the lean path; a stalled gx10
+  makes an import fall back rather than hang, but the host proxy timeout must allow it (see
+  `docs/deployment/PRODUCTION_CONFIG.md`).
+- **Deploy.** The `Jenkinsfile` turns the lean import on only where Jenkins declares the global
+  variable `IMPORT_MOTORE=snello` (plus `GX10_BASE_URL` and the `budget-gx10-api-key` secret);
+  production stays on the current importer.
+
+Full reference: [docs/deployment/PRODUCTION_CONFIG.md](docs/deployment/PRODUCTION_CONFIG.md);
+lean-path rules: [docs/import/REGOLE-IMPORT-02-ESTRAZIONE.md](docs/import/REGOLE-IMPORT-02-ESTRAZIONE.md) §10.
 
 ### Complete Analysis Response Structure
 
@@ -553,6 +595,11 @@ Three services: **nginx** (reverse proxy), **backend** (FastAPI + shared modules
 | `SUPABASE_JWT_SECRET` | Supabase JWT secret (HS256) | Required in prod |
 | `DEV_USER_ID` | Bypass JWT auth (any string) | - |
 | `ANTHROPIC_API_KEY` | Claude API key for PDF extraction | - |
+| `IMPORT_MOTORE` | `snello` = lean PDF import (see «Local Qwen on gx10») | current importer |
+| `PDF_LLM_PROVIDER_COGE` / `_IVCEE` / `_DETTAGLI` | `gx10` moves that PDF pass to local Qwen | `anthropic` |
+| `GX10_API_KEY` | gx10 key, sent only as Bearer header | - |
+| `GX10_BASE_URL` | gx10 address | `http://100.65.63.12:18300` |
+| `GX10_CONCORRENZA` | Concurrent gx10 requests per process | 6 |
 | `ADMIN_API_KEY` | Secret for `/admin/uploads/*` endpoints (see Upload Tracking) | - |
 | `UPLOAD_ROOT` | Override uploaded-file storage dir | `data/uploads` |
 | `UPLOAD_RETENTION_DAYS` | Cleanup retention for uploaded files | 90 |

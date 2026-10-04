@@ -119,3 +119,85 @@ Anthropic.
   passata di dettaglio: il `proxy_read_timeout` del vhost nginx **dell'host** va portato allo
   stesso valore del container (1200 s, `nginx/default.conf`), o l'utente riceve un 504 mentre
   l'import prosegue.
+
+### Verificare che gx10 sia pronto per un server fuori dalla tailnet
+
+`<IP_PUBBLICO>` e `<PORTA_ESTERNA>` sono l'indirizzo e la porta con cui quel server raggiunge gx10
+(lo stesso valore di `GX10_BASE_URL`). La chiave si passa sempre da stdin, mai sulla riga di comando.
+
+**1. Su gx10 — il servizio ascolta sull'interfaccia giusta e chiede la chiave.**
+
+```bash
+sudo ss -ltnp | grep 18300
+```
+
+Un indirizzo `100.65.63.12:18300` (solo Tailscale) o `127.0.0.1:18300` non riceve mai
+connessioni da fuori: deve risultare `0.0.0.0:18300`, o l'IP di rete locale verso cui il router
+inoltra la porta.
+
+```bash
+read -rs GX10_API_KEY; export GX10_API_KEY
+curl -s -o /dev/null -w "%{http_code}\n" http://127.0.0.1:18300/v1/models                  # atteso: 401
+curl -s -H @- http://127.0.0.1:18300/v1/models <<< "Authorization: Bearer $GX10_API_KEY"   # atteso: JSON col modello
+```
+
+Un 200 **senza** chiave vuol dire che il server accetta chiunque: da sistemare prima di esporlo.
+
+**2. Firewall di gx10 e router — la porta è aperta solo al server.**
+
+```bash
+sudo ufw status numbered
+sudo ufw allow from 194.163.175.249 to any port 18300 proto tcp   # staging; se manca
+```
+
+Una regola `18300 ALLOW Anywhere` è troppo larga e va sostituita. Sul router: inoltro TCP
+`<PORTA_ESTERNA>` → IP locale di gx10 `:18300`, limitato all'IP sorgente del server se il router
+lo consente.
+
+**3. Dal server — gx10 raggiungibile, anche dal container.**
+
+```bash
+nc -zv -w 5 <IP_PUBBLICO> <PORTA_ESTERNA>                                                  # atteso: open
+curl -s -o /dev/null -w "%{http_code}\n" http://<IP_PUBBLICO>:<PORTA_ESTERNA>/v1/models   # atteso: 401
+```
+
+L'import parte dal container del backend, la cui rete non sempre esce come l'host:
+
+```bash
+docker exec -i budget-backend-1 python - <<'EOF'
+import urllib.request, urllib.error
+try:
+    urllib.request.urlopen("http://<IP_PUBBLICO>:<PORTA_ESTERNA>/v1/models", timeout=10)
+except urllib.error.HTTPError as e:
+    print("raggiungibile, HTTP", e.code)   # atteso: 401
+except Exception as e:
+    print("NON raggiungibile:", type(e).__name__, e)
+EOF
+```
+
+Dopo aver acceso il percorso snello e rilanciato la build, una chiamata vera con la chiave che il
+container ha ricevuto da Jenkins:
+
+```bash
+docker exec -i budget-backend-1 python - <<'EOF'
+import sys; sys.path.insert(0, "/app")
+from importers.llm_provider import chiama_gx10_testo
+print(chiama_gx10_testo("Rispondi con una parola.", [{"role": "user", "content": "ping"}],
+                        max_tokens=20, timeout=30))
+EOF
+```
+
+Atteso: una parola in pochi secondi. «gx10 non raggiungibile» = rete o porta; «gx10 ha risposto
+401» = chiave sbagliata nella credenziale `budget-gx10-api-key`; «GX10_API_KEY non impostata» = la
+build non è passata dal ramo snello (variabile globale `IMPORT_MOTORE` mancante).
+
+**4. Da un'altra rete — gx10 non è aperto a tutti.**
+
+```bash
+nc -zv -w 5 <IP_PUBBLICO> <PORTA_ESTERNA>       # atteso: timeout o refused
+```
+
+Se si collega, la chiave è l'unica protezione, e su `http://` viaggia in chiaro.
+
+gx10 è pronto quando il punto 1 dà 401 senza chiave e il modello con la chiave, il punto 3 dà 401
+dal server e dal container, e il punto 4 non si collega.

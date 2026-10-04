@@ -276,11 +276,12 @@ def _column_centres(document: fitz.Document) -> Optional[Tuple[float, float]]:
 def _labelled_column_centres(document: fitz.Document) -> Optional[Tuple[float, float]]:
     """Ancore di due colonne intestate a PAROLE (``corrente | comparato | ...``).
 
-    Serve solo a **riconoscere** un prospetto comparato, mai a leggerlo: quelle
-    ancore sono bordi destri e su quel layout le colonne sono quattro (le due
-    di analisi comprese), mentre ``_physical_rows`` classifica per centro e ne
-    conosce due — dargliele in pasto attribuirebbe lo scostamento all'anno
-    precedente.  L'estrazione deterministica su questo layout resta declinata.
+    Serve solo a **riconoscere** un prospetto comparato
+    (``has_comparative_ivcee_columns``), mai a leggerlo: su quel layout le
+    colonne possono essere quattro (le due di analisi comprese), e date in pasto
+    a ``_physical_rows`` senza confine attribuirebbero lo scostamento all'anno
+    precedente. La lettura passa da ``_labelled_layout`` (#60), che il confine
+    lo ricava dai dati.
 
     L'import è locale di proposito: ``pdf_extractor_llm`` importa ``anthropic``,
     e questo parser deve restare importabile senza il client LLM.
@@ -295,6 +296,51 @@ def _labelled_column_centres(document: fitz.Document) -> Optional[Tuple[float, f
         if not _anchors_carry_amounts(words, anchors.current, anchors.prior):
             continue
         return anchors.current, anchors.prior
+    return None
+
+
+def _labelled_layout(
+    document: fitz.Document,
+) -> Optional[Tuple[float, float, bool, Optional[float]]]:
+    """(current_x, prior_x, prior_affidabile, bound_x) dell'intestazione a parole (#60).
+
+    Stessa forma di `_column_layout`, sulle ancore di `_labelled_column_centres`
+    (bordi destri). La #27 non leggeva mai il comparato di questo layout perché,
+    senza confine, `_physical_rows` dava alla seconda colonna anche lo scostamento.
+    La decisione segue i DATI, come in `_column_layout`:
+
+    1. nessun importo stabile (almeno tre righe) col bordo destro oltre il
+       comparato: due colonne sole, il comparato si legge senza confine;
+    2. una terza colonna stabile sotto un'intestazione di analisi stampata
+       (Scostamento/Differenza/%): il comparato si legge, e ``bound_x`` subito
+       oltre il suo bordo destro esclude lo scostamento — purché nessun importo
+       della terza colonna abbia il centro prima del confine, altrimenti il
+       confine non separa le due colonne e il comparato non si legge;
+    3. una terza colonna che nessuna intestazione identifica: mai indovinare
+       quale sia il comparato (``prior_affidabile=False``).
+
+    Un comparato letto passa comunque i controlli incrociati di `_parse_column`.
+    """
+    from importers.pdf_extractor_llm import _labelled_column_anchors
+
+    for page in document:
+        words = page.get_text("words", sort=True)
+        anchors = _labelled_column_anchors(words)
+        if anchors is None:
+            continue
+        if not _anchors_carry_amounts(words, anchors.current, anchors.prior):
+            continue
+        bound_x = anchors.prior + _ANCHOR_AMOUNT_TOL
+        oltre = [
+            word for word in words
+            if _amount(str(word[4]).strip()) is not None and float(word[2]) > bound_x
+        ]
+        if len({round(float(word[1])) for word in oltre}) < 3:
+            return anchors.current, anchors.prior, True, None
+        separate = all((float(word[0]) + float(word[2])) / 2 >= bound_x for word in oltre)
+        if anchors.others and separate:
+            return anchors.current, anchors.prior, True, bound_x
+        return anchors.current, anchors.prior, False, None
     return None
 
 
@@ -1926,19 +1972,18 @@ def _extract_balances(
             # indovinare quale sia il comparato.
             prior = _parse_column(rows, 1) if prior_ok else None
             return current, prior
-        centres = _labelled_column_centres(document)
-        if centres is not None:
-            # #27 declined reading this layout at all: its anchors are right
-            # edges on a four-column print (corrente | comparato | scostamento
-            # | %), `_physical_rows` only knows two, and the second one ends up
-            # with the variance instead of the prior year. That risk is real
-            # only for the SECOND column: the current-year column sits left of
-            # the mid-point cutoff, clear of scostamento/% (#19 diagnosis,
-            # verified against AMBIENTA's printed totals). Read column 0 only,
-            # and never even attempt column 1 — a declared "no prior" here,
-            # not a cross-foot gamble on a column known to be corrupted.
-            rows = _physical_rows(document, centres)
-            return _parse_column(rows, 0), None
+        labelled = _labelled_layout(document)
+        if labelled is not None:
+            # #27 never read column 1 here: without a bound `_physical_rows`
+            # gave it the variance of a four-column print (corrente | comparato
+            # | scostamento | %). `_labelled_layout` (#60) decides from the data
+            # whether a bound separates the prior year from the analysis
+            # columns; when it cannot, column 1 stays unread, as before.
+            current_x, prior_x, prior_ok, bound_x = labelled
+            rows = _physical_rows(document, (current_x, prior_x), bound=bound_x)
+            current = _parse_column(rows, 0)
+            prior = _parse_column(rows, 1) if prior_ok else None
+            return current, prior
         return _parse_compact_balance(_single_column_rows(document)), None
     finally:
         document.close()
@@ -1971,12 +2016,14 @@ def _extract_income(
             current = _parse_income_column(rows, 0)
             prior = _parse_income_column(rows, 1) if prior_ok else None
             return current, prior
-        centres = _labelled_column_centres(document)
-        if centres is not None:
-            # Same restriction as extract_standard_ivcee_balances: only the
-            # current-year column is reliable on this layout (#27, #19).
-            rows = _physical_rows(document, centres)
-            return _parse_income_column(rows, 0), None
+        labelled = _labelled_layout(document)
+        if labelled is not None:
+            # Same rule as extract_standard_ivcee_balances (#27, #60).
+            current_x, prior_x, prior_ok, bound_x = labelled
+            rows = _physical_rows(document, (current_x, prior_x), bound=bound_x)
+            current = _parse_income_column(rows, 0)
+            prior = _parse_income_column(rows, 1) if prior_ok else None
+            return current, prior
         return _parse_compact_income(_single_column_rows(document)), None
     finally:
         document.close()

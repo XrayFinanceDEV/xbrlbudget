@@ -151,15 +151,42 @@ def _prova_standard_ivcee(file_path: str) -> dict | None:
     )
 
     comparativo = has_comparative_ivcee_columns(file_path)
-    bs_raw, _ = extract_standard_ivcee_balances(file_path)
-    ce_raw, _ = extract_standard_ivcee_income(file_path)
+    bs_raw, prior_bs_raw = extract_standard_ivcee_balances(file_path)
+    ce_raw, prior_ce_raw = extract_standard_ivcee_income(file_path)
     if bs_raw is None or ce_raw is None:
         if not comparativo:
             return None
         return {"adottato": False, "parser": "standard_ivcee_parser", "esito": "vuoto"}
     stampati = {"totale_attivo": bs_raw.get("totale_attivo"),
                 "totale_passivo": bs_raw.get("totale_passivo")}
-    return _esito("standard_ivcee_parser", bs_raw, ce_raw, stampati)
+    esito = _esito("standard_ivcee_parser", bs_raw, ce_raw, stampati)
+    if esito["adottato"] and comparativo:
+        _con_precedente(esito, prior_bs_raw, prior_ce_raw)
+    return esito
+
+
+def _con_precedente(esito: dict, prior_bs_raw: dict | None, prior_ce_raw: dict | None) -> None:
+    """La colonna comparativa del parser standard accompagna l'anno corrente adottato (#60).
+
+    Stesse regole dell'anno corrente (``_esito``), ma solo un esito "ok": un tappo sull'anno
+    precedente non avrebbe dove essere dichiarato (``_plug_residual`` e' dell'anno corrente),
+    quindi un precedente che chiude solo col tappo si scarta, e lo si dice. Il precedente non
+    letto (layout che non lo separa dallo scostamento) resta "assente": l'avviso all'utente lo
+    aggiunge ``pdf_importer`` per ogni percorso."""
+    if prior_bs_raw is None or prior_ce_raw is None:
+        esito["prior_stato"] = "assente"
+        return
+    stampati = {"totale_attivo": prior_bs_raw.get("totale_attivo"),
+                "totale_passivo": prior_bs_raw.get("totale_passivo")}
+    precedente = _esito("standard_ivcee_parser", prior_bs_raw, prior_ce_raw, stampati)
+    if precedente["adottato"] and precedente["esito"] == "ok":
+        esito["prior_bs"], esito["prior_ce"] = precedente["bs"], precedente["ce"]
+        esito["prior_stato"] = "letto"
+    else:
+        esito["prior_stato"] = "scartato"
+        esito["prior_rifiuto"] = {"controllo": precedente["esito"],
+                                  **({"unclassified_mass": precedente["unclassified_mass"]}
+                                     if "unclassified_mass" in precedente else {})}
 
 
 def _prova_schema_con_dettaglio(file_path: str) -> dict | None:

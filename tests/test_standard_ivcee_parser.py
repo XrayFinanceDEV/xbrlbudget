@@ -1367,6 +1367,16 @@ def test_ambienta_verifica_source_balances_are_exact_and_self_validating():
     assert current_q.quadra
     assert current_q.utile_ce == Decimal("27887.32")
 
+    # #60: il comparato (31/12/2025) si legge, separato dallo scostamento.
+    assert _prior is not None and _prior_ce is not None
+    assert _prior["totale_attivo"] == Decimal("2170417.20")
+    assert _prior["totale_passivo"] == Decimal("2170417.20")
+    assert _prior["sp05_rimanenze"] == Decimal("286094.89")
+    assert _prior["sp13_utile_perdita"] == Decimal("7422.36")
+    prior_q = check_quadratura(_prior, _prior_ce, tol=Decimal("2"))
+    assert prior_q.quadra
+    assert prior_q.utile_ce == Decimal("7422.36")
+
 
 # ---------------------------------------------------------------------------
 # Task 23 — gruppo G3, tre dialetti che la diagnosi (2026-09-26) isola dietro

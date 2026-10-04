@@ -446,6 +446,19 @@ superare *sia* `validate_balance` *sia* la quadratura piena.
 - Se non supera il gate → **non viene mai persistito**; un record già esistente viene
   **preservato**; l'utente riceve "ANNO PRECEDENTE NON IMPORTATO [anno]".
 - Se lo supera → sostituisce l'eventuale record esistente, forzato ad anno pieno.
+- Se il documento **stampa** un comparato (`has_comparative_ivcee_columns`) ma nessun lettore lo ha
+  restituito, e nessun avviso sull'anno precedente c'è già → "ANNO PRECEDENTE NON IMPORTATO [anno]"
+  nel risultato e nel report persistito dell'anno corrente (`_avviso_comparato_non_letto`, #60):
+  un anno di riferimento che sparisce in silenzio non si distingue da un documento monocolonna.
+- **Intestazione a parole** (`corrente | comparato | Scostamento | %`, `_labelled_layout` in
+  `standard_ivcee_parser`, #60). Fino al 2026-10-04 il comparato di questo layout non si leggeva
+  mai (#27): senza confine la seconda colonna riceveva lo scostamento, che è lineare e passa ogni
+  controllo incrociato. Ora decidono i dati, come per le intestazioni a date: nessun importo stabile
+  oltre il comparato → due colonne, si legge; una terza colonna sotto un'intestazione di analisi
+  stampata → si legge con un confine subito oltre il bordo destro del comparato, purché nessun
+  importo della terza colonna cada prima del confine; una terza colonna che nessuna intestazione
+  nomina → il comparato non si legge. Misurato sui 200 PDF unici del corpus: l'anno corrente non
+  cambia su nessuno.
 
 La logica: un anno precedente sbagliato è peggio di un anno precedente assente, perché diventa
 la base di confronto di tutto il previsionale.
@@ -523,6 +536,11 @@ quella porta e `a09e472` l'ha richiusa (2026-10-03), perché il parser delle sit
 adottava budget_238 e budget_338 quadrati ma con le voci sbagliate. Prima ancora, un
 riepilogo di poche macro-voci (`importers/import_snello/riepilogo.py`, tipo export xlsx) si rifiuta
 con `PDFImportError`: non è un bilancio (decisione del proprietario, 2026-10-03).
+Lo schema di legge adottato porta con sé anche la colonna comparativa (`_con_precedente`, #60),
+con le stesse regole di adozione dell'anno corrente ma **solo con esito `"ok"`**: un tappo
+sull'anno precedente non avrebbe dove essere dichiarato. `deterministico.prior_stato` nel report
+vale `"letto"`, `"scartato"` (con `prior_rifiuto`) o `"assente"`. Prima il percorso snello
+lo scartava sempre, e solo il reso XBRL portava l'anno precedente.
 
 **F1 — Struttura.** Riusa la mappa del branch struttura (vision Sonnet, un blocco per chiamata):
 per ogni pagina, quali sono SP/CE/dettaglio, lo `schema` (di legge / riclassificato / piano dei

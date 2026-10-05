@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { AssumptionsMap } from "@/lib/budget-horizon";
 import type { BalanceSheet, ForecastPreviewResponse, ForecastPreviewYear, IncomeStatement } from "@/types/api";
 import {
-  annoLibero, avvisiFidi, nuoviFinanziamenti, nuovoPrestito, regimeEsplicito, regoleVociMinori, riepilogoNuovo,
+  annoLibero, avvisiAltriDebiti, avvisiFidi, nuoviFinanziamenti, nuovoPrestito, regimeEsplicito, regoleVociMinori, riepilogoNuovo,
   rowsAltriCreditiDebiti, rowsDebitoCassaPfn, tfrRighe, withNuovoCampo,
 } from "./budget-piano-step";
 
@@ -119,5 +119,15 @@ describe("budget-piano-step", () => {
     const anno2028 = y(2028, { avviso_fidi: null });
     expect(avvisiFidi([anno2027, anno2028])).toEqual([anno2027.details.avviso_fidi]);
     expect(avvisiFidi([anno2028])).toEqual([]);
+  });
+  it("avvisiAltriDebiti: dal dato strutturato, solo l'anno che lo dichiara", () => {
+    const a = y(2027, { avviso_altri_debiti_breve: { oltre_prima: 201851, oltre_base: 0, entro_base: 50000, anno_prima: 2025 } });
+    const b = y(2028, { avviso_altri_debiti_breve: null });
+    const out = avvisiAltriDebiti([a, b], 2026);
+    expect(out).toHaveLength(1);
+    expect(out[0]).toContain("(2025)");
+    expect(out[0]).toContain("(2026)");
+    expect(out[0]).toContain("Patrimoniale pregresso");
+    expect(avvisiAltriDebiti([b], 2026)).toEqual([]);
   });
 });

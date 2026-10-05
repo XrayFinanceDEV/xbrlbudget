@@ -207,6 +207,8 @@ class ForecastSource:
     base_fy: FinancialYear
     base_bs: BalanceSheet
     base_inc: IncomeStatement
+    # Lo SP dell'anno prima della base, se esiste: serve solo a un avviso (#62 S18), mai ai numeri.
+    prev_base_bs: Optional[Any] = None
 
 
 @dataclass
@@ -741,8 +743,13 @@ def load_forecast_source(db: Session, scenario_id: int) -> ForecastSource:
             f"Correggi i ricavi in Rettifiche (o re-importa il bilancio) prima di generare il previsionale."
         )
 
+    # L'anno prima della base (#62 S18): letto solo per l'avviso sugli altri debiti; assente = «non lo so».
+    prev_fy = get_fy_prefer_full(db, scenario.company_id, scenario.base_year - 1)
+    prev_base_bs = prev_fy.balance_sheet if prev_fy is not None else None
+
     return ForecastSource(scenario=scenario, base_fy=base_fy,
-                          base_bs=base_fy.balance_sheet, base_inc=base_inc)
+                          base_bs=base_fy.balance_sheet, base_inc=base_inc,
+                          prev_base_bs=prev_base_bs)
 
 
 def prune_out_of_plan_forecast_years(db: Session, scenario_id: int, planned_years) -> int:
@@ -2650,6 +2657,7 @@ class ForecastEngine:
                 )
                 forecast_bs = self._calculate_balance_sheet(
                     base_bs=source.base_bs,
+                    prev_base_bs=source.prev_base_bs,
                     base_inc=source.base_inc,
                     forecast_inc=forecast_inc,
                     assumption=assumption,
@@ -3779,6 +3787,7 @@ class ForecastEngine:
         fidi_apertura=None,
         altri_finanziatori=None,
         compensa_crediti_tributari: bool = False,
+        prev_base_bs=None,
     ) -> Dict:
         """
         Calculate forecasted balance sheet based on assumptions and forecast income statement.
@@ -4727,6 +4736,28 @@ class ForecastEngine:
             sp16f = sp16f + runoff_previdenziali.residual_short
             sp17f = runoff_previdenziali.residual_long
         altri_debiti_plan = (pregresso or {}).get('altri_debiti')
+        # #62 S18: gli «altri debiti oltre 12 mesi» dell'anno prima della base erano piu' alti di quelli
+        # della base e senza piano il lato entro cresce coi ricavi. Solo un avviso: nessun numero si muove.
+        # Senza l'anno prima il controllo manca, e «non lo so» non e' un verdetto.
+        avviso_altri = None
+        if details is not None and year_index == 0 and prev_base_bs is not None and not altri_debiti_plan:
+            oltre_prima = Decimal(str(prev_base_bs.sp17g_altri_debiti_lungo or 0))
+            oltre_base = Decimal(str(base_bs.sp17g_altri_debiti_lungo or 0))
+            if oltre_prima > oltre_base:
+                anno_base = assumption.forecast_year - year_offset
+                avviso_altri = {
+                    'oltre_prima': oltre_prima, 'oltre_base': oltre_base,
+                    'entro_base': Decimal(str(base_bs.sp16g_altri_debiti_breve or 0)),
+                    'anno_prima': anno_base - 1,
+                }
+                details['avvisi'].append(
+                    f"Gli altri debiti oltre 12 mesi sono scesi da {_importo_it(oltre_prima)} "
+                    f"({anno_base - 1}) a {_importo_it(oltre_base)} ({anno_base}) e quelli entro "
+                    f"12 mesi ora crescono con i ricavi: se sono debiti che si pagheranno a rate, "
+                    f"scadenziali al passo 5 «Patrimoniale pregresso»."
+                )
+        if details is not None:
+            details['avviso_altri_debiti_breve'] = avviso_altri
         if altri_debiti_plan:
             runoff_altri = runoff_schedule(
                 altri_debiti_plan['opening'], altri_debiti_plan['amounts'],

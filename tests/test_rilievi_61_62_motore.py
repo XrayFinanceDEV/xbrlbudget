@@ -195,3 +195,19 @@ def test_M4_col_piano_dei_crediti_la_compensazione_non_si_perde():
         D("184140.58") - D("10000") - cum[0])
     for y in (2027, 2028, 2029):
         assert e.det[y]["imposte"]["crediti_tributari_consuntivo"] >= D("0")
+
+
+def test_M6_avviso_quando_l_oltre_si_e_spostato_entro():
+    prima = {**BASE_BS, "sp17g_altri_debiti_lungo": D("201851.00"),
+             "sp16g_altri_debiti_breve": BASE_BS["sp16g_altri_debiti_breve"] - D("201851.00")}
+    e = generato(genera(righe(), anno_prima_bs=prima))
+    av = e.det[2027]["avviso_altri_debiti_breve"]
+    assert av is not None and av["oltre_prima"] == D("201851.00")
+    assert av["anno_prima"] == 2025
+    assert any("altri debiti" in a.lower() for a in e.det[2027]["avvisi"])
+    assert e.det[2028]["avviso_altri_debiti_breve"] is None
+
+
+def test_M6_senza_anno_prima_nessun_avviso():
+    e = generato(genera(righe()))
+    assert e.det[2027]["avviso_altri_debiti_breve"] is None

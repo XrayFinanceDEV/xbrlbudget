@@ -1321,6 +1321,11 @@ export interface ForecastYearDetails {
    *  dichiara in italiano, gia' pronto per lo schermo; `null`/assente quando non scatta o
    *  fuori dal regime esplicito. */
   avviso_fidi?: string | null;
+  /** Altri debiti oltre 12 mesi scesi fra l'anno prima della base e la base, senza piano `altri_debiti`
+   *  (#62 S18). `null` quando non scatta o l'anno prima non c'e': solo un avviso, i numeri non si muovono. */
+  avviso_altri_debiti_breve?: {
+    oltre_prima: number; oltre_base: number; entro_base: number; anno_prima: number;
+  } | null;
 }
 
 export interface ForecastPreviewYear {

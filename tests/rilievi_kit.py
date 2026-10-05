@@ -46,12 +46,15 @@ class Esito:
     meta: dict
 
 
-def genera(rows, *, bs=None, ce=None, report=False, prima=None, ritocca=None) -> Esito:
+def genera(rows, *, bs=None, ce=None, report=False, prima=None, ritocca=None,
+           anno_prima_bs=None) -> Esito:
     """Semina la base (con eventuali ritocchi `bs`/`ce`), salva le righe col bulk di produzione
     (`auto_generate=True`) e rilegge ciò che è persistito. `prima`: righe salvate e generate PRIMA di
     `rows`, per i test che vogliono un previsionale vecchio sotto un salvataggio respinto. `ritocca`:
     `callable(db, scenario_id)` eseguito dopo la generazione e prima del report, per i test che
-    scrivono a mano un campo persistito (es. `ForecastYear.engine_meta`) che nessuna API espone."""
+    scrivono a mano un campo persistito (es. `ForecastYear.engine_meta`) che nessuna API espone.
+    `anno_prima_bs`: SP dell'anno prima della base (2025, annuale), scritto cosi' com'e' sulle righe ORM
+    senza validatori; il motore ne legge un solo campo (#62 S18)."""
     engine, sessions = memory_sessions()
     try:
         with sessions() as db:
@@ -62,6 +65,11 @@ def genera(rows, *, bs=None, ce=None, report=False, prima=None, ritocca=None) ->
             db.add(fy); db.flush()
             db.add(BalanceSheet(financial_year_id=fy.id, **{**BASE_BS, **(bs or {})}))
             db.add(IncomeStatement(financial_year_id=fy.id, **{**BASE_CE, **(ce or {})}))
+            if anno_prima_bs is not None:
+                fy0 = FinancialYear(company_id=company.id, year=2025, period_months=None,
+                                    validation_status="verified", forecastable=True)
+                db.add(fy0); db.flush()
+                db.add(BalanceSheet(financial_year_id=fy0.id, **anno_prima_bs))
             db.commit()
             sc = BudgetScenario(company_id=company.id, name="rilievi", base_year=2026, scenario_type="budget")
             db.add(sc); db.commit()

@@ -1857,7 +1857,7 @@ class ForecastEngine:
     # `sp16a-c`/`sp17a-c` (confine PFN e confine del rendiconto: sono un
     # debito finanziario, mai il ripiego di un residuo di arrotondamento),
     # `sp05b_prodotti_in_corso`, `sp05c_lavori_in_corso`, `sp05d_prodotti_finiti`
-    # (nota S04 #62, 2026-10-05: ora hanno una contropartita di CE — `ce02`/`ce03` —
+    # (nota S04 #62, 2026-10-05: sp05b/sp05d hanno ora una contropartita di CE — `ce02` —
     # e un centesimo su di loro attraverserebbe il confine CE↔SP: restano neutri i soli
     # acconti `sp05e`, che non passano dal CE),
     # `sp05a_materie_prime` (spec B01, 2026-09-26: confine CE↔SP, la chiusura
@@ -3321,8 +3321,8 @@ class ForecastEngine:
 
 
         # CE line items: use override if set, otherwise fall back to base year
-        # ce02/ce03 (variazioni di rimanenze di prodotti e lavori in corso) non sono piu' quelle dell'anno base:
-        # si derivano dallo SP nel blocco delle rimanenze qui sotto (#62 nota S04, 2026-10-05).
+        # ce02 (variazione di rimanenze di prodotti) non e' piu' quella dell'anno base: si deriva dallo SP nel
+        # blocco delle rimanenze qui sotto (#62 nota S04, 2026-10-05). ce03 resta della base (vedi sotto).
         # A.4 "Incrementi di immobilizzazioni per lavori interni" — carried as its own line.
         # Without this the engine silently dropped it from the production value (the client's
         # "380.423 che sparisce / non si azzera" issue) and it had no override.
@@ -3334,7 +3334,7 @@ class ForecastEngine:
         # contrario. Gruppo 1 = materie prime + semilavorati (sp05a+sp05b), giorni sul CONSUMO di materie;
         # gruppo 2 = prodotti finiti e merci (sp05d), giorni sui RICAVI; sp05c (lavori in corso) e sp05e
         # (acconti), giorni dedotti dai ricavi sulla loro somma. Contropartite OIC: ce10 = -Δsp05a (B11),
-        # ce02 = Δ(sp05b+sp05d) (A2), ce03 = Δsp05c (A3). Gli acconti (sp05e) non passano dal CE.
+        # ce02 = Δ(sp05b+sp05d) (A2); ce03 NON deriva da sp05c (campo ambiguo). Gli acconti (sp05e) non passano dal CE.
         def _base_bs_val(field):
             if base_bs is None:
                 return Decimal('0')
@@ -3530,19 +3530,11 @@ class ForecastEngine:
                 chiusura_semilav = _qc(nuova_sl)
         else:
             ce02 = ce02_calc
-        if assumption.ce03_override is not None:
-            ce03 = assumption.ce03_override
-            nuova_c = ap_c + ce03
-            if nuova_c < 0:
-                raise ValueError(
-                    f"L'override di ce03_lavori_interni nell'anno {assumption.forecast_year} "
-                    f"({eur_it(ce03)}) porterebbe i lavori in corso sotto zero "
-                    f"({eur_it(nuova_c)}): le rimanenze non possono scendere sotto zero. "
-                    "Abbassa l'override o svuota la cella (value: null) e lascia che i giorni lo derivino."
-                )
-            chiusura_c = _qc(nuova_c)
-        else:
-            ce03 = chiusura_c - ap_c
+        # ce03 NON deriva da Δsp05c: negli import la voce A.4 «incrementi di immobilizzazioni per lavori
+        # interni» finisce spesso proprio in `ce03_lavori_interni` (ce03a resta vuota), quindi il campo e'
+        # ambiguo e derivarlo dallo SP azzererebbe un ricavo vero. Resta quello della base, o l'override.
+        # Il movimento di sp05c non si specchia nel CE (solo cassa), e si dichiara: contropartita 'nessuna'.
+        ce03 = assumption.ce03_override if assumption.ce03_override is not None else base_inc.ce03_lavori_interni
 
         # ── Avviso: giorni ESPLICITI che spostano un gruppo oltre il 50% dell'apertura o oltre il suo flusso ──
         avvisi_rimanenze: List[Dict[str, Any]] = []
@@ -3602,8 +3594,8 @@ class ForecastEngine:
                 'lavori_in_corso': {
                     'apertura': ap_c, 'chiusura': chiusura_c,
                     'giorni': giorni_ce_dichiarati, 'base_giorni': storico_ce,
-                    'degenere': degenere_ce, 'override': assumption.ce03_override is not None,
-                    'contropartita': 'ce03',
+                    'degenere': degenere_ce, 'override': False,
+                    'contropartita': 'nessuna',
                     'chiusura_sp05e': chiusura_e,
                 },
             }

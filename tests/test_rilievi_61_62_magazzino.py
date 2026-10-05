@@ -57,10 +57,19 @@ def test_semilavorati_seguono_il_gruppo_materie_e_passano_da_ce02():
     assert abs(ce["ce10_var_rimanenze_mat_prime"] - (D("187312") - sp["sp05a_materie_prime"])) < D("0.01")
 
 
-def test_lavori_in_corso_passano_da_ce03():
+def test_lavori_in_corso_non_passano_dal_ce():
+    # ce03 e' ambiguo negli import (A.4 finisce spesso li'): resta quello della base, sp05c muove solo la cassa.
     e = generato(genera(righe(revenue_growth_pct=10), bs=BS_LC))
     sp, ce = e.anni[2027]
-    assert abs(ce["ce03_lavori_interni"] - (sp["sp05c_lavori_in_corso"] - D("100000"))) < D("0.01")
+    assert sp["sp05c_lavori_in_corso"] > D("100000")
+    assert ce["ce03_lavori_interni"] == BASE_CE["ce03_lavori_interni"]
+    assert e.det[2027]["rimanenze"]["lavori_in_corso"]["contropartita"] == "nessuna"
+
+
+def test_ce03_della_base_ambienta_si_riporta():
+    e = generato(genera(righe()))
+    assert BASE_CE["ce03_lavori_interni"] == D("93000.00")
+    assert e.anni[2027][1]["ce03_lavori_interni"] == D("93000.00")
 
 
 def test_base_senza_dettaglio_non_perde_massa():
@@ -73,12 +82,6 @@ def test_override_ce02_vince_e_lo_sp_lo_segue():
     sp, ce = e.anni[2027]
     assert ce["ce02_variazioni_rimanenze"] == D("-20000")
     assert abs(sp["sp05d_prodotti_finiti"] - D("80000")) < D("0.01")
-
-
-def test_override_ce03_vince_e_lo_sp_lo_segue():
-    e = generato(genera(righe(ce03_override=5000), bs=BS_LC))
-    sp, ce = e.anni[2027]
-    assert abs(sp["sp05c_lavori_in_corso"] - D("105000")) < D("0.01")
 
 
 def test_override_ce02_sotto_zero_si_rifiuta():

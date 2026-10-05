@@ -37,7 +37,6 @@ class Settings(BaseSettings):
         "http://localhost:3002",  # Next.js dev server (alternative port)
         "http://localhost:8000",  # FastAPI dev server
         "http://localhost:8501",  # Streamlit (legacy)
-        "https://xbrlbudget.netlify.app",  # Netlify production deployment
     ]
 
     # CORS - Additional origins from env var (comma-separated)

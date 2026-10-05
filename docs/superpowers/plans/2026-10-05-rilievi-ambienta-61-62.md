@@ -974,3 +974,11 @@ Leggi `tests/test_bp_narrative.py:1-40` per la forma esatta di `AMBIENTA`, `make
 2. Merge su `main` secondo `superpowers:finishing-a-development-branch`. Prima del push serve `next build`.
 3. Commento di chiusura su #61 e #62: punto per punto che cosa è cambiato, dove ci si discosta dai tester (S11 perimetro, S14 compensazione orizzontale degli acconti, S18 compensazione invece della riclassifica) e la nota per chi ritesta («Salva e Calcola Previsionale»; il DIO va reinserito in due gruppi). Il testo si mostra al proprietario prima di pubblicarlo.
 4. Un'issue nuova per l'import che mette tutte le rimanenze su `sp05a` senza dettaglio (fuori perimetro).
+
+---
+
+**Superato dall'esecuzione (2026-10-05).** Il codice del Task 3 Step 3 è stato ristretto da
+`33f3bc0` (fix finale 4, pinato da `fac439c`): il ramo «componenti» scatta solo con `prev_b > 0`
+(salari), non `(prev_b + prev_c + prev_d) > 0` — senza salari il TFR cadrebbe sul ripiego del 70%
+sopra oneri e altri costi. Stato attuale: blocco Personnel di `calculations/forecast_engine.py`
+e CLAUDE.md §«Lotto 1 fix rilievi».

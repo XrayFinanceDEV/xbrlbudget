@@ -286,3 +286,11 @@ Ogni voce M/I/R ha almeno un test che fallisce prima e passa dopo, sui numeri d'
 riproducibili, e un test «casella spenta = identico a prima» per M4. La suite backend, Vitest e
 `next build` restano verdi. La revisione finale del lotto si fa con opus (memoria
 «scelta-modello-subagenti»).
+
+---
+
+**Superata dall'esecuzione (2026-10-05).** La condizione del ramo «componenti» di M2/S06 è stata
+ristretta dopo la stesura di questa spec: `33f3bc0` (fix finale 4, pinato da `fac439c`) la fa scattare
+solo quando l'anno prima ha **salari** (`ce08b > 0`), non su `ce08b + ce08c + ce08d > 0`: senza salari
+il TFR cadrebbe sul ripiego del 70% sopra `ce08c`/`ce08d`. Stato attuale: blocco Personnel di
+`calculations/forecast_engine.py` (`details['personale']['modo']`) e CLAUDE.md §«Lotto 1 fix rilievi».

@@ -63,4 +63,24 @@ describe("Final report dossier v2 boundary", () => {
     reordered.structure_series[1].periods.reverse();
     expect(isFinalReportModelV2(reordered), "a group reading the periods in another order").toBe(false);
   });
+  it("checks the break-even split against the operating costs net of the production adjustments (F5)", () => {
+    // AMBIENTA, 2026-10-05: «Impossibile caricare il dossier — Unsupported or invalid
+    // FinalReportModel v2 payload» su ogni Business plan con altri ricavi o variazioni di
+    // rimanenze. Da F5 (2026-09-26) i fissi sono `costi_fissi_operativi` del motore, e
+    // fissi + variabili = ce05+ce06+ce07+ce08+ce12 + ce10+ce11+ce11b − ce04−ce02−ce03−ce03a,
+    // la stessa identita' del validatore Python (`final_report_v2.py`). Il client
+    // controllava ancora le sole cinque voci di costo.
+    const altriRicavi = (fixedDelta: string) => {
+      const report = structuredClone(annual) as Record<string, any>;
+      const ce = report.detailed_statements[0];
+      const fixed = report.structure_series.find((g: any) => g.id === "break_even").series.find((s: any) => s.id === "fixed_costs");
+      const i = fixed.values.findIndex((v: unknown) => v !== null);
+      const ce04 = ce.rows.find((r: any) => r.id === "income_statement:ce04_altri_ricavi");
+      ce04.values[i] = (Number(ce04.values[i] ?? 0) + 1000).toFixed(2);
+      fixed.values[i] = (Number(fixed.values[i]) + Number(fixedDelta)).toFixed(2);
+      return report;
+    };
+    expect(isFinalReportModelV2(altriRicavi("-1000")), "fixed costs net of ce04").toBe(true);
+    expect(isFinalReportModelV2(altriRicavi("0")), "a split that ignores ce04").toBe(false);
+  });
 });

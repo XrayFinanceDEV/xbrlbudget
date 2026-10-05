@@ -102,6 +102,7 @@ const RULES = {
   cash_sweep_enabled: bool,
   cash_sweep_min_cash: eur({ nullable: true }),
   overdraft_allowed: bool,
+  compensa_crediti_tributari: bool,
   // Vuoto = concesso senza tetto: e' la modalita' di misura del fabbisogno.
   overdraft_limit: eur({ nullable: true }),
   tfr_accrual_suspended: bool,

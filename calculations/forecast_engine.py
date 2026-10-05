@@ -2528,6 +2528,9 @@ class ForecastEngine:
             pregresso = validate_pregresso(
                 getattr(assumptions[0], 'pregresso', None), source.base_bs, len(assumptions)
             )
+            # #62 S14/S18: la compensazione del credito tributario e' per scenario e si legge sulla prima riga;
+            # un'altra riga diversa non e' un errore (l'interfaccia le scrive tutte uguali).
+            compensa_crediti_tributari = bool(getattr(assumptions[0], 'compensa_crediti_tributari', False))
             # Va fatto QUI e non nel calcolatore: sopprimere l'inesigibile di un
             # anno alza il residuo di tutti gli anni dopo, e il singolo anno non
             # vede gli override degli altri.
@@ -2667,6 +2670,7 @@ class ForecastEngine:
                     # ha (rilievo m-2).
                     previous_year=(assumptions[year_index - 1].forecast_year
                                    if year_index else source.scenario.base_year),
+                    compensa_crediti_tributari=compensa_crediti_tributari,
                     sweep=sweep,
                     debito_bancario=debito,
                     fidi_apertura=fidi_apertura,
@@ -3774,6 +3778,7 @@ class ForecastEngine:
         settore: Optional[int] = None,
         fidi_apertura=None,
         altri_finanziatori=None,
+        compensa_crediti_tributari: bool = False,
     ) -> Dict:
         """
         Calculate forecasted balance sheet based on assumptions and forecast income statement.
@@ -4520,8 +4525,14 @@ class ForecastEngine:
             # applica solo alla quota del consuntivo; il credito da acconti
             # resta distinto e non viene moltiplicato una seconda volta.
             crediti_consuntivo *= D('1') + _sp_growth('sp06e_growth_pct')
+            # #62 S14/S18: quanto del credito del consuntivo e' gia' stato compensato negli anni prima. Col piano
+            # `crediti_tributari_breve` il residuo si riassegna dal runoff ogni anno, e senza questo cumulato la
+            # compensazione dell'anno prima andrebbe persa.
+            compensato_cumulato = D(str(prev_tax_details.get('credito_storico_compensato_cumulato') or 0))
             if piano_crediti_tributari_breve:
-                crediti_consuntivo = pregresso_runoff['crediti_tributari_breve'].residual
+                crediti_consuntivo = max(
+                    ZERO, pregresso_runoff['crediti_tributari_breve'].residual - compensato_cumulato)
+                compensato_cumulato = min(compensato_cumulato, pregresso_runoff['crediti_tributari_breve'].residual)
             if prev_tax_details.get('mode') == 'saldo_acconto':
                 # L'anno prima e' passato di qui: sa dire quanto di se' e' saldo
                 # e quanto e' rata, e lo consegna gia' scomposto.
@@ -4622,7 +4633,12 @@ class ForecastEngine:
                 # mette `acconto_pct = 0`.
                 explicit_advances=getattr(assumption, 'tax_advances_paid', None),
                 carry_excess_credit=acconti_tributari_storici > ZERO,
+                credito_storico_compensabile=crediti_consuntivo if compensa_crediti_tributari else ZERO,
             )
+            # Il credito compensato esce dal credito del consuntivo prima di `sp06e`; la cassa, che e' il plug,
+            # sale dello stesso importo. L'anno dopo riparte da `crediti_tributari_consuntivo`, gia' al netto.
+            crediti_consuntivo -= tax_year.credito_storico_compensato
+            compensato_cumulato += tax_year.credito_storico_compensato
             # #62 S28: l'importo inserito vince (puo' essere voluto), ma sotto sia al metodo storico sia al
             # previsionale espone a sanzioni: si dichiara, non si corregge.
             esplicito = Decimal(str(getattr(assumption, 'tax_advances_paid', None) or 0))
@@ -5210,6 +5226,9 @@ class ForecastEngine:
                     'opening_credit_left': tax_year.opening_credit_left,
                     'credito_compensato': tax_year.credito_compensato,
                     'crediti_tributari_consuntivo': crediti_consuntivo,
+                    'credito_storico_compensato': tax_year.credito_storico_compensato,
+                    'credito_storico_compensato_cumulato': compensato_cumulato,
+                    'compensazione_ignorata': False,
                     'mode': 'saldo_acconto',
                     'avviso_acconti': avviso_acconti,
                 }
@@ -5219,6 +5238,9 @@ class ForecastEngine:
                     'rate_paid': ZERO, 'generated_debt': ZERO, 'generated_credit': ZERO,
                     'opening_credit_left': ZERO, 'credito_compensato': ZERO,
                     'crediti_tributari_consuntivo': ZERO, 'mode': 'manual', 'avviso_acconti': None,
+                    # Via manuale: la compensazione non si applica, e se l'utente la voleva lo si dichiara.
+                    'credito_storico_compensato': ZERO, 'credito_storico_compensato_cumulato': ZERO,
+                    'compensazione_ignorata': bool(compensa_crediti_tributari),
                 }
             )
 

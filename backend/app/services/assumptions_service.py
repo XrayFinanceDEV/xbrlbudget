@@ -242,6 +242,7 @@ def build_assumption_row(
         cash_sweep_enabled=data.get("cash_sweep_enabled", False) or False,
         cash_sweep_min_cash=data.get("cash_sweep_min_cash", None),
         overdraft_allowed=data.get("overdraft_allowed", False) or False,
+        compensa_crediti_tributari=data.get("compensa_crediti_tributari", False) or False,
         overdraft_limit=data.get("overdraft_limit", None),
         tfr_accrual_suspended=data.get("tfr_accrual_suspended", False) or False,
         previdenza_scales_with_personnel=data.get("previdenza_scales_with_personnel", False) or False,

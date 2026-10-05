@@ -104,7 +104,11 @@ def test_details_declare_the_three_keys_without_any_plan(monkeypatch):
                 assert set(details["imposte"]) == {"current_tax", "saldo_paid", "acconti_paid",
                                                    "rate_paid", "generated_debt", "generated_credit",
                                                    "opening_credit_left", "credito_compensato",
-                                                   "crediti_tributari_consuntivo", "mode", "avviso_acconti"}
+                                                   "crediti_tributari_consuntivo", "mode", "avviso_acconti",
+                                                   # #62 S14/S18: compensazione del credito storico
+                                                   "credito_storico_compensato",
+                                                   "credito_storico_compensato_cumulato",
+                                                   "compensazione_ignorata"}
     finally:
         engine.dispose()
 

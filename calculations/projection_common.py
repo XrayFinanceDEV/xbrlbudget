@@ -605,11 +605,13 @@ class TaxYear:
     opening_credit_left: Decimal
     cash_out: Decimal
     credito_compensato: Decimal = ZERO
+    # #62 S14/S18: la parte del credito tributario del consuntivo compensata (F24) con cio' che resta da versare.
+    credito_storico_compensato: Decimal = ZERO
 
 
 def tax_settlement_saldo_acconto(*, opening_credit, saldo_due, rate_due, current_tax,
                                  previous_tax, acconto_pct, explicit_advances,
-                                 carry_excess_credit=False) -> TaxYear:
+                                 carry_excess_credit=False, credito_storico_compensabile=ZERO) -> TaxYear:
     """Imposte a saldo + acconto (spec lotto 2 §3.2). La regola degli acconti e' `acconti_dovuti`, condivisa con
     `posizione_tributaria_fine_anno` dell'infrannuale.
 
@@ -636,12 +638,17 @@ def tax_settlement_saldo_acconto(*, opening_credit, saldo_due, rate_due, current
     generated_debt = max(ZERO, net).quantize(CENT, rounding=ROUND_HALF_UP)
     payable = max(ZERO, saldo_paid + acconti + rate_due)
     compensated = min(opening_credit, payable) if carry_excess_credit else opening_credit
+    # #62 S14/S18 (decisione del proprietario 2026-10-05): il credito tributario del consuntivo che il piano non
+    # incassa si compensa, se l'utente lo sceglie, con cio' che resta da versare dopo il credito da acconti.
+    # Il debito generato non cambia: si riduce solo cio' che esce.
+    capienza = max(ZERO, payable - compensated)
+    storico = min(max(ZERO, d(credito_storico_compensabile)), capienza)
     return TaxYear(
         saldo_paid=saldo_paid, acconti_paid=acconti, rate_paid=rate_due,
         generated_debt=generated_debt, generated_credit=max(ZERO, -net),
         opening_credit_left=opening_credit - compensated,
-        cash_out=saldo_paid + acconti + rate_due - compensated,
-        credito_compensato=compensated,
+        cash_out=saldo_paid + acconti + rate_due - compensated - storico,
+        credito_compensato=compensated, credito_storico_compensato=storico,
     )
 
 

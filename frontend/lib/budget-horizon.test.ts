@@ -56,6 +56,7 @@ function fixtureRow(overrides: Partial<BudgetAssumptions>): BudgetAssumptions {
     cash_sweep_enabled: false,
     cash_sweep_min_cash: null,
     overdraft_allowed: false,
+    compensa_crediti_tributari: false,
     overdraft_limit: null,
     tfr_accrual_suspended: false,
     previdenza_scales_with_personnel: false,
@@ -252,6 +253,7 @@ describe("hydrateAssumptions", () => {
     "ce09d_override", "ce10_override", "ce11_override", "ce11b_override", "ce12_override",
     "ce13_override", "ce14_override", "ce15_override", "ce16_override", "ce17_override",
     "ce17a_override", "ce17b_override", "ce18_override", "ce19_override", "ce20_override",
+    "compensa_crediti_tributari",
     "depreciation_rate", "depreciation_rate_intangible", "dio_days", "dio_pf_days", "dpo_days", "dso_days",
     "existing_debt_repayment_years", "financing_amount", "financing_duration_years",
     "financing_interest_rate", "financing_loans", "fixed_materials_growth_pct",
@@ -271,8 +273,8 @@ describe("hydrateAssumptions", () => {
     "variable_services_growth_auto", "variable_services_growth_pct",
   ];
 
-  it("scrive esattamente le 102 chiavi congelate, ordinate", () => {
-    expect(CHIAVI_ATTESE.length).toBe(102);
+  it("scrive esattamente le 103 chiavi congelate, ordinate", () => {
+    expect(CHIAVI_ATTESE.length).toBe(103);
     const out = hydrateAssumptions([fixtureRow({ forecast_year: 2026 })], 1);
     expect(Object.keys(out[2026]).sort()).toEqual([...CHIAVI_ATTESE].sort());
   });
@@ -518,7 +520,7 @@ describe("assumptionRowsForSave", () => {
     const attese = Object.keys(map[2026]).sort();
     // Ancorato all'elenco congelato di `hydrateAssumptions`: se il numero si
     // muove, il difetto e' li' e questo test non si aggiorna per zittirlo.
-    expect(attese.length).toBe(102);
+    expect(attese.length).toBe(103);
     const rows = assumptionRowsForSave(map, [2026, 2027], 7);
     expect(rows).toHaveLength(2);
     for (const row of rows) expect(Object.keys(row).sort()).toEqual(attese);

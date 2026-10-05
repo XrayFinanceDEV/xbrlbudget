@@ -335,6 +335,8 @@ class BudgetAssumptionsBase(BaseModel):
     # Scoperto di c/c (opt-in): un fabbisogno scoperto diventa sp16a generato dal
     # piano invece di far alzare il motore. Spento = comportamento di sempre.
     overdraft_allowed: bool = False
+    # #62 S14/S18: compensazione del credito tributario del consuntivo; per scenario, letta sulla prima riga.
+    compensa_crediti_tributari: bool = False
     # None = concesso senza tetto; negativo non ha senso (un fido non e' un credito).
     overdraft_limit: Optional[Decimal] = Field(default=None, ge=0)
 
@@ -488,6 +490,7 @@ class BudgetAssumptionsUpdate(BaseModel):
     cash_sweep_enabled: Optional[bool] = None
     cash_sweep_min_cash: Optional[Decimal] = None
     overdraft_allowed: Optional[bool] = None
+    compensa_crediti_tributari: Optional[bool] = None
     overdraft_limit: Optional[Decimal] = Field(None, ge=0)
     tfr_accrual_suspended: Optional[bool] = None
     previdenza_scales_with_personnel: Optional[bool] = None

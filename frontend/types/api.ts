@@ -553,6 +553,8 @@ export interface BudgetAssumptions {
   overdraft_allowed: boolean;
   /** Tetto dello scoperto; `null` = concesso senza tetto. */
   overdraft_limit: number | null;
+  /** Compensa il credito tributario del consuntivo non incassato dal piano con le imposte da versare. */
+  compensa_crediti_tributari: boolean;
   tfr_accrual_suspended: boolean;
   previdenza_scales_with_personnel: boolean;
   inflation_pct: number | null;
@@ -662,6 +664,7 @@ export interface BudgetAssumptionsCreate {
   cash_sweep_min_cash?: number | null;
   overdraft_allowed?: boolean;
   overdraft_limit?: number | null;
+  compensa_crediti_tributari?: boolean;
   tfr_accrual_suspended?: boolean;
   previdenza_scales_with_personnel?: boolean;
   inflation_pct?: number | null;

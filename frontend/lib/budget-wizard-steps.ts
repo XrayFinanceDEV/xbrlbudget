@@ -41,6 +41,7 @@ export const STEP_FIELDS: Record<WizardStepKey, readonly string[]> = {
   "patrimoniale-pregresso": [
     "bank_lines_amount", "bank_lines_rate", "financing_loans",
     "existing_debt_repayment_years", "altri_finanz_repayment_years", "sp06e_growth_pct",
+    "compensa_crediti_tributari",
   ],
   "patrimoniale-piano": [
     "sp01_growth_pct", "sp04_growth_pct",

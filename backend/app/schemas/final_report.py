@@ -86,7 +86,7 @@ _CATALOG_FIELDS = {
     for section in ASSUMPTION_SECTION_CATALOG
 }
 _BOOLEAN_ASSUMPTION_FIELDS = frozenset({
-    "cash_sweep_enabled", "overdraft_allowed", "tfr_accrual_suspended",
+    "cash_sweep_enabled", "overdraft_allowed", "compensa_crediti_tributari", "tfr_accrual_suspended",
     "fixed_materials_growth_auto", "fixed_services_growth_auto",
     "variable_materials_growth_auto", "variable_services_growth_auto",
 })

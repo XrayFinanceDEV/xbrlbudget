@@ -177,6 +177,7 @@ FIELD_LABELS: Mapping[str, str] = {
     "cash_sweep_enabled": "Cash sweep",
     "cash_sweep_min_cash": "Cassa minima del cash sweep",
     "overdraft_allowed": "Scoperto di conto consentito",
+    "compensa_crediti_tributari": "Compensazione del credito tributario residuo con le imposte",
     "overdraft_limit": "Tetto dello scoperto",
     "bank_lines_amount": "Fidi, Anticipi Ft e Scoperti CC",
     "bank_lines_rate": "Tasso fidi e scoperto %",

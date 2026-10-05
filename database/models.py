@@ -652,6 +652,9 @@ class BudgetAssumptions(Base):
     # stressato lo si vuole poter far girare per leggere quanta finanza richiede.
     overdraft_allowed = Column(Boolean, default=False, nullable=False)
     overdraft_limit = Column(Numeric(15, 2), nullable=True)  # NULL = concesso senza tetto
+    # #62 S14/S18: compensa il credito tributario del consuntivo che il piano non incassa con le imposte da
+    # versare. Per scenario, si legge sulla prima riga. Spenta = comportamento di sempre.
+    compensa_crediti_tributari = Column(Boolean, default=False, nullable=False)
 
     # TFR accrual suspension: companies with >60 employees pay the maturing TFR to the
     # INPS treasury fund instead of accruing it internally. When True, the TFR fund

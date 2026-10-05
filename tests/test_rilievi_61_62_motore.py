@@ -1,6 +1,6 @@
 """Rilievi AMBIENTA #61/#62: regole del motore, una sezione per rilievo."""
 from decimal import Decimal as D
-from tests.rilievi_kit import BASE_BS, BASE_CE, genera, generato, righe
+from tests.rilievi_kit import BASE_BS, BASE_CE, genera, generato, per_anno, righe
 
 
 def _q(x): return D(str(x)).quantize(D("0.01"))
@@ -144,3 +144,54 @@ def test_M5_acconti_sotto_entrambi_i_minimi_avvisano():
 def test_M5_acconti_non_dichiarati_non_avvisano():
     e = generato(genera(righe()))
     assert all(e.det[y]["imposte"]["avviso_acconti"] is None for y in (2027, 2028, 2029))
+
+
+# ── M4 (#62 S14/S18): compensazione del credito tributario del consuntivo, a scelta ──
+def _netto_scoperto(sp):
+    return sp["sp09_disponibilita_liquide"] - sp["sp16a_debiti_banche_breve"]
+
+
+def test_M4_casella_spenta_identica_a_prima():
+    a = generato(genera(righe()))
+    b = generato(genera(per_anno(righe(), "compensa_crediti_tributari", [False, False, False])))
+    assert a.anni == b.anni
+
+
+def test_M4_casella_accesa_consuma_il_credito_e_libera_cassa():
+    a = generato(genera(righe()))
+    b = generato(genera(per_anno(righe(), "compensa_crediti_tributari", [True, True, True])))
+    comp = b.det[2027]["imposte"]["credito_storico_compensato"]
+    assert comp > D("0")
+    assert _q(a.anni[2027][0]["sp06e_crediti_tributari_breve"] - b.anni[2027][0]["sp06e_crediti_tributari_breve"]) == _q(comp)
+    assert _q(_netto_scoperto(b.anni[2027][0]) - _netto_scoperto(a.anni[2027][0])) >= _q(comp) - D("0.01")
+    assert _q(a.anni[2027][0]["sp16e_debiti_tributari_breve"]) == _q(b.anni[2027][0]["sp16e_debiti_tributari_breve"])
+    # l'anno dopo riparte dal residuo gia' compensato
+    c2 = b.det[2028]["imposte"]
+    assert c2["credito_storico_compensato_cumulato"] == comp + c2["credito_storico_compensato"]
+
+
+def test_M4_via_manuale_la_dichiara_ignorata():
+    rows = per_anno(righe(sp16e_growth_pct=0), "compensa_crediti_tributari", [True, True, True])
+    e = generato(genera(rows))
+    assert e.det[2027]["imposte"]["compensazione_ignorata"] is True
+    assert e.det[2027]["imposte"]["credito_storico_compensato"] == D("0")
+
+
+def test_M4_si_legge_sulla_prima_riga():
+    uno = generato(genera(per_anno(righe(), "compensa_crediti_tributari", [True, True, True])))
+    misto = generato(genera(per_anno(righe(), "compensa_crediti_tributari", [True, False, False])))
+    assert uno.anni == misto.anni
+
+
+def test_M4_col_piano_dei_crediti_la_compensazione_non_si_perde():
+    rows = righe()
+    rows[0]["pregresso"] = {"crediti_tributari_breve": {"opening": D("184140.58"), "amounts": [D("10000"), D("0"), D("0")]}}
+    rows = per_anno(rows, "compensa_crediti_tributari", [True, True, True])
+    e = generato(genera(rows))
+    cum = [e.det[y]["imposte"]["credito_storico_compensato_cumulato"] for y in (2027, 2028, 2029)]
+    assert cum[0] > D("0") and cum == sorted(cum)
+    # il residuo non e' piu' quello del solo piano: la compensazione dell'anno prima non si perde
+    assert e.det[2027]["imposte"]["crediti_tributari_consuntivo"] == (
+        D("184140.58") - D("10000") - cum[0])
+    for y in (2027, 2028, 2029):
+        assert e.det[y]["imposte"]["crediti_tributari_consuntivo"] >= D("0")

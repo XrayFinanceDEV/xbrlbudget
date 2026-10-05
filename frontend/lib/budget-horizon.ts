@@ -45,7 +45,8 @@ export type BoolAssumptionField =
   | "previdenza_scales_with_personnel"
   | "tfr_accrual_suspended"
   | "cash_sweep_enabled"
-  | "overdraft_allowed";
+  | "overdraft_allowed"
+  | "compensa_crediti_tributari";
 
 /**
  * Un interruttore e' un'ipotesi PER ANNO — il motore la applica riga per
@@ -139,6 +140,7 @@ export function hydrateAssumptions(
       cash_sweep_enabled: a.cash_sweep_enabled ?? false,
       cash_sweep_min_cash: a.cash_sweep_min_cash,
       overdraft_allowed: a.overdraft_allowed ?? false,
+      compensa_crediti_tributari: a.compensa_crediti_tributari ?? false,
       overdraft_limit: a.overdraft_limit ?? null,
       tfr_accrual_suspended: a.tfr_accrual_suspended ?? false,
       previdenza_scales_with_personnel: a.previdenza_scales_with_personnel ?? false,
@@ -298,6 +300,7 @@ export function defaultAssumption(
     cash_sweep_enabled: false,
     cash_sweep_min_cash: null,
     overdraft_allowed: false,
+    compensa_crediti_tributari: false,
     overdraft_limit: null,
     tfr_accrual_suspended: false,
     previdenza_scales_with_personnel: false,

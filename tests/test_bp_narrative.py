@@ -108,5 +108,17 @@ def test_R3_cassa_sostenuta_dal_nuovo_finanziamento_lo_dice():
     assert "sufficiente a finanziare" not in s and "nuovi finanziamenti per" in s
 
 
+def test_R3_nuovo_finanziamento_cita_solo_gli_anni_con_nuovo_debito():
+    # Fix finale 6: gli anni a zero non vanno elencati come «0 nel 2028».
+    vals = {**AMBIENTA, "cf_variazione": [None, 10, 10, 10], "cf_operativo": [None, 5, 5, 5],
+            "cf_investimenti": [None, -50, -50, -50], "cf_rimborsi": [None, 0, 0, 0],
+            "cf_nuovo_debito": [None, 55, 0, 0]}
+    d = make(vals, GROWTH)
+    s = narrative.subtitle_flussi(d)
+    frase = s.split("nuovi finanziamenti per", 1)[1]
+    assert f"nel {d.plan_years[0]}" in frase
+    assert f"nel {d.plan_years[1]}" not in frase and f"nel {d.plan_years[2]}" not in frase
+
+
 def test_R3_cassa_autosufficiente_resta_il_testo_di_oggi():
     assert "sufficiente a finanziare" in narrative.subtitle_flussi(make(AMBIENTA, GROWTH))

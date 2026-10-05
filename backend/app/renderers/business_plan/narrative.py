@@ -96,11 +96,12 @@ def _growth_phrase(data: BusinessPlanData) -> Optional[str]:
     return _join(parts)
 
 
-def _eur_per_anno(data: BusinessPlanData, vals: list) -> str:
+def _eur_per_anno(data: BusinessPlanData, vals: list, solo_positivi: bool = False) -> str:
     """C08 (lotto 2 fix rilievi, 2026-09-26): un importo per ogni anno di piano, come
     `_growth_phrase` — la sintesi cita i rimborsi anno per anno, non il cumulato, perché ora
     erogazioni e rimborsi escono su righe separate del rendiconto invece che nette."""
-    parts = [f"{fmt.compact_eur(v)} nel {y}" for v, y in zip(vals, data.plan_years)]
+    parts = [f"{fmt.compact_eur(v)} nel {y}" for v, y in zip(vals, data.plan_years)
+             if not solo_positivi or v > 0]
     return _join(parts)
 
 
@@ -412,6 +413,6 @@ def subtitle_flussi(data: BusinessPlanData) -> str:
         nuovo = _plan_values(data, "cf_nuovo_debito")
         if _all(*nuovo) and any(n > 0 for n in nuovo):
             return base + (" La cassa non scende in nessun anno, sostenuta da nuovi finanziamenti per "
-                           f"{_eur_per_anno(data, nuovo)}.")
+                           f"{_eur_per_anno(data, nuovo, solo_positivi=True)}.")
         return base + " La cassa non scende in nessun anno."
     return base + f" La cassa diminuisce nel {_join(neg)}."

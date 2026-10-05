@@ -93,21 +93,27 @@ minuti prima di ripiegare.
 
 ### Accendere il percorso snello su un server (Jenkins)
 
-Il `Jenkinsfile` è lo stesso per staging e produzione: il percorso snello si accende **solo** sul
-Jenkins che dichiara, in *Manage Jenkins › System › Global properties › Environment variables*:
+Il `Jenkinsfile` è lo stesso per staging e produzione. Le variabili proprie di un server stanno in
+una credenziale *Secret file* **`budget-env-staging`** (*Manage Jenkins › Credentials › System ›
+Global*): righe `CHIAVE=valore`, che lo stage *Generate env* accoda a `.env.docker` (togliendo gli
+`\r` di un file salvato da Windows) e di cui il log della build stampa i soli **nomi**. Il Jenkins
+che non ha la credenziale scrive il `.env.docker` di sempre e importa con l'importatore attuale.
 
-| Variabile globale | Valore |
-|---|---|
-| `IMPORT_MOTORE` | `snello` |
-| `GX10_BASE_URL` | l'indirizzo con cui **quel** server raggiunge gx10 (obbligatoria: senza, la build si ferma con un errore) |
-| `GX10_CONCORRENZA` | facoltativa, default `3` |
+Per accendere il percorso snello, il file contiene:
 
-più la credenziale *secret text* **`budget-gx10-api-key`** (la chiave di gx10, mai in chiaro nel
-repo né nei log). Con `IMPORT_MOTORE=snello` lo stage *Generate env* aggiunge a `.env.docker`
-`IMPORT_MOTORE`, i tre `PDF_LLM_PROVIDER_*=gx10`, `GX10_BASE_URL`, `GX10_API_KEY` e
-`GX10_CONCORRENZA`; senza la variabile `.env.docker` resta quello di sempre e il server importa con
-l'importatore attuale. `ANTHROPIC_API_KEY` resta necessaria: la struttura (F1) e la vision girano su
-Anthropic.
+```ini
+IMPORT_MOTORE=snello
+PDF_LLM_PROVIDER_COGE=gx10
+PDF_LLM_PROVIDER_IVCEE=gx10
+PDF_LLM_PROVIDER_DETTAGLI=gx10
+GX10_BASE_URL=https://kpsfinanciallab.w3pro.it:18443
+GX10_API_KEY=<la chiave Bearer di vLLM su gx10>
+GX10_CONCORRENZA=3
+```
+
+`GX10_BASE_URL` senza `/v1` (lo aggiunge il codice) e senza barra finale. La chiave sta solo in
+quel file, mai nel repo né nei log. `ANTHROPIC_API_KEY` resta necessaria: la struttura (F1) e la
+vision girano su Anthropic, e l'importatore attuale la usa quando il percorso snello ripiega.
 
 - **Concorrenza.** Il semaforo di `GX10_CONCORRENZA` è **per processo**, e il backend gira con
   `--workers 2` (`backend/entrypoint.sh`): il default di Jenkins è quindi `3`, cioè al massimo 6

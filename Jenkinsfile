@@ -44,32 +44,26 @@ ALLOWED_ORIGINS=https://app.formulafinance.it,https://app.kpsfinanciallab.it
 MAX_COMPANIES_PER_USER=50
 PORT=9090
 """.stripIndent()
-                    // Import PDF snello (IMPORT_MOTORE=snello + Qwen su gx10). Questo Jenkinsfile
-                    // lo usano staging E produzione: si accende SOLO dove il Jenkins dichiara
-                    // la variabile globale IMPORT_MOTORE=snello (Manage Jenkins > System >
-                    // Global properties), insieme a GX10_BASE_URL e alla credenziale
-                    // secret-text 'budget-gx10-api-key'. Senza, .env.docker resta quello di
-                    // sempre e l'import gira sull'importatore attuale.
-                    if (env.IMPORT_MOTORE == 'snello') {
-                        if (!env.GX10_BASE_URL?.trim()) {
-                            error('IMPORT_MOTORE=snello richiede la variabile globale GX10_BASE_URL')
+                    writeFile file: '.env.docker', text: base
+                    // Variabili proprie di un server (es. lo staging): una credenziale "Secret
+                    // file" 'budget-env-staging', righe KEY=VALORE, accodata a .env.docker.
+                    // Questo Jenkinsfile lo usano staging E produzione: il Jenkins che non ha la
+                    // credenziale usa il .env.docker di sempre. Il percorso snello (IMPORT_MOTORE=
+                    // snello, PDF_LLM_PROVIDER_*=gx10, GX10_BASE_URL, GX10_API_KEY,
+                    // GX10_CONCORRENZA) si accende da li': docs/deployment/PRODUCTION_CONFIG.md.
+                    try {
+                        withCredentials([file(credentialsId: 'budget-env-staging', variable: 'BUDGET_ENV_EXTRA')]) {
+                            // tr: un file salvato da Windows porta \r, che finirebbe nei valori.
+                            sh 'tr -d "\\r" < "$BUDGET_ENV_EXTRA" >> .env.docker && echo >> .env.docker'
+                            sh 'grep -o "^[A-Z_][A-Z0-9_]*=" "$BUDGET_ENV_EXTRA" | tr -d "=" | sed "s/^/budget-env-staging: /"'
                         }
-                        withCredentials([string(credentialsId: 'budget-gx10-api-key', variable: 'GX10_API_KEY')]) {
-                            // GX10_CONCORRENZA: il semaforo e' per processo e uvicorn gira con
-                            // --workers 2 (backend/entrypoint.sh): 2 x 3 = 6, il massimo che
-                            // gx10 deve ricevere in contemporanea.
-                            writeFile file: '.env.docker', text: base + """\
-IMPORT_MOTORE=snello
-PDF_LLM_PROVIDER_COGE=gx10
-PDF_LLM_PROVIDER_IVCEE=gx10
-PDF_LLM_PROVIDER_DETTAGLI=gx10
-GX10_BASE_URL=${env.GX10_BASE_URL.trim()}
-GX10_API_KEY=${env.GX10_API_KEY}
-GX10_CONCORRENZA=${env.GX10_CONCORRENZA ?: '3'}
-""".stripIndent()
+                    } catch (Exception e) {
+                        // Solo la credenziale assente vuol dire "niente variabili in piu'";
+                        // qualunque altro errore (anche un abort) ferma la build come prima.
+                        if (!(e.message ?: '').contains('budget-env-staging')) {
+                            throw e
                         }
-                    } else {
-                        writeFile file: '.env.docker', text: base
+                        echo 'Credenziale budget-env-staging assente: .env.docker di sempre'
                     }
                 }
             }

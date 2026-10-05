@@ -330,9 +330,10 @@ Vision and the structure map **always** stay on Anthropic, so `ANTHROPIC_API_KEY
 - **Timeouts.** 900 s per call on the route C CoGe pass, 120 s on the lean path; a stalled gx10
   makes an import fall back rather than hang, but the host proxy timeout must allow it (see
   `docs/deployment/PRODUCTION_CONFIG.md`).
-- **Deploy.** The `Jenkinsfile` turns the lean import on only where Jenkins declares the global
-  variable `IMPORT_MOTORE=snello` (plus `GX10_BASE_URL` and the `budget-gx10-api-key` secret);
-  production stays on the current importer.
+- **Deploy.** The `Jenkinsfile` appends the `budget-env-staging` secret file (one `KEY=value` per
+  line) to `.env.docker`; the lean import is turned on from there (`IMPORT_MOTORE`, the
+  `PDF_LLM_PROVIDER_*`, `GX10_*`). A Jenkins without that credential stays on the current
+  importer.
 
 Full reference: [docs/deployment/PRODUCTION_CONFIG.md](docs/deployment/PRODUCTION_CONFIG.md);
 lean-path rules: [docs/import/REGOLE-IMPORT-02-ESTRAZIONE.md](docs/import/REGOLE-IMPORT-02-ESTRAZIONE.md) §10.

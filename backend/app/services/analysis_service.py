@@ -26,6 +26,7 @@ from app.schemas import income_statement as inc_schemas
 from app.schemas import budget as budget_schemas
 from pdf_service.em_score import calculate_em_score, get_em_score_description
 from app.services.forecast_freshness import forecast_staleness
+from database.queries import get_fy_full
 
 
 # The established /analysis contract emits JSON-ready floats.  The dossier V2
@@ -215,13 +216,22 @@ def _get_complete_analysis(
         calculations_by_year = {}
 
         # Calculate for each year
-        for year_data in all_years_data:
+        for pos, year_data in enumerate(all_years_data):
             year = year_data["year"]
             bs = year_data["balance_sheet"]
             inc = year_data["income_statement"]
             sector = scenario.company.sector
 
-            year_calculations = _calculate_year_metrics(bs, inc, sector)
+            # #61 S11: SP d'inizio anno = fine dell'anno prima, solo se contiguo
+            prev_data = all_years_data[pos - 1] if pos > 0 else None
+            prev_bs = (prev_data["balance_sheet"]
+                       if prev_data is not None and prev_data["year"] == year - 1 else None)
+            if pos == 0 and prev_data is None:
+                # Prima colonna: stessa ricerca a DB di /ratios (`get_fy_full(year-1)`), cosi'
+                # le due pagine mostrano lo stesso ROD sulla prima colonna.
+                fy_prec = get_fy_full(db, company_id, year - 1)
+                prev_bs = fy_prec.balance_sheet if fy_prec is not None else None
+            year_calculations = _calculate_year_metrics(bs, inc, sector, prev_bs)
             calculations_by_year[str(year)] = year_calculations
 
         result["calculations"]["by_year"] = calculations_by_year
@@ -239,13 +249,16 @@ def _get_complete_analysis(
                 engine_meta = current_year_data.get("engine_meta") or {}
                 erogazioni_raw = engine_meta.get("erogazioni")
                 erogazioni = Decimal(str(erogazioni_raw)) if erogazioni_raw is not None else None
+                versate_raw = engine_meta.get("imposte_versate")  # #62 S13
+                imposte_versate = Decimal(str(versate_raw)) if versate_raw is not None else None
                 cf_result = _calculate_cashflow(
                     base_year_data["balance_sheet"],
                     base_year_data["income_statement"],
                     current_year_data["balance_sheet"],
                     current_year_data["income_statement"],
                     current_year_data["year"],
-                    erogazioni
+                    erogazioni,
+                    imposte_versate
                 )
                 cf_result["base_year"] = base_year_data["year"]
                 cashflow_years.append(cf_result)
@@ -304,16 +317,18 @@ def _forecast_staleness(scenario) -> tuple:
 def _calculate_year_metrics(
     bs: models.BalanceSheet,
     inc: models.IncomeStatement,
-    sector: int
+    sector: int,
+    prev_bs: Optional[models.BalanceSheet] = None,
 ) -> Dict[str, Any]:
     """
     Calculate all financial metrics for a single year.
+    `prev_bs`: SP d'inizio anno, per il ROD sul debito finanziario medio (#61 S11).
 
     Returns:
         Dictionary with Altman, FGPMI, and all ratio categories
     """
     # Calculate ratios
-    ratios_calc = FinancialRatiosCalculator(bs, inc)
+    ratios_calc = FinancialRatiosCalculator(bs, inc, prev_bs)
     wc = ratios_calc.calculate_working_capital_metrics()
     liquidity = ratios_calc.calculate_liquidity_ratios()
     solvency = ratios_calc.calculate_solvency_ratios()
@@ -370,7 +385,8 @@ def _calculate_cashflow(
     current_bs: models.BalanceSheet,
     current_inc: models.IncomeStatement,
     year: int,
-    erogazioni: Optional[Decimal] = None
+    erogazioni: Optional[Decimal] = None,
+    imposte_versate: Optional[Decimal] = None
 ) -> Dict[str, Any]:
     """
     Calculate detailed cashflow for one year.
@@ -388,7 +404,8 @@ def _calculate_cashflow(
         bs_previous=base_bs,
         inc_current=current_inc,
         year=year,
-        erogazioni=erogazioni
+        erogazioni=erogazioni,
+        imposte_versate=imposte_versate
     )
 
     return {

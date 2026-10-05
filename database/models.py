@@ -331,6 +331,16 @@ class BalanceSheet(Base):
         return self.financial_debt_short + self.financial_debt_long
 
     @property
+    def financial_debt_undetailed(self) -> bool:
+        """Debiti (sp16+sp17) positivi con le sei sotto-voci finanziarie a zero: l'import non
+        ha classificato il debito, non e' "nessun debito" (stesso predicato F1 di
+        `report_indicators`)."""
+        return (
+            self.financial_debt_total == 0
+            and (self.sp16_debiti_breve + self.sp17_debiti_lungo) > 0
+        )
+
+    @property
     def operating_debt_short(self) -> Decimal:
         """Short-term Operating Debt (for working capital cashflow)"""
         return (
@@ -626,6 +636,7 @@ class BudgetAssumptions(Base):
     # Working capital turnover days (NULL = auto-compute from base year)
     dso_days = Column(Numeric(10, 2), nullable=True)  # Days Sales Outstanding
     dio_days = Column(Numeric(10, 2), nullable=True)  # Days Inventory Outstanding
+    dio_pf_days = Column(Numeric(10, 2), nullable=True)  # Giorni prodotti finiti e merci (sp05d), sui ricavi (#62 S04)
     dpo_days = Column(Numeric(10, 2), nullable=True)  # Days Payable Outstanding
 
     # Existing financial debt repayment (NULL = keep constant).
@@ -651,6 +662,9 @@ class BudgetAssumptions(Base):
     # stressato lo si vuole poter far girare per leggere quanta finanza richiede.
     overdraft_allowed = Column(Boolean, default=False, nullable=False)
     overdraft_limit = Column(Numeric(15, 2), nullable=True)  # NULL = concesso senza tetto
+    # #62 S14/S18: compensa il credito tributario del consuntivo che il piano non incassa con le imposte da
+    # versare. Per scenario, si legge sulla prima riga. Spenta = comportamento di sempre.
+    compensa_crediti_tributari = Column(Boolean, default=False, nullable=False)
 
     # TFR accrual suspension: companies with >60 employees pay the maturing TFR to the
     # INPS treasury fund instead of accruing it internally. When True, the TFR fund
@@ -1026,6 +1040,16 @@ class ForecastBalanceSheet(Base):
     def financial_debt_total(self) -> Decimal:
         """Total Financial Debt (for financing cashflow)"""
         return self.financial_debt_short + self.financial_debt_long
+
+    @property
+    def financial_debt_undetailed(self) -> bool:
+        """Debiti (sp16+sp17) positivi con le sei sotto-voci finanziarie a zero: l'import non
+        ha classificato il debito, non e' "nessun debito" (stesso predicato F1 di
+        `report_indicators`)."""
+        return (
+            self.financial_debt_total == 0
+            and (self.sp16_debiti_breve + self.sp17_debiti_lungo) > 0
+        )
 
     @property
     def operating_debt_short(self) -> Decimal:

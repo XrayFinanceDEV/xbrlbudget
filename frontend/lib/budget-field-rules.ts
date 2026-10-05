@@ -66,6 +66,7 @@ const RULES = {
   // Capitale circolante
   dso_days: days(),
   dio_days: days(),
+  dio_pf_days: days(),
   dpo_days: days(),
   receivables_long_growth_pct: pct(),
 
@@ -101,6 +102,7 @@ const RULES = {
   cash_sweep_enabled: bool,
   cash_sweep_min_cash: eur({ nullable: true }),
   overdraft_allowed: bool,
+  compensa_crediti_tributari: bool,
   // Vuoto = concesso senza tetto: e' la modalita' di misura del fabbisogno.
   overdraft_limit: eur({ nullable: true }),
   tfr_accrual_suspended: bool,

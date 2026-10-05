@@ -72,7 +72,7 @@ class TurnoverRatios(NamedTuple):
 class ExtendedProfitabilityRatios(NamedTuple):
     """Extended profitability indices"""
     spread: Optional[Decimal]            # ROI - ROD; None se il ROD è None (nessun debito finanziario)
-    financial_leverage_effect: Decimal   # (PC+PF)/CN
+    financial_leverage_effect: Decimal   # TA/CN (totale attivo / patrimonio netto)
     ebitda_on_sales: Decimal            # MOL/RIC
     financial_charges_on_revenue: Decimal  # OF/RIC
 
@@ -101,16 +101,19 @@ class FinancialRatiosCalculator(BaseCalculator):
     Matches Excel INDICI sheet functionality
     """
 
-    def __init__(self, balance_sheet: BalanceSheet, income_statement: IncomeStatement):
+    def __init__(self, balance_sheet: BalanceSheet, income_statement: IncomeStatement,
+                 previous_balance_sheet: Optional[BalanceSheet] = None):
         """
         Initialize calculator with financial statements
 
         Args:
             balance_sheet: Balance Sheet data
             income_statement: Income Statement data
+            previous_balance_sheet: SP d'inizio anno (opzionale), usato dal ROD
         """
         self.bs = balance_sheet
         self.inc = income_statement
+        self.prev_bs = previous_balance_sheet
 
     # ============= WORKING CAPITAL METRICS =============
 
@@ -269,7 +272,17 @@ class FinancialRatiosCalculator(BaseCalculator):
         # un'azienda senza banche/altri finanziatori/obbligazioni non ha "un costo del denaro pari
         # a zero", non ha un costo del denaro da misurare — `safe_divide` con default 0 lo
         # dichiarerebbe silenziosamente pulito.
-        financial_debt = self.bs.financial_debt_total
+        # #61 S11 (decisione del proprietario 2026-10-05): ROD sul debito finanziario MEDIO
+        # dell'anno (inizio e fine), stesso perimetro della PFN. Senza un bilancio d'inizio
+        # (prima colonna) resta la fine anno.
+        debito_fine = self.bs.financial_debt_total
+        # Media solo se ENTRAMBI i bilanci hanno il dettaglio finanziario: un'apertura senza
+        # dettaglio (98% dei bilanci annuali) dimezzerebbe il debito di chiusura (ROD raddoppiato).
+        if (self.prev_bs is not None and not self.prev_bs.financial_debt_undetailed
+                and not self.bs.financial_debt_undetailed):
+            financial_debt = (self.prev_bs.financial_debt_total + debito_fine) / 2
+        else:
+            financial_debt = debito_fine
         rod = self.safe_divide(self.inc.ce15_oneri_finanziari, financial_debt) if financial_debt > 0 else None
 
         # EBITDA Margin = EBITDA / Fatturato
@@ -509,10 +522,10 @@ class FinancialRatiosCalculator(BaseCalculator):
         # zero dichiarerebbe un costo del denaro che non è mai stato misurato.
         spread = profitability.roi - profitability.rod if profitability.rod is not None else None
 
-        # Financial Leverage Effect = (PC+PF)/CN
-        total_liabilities = self.bs.current_liabilities + self.bs.sp17_debiti_lungo
+        # Leva finanziaria = Totale attivo / Patrimonio netto (#62 S20): prima era (PC+PF)/CN, cioe'
+        # debiti/PN, numericamente identica all'Indice di indebitamento accanto.
         financial_leverage_effect = self.safe_divide(
-            total_liabilities,
+            self.bs.total_assets,
             self.bs.total_equity
         )
 

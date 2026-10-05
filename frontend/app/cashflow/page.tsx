@@ -441,7 +441,7 @@ export default function CashflowPage() {
                   indent={2}
                 />
                 <CashFlowRow
-                  label="(Imposte sul reddito pagate)"
+                  label="(Imposte sul reddito pagate, al netto delle compensazioni in F24)"
                   historicalValues={getValues((cf) => cf.operating_activities.cash_adjustments.taxes_paid, historicalYears)}
                   forecastValues={getValues((cf) => cf.operating_activities.cash_adjustments.taxes_paid, forecastYears)}
                   indent={2}

@@ -273,14 +273,25 @@ esistente**, storico compreso, non solo su quelli generati dopo il lotto.
   positivo (import abbreviato/riconciliato, la massa finisce in sp06g/sp07g) non è "zero crediti
   commerciali" — reason `trade_receivables_detail_unavailable`. TdC (turnover crediti) e TdCCN/
   giorni CCN seguono la stessa perimetrazione (F7): vedi la voce «Un solo current ratio» sotto.
+  **Il motore governa lo stesso perimetro** (#61 S03/S27, 2026-10-05): senza piano
+  `sp06a + sp07a = DSO × ricavi / 360` e `sp06b/c/d/g` restano quelle dell'anno prima, quindi
+  con 90 in input il report legge 90 (`details['dso_clienti']` dichiara target, `sp06a`, `sp07a` e
+  lo `scarto` quando `sp07a` da sola supera il target). Con un piano `crediti_commerciali` l'identità
+  non vale: il DSO derivato resta sull'intero commerciale a breve, il generato cade su `sp06a` e
+  `sp06b/c/d/g` ricevono solo la loro quota del residuo del piano.
 - **DIO sul consumo di materie, `None` se non positivo.** Il denominatore di
   `inventory_turnover_days` è `ce05_materie_prime + ce10_var_rimanenze_mat_prime` (convenzione
   OIC B11), non il fatturato: comune nei servizi, senza una riga di materie prime distinta, dove
-  il DMAG (e `cash_conversion_cycle`, che lo somma) è `None`, mai zero.
+  il DMAG (e `cash_conversion_cycle`, che lo somma) è `None`, mai zero. **Nel motore i giorni di
+  magazzino sono in due gruppi** (#62 nota S04): `dio_days` = materie e semilavorati
+  (`sp05a + sp05b`) sul consumo, `dio_pf_days` = prodotti finiti e merci (`sp05d`) sui ricavi;
+  lavori in corso e acconti (`sp05c`, `sp05e`) hanno giorni dedotti dai ricavi, senza casella. Un
+  `dio_days` scritto prima di questo lotto vale ora per il solo primo gruppo: chi ritesta reinserisce il
+  DIO in due gruppi (il wizard mostra accanto alla casella il DIO storico di ciascuno).
 - **ROD e PFN su un solo perimetro di debito finanziario**: `financial_debt_total` (banche +
   altri finanziatori + obbligazioni, sp16a-c/sp17a-c, somma incondizionata) — prima un ramo
   tagliava fuori gli altri finanziatori quando c'erano già banche, sottostimando ROD e PFN su
-  ogni azienda con debito misto. `rod` è `None` (mai zero) a perimetro zero. **`None`, non
+  ogni azienda con debito misto. `rod` è `None` (mai zero) a perimetro zero. **ROD sul debito medio** (#61 S11, 2026-10-05): oneri / media del debito finanziario a inizio e fine anno (`FinancialRatiosCalculator(bs, inc, previous_balance_sheet=…)`, passato da `/ratios` e da `analysis_service`, quindi anche dal report); senza SP d'inizio (prima colonna) resta la fine anno, **e così pure quando l'SP d'inizio non ha il dettaglio finanziario** (sp16+sp17 > 0 con le sei sotto-voci a zero, `BalanceSheet.financial_debt_undetailed`: mediare con un'apertura non classificata dimezzerebbe il debito di chiusura e raddoppierebbe il ROD — la media vale solo con entrambi gli estremi dettagliati). La prima colonna cerca l'anno prima **solo a periodo pieno** (`get_fy_full`: un parziale non si media con un fine anno) e la formula, scritta nella colonna, dichiara la media: nessuna reason apposta. La sintesi annuale `/calculations/complete` (e il PDF legacy) resta sulla fine anno; la media vale per `/ratios` e `/analysis`. **`None`, non
   "-cassa"/zero, quando il dettaglio manca** (revisione finale, F1): sp16a/b/c e sp17a/b/c tutti a
   zero mentre l'aggregato sp16+sp17 resta positivo non vuol dire "nessun debito finanziario" —
   vuol dire che l'import non l'ha classificato. PFN, PFN/EBITDA e ROD analitico diventano `None`
@@ -303,7 +314,9 @@ esistente**, storico compreso, non solo su quelli generati dopo il lotto.
   propria del modello di rating).
 - **Indice di indebitamento = debiti totali / patrimonio netto** (`leverage_ratio` ora uguale a
   `debt_to_equity`, un solo calcolo): prima era immobilizzazioni/PN, una leva sugli investimenti
-  sotto l'etichetta "Indice di Indebitamento" dell'Allegato E.
+  sotto l'etichetta "Indice di Indebitamento" dell'Allegato E. **La leva finanziaria
+  (`financial_leverage_effect`) è TA/PN** (#62 S20: prima (PC+PF)/PN, cioè debiti / PN, un secondo nome dell'indice di indebitamento), «TA/CN» in Indici,
+  formato rapporto.
 - **Copertura delle immobilizzazioni include il TFR** nel numeratore (patrimonio netto + debiti
   oltre 12 mesi + TFR): fonte consolidata come il debito a lungo, prima ne restava fuori.
 - **ROD, DIO, spread e ciclo di conversione del denaro sono `None` a denominatore non positivo,
@@ -352,8 +365,9 @@ esistente**, storico compreso, non solo su quelli generati dopo il lotto.
   `error`, come `forecast_stale`) blocca il "finale" del Business plan quando un `ForecastYear`
   porta un `engine_version` inferiore a quello corrente — mai per l'infrannuale. In intestazione
   solo la forma corta («BOZZA · da rigenerare»: la frase intera troncherebbe il nome azienda), le
-  frasi intere della spec una per riga in copertina. `engine_meta` `NULL` o senza
-  `engine_version` = nessun avviso («non lo so», non un verdetto negativo).
+  frasi intere della spec una per riga in copertina. Su un budget `engine_meta`
+  `NULL` o senza `engine_version` = «da rigenerare» (decisione del proprietario, 2026-10-05: i dati vecchi
+  non contano); sull'infrannuale nessun avviso.
 - **C09**: la frase sugli oneri finanziari sul MOL parte dal valore della colonna base/storica
   (`of_mol`) quando la base la dichiara, non più dal primo anno di piano; senza `of_mol` in base,
   ripiega sul primo anno di piano come prima.
@@ -396,9 +410,9 @@ esistente**, storico compreso, non solo su quelli generati dopo il lotto.
   e le righe di `details['pregresso']` (`_realign_sp_declarations`), e l'anno N+1 legge saldo e
   credito d'apertura da lì. Il credito forzato riempie prima `opening_credit_left`, poi
   `generated_credit`: la ripartizione è solo dichiarativa, perché N+1 ne legge la somma.
-- **Sulle righe a giorni un override vale un anno.** `sp06a`, `sp06b`, `sp06c`, `sp06d`, `sp06g`
-  (le voci commerciali ripartite dal DSO, `_alloc`; `sp06e` e `sp06f` non ci sono: seguono la
-  posizione tributaria e le imposte differite, non i giorni)
+- **Sulle righe a giorni un override vale un anno.** `sp06a` (i crediti verso clienti, governati dal
+  DSO; `sp06b/c/d/g` non sono più righe a giorni: restano quelle dell'anno prima, o seguono il
+  residuo del piano; `sp06e` e `sp06f` seguono la posizione tributaria e le imposte differite)
   e `sp16d` (DPO) si ricalcolano ogni anno dalla formula dei giorni, non da `prev`: un
   `sp_overrides` nell'anno N fissa lo stock di N, e dall'anno N+1 la riga torna quella senza
   override. La differenza rientra come variazione del circolante dell'anno dopo, che il
@@ -478,6 +492,11 @@ esistente**, storico compreso, non solo su quelli generati dopo il lotto.
 - **Il rendiconto ha una riga propria per la posizione tributaria**: `delta_tax` =
   Δ(`sp16e`+`sp17e`) − Δ(`sp06e`+`sp07e`), tolta da crediti, debiti e altre variazioni del
   circolante (`backend/app/calculations/cashflow_detailed.py`); il totale del circolante non cambia.
+  **«Imposte sul reddito pagate» = i versamenti del motore** (#62 S13): saldo + acconti + rate −
+  credito compensato − credito storico compensato, da `ForecastYear.engine_meta['imposte_versate']`
+  (`None` in via manuale e sulle righe senza firma: il rendiconto resta com'era), con `delta_tax` che
+  assorbe la differenza; la cassa non cambia, solo la riga in cui compare. Su entrambe le pagine
+  che leggono il rendiconto, come per le erogazioni.
   Il catalogo del dossier si rigenera da `report-cashflow.tsx` con
   `node tools/final_report/export_catalog.cjs`, che legge solo righe `get: (cf) => cf.<percorso>,`.
 - **Le imposte si pagano a saldo + acconto, non ad accumulo, e ogni anno debito e credito
@@ -490,6 +509,14 @@ esistente**, storico compreso, non solo su quelli generati dopo il lotto.
   `tax_advances_paid` se **maggiore di zero**: zero in quella casella non vuol dire «zero
   acconti», vuol dire «non dichiarato», e ricade sulla percentuale
   (`tax_settlement_saldo_acconto`, `calculations/projection_common.py`). Il debito generato
+  **Compensazione a scelta** (#62 S14/S18, `compensa_crediti_tributari`, casella «compensa il credito
+  residuo con le imposte da versare» al passo 5, falsa di default): il credito tributario del
+  consuntivo che il piano non incassa si scala da saldo, acconti e rate fino a capienza
+  (`credito_storico_compensato`); il debito generato non cambia, calano insieme credito e imposte
+  versate. Col piano `crediti_tributari_breve` la compensazione si accumula in
+  `credito_storico_compensato_cumulato`, al massimo il residuo del piano; in via manuale non vale
+  e lo dichiara (`compensazione_ignorata`). Un acconto inserito sotto sia all'imposta dell'anno prima
+  sia a quella dell'anno è solo segnalato (`avviso_acconti`, #62 S28): nessun numero si muove. Il debito generato
   nasce già quantizzato al centesimo nel kernel: è la cifra di bilancio che N+1 usa come
   `saldo_due`, non una misura descrittiva a precisione libera. Prima di questo
   lotto le imposte si accumulavano e non uscivano mai: la cassa proiettata era gonfiata di
@@ -545,7 +572,11 @@ esistente**, storico compreso, non solo su quelli generati dopo il lotto.
   TFR (`ce08a`) è sempre `ce08b/13,5`, non più capato al residuo del personale: se supera il totale,
   questo si ricompone come somma e `ce08d` va a zero (`details['personale_ricomposto']`, `None`
   quando non serve ricomporre — un `ce08_override` invece vince e limita `ce08a`,
-  `tfr_limitato: true`). Gli ammortamenti tengono separati il residuo dei cespiti esistenti e quello
+  `tfr_limitato: true`). **Dal 2026-10-05 (#61 S06) il ramo normale è un altro**: quando l'anno prima ha
+  salari, oneri o altri costi del personale e non c'è `ce08_override`, ogni componente cresce con
+  `personnel_growth_pct` e `ce08` è la **somma** (TFR di legge compreso), non più «anno prima × crescita»;
+  `details['personale']` dichiara `modo` (`componenti`/`aggregato`/`override`), `ce08_ipotesi`, `ce08`,
+  `differenza`, `tfr_limitato`. Con la sola aggregata a bilancio resta il ramo di prima. Gli ammortamenti tengono separati il residuo dei cespiti esistenti e quello
   di ogni nuovo investimento (`details['ammortamenti']`), e un nuovo investimento entra a metà
   aliquota il primo anno: un anno con investimenti mostra quindi meno ammortamento e più utile
   imponibile di prima. `ce10_var_rimanenze_mat_prime` si deriva ora dallo stato patrimoniale delle
@@ -568,10 +599,24 @@ esistente**, storico compreso, non solo su quelli generati dopo il lotto.
   zero — non più un riparto proporzionale che spostava la riga sbagliata quando clienti e altri
   crediti oltre 12 mesi convivono (`_consuma_in_ordine`). → sezione «Forecasting Engine (Budget)»
   sopra per i dettagli di ciascuna regola.
-- **`ForecastYear.engine_meta` è `NULL` su ogni previsionale generato prima di questo lotto: è
-  «non lo so», non un motore vecchio da segnalare.** Solo un confronto fra due firme lette (non fra
-  una firma e la sua assenza) può dire che un previsionale è stato generato da una versione
-  precedente del motore — la stessa regola di `forecast_stale` qualche bullet sopra.
+- **Riserva legale** (#62 S29, decisione del proprietario 2026-10-05): ogni anno di piano il 5%
+  dell'utile dell'anno prima passa da `sp12g` a `sp12c` finché la riserva non raggiunge il 20% del
+  capitale (`sp11`), al centesimo; una perdita non accantona. Il movimento sta dentro il PN: totale
+  e cassa non cambiano, ma `sp12c`/`sp12g` sì, su ogni scenario esistente. Si dichiara in
+  `details['riserva_legale']` (`utile`, `quota`, `tetto`, `raggiunto`); `sp12c` non ha un campo
+  d'ipotesi, si forza solo con un override SP.
+- **Gli avvisi del motore passano per `details['avvisi']`**, una lista di frasi italiane sempre
+  presente (anche vuota), persistita in `ForecastYear.engine_meta['avvisi']`; il report la legge come
+  diagnostica `engine_avviso` di severità `info` (non tiene il documento in bozza) e la mostra nella
+  sezione 10 «Avvisi del motore» (`BusinessPlanData.avvisi_motore`). Le chiavi strutturate restano a
+  fianco: `details['avviso_rimanenze']`, `details['imposte']['avviso_acconti']`,
+  `details['avviso_altri_debiti_breve']`. Un avviso non cambia un numero: segnala una scelta (giorni di
+  magazzino che spostano il CE, acconti sotto il minimo, altri debiti passati da oltre a entro 12
+  mesi dell'anno prima annuale, `get_fy_full`) che l'utente tiene o corregge.
+- **`ForecastYear.engine_meta` `NULL` su uno scenario budget vale «da rigenerare»** (decisione del
+  proprietario, 2026-10-05, #61: i dati vecchi non contano; prima era «non lo so»). Sull'infrannuale
+  non c'è alcun avviso. Gli avvisi del motore passano per un canale solo, `details['avvisi']`
+  (lista sempre presente, anche vuota), persistito in `engine_meta['avvisi']`.
 
 ### Frontend
 - **`PraticaProvider` sta SOPRA `AppProvider`** in `app/layout.tsx`. È quell'ordine a rendere
@@ -763,7 +808,9 @@ total personnel cost when salaries aren't broken out), no longer capped against 
 `ce08`. When `ce08a + ce08b + ce08c` alone exceeds the (ungoverned) `ce08` total, the total is
 recomposed as their sum, `ce08d_altri_costi_personale` goes to zero, and the excess is declared in
 `details['personale_ricomposto']` (`None` when no recomposition happened); an explicit `ce08_override`
-instead wins and `ce08a` is capped to fit under it, `tfr_limitato: true`. **Cash is the
+instead wins and `ce08a` is capped to fit under it, `tfr_limitato: true`. **#61 S06 (2026-10-05): when the
+prior year carries salaries, social charges or other personnel costs and there is no `ce08_override`,
+every component grows with `personnel_growth_pct` and `ce08` is their sum — see `details['personale']`.** **Cash is the
 plug** (`sp09_disponibilita_liquide`), and it plugs **upward only**: a negative plug is an uncovered
 funding requirement. What happens then is **the user's explicit choice**, `overdraft_allowed` (per
 assumption year), which is **off by default** — so every existing scenario behaves as before.
@@ -860,9 +907,19 @@ with projected revenue and costs, CE overrides included.
 round.** `ce10_var_rimanenze_mat_prime` of every plan year = −(closing − opening) of raw materials
 only (`sp05a_materie_prime`, OIC B11: a stock increase *reduces* the cost), and the closing stock
 comes from a DIO measured on **materials consumption** (`ce05 + ce10`), not on revenue — the other
-stock lines (`sp05b`-`sp05e`) keep the revenue-based DIO. An explicit `dio_days` therefore now means
+stock lines keep the revenue-based DIO. An explicit `dio_days` therefore now means
 days of materials on consumption, never on sales, and materials are no longer a valid target of
-`_CAMPI_NEUTRI_RESIDUO['sp05_rimanenze']` (a CE↔SP boundary, like the financial rows). A
+`_CAMPI_NEUTRI_RESIDUO['sp05_rimanenze']` (a CE↔SP boundary, like the financial rows).
+**#62 note S04 (2026-10-05): two groups, and the CE takes its stock lines from the SP.** `dio_days` =
+raw materials + semi-finished (`sp05a + sp05b`) on consumption; the new `dio_pf_days` (column on
+`BudgetAssumptions`, `migrate_db.py`) = finished goods and merchandise (`sp05d`) on revenue; `sp05c`/`sp05e`
+get days derived from revenue, no input. `ce02_variazioni_rimanenze` = Δ(`sp05b + sp05d`) is derived
+(`ce02_override` wins and `sp05d` follows; below zero it raises). **`ce03_lavori_interni` is NOT derived from
+`sp05c`**: the importers write the A.4 «incrementi per lavori interni» line there, so deriving it would zero a
+real revenue — it stays the base value or the override, and the `sp05c` movement is cash only, declared
+`details['rimanenze']['lavori_in_corso']['contropartita'] = 'nessuna'`. `_CAMPI_NEUTRI_RESIDUO['sp05_rimanenze']`
+is now `sp05e` alone. Explicit days that move a group by more than 50% of its opening stock, or more than its
+flow, are only flagged (`details['avvisi']`, `details['avviso_rimanenze']`): the user keeps the number. A
 `ce10_override` beyond the opening materials stock is **refused** (stock cannot go negative, Italian
 `ValueError`); at or below it, the override wins and `sp05a` follows exactly (`details['rimanenze_materie']`).
 Existing scenarios move: materials used to scale with revenue like every other stock line, so a
@@ -925,9 +982,9 @@ ENGINE_VERSION, "pareggio": details['pareggio']}` on every generation. The local
 migration run once (`python migrate_db.py financial_analysis.db`) — without it the column does not
 exist and every forecast read answers 500, not just a missing signature. `ENGINE_VERSION`
 (`calculations/forecast_engine.py`) is a string constant bumped whenever a lotto changes the
-engine's numbers — this lotto brings it to `"2"`. Existing `ForecastYear` rows have `engine_meta =
-NULL`: that means **«I don't know», never «stale»** — there is no earlier signature to compare
-against, so nothing downstream may read `NULL` as a negative verdict.
+engine's numbers — it is now `"3"` (#61/#62). Existing budget `ForecastYear` rows have `engine_meta =
+NULL`: that means **«da rigenerare»** (owner's decision 2026-10-05, old data do not count);
+infrannuale never raises the warning.
 
 ### Intra-Year Engine (Infrannuale)
 Projects a partial year (say 9 months) to a full 12 months, against a reference full year

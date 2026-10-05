@@ -23,6 +23,7 @@ import { Loader2 } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { usePratica } from "@/contexts/PraticaContext";
+import { useApp } from "@/contexts/AppContext";
 import { usePrimaryAction } from "@/contexts/PraticaActionContext";
 import { useInvalidateAnalysis, useInvalidateScenarios } from "@/hooks/use-queries";
 import { useForecastPreview } from "@/hooks/use-forecast-preview";
@@ -90,6 +91,7 @@ export function BudgetWizard({
 }): JSX.Element {
   const router = useRouter();
   const { pratica } = usePratica();
+  const { selectedCompany } = useApp();
   const invalidateScenarios = useInvalidateScenarios();
   const invalidateAnalysis = useInvalidateAnalysis();
   const s = useScenarioAssumptions({ companyId, years, scenario });
@@ -253,6 +255,7 @@ export function BudgetWizard({
     scenarioId: scenario.id,
     isNew: s.isNew,
     baseYear: s.baseYear,
+    sector: selectedCompany?.sector,
     forecastYears: s.forecastYears,
     assumptions: s.assumptions,
     historical: s.historicalData,

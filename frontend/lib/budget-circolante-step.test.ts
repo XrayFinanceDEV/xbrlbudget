@@ -5,6 +5,7 @@ import {
   degenerateDaysAvvisi,
   giorniMediAuto,
   giorniMediRows,
+  avvisiMagazzino,
   minorFieldsRows,
   pianiPregressoOf,
   spIndexingOf,
@@ -38,7 +39,7 @@ describe("giorniMediAuto + giorniMediRows", () => {
     const auto = giorniMediAuto(income(), balance());
     expect(auto.dso).not.toBeNull();
     const rows = giorniMediRows(auto);
-    expect(rows).toHaveLength(3);
+    expect(rows.map((r) => r.field)).toEqual(["dso_days", "dio_days", "dio_pf_days", "dpo_days"]);
     expect(rows[0].field).toBe("dso_days");
     expect(rows[0].baseLabel).toBe(`${auto.dso} gg`);
     expect(rows[0].placeholder?.(2025)).toBe(`auto ${auto.dso}`);
@@ -46,10 +47,51 @@ describe("giorniMediAuto + giorniMediRows", () => {
 
   it("senza anno base i tre giorni sono null: baseLabel 'n/d', placeholder 'auto' senza numero", () => {
     const auto = giorniMediAuto(undefined, undefined);
-    expect(auto).toEqual({ dso: null, dio: null, dpo: null });
+    expect(auto).toEqual({ dso: null, dio: null, dio_pf: null, dpo: null });
     const rows = giorniMediRows(auto);
     expect(rows[0].baseLabel).toBe("n/d");
     expect(rows[0].placeholder?.(2025)).toBe("auto");
+  });
+});
+
+describe("giorni di magazzino in due gruppi (#62 S04)", () => {
+  const ambienta = () => giorniMediAuto(
+    income({ ce05_materie_prime: "129308", ce10_var_rimanenze_mat_prime: "-1217" }),
+    balance({ sp05_rimanenze: "287312", sp05a_materie_prime: "287312" }),
+  );
+
+  it("le etichette dei due gruppi", () => {
+    const rows = giorniMediRows(ambienta(), 2025);
+    expect(rows[1].label).toBe("Giorni materie prime e semilavorati (sul consumo)");
+    expect(rows[2].label).toBe("Giorni prodotti finiti e merci (sui ricavi)");
+  });
+
+  it("la riga dio mostra il giorno storico anche degenere, con la nota della soglia", () => {
+    const rows = giorniMediRows(ambienta(), 2025);
+    expect(rows[1].sub).toContain("807");
+    expect(rows[1].sub).toContain("2025");
+    expect(rows[1].sub).toContain("oltre la soglia");
+    // Il segnaposto non promette un numero che il motore non applica.
+    expect(rows[1].placeholder?.(2026)).toBe("auto");
+  });
+
+  it("sotto soglia niente nota", () => {
+    const rows = giorniMediRows(giorniMediAuto(income(), balance({ sp05a_materie_prime: "36" })), 2025);
+    expect(rows[1].sub).not.toContain("oltre la soglia");
+    expect(rows[1].sub).toContain("gg sul consumo");
+  });
+
+  it("avvisiMagazzino legge l'elenco strutturato, anno per anno", () => {
+    const y = (year: number, avviso: unknown[]) =>
+      ({ ...previewYear(year), details: { avviso_rimanenze: avviso } } as unknown as ForecastPreviewYear);
+    const v = { gruppo: "materie_semilavorati", apertura: 100, chiusura: 400, variazione: 300, giorni: 120 };
+    const out = avvisiMagazzino([y(2026, [v]), y(2027, []), y(2028, [{ ...v, gruppo: "prodotti_finiti", variazione: -50 }])]);
+    expect(out).toHaveLength(2);
+    expect(out[0]).toContain("2026");
+    expect(out[0]).toContain("materie prime e semilavorati");
+    expect(out[1]).toContain("2028");
+    expect(out[1]).toContain("prodotti finiti e merci");
+    expect(avvisiMagazzino([previewYear(2026)])).toEqual([]);
   });
 });
 
@@ -260,5 +302,35 @@ describe("degenerateDaysAvvisi", () => {
     const p = circolantePreview(balance(), income(), response([conDegenere(2025, ["dso"])]));
     expect(p.degenerateDays).toHaveLength(1);
     expect(p.degenerateDays[0]).toContain("(DSO)");
+  });
+});
+
+describe("soglia dei giorni di magazzino per settore (fix finale 8)", () => {
+  const degenere = () => giorniMediAuto(
+    income({ ce05_materie_prime: "1000", ce10_var_rimanenze_mat_prime: "0" }),
+    balance({ sp05_rimanenze: "5000", sp05a_materie_prime: "5000" }),
+  );
+
+  it("settore generico: oltre 365 gg il segnaposto resta «auto» e la nota dice «oltre la soglia»", () => {
+    const row = giorniMediRows(degenere(), 2025, 1).find((r) => r.field === "dio_days")!;
+    expect(row.placeholder?.(2026)).toBe("auto");
+    expect(row.sub).toContain("oltre la soglia");
+  });
+
+  it("settori 5 e 6: nessuna soglia, il giorno e' promesso e la nota non lo dichiara scartato", () => {
+    for (const settore of [5, 6]) {
+      const row = giorniMediRows(degenere(), 2025, settore).find((r) => r.field === "dio_days")!;
+      expect(row.placeholder?.(2026)).toBe("auto 1800");
+      expect(row.sub).not.toContain("oltre la soglia");
+    }
+  });
+
+  it("GIORNI_LABELS ha la voce di dio_altre: l'avviso degenere non stampa la chiave grezza", () => {
+    const out = degenerateDaysAvvisi({
+      scenario_id: 1, base_year: 2024, error: null,
+      forecast_years: [{ year: 2025, details: { degenerate_turnover_ratio: ["dio_altre"] } }],
+    } as unknown as ForecastPreviewResponse);
+    expect(out[0]).toContain("Giorni lavori in corso e acconti (sui ricavi)");
+    expect(out[0]).not.toContain("dio_altre");
   });
 });

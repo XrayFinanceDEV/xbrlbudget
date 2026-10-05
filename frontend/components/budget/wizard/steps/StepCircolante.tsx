@@ -17,7 +17,7 @@
 import type { JSX } from "react";
 import { useMemo } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { circolantePreview, giorniMediAuto, giorniMediRows } from "@/lib/budget-circolante-step";
+import { avvisiMagazzino, circolantePreview, giorniMediAuto, giorniMediRows, pianiPregressoOf } from "@/lib/budget-circolante-step";
 import { fornitoriZeroAvviso } from "@/lib/budget-fornitori-zero";
 import { AlertTriangle } from "lucide-react";
 import { previewNotice } from "@/lib/budget-preview-notice";
@@ -29,9 +29,12 @@ export function StepCircolante(p: StepProps): JSX.Element {
   const baseInc = p.historical[p.baseYear]?.income;
   const baseBs = p.historical[p.baseYear]?.balance;
 
-  const auto = useMemo(() => giorniMediAuto(baseInc, baseBs), [baseInc, baseBs]);
-  const giorniRows = useMemo(() => giorniMediRows(auto), [auto]);
+  // Col piano `crediti_commerciali` il motore deriva il DSO sull'intero commerciale a breve.
+  const pianoCrediti = pianiPregressoOf(p.assumptions, p.forecastYears).includes("crediti_commerciali");
+  const auto = useMemo(() => giorniMediAuto(baseInc, baseBs, pianoCrediti), [baseInc, baseBs, pianoCrediti]);
+  const giorniRows = useMemo(() => giorniMediRows(auto, p.baseYear, p.sector), [auto, p.baseYear, p.sector]);
   const avviso = useMemo(() => fornitoriZeroAvviso(p.baseYear, baseBs, baseInc), [p.baseYear, baseBs, baseInc]);
+  const avvisiRimanenze = useMemo(() => avvisiMagazzino(p.preview.data?.forecast_years ?? []), [p.preview.data]);
   const preview = useMemo(() => circolantePreview(baseBs, baseInc, p.preview.data), [baseBs, baseInc, p.preview.data]);
 
   return (
@@ -61,7 +64,9 @@ export function StepCircolante(p: StepProps): JSX.Element {
             <p className="mt-2 text-xs text-muted-foreground">
               I giorni del {p.baseYear} sono calcolati sui soli crediti verso clienti e debiti verso fornitori, su
               360 giorni. Crediti e debiti del {p.baseYear} si chiudono nel {p.baseYear + 1} (passo 5): questi
-              giorni generano quelli nuovi.
+              giorni generano quelli nuovi. I giorni si applicano a ricavi e acquisti al netto dell&apos;IVA; i
+              saldi di crediti e debiti del bilancio sono al lordo. Un DSO/DPO misurato sui saldi storici risulta
+              quindi più alto di quello effettivo.
             </p>
             {/* Un giorno medio dedotto e poi SCARTATO dal motore va detto qui,
                 dove i giorni si leggono: altrimenti si guarda un numero che il
@@ -69,6 +74,18 @@ export function StepCircolante(p: StepProps): JSX.Element {
             {preview.degenerateDays.length > 0 && (
               <div className="mt-2 space-y-1 rounded-md bg-amber-500/10 p-3 text-xs text-amber-700 dark:text-amber-300">
                 {preview.degenerateDays.map((m) => (
+                  <div key={m} className="flex gap-2">
+                    <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+                    <span>{m}</span>
+                  </div>
+                ))}
+              </div>
+            )}
+            {/* Le frasi vengono dall'elenco strutturato `avviso_rimanenze`: gli avvisi di
+                imposte e debiti sono di altri passi e qui non si filtrano a testo. */}
+            {avvisiRimanenze.length > 0 && (
+              <div className="mt-2 space-y-1 rounded-md bg-amber-500/10 p-3 text-xs text-amber-700 dark:text-amber-300">
+                {avvisiRimanenze.map((m) => (
                   <div key={m} className="flex gap-2">
                     <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
                     <span>{m}</span>

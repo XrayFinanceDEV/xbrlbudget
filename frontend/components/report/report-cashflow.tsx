@@ -66,7 +66,7 @@ const CF_ROWS: CFRow[] = [
   { label: "3. Flusso finanziario dopo le variazioni del ccn", get: (cf) => cf.operating.cashflow_after_wc, kind: "subtotal" },
   { label: "Altre rettifiche:", kind: "group" },
   { label: "Interessi incassati/(pagati)", get: (cf) => cf.operating.cash_adjustments.interest_paid_received, kind: "detail" },
-  { label: "(Imposte sul reddito pagate)", get: (cf) => cf.operating.cash_adjustments.taxes_paid, kind: "detail" },
+  { label: "(Imposte sul reddito pagate, al netto delle compensazioni in F24)", get: (cf) => cf.operating.cash_adjustments.taxes_paid, kind: "detail" },
   { label: "Dividendi incassati", get: (cf) => cf.operating.cash_adjustments.dividends_received, kind: "detail" },
   { label: "(Utilizzo dei fondi)", get: (cf) => cf.operating.cash_adjustments.use_of_provisions, kind: "detail" },
   { label: "Altri incassi/(pagamenti)", get: (cf) => cf.operating.cash_adjustments.other_cash_changes, kind: "detail" },

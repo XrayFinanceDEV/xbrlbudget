@@ -28,6 +28,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Checkbox } from "@/components/ui/checkbox";
 import { Label } from "@/components/ui/label";
 import { euro, numOrNull } from "@/lib/budget-format";
+import { boolAssumption } from "@/lib/budget-horizon";
 import { openingMasses, validatePregresso } from "@/lib/budget-pregresso-circolante";
 import {
   FORNITORI_AVVISO_RIGA, OLTRE_KEYS, OLTRE_NOTA, OLTRE_STATI, PREGRESSO_VUOTO,
@@ -106,6 +107,7 @@ export function StepPatrimonialePregresso(p: StepProps): JSX.Element {
   const firstYear = p.forecastYears[0];
   const annoSuccessivo = firstYear ?? p.baseYear + 1;
   const { updatePregresso } = p;
+  const compensaCrediti = boolAssumption(p.assumptions, p.forecastYears, "compensa_crediti_tributari");
 
   // La stessa decisione del passo 4 (`StepCircolante`), qui nella forma breve
   // che sta nella riga: i giorni di pagamento non si calcolano, e il breve
@@ -261,6 +263,28 @@ export function StepPatrimonialePregresso(p: StepProps): JSX.Element {
                       <td className="px-2 py-1.5 align-top">
                         <div className="font-medium text-foreground">{r.label}</div>
                         <div className="text-[11px] text-muted-foreground">{OLTRE_NOTA[r.key]}</div>
+                        {r.key === "crediti_tributari_breve" && (
+                          <div className="mt-1.5">
+                            <div className="flex items-center gap-2">
+                              <Checkbox
+                                id="compensa-crediti-tributari"
+                                checked={compensaCrediti}
+                                onCheckedChange={(c) => p.updateAll("compensa_crediti_tributari", c === true)}
+                              />
+                              <Label
+                                htmlFor="compensa-crediti-tributari"
+                                className="text-[11px] font-normal text-muted-foreground"
+                              >
+                                compensa il credito residuo con le imposte da versare
+                              </Label>
+                            </div>
+                            <div className="mt-0.5 text-[11px] text-muted-foreground">
+                              Ogni anno la parte che il piano non incassa si scala (F24) da saldo, acconti e rate:
+                              il credito e le imposte pagate calano dello stesso importo. Non vale con le imposte in
+                              via manuale.
+                            </div>
+                          </div>
+                        )}
                         {r.key === "crediti_commerciali" && (
                           <div className="mt-1.5 flex items-center gap-2">
                             <Checkbox

@@ -102,6 +102,7 @@ MIGRATIONS = {
         ("tangible_investments",               "NUMERIC(15,2) DEFAULT 0 NOT NULL"),
         ("dso_days",                           "NUMERIC(10,2)"),
         ("dio_days",                           "NUMERIC(10,2)"),
+        ("dio_pf_days",                        "NUMERIC(10,2)"),
         ("dpo_days",                           "NUMERIC(10,2)"),
         ("existing_debt_repayment_years",      "NUMERIC(10,2)"),
         ("altri_finanz_repayment_years",       "NUMERIC(10,2)"),
@@ -115,6 +116,7 @@ MIGRATIONS = {
         # cioe' il comportamento di oggi (il motore alza sul fabbisogno scoperto).
         ("overdraft_allowed",                  "BOOLEAN DEFAULT 0 NOT NULL"),
         ("overdraft_limit",                    "NUMERIC(15,2)"),
+        ("compensa_crediti_tributari",         "BOOLEAN DEFAULT 0 NOT NULL"),
         ("ce03a_override",                     "NUMERIC(15,2)"),
         ("tfr_accrual_suspended",              "BOOLEAN DEFAULT 0 NOT NULL"),
         ("previdenza_scales_with_personnel",   "BOOLEAN DEFAULT 0 NOT NULL"),

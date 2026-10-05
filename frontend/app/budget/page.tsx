@@ -567,6 +567,7 @@ function buildStartupAssumption(
     payables_short_growth_pct: 0,
     dso_days: null,
     dio_days: null,
+    dio_pf_days: null,
     dpo_days: null,
     existing_debt_repayment_years: null,
     altri_finanz_repayment_years: null,

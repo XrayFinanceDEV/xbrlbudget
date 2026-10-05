@@ -25,7 +25,7 @@ AMBIENTA = {
     "dso": [119, 101, 99, 93], "dpo": [126, 126, 125, 120], "ciclo": [18, 0, 2, 3],
     "patrimonio_netto": [203616, 230385, 410503, 598707], "margine_struttura": [-253424, -281391, -6008, 277460],
     "indipendenza": [8.79, 8.89, 14.81, 20.15], "cassa_fine": [55, 346000, 503190, 804344],
-    "banche": [960937, 1067528, 972528, 877528], "banche_breve": [493409, 495000, 495000, 450000],
+    "debiti_finanziari": [1500000, 1400000, 1200000, 900000], "banche": [960937, 1067528, 972528, 877528], "banche_breve": [493409, 495000, 495000, 450000],
     "costi_fissi": [1671438, 1780869, 1802894, 1832755], "cf_variazione": [-29212, 345946, 157189, 301154],
     "cc_comm": [852261, 888269, 979298, 983378], "inc_costi_operativi": [101.65, 97.79, 93.40, 93.38],
     "inc_servizi": [34.86, 34.03, 33.06, 32.52], "inc_materie": [3.15, 3.15, 3.15, 3.51],
@@ -81,3 +81,44 @@ def test_narrativa_senza_dati():
 def test_testo_deterministico():
     a = make(AMBIENTA, GROWTH)
     assert narrative.key_points(a) == narrative.key_points(make(AMBIENTA, GROWTH))
+
+
+def test_R3_niente_deleveraging_se_il_debito_lordo_non_scende():
+    vals = {**AMBIENTA, "debiti_finanziari": [500, 500, 500, 500], "pfn": [400, 300, 200, 100]}
+    d = make(vals, GROWTH)
+    leads = [lead for lead, _ in narrative.key_points(d)]
+    assert "Generazione di cassa e riduzione della PFN per accumulo di liquidità." in leads
+    assert not any("deleveraging" in l.lower() for l in leads)
+    forza, _ = narrative.strengths_weaknesses(d)
+    assert "deleveraging" not in [f.id for f in forza]
+    assert "Riduzione della PFN per accumulo di liquidità" in [f.title for f in forza]
+
+
+def test_R3_debito_lordo_ignoto_non_dice_deleveraging():
+    vals = {k: v for k, v in AMBIENTA.items() if k != "debiti_finanziari"}
+    leads = [lead for lead, _ in narrative.key_points(make(vals, GROWTH))]
+    assert "Generazione di cassa." in leads and not any("deleveraging" in l.lower() for l in leads)
+
+
+def test_R3_cassa_sostenuta_dal_nuovo_finanziamento_lo_dice():
+    vals = {**AMBIENTA, "cf_variazione": [None, 10, 10, 10], "cf_operativo": [None, 5, 5, 5],
+            "cf_investimenti": [None, -50, -50, -50], "cf_rimborsi": [None, 0, 0, 0],
+            "cf_nuovo_debito": [None, 55, 55, 55]}
+    s = narrative.subtitle_flussi(make(vals, GROWTH))
+    assert "sufficiente a finanziare" not in s and "nuovi finanziamenti per" in s
+
+
+def test_R3_nuovo_finanziamento_cita_solo_gli_anni_con_nuovo_debito():
+    # Fix finale 6: gli anni a zero non vanno elencati come «0 nel 2028».
+    vals = {**AMBIENTA, "cf_variazione": [None, 10, 10, 10], "cf_operativo": [None, 5, 5, 5],
+            "cf_investimenti": [None, -50, -50, -50], "cf_rimborsi": [None, 0, 0, 0],
+            "cf_nuovo_debito": [None, 55, 0, 0]}
+    d = make(vals, GROWTH)
+    s = narrative.subtitle_flussi(d)
+    frase = s.split("nuovi finanziamenti per", 1)[1]
+    assert f"nel {d.plan_years[0]}" in frase
+    assert f"nel {d.plan_years[1]}" not in frase and f"nel {d.plan_years[2]}" not in frase
+
+
+def test_R3_cassa_autosufficiente_resta_il_testo_di_oggi():
+    assert "sufficiente a finanziare" in narrative.subtitle_flussi(make(AMBIENTA, GROWTH))

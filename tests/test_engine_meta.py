@@ -11,7 +11,8 @@ def test_engine_meta_serializza_il_pareggio_in_stringhe():
     # F2 (decisione del proprietario, 2026-09-26): aggiunge `rimborsi_piano`, sempre presente.
     assert meta == {"engine_version": ENGINE_VERSION,
                     "pareggio": {"costi_variabili": "10.01", "fatturato_pareggio": None},
-                    "erogazioni": "0.00", "rimborsi_piano": "0.00"}
+                    "erogazioni": "0.00", "rimborsi_piano": "0.00", "imposte_versate": None,
+                    "avvisi": []}
 
 
 def test_engine_meta_senza_pareggio_dichiara_none():
@@ -19,7 +20,8 @@ def test_engine_meta_senza_pareggio_dichiara_none():
     # ne' debito bancario ne' altri finanziatori ne' fidi ne' scoperto — zero vero, non assenza.
     # F2 (decisione del proprietario, 2026-09-26): stesso zero vero per `rimborsi_piano`.
     assert engine_meta({}) == {"engine_version": ENGINE_VERSION, "pareggio": None,
-                               "erogazioni": "0.00", "rimborsi_piano": "0.00"}
+                               "erogazioni": "0.00", "rimborsi_piano": "0.00", "imposte_versate": None,
+                    "avvisi": []}
 
 
 def test_engine_meta_erogazioni_somma_contratti_altri_finanziatori_fidi_e_scoperto():
@@ -73,7 +75,22 @@ def test_ogni_anno_generato_porta_firma_e_pareggio_del_motore():
     e = generato(genera(righe()))
     assert set(e.meta) == {2027, 2028, 2029}
     for anno, meta in e.meta.items():
-        assert meta["engine_version"] == ENGINE_VERSION == "2"
+        assert meta["engine_version"] == ENGINE_VERSION == "3"
         atteso = {k: (None if v is None else str(D(str(v)).quantize(D("0.01"))))
                   for k, v in e.det[anno]["pareggio"].items()}
         assert meta["pareggio"] == atteso, anno
+
+
+def test_engine_meta_porta_gli_avvisi_e_la_versione_3():
+    from calculations.forecast_engine import ENGINE_VERSION, engine_meta
+    assert ENGINE_VERSION == "3"
+    meta = engine_meta({'avvisi': ['uno', 'due']})
+    assert meta['avvisi'] == ['uno', 'due']
+    assert engine_meta({})['avvisi'] == []
+
+
+def test_ogni_anno_generato_ha_la_lista_avvisi():
+    e = generato(genera(righe()))
+    for anno in e.meta:
+        assert e.det[anno]['avvisi'] == []
+        assert e.meta[anno]['avvisi'] == []

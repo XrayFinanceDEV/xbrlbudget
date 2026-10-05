@@ -19,9 +19,9 @@
 import { computeAutoDays } from "@/lib/budget-turnover";
 import type { AssumptionsMap } from "@/lib/budget-horizon";
 import { euro, numOrNull } from "@/lib/budget-format";
-import { rowsCircolante, type PreviewRow } from "@/lib/budget-preview-rows";
+import { GIORNI_LABELS, rowsCircolante, type PreviewRow } from "@/lib/budget-preview-rows";
 import type { YearCellOff } from "@/lib/budget-year-cell";
-import type { BalanceSheet, ForecastPreviewResponse, IncomeStatement, SpIndexingDriver } from "@/types/api";
+import type { BalanceSheet, ForecastPreviewResponse, ForecastPreviewYear, IncomeStatement, SpIndexingDriver } from "@/types/api";
 
 /**
  * Riga della tabella, forma strutturalmente compatibile con `YearInputRow`
@@ -40,6 +40,7 @@ export interface CircolanteTableRow extends YearCellOff {
 export interface GiorniMedi {
   dso: number | null;
   dio: number | null;
+  dio_pf: number | null;
   dpo: number | null;
 }
 
@@ -50,10 +51,12 @@ export interface GiorniMedi {
 export function giorniMediAuto(
   baseInc: IncomeStatement | undefined | null,
   baseBs: BalanceSheet | undefined | null,
+  pianoCrediti = false,
 ): GiorniMedi {
   return {
-    dso: computeAutoDays("dso", baseInc ?? undefined, baseBs ?? undefined),
+    dso: computeAutoDays("dso", baseInc ?? undefined, baseBs ?? undefined, { pianoCrediti }),
     dio: computeAutoDays("dio", baseInc ?? undefined, baseBs ?? undefined),
+    dio_pf: computeAutoDays("dio_pf", baseInc ?? undefined, baseBs ?? undefined),
     dpo: computeAutoDays("dpo", baseInc ?? undefined, baseBs ?? undefined),
   };
 }
@@ -61,26 +64,68 @@ export function giorniMediAuto(
 const dayLabel = (n: number | null): string => (n === null ? "n/d" : `${n} gg`);
 const autoPlaceholder = (n: number | null) => () => (n === null ? "auto" : `auto ${n}`);
 
-/** L'etichetta di ciascuno dei tre giorni medi, in un posto solo: le righe
- *  della tabella e gli avvisi devono chiamarli allo stesso modo.
- *
- *  `dio` (lotto 1 fix rilievi, rilievo I2 della revisione finale, 2026-09-26): dal B01 questo
- *  campo e' i giorni delle sole MATERIE PRIME sul loro consumo (`ce05+ce10`), non piu' un giorno
- *  di rotazione di tutto il magazzino sui ricavi — l'etichetta "(DIO)" da sola lo presenta ancora
- *  come prima. */
-const GIORNI_LABELS: Record<string, string> = {
-  dso: "Giorni incasso clienti (DSO)",
-  dio: "Giorni di scorta materie prime (sul consumo)",
-  dpo: "Giorni pagamento fornitori (DPO)",
-};
+/** Oltre un anno di giacenza il motore scarta il giorno dedotto e riporta il saldo, tranne in
+ *  Immobiliare (5) ed Edilizia (6), dove un magazzino lungo e' il mestiere: nessuna soglia
+ *  (`soglia_giorni_magazzino`, `calculations/projection_common.py`). */
+export function sogliaGiorniMagazzino(settore?: number | null): number | null {
+  return settore === 5 || settore === 6 ? null : 365;
+}
 
-/** Le tre righe "Giorni medi": DSO, DIO, DPO. */
-export function giorniMediRows(auto: GiorniMedi): CircolanteTableRow[] {
+/** Il segnaposto promette solo cio' che il motore applica: oltre soglia resta «auto». */
+const autoPlaceholderMagazzino = (n: number | null, soglia: number | null) => () =>
+  (n === null || (soglia !== null && n > soglia) ? "auto" : `auto ${n}`);
+
+/** La nota sotto la casella: il giorno storico del gruppo, anche degenere. */
+function notaStorico(
+  n: number | null, baseYear: number | undefined, base: string, soglia: number | null,
+): string | undefined {
+  if (n === null) return undefined;
+  const anno = baseYear === undefined ? "" : ` ${baseYear}`;
+  const testo = `Storico${anno}: ${n} gg ${base}`;
+  return soglia !== null && n > soglia
+    ? `${testo} — oltre la soglia: senza un valore il motore riporta il saldo`
+    : testo;
+}
+
+/** Le quattro righe "Giorni medi": DSO, DIO materie, DIO prodotti finiti, DPO. */
+export function giorniMediRows(
+  auto: GiorniMedi, baseYear?: number, settore?: number | null,
+): CircolanteTableRow[] {
+  const soglia = sogliaGiorniMagazzino(settore);
   return [
     { field: "dso_days", label: GIORNI_LABELS.dso, baseLabel: dayLabel(auto.dso), placeholder: autoPlaceholder(auto.dso) },
-    { field: "dio_days", label: GIORNI_LABELS.dio, baseLabel: dayLabel(auto.dio), placeholder: autoPlaceholder(auto.dio) },
+    { field: "dio_days", label: GIORNI_LABELS.dio, baseLabel: dayLabel(auto.dio),
+      sub: notaStorico(auto.dio, baseYear, "sul consumo", soglia), placeholder: autoPlaceholderMagazzino(auto.dio, soglia) },
+    { field: "dio_pf_days", label: GIORNI_LABELS.dio_pf, baseLabel: dayLabel(auto.dio_pf),
+      sub: notaStorico(auto.dio_pf, baseYear, "sui ricavi", soglia), placeholder: autoPlaceholderMagazzino(auto.dio_pf, soglia) },
     { field: "dpo_days", label: GIORNI_LABELS.dpo, baseLabel: dayLabel(auto.dpo), placeholder: autoPlaceholder(auto.dpo) },
   ];
+}
+
+/**
+ * Gli avvisi del motore sul magazzino, anno per anno, dall'elenco STRUTTURATO
+ * (`details.avviso_rimanenze`): niente filtro sul testo di `details.avvisi`, che
+ * mescola imposte e debiti di altri passi. Una chiave assente vale «nessun avviso».
+ */
+export function avvisiMagazzino(years: ForecastPreviewYear[]): string[] {
+  const etichetta: Record<string, string> = {
+    materie_semilavorati: "materie prime e semilavorati",
+    prodotti_finiti: "prodotti finiti e merci",
+  };
+  const out: string[] = [];
+  for (const y of years) {
+    for (const v of y.details?.avviso_rimanenze ?? []) {
+      const natura = v.gruppo === "materie_semilavorati"
+        ? (v.variazione < 0 ? "di costo" : "di minor costo")
+        : (v.variazione > 0 ? "di ricavo" : "di minor ricavo");
+      out.push(
+        `Nel ${y.year} i giorni inseriti per ${etichetta[v.gruppo] ?? v.gruppo} (${Math.round(v.giorni)} gg) ` +
+        `portano il magazzino da ${euro(v.apertura)} a ${euro(v.chiusura)}: ` +
+        `${euro(Math.abs(v.variazione))} ${natura} a conto economico.`,
+      );
+    }
+  }
+  return out;
 }
 
 /**

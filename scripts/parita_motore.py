@@ -305,6 +305,7 @@ def profilo_giorni_manuali(rng: random.Random, anno_idx: int) -> Dict[str, Any]:
     return {
         "dso_days": _giorni(rng, 20, 120),
         "dio_days": _giorni(rng, 5, 90),
+        "dio_pf_days": _giorni(rng, 5, 90),
         "dpo_days": _giorni(rng, 20, 150),
     }
 

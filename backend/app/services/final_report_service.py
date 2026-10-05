@@ -59,15 +59,18 @@ def _diagnostic(code: str, severity: str, section: str, message: str) -> Diagnos
 
 def _engine_version_stale(workflow: str, forecast_years: Iterable[Any]) -> bool:
     """A01-bis: `True` when a **budget** scenario (`workflow != "infrannuale"`) has at least one
-    persisted forecast year whose `engine_meta.engine_version` is present and older than
-    `calculations.forecast_engine.ENGINE_VERSION`. `engine_meta` `NULL`, or without a version, is
-    "non lo so" — never a verdict. Infrannuale scenarios never qualify (spec, Task 1)."""
+    persisted forecast year whose `engine_meta.engine_version` is older than
+    `calculations.forecast_engine.ENGINE_VERSION`, or absent: `engine_meta` `NULL` on a budget means
+    "da rigenerare" (owner's decision 2026-10-05, old data do not count). Infrannuale scenarios never qualify (spec, Task 1)."""
     if workflow == "infrannuale":
         return False
     for row in forecast_years:
-        version = (getattr(row, "engine_meta", None) or {}).get("engine_version")
+        meta = row.get("engine_meta") if isinstance(row, dict) else getattr(row, "engine_meta", None)
+        version = (meta or {}).get("engine_version")
         if version is None:
-            continue
+            # Decisione del proprietario 2026-10-05 (#61): i dati vecchi non contano. Un previsionale budget
+            # senza firma e' di sicuro anteriore al 2026-09-26, quindi va rigenerato.
+            return True
         try:
             if int(version) < int(ENGINE_VERSION):
                 return True
@@ -414,6 +417,14 @@ def assemble_final_report(db: Session, company_id: int, scenario_id: int, *, sch
                                            "Forecast generato da una versione precedente del motore."))
 
         by_forecast_year = {row.year: row for row in scenario.forecast_years}
+        # Le frasi d'avviso del motore (`engine_meta['avvisi']`) arrivano al Business plan come
+        # diagnostiche `info`: non cambiano la prontezza (che guarda errori e warning), e le deduplica
+        # chi le legge. Un `engine_meta` assente o senza `avvisi` e' «non lo so», non un avviso.
+        for year in wanted:
+            meta = getattr(by_forecast_year.get(year), "engine_meta", None)
+            for frase in (meta.get("avvisi") if isinstance(meta, dict) else None) or []:
+                if isinstance(frase, str) and frase:
+                    diagnostics.append(_diagnostic("engine_avviso", "info", "forecast", frase))
         for year in wanted:
             row = by_forecast_year.get(year)
             if row is None:

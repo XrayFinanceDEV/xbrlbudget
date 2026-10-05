@@ -1796,7 +1796,7 @@
     {
       "id": "cashflow:operating.cash_adjustments.taxes_paid",
       "code": "operating.cash_adjustments.taxes_paid",
-      "label": "(Imposte sul reddito pagate)",
+      "label": "(Imposte sul reddito pagate, al netto delle compensazioni in F24)",
       "parent_id": "cashflow:altre_rettifiche",
       "level": 2,
       "kind": "detail",

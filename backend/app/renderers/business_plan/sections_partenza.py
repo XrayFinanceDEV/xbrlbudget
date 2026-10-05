@@ -67,6 +67,16 @@ def _uniform(vals) -> bool:
     return bool(vals) and all(v is not None and v == vals[0] for v in vals)
 
 
+def _tabella_testo(headers: tuple, rows: list, widths: tuple) -> Table:
+    data = [[Paragraph(h, layout.ST["cellh"]) for h in headers]] + \
+        [[Paragraph(str(c), layout.ST["cell"]) for c in r] for r in rows]
+    t = Table(data, colWidths=list(widths), repeatRows=1)
+    t.setStyle(TableStyle([("BACKGROUND", (0, 0), (-1, 0), C(theme.NAVY)), ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+                           ("LINEBELOW", (0, 1), (-1, -1), 0.4, C(theme.RULE)),
+                           ("TOPPADDING", (0, 0), (-1, -1), 4.6), ("BOTTOMPADDING", (0, 0), (-1, -1), 4.6)]))
+    return t
+
+
 def ipotesi(data: BusinessPlanData, pages: dict) -> list:
     years = data.plan_years
     s = layout.section_head("SEZIONE 10", "Assunzioni del piano", "Driver dichiarati per ciascun anno di piano.")
@@ -90,7 +100,21 @@ def ipotesi(data: BusinessPlanData, pages: dict) -> list:
     s += layout.h2("Driver economici e finanziari", after=6)
     s += [layout.fin_table([f"{y} P" for y in years],
                            [(r.label, [fmt.value(v, r.unit) for v in r.values], "") for r in data.assumptions],
-                           first="Driver"), Spacer(0, 10)]
+                           first="Driver"), Spacer(0, 4),
+          layout.note("I giorni si applicano a ricavi e acquisti al netto dell'IVA; i saldi di crediti e debiti del "
+                      "bilancio sono al lordo. Un DSO/DPO misurato sui saldi storici risulta quindi più alto di quello "
+                      "effettivo."), Spacer(0, 10)]
+    if data.finanziamenti_tabella:
+        s += layout.h2("Finanziamenti", after=6)
+        s += [_tabella_testo(("Contratto", "Tipo", "Importo / residuo", "Tasso", "Durata"),
+                             [(f.nome, f.tipo, fmt.eur(f.importo), fmt.pct(f.tasso),
+                               f"{f.durata_anni} anni" if f.durata_anni else fmt.ND)
+                              for f in data.finanziamenti_tabella], (150, 90, 100, 60, CW - 400)), Spacer(0, 10)]
+    if data.ipotesi_puntuali:
+        s += layout.h2("Altre ipotesi dichiarate", after=6)
+        s += [_tabella_testo(("Voce", "Ipotesi"), list(data.ipotesi_puntuali), (170, CW - 170)), Spacer(0, 10)]
+    if data.avvisi_motore:
+        s += [layout.panel("Avvisi del motore", [("", a) for a in data.avvisi_motore]), Spacer(0, 10)]
     head = layout.h2("Aree del piano", after=6)
     rows = [[Paragraph("Area", layout.ST["cellh"]), Paragraph("Contenuto delle ipotesi", layout.ST["cellh"])]] + \
         [[Paragraph(a, layout.ST["cellb"]), Paragraph(b, layout.ST["cell"])] for a, b in _AREE]

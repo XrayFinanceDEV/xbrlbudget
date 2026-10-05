@@ -29,7 +29,7 @@ import {
   DRIVERS, DRIVER_LABELS, minorFieldsRows, pianiPregressoOf, spIndexingOf,
 } from "@/lib/budget-circolante-step";
 import {
-  annoLibero, avvisiFidi, nuoviFinanziamenti, nuovoPrestito, regimeEsplicito, regoleVociMinori, riepilogoNuovo,
+  annoLibero, avvisiAltriDebiti, avvisiFidi, nuoviFinanziamenti, nuovoPrestito, regimeEsplicito, regoleVociMinori, riepilogoNuovo,
   rowsAltriCreditiDebiti, rowsDebitoCassaPfn, tfrRighe, withNuovoCampo,
 } from "@/lib/budget-piano-step";
 import { euro, numOrNull, pct1, pctOf } from "@/lib/budget-format";
@@ -223,6 +223,7 @@ export function StepPatrimonialePiano(p: StepProps): JSX.Element {
   const overdraftAllowed = boolAssumption(p.assumptions, p.forecastYears, "overdraft_allowed");
   const avvisi = useMemo(() => scopertoAvvisi(previewYears), [previewYears]);
   const avvisiDeiFidi = useMemo(() => avvisiFidi(previewYears), [previewYears]);
+  const avvisiAltri = useMemo(() => avvisiAltriDebiti(previewYears, p.baseYear), [previewYears, p.baseYear]);
 
   // ── Anteprima: debito, cassa, PFN ──
   const fidiBase = firstYear !== undefined ? numOrNull(p.assumptions[firstYear]?.bank_lines_amount) : null;
@@ -532,6 +533,13 @@ export function StepPatrimonialePiano(p: StepProps): JSX.Element {
               futuro Task 3b): un avviso per anno, letto da cio' che il
               motore dichiara, mai ricalcolato qui. */}
           {avvisiDeiFidi.map((m) => (
+            <div key={m} className="mt-3 flex gap-2 rounded-md bg-amber-500/10 p-3 text-xs text-amber-700 dark:text-amber-300">
+              <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+              <span>{m}</span>
+            </div>
+          ))}
+          {/* Altri debiti passati da oltre a entro 12 mesi (#62 S18): letto dal dato strutturato. */}
+          {avvisiAltri.map((m) => (
             <div key={m} className="mt-3 flex gap-2 rounded-md bg-amber-500/10 p-3 text-xs text-amber-700 dark:text-amber-300">
               <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
               <span>{m}</span>

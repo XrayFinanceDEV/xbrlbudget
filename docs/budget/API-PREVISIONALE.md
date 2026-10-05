@@ -311,6 +311,12 @@ scrittura hanno cinque comportamenti da conoscere:
    rollback del lotto intero; sul bulk è `forecast_generated: false` con l'override salvato
    comunque.
 
+Un `sp_overrides` su `sp05b` o `sp05d` (prodotti in corso, prodotti finiti) muove la **cassa**
+nell'anno N e arriva al CE solo nell'anno N+1, via `ce02`: `ce02` di N+1 è la variazione fra la
+giacenza forzata di N e la chiusura di N+1 — stesso schema di `sp05a` sotto B01 (`ce10`). Nell'anno
+dell'override `ce02` non si sposta, e il foglio quadra lo stesso perché la differenza passa per la
+cassa.
+
 Dopo gli override, le scomposizioni dei `details` seguono il persistito
 (`_realign_sp_declarations`): `details['imposte']`, le righe di `details['pregresso']` — i
 quattro saldi di debito e, dallo stesso giro, anche `crediti_commerciali` — e il `valore` di
@@ -361,8 +367,9 @@ deriva dall'anno base con `DAYS = 360` (`forecast_engine.py:2484`):
 
 | | formula | nota |
 |---|---|---|
-| DSO | `(sp06 − sp06e − sp06f) / ce01 × 360` | solo i crediti **commerciali**: crediti tributari e imposte anticipate sono esclusi perché dipendono dalla posizione fiscale, non dal giro d'affari (`:2214-2236`) |
-| DIO | `sp05 / ce01 × 360` | il denominatore è il **ricavo**, non gli acquisti (`:2238-2252`) |
+| DSO | `(sp06a + sp07a) / ce01 × 360` | solo i crediti verso **clienti** (da #61 S03/S27, 2026-10-05; prima `sp06 − sp06e − sp06f`): le altre voci commerciali non hanno giorni e restano quelle dell'anno prima, salvo un piano `crediti_commerciali` (il DSO derivato resta allora sull'intero commerciale a breve). Dichiarato in `details['dso_clienti']` |
+| DIO materie e semilavorati | `(sp05a + sp05b) / (ce05 + ce10) × 360` | il denominatore è il **consumo** di materie; `dio_days` esplicito vale per questo gruppo |
+| DIO prodotti finiti e merci | `sp05d / ce01 × 360` | sui **ricavi**; `dio_pf_days` esplicito (colonna nuova, `NUMERIC(10,2)`, `migrate_db.py`) vale per questo gruppo; `details['dio_pf_applied']`. Lavori in corso e acconti (`sp05c`, `sp05e`) hanno giorni dedotti dai ricavi, senza input (`details['dio_altre_applied']`) |
 | DPO | `sp16d / (ce05 + ce06) × 360` | solo i debiti **verso fornitori**, non l'aggregato `sp16` (`:2429-2442`) |
 
 > **L'aliquota di default non è quella che l'app usa, e dal 2026-09-18 è quella che gira.** Lo
@@ -384,6 +391,12 @@ di cassa non diventa mai da solo debito a breve. Di default il motore solleva `F
 finanziario scoperto di <importo>` e non produce nulla; solo con `overdraft_allowed` (per anno di
 ipotesi) il fabbisogno diventa uno scoperto generato dal piano, dichiarato in `sp16a` e nei
 `details` (`scoperto_generato`, `scoperto_residuo`) — vedi «Forecasting Engine» in `CLAUDE.md`.
+
+> **Avvisi e firma (#61/#62).** Ogni anno di piano porta `details['avvisi']`, lista di frasi italiane
+> sempre presente, persistita in `ForecastYear.engine_meta['avvisi']` (con `engine_version: "3"` e
+> `imposte_versate`, i versamenti d'imposta che il rendiconto mostra come «imposte pagate»). Un avviso non
+> cambia alcun numero. `ce02` = Δ(`sp05b + sp05d`) è derivato, `ce03` no (resta base o override), e
+> l'override di `ce02` è rifiutato se porta i prodotti finiti sotto zero.
 
 > **Per Immobiliare (5) ed Edilizia (6) la soglia sul DIO dedotto non c'è** (lotto 3A, Task 10):
 > un magazzino oltre l'anno lì è il mestiere (immobili in rimanenza, lavori in corso su ordinazione),
@@ -667,7 +680,7 @@ porta a `sp16e` il solo saldo dell'anno proiettato: il primo anno di budget lo v
 
 | File | Che cosa contiene |
 |---|---|
-| `database/models.py` | `BudgetAssumptions` — le 32 colonne `ce*_override`, `sp_overrides`, `pregresso`, `overdraft_allowed`/`overdraft_limit` |
+| `database/models.py` | `BudgetAssumptions` — le 32 colonne `ce*_override`, `sp_overrides`, `pregresso`, `overdraft_allowed`/`overdraft_limit`, `dio_pf_days` (giorni di prodotti finiti e merci, #62) e `compensa_crediti_tributari` (booleano, falso di default: compensa il credito tributario residuo con le imposte da versare; vale su tutte le righe dello scenario, la scrive il wizard al passo 5) |
 | `backend/app/schemas/budget.py` | gli stessi campi lato Pydantic (`PregressoInput` e le sue due sotto-classi comprese) |
 | `backend/app/services/assumptions_service.py` | il bulk, e il `try/except` che produce il 200 con `forecast_generated: false` |
 | `backend/app/services/forecast_freshness.py` | unica misura condivisa di freschezza — `forecast_stale`, `assumptions_updated_at`, `forecast_updated_at` (§1.1) |

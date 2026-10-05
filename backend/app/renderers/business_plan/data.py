@@ -63,6 +63,16 @@ class AssumptionRow:
 
 
 @dataclass(frozen=True)
+class FinanziamentoRow:
+    """Una riga della tabella «Finanziamenti» della sezione 10 (passo 5 del wizard)."""
+    nome: str
+    tipo: str  # «Pregresso» | «Nuovo» | «Altro finanziatore»
+    importo: Num
+    tasso: Num
+    durata_anni: Optional[int] = None
+
+
+@dataclass(frozen=True)
 class TableBlock:
     title: str
     headers: tuple
@@ -105,6 +115,9 @@ class BusinessPlanData:
     indicators_analytical: tuple = ()
     draft: bool = False
     avvisi: tuple = ()  # A01-bis: frasi «da rigenerare» per forecast_stale/engine_version_stale, nell'ordine
+    finanziamenti_tabella: tuple = ()  # FinanziamentoRow: i contratti dei passi 5-6, col tasso (#61 S15)
+    ipotesi_puntuali: tuple = ()  # (voce, testo): piani di rientro, indicizzazioni, valori forzati
+    avvisi_motore: tuple = ()  # frasi di `engine_meta['avvisi']` di tutti gli anni di piano, deduplicate (#62 S24)
 
     def v(self, key: str) -> tuple:
         return self.values.get(key) or (None,) * len(self.columns)
@@ -287,7 +300,8 @@ _ASSUMPTIONS = (
     ("rent_growth_pct", "Crescita godimento beni di terzi", "percent"),
     ("other_costs_growth_pct", "Crescita oneri diversi", "percent"),
     ("dso_days", "DSO (giorni incasso)", "days"),
-    ("dio_days", "DIO (giorni magazzino)", "days"),
+    ("dio_days", "Giorni materie prime e semilavorati (sul consumo)", "days"),
+    ("dio_pf_days", "Giorni prodotti finiti e merci (sui ricavi)", "days"),
     ("dpo_days", "DPO (giorni pagamento)", "days"),
     ("tangible_investments", "Investimenti materiali", "eur"),
     ("intangible_investments", "Investimenti immateriali", "eur"),
@@ -296,6 +310,35 @@ _ASSUMPTIONS = (
     ("tax_rate", "Aliquota fiscale", "percent"),
     ("inflation_pct", "Inflazione", "percent"),
 )
+
+
+# Campi dei passi 1-7 non ancora nella lista sopra (inventario del task 14). Un campo qui compare solo se
+# l'utente l'ha scritto o se vale qualcosa: un default tutto a zero non e' un'ipotesi dichiarata.
+_ASSUMPTIONS_EXTRA = (
+    ("fixed_materials_percentage", "percent"), ("fixed_services_percentage", "percent"),
+    ("fixed_materials_growth_pct", "percent"), ("fixed_services_growth_pct", "percent"),
+    ("fixed_materials_growth_auto", "bool"), ("fixed_services_growth_auto", "bool"),
+    ("variable_materials_growth_auto", "bool"), ("variable_services_growth_auto", "bool"),
+    ("receivables_long_growth_pct", "percent"),
+    ("bank_lines_amount", "eur"), ("bank_lines_rate", "percent"),
+    ("existing_debt_repayment_years", "years"), ("altri_finanz_repayment_years", "years"),
+    ("sp06e_growth_pct", "percent"), ("compensa_crediti_tributari", "bool"),
+    ("sp01_growth_pct", "percent"), ("sp04_growth_pct", "percent"), ("sp08_growth_pct", "percent"),
+    ("sp10_growth_pct", "percent"), ("sp14_growth_pct", "percent"), ("sp16f_growth_pct", "percent"),
+    ("sp16g_growth_pct", "percent"), ("sp17d_growth_pct", "percent"), ("sp17f_growth_pct", "percent"),
+    ("sp17g_growth_pct", "percent"), ("sp18_growth_pct", "percent"),
+    ("tfr_accrual_suspended", "bool"), ("tfr_payments", "eur"),
+    ("financing_amount", "eur"), ("financing_duration_years", "years"), ("financing_interest_rate", "percent"),
+    ("asset_disposal_nbv", "eur"), ("asset_disposal_proceeds", "eur"),
+    ("cash_sweep_enabled", "bool"), ("cash_sweep_min_cash", "eur"),
+    ("overdraft_allowed", "bool"), ("overdraft_limit", "eur"),
+    ("tax_advances_paid", "eur"), ("sp16e_growth_pct", "percent"), ("sp17e_growth_pct", "percent"),
+)
+
+
+def _etichetta(fld: str) -> str:
+    from app.services.final_report_assumptions import FIELD_LABELS
+    return FIELD_LABELS.get(fld, fld).replace(" %", "").strip()
 
 
 def _numeric(v) -> Num:
@@ -316,6 +359,13 @@ def _ce01_overridden(report) -> bool:
     return False
 
 
+def _valori_ipotesi(a, plan_n: int) -> tuple:
+    out = []
+    for x in list(a.values)[:plan_n]:
+        out.append(Decimal(int(x)) if isinstance(x, bool) else _numeric(x))
+    return tuple(out) + (None,) * (plan_n - len(out))
+
+
 def _assumptions(report, plan_n: int) -> tuple:
     by_field = {a.field: a for s in report.assumption_sections for a in s.assumptions}
     growth, rows = {}, []
@@ -323,13 +373,76 @@ def _assumptions(report, plan_n: int) -> tuple:
         a = by_field.get(fld)
         if a is None or not a.active:
             continue
-        vals = tuple(_numeric(x) for x in list(a.values)[:plan_n])
-        vals = vals + (None,) * (plan_n - len(vals))
+        vals = _valori_ipotesi(a, plan_n)
         if all(x is None for x in vals):
             continue
         growth[fld] = vals
         rows.append(AssumptionRow(label, unit, vals))
+    for fld, unit in _ASSUMPTIONS_EXTRA:
+        a = by_field.get(fld)
+        if a is None or not a.active:
+            continue
+        vals = _valori_ipotesi(a, plan_n)
+        if all(x is None for x in vals):
+            continue
+        if all(x == 0 for x in vals if x is not None) and a.provenance not in ("user", "override"):
+            continue
+        growth[fld] = vals
+        rows.append(AssumptionRow(_etichetta(fld), unit, vals))
     return growth, rows
+
+
+def _finanziamenti(report) -> tuple:
+    """Tabella «Finanziamenti»: contratti del passo 5 (`financing_loans`, `other_lenders`), col tasso."""
+    out = []
+    for s in report.assumption_sections:
+        for a in s.assumptions:
+            if not a.active:
+                continue
+            for ln in (a.financing_loans or []) if a.field == "financing_loans" else []:
+                nuovo = ln.amount is not None and ln.amount > 0
+                if not nuovo and not (ln.opening_residual and ln.opening_residual > 0):
+                    continue
+                out.append(FinanziamentoRow(ln.name or "Finanziamento", "Nuovo" if nuovo else "Pregresso",
+                                            ln.amount if nuovo else ln.opening_residual, ln.interest_rate,
+                                            ln.duration_years))
+            for ol in (a.other_lenders or []) if a.field == "other_lenders" else []:
+                out.append(FinanziamentoRow(ol.name or "Altro finanziatore", "Altro finanziatore",
+                                            ol.opening_residual, ol.interest_rate, len(ol.repayments) or None))
+    return tuple(out)
+
+
+def _puntuali(report) -> tuple:
+    """Ipotesi nidificate che non hanno una riga per anno: piani di rientro, indicizzazioni, valori forzati."""
+    out = []
+    for s in report.assumption_sections:
+        for a in s.assumptions:
+            if not a.active:
+                continue
+            if a.field == "pregresso" and a.pregresso is not None:
+                for nome, piano in a.pregresso.model_dump(exclude_none=True).items():
+                    importi = " / ".join(fmt.eur(_numeric(x)) for x in piano.get("amounts", []))
+                    out.append((f"Piano pregresso: {nome.replace('_', ' ')}",
+                                f"residuo {fmt.eur(_numeric(piano.get('opening')))} · per anno {importi}"))
+            elif a.field == "sp_indexing" and a.sp_indexing:
+                voci = ", ".join(f"{i.field} → {i.driver}" for i in a.sp_indexing)
+                out.append(("Voci indicizzate", voci))
+            elif a.field == "sp_overrides" and a.sp_overrides:
+                out.append(("Valori forzati SP previsionale",
+                            ", ".join(f"{o.field}: {fmt.eur(o.value)}" for o in a.sp_overrides)))
+            elif a.field == "ce_overrides" and a.ce_overrides:
+                out.append(("Valori forzati CE previsionale",
+                            ", ".join(f"{o.field.removesuffix('_override')}: {fmt.eur(o.value)}" for o in a.ce_overrides)))
+    return tuple(out)
+
+
+def _avvisi_motore(report) -> tuple:
+    visti, out = set(), []
+    for d in report.diagnostics:
+        if d.code == "engine_avviso" and d.message not in visti:
+            visti.add(d.message)
+            out.append(d.message)
+    return tuple(out)
 
 
 # ------------------------------------------------------------------ allegati e indicatori
@@ -355,6 +468,32 @@ def _annex(statement, cols) -> tuple:
 _PRACTICE_D = tuple("practice." + k for k in ("dscr", "ebitda_margin", "mt", "ccn", "current_ratio", "ms",
                                               "copertura_immob", "indipendenza", "pfn", "pfn_ebitda", "roi", "roe",
                                               "ros", "of_mol", "of_revenue"))
+
+
+# Indicatori che su un periodo parziale (m < 12 mesi) si mostrano anche annualizzati, con il fattore che si applica
+# al valore del periodo: il ROI è un flusso su uno stock (× 12/m), la PFN/EBITDA ha lo stock al numeratore e il
+# flusso al denominatore (× m/12). Chiave del catalogo -> (etichetta annualizzata, fattore in funzione di m).
+_ANNUALIZZATI = {
+    "roi": ("ROI (annualizzato)", lambda m: Decimal(12) / Decimal(m)),
+    "pfn_ebitda": ("PFN / EBITDA (annualizzato)", lambda m: Decimal(m) / Decimal(12)),
+}
+
+
+def _annualizza(rows: tuple, keys: tuple, m: int | None, adj_i: int | None) -> tuple:
+    """Dopo ogni riga `keys[i]` inserisce la versione annualizzata. La colonna del periodo parziale (`adj_i`) è
+    scalata, le colonne di 12 mesi ripetono il valore; un valore assente resta assente (n.d.).
+    Senza periodo parziale (m >= 12 o assente, colonna assente) restituisce le righe com'erano."""
+    if not m or m >= 12 or adj_i is None:
+        return rows
+    out = []
+    for key, row in zip(keys, rows):
+        out.append(row)
+        if key in _ANNUALIZZATI:
+            label, factor = _ANNUALIZZATI[key]
+            vals = tuple(None if v is None else (v * factor(m) if i == adj_i else v)
+                         for i, v in enumerate(row.values))
+            out.append(IndicatorRow(label, row.unit, vals))
+    return tuple(out)
 
 
 def _indicators(report, ids, pids: list) -> tuple:
@@ -460,10 +599,13 @@ def _starting_infrannuale(report, lk, cols, periods) -> StartingPoint:
                        (f"{m}M rettificato", "Stimato residuo", f"Forecast {y}"), ponte),
         ),
         indicator_headers=(f"{m}M {y} rettificato", f"Forecast {y}"),
-        indicators=tuple(IndicatorRow(label, UNITS.get(k, "eur"), (g(k, adj), g(k, clo))) for label, k in _START_IND),
+        indicators=_annualizza(
+            tuple(IndicatorRow(label, UNITS.get(k, "eur"), (g(k, adj), g(k, clo))) for label, k in _START_IND),
+            tuple(k for _, k in _START_IND), m, 0),
         checks=_checks(lk, cols, report),
         note=f"Periodi di durata diversa ({m} mesi e 12 mesi): gli indicatori reddituali vanno letti tenendo conto "
-             "di questa differenza.",
+             f"di questa differenza. Per il periodo di {m} mesi ROI e PFN / EBITDA compaiono sia sul periodo sia "
+             f"annualizzati (ROI × 12/{m}, PFN / EBITDA × {m}/12).",
         sources=(("Bilancio di verifica", f"{m}M {y}", "disponibile"),
                  ("Registro rettifiche", f"{n_rett} eventi",
                   "confermato" if report.adjustments.confirmed else "da confermare"),
@@ -551,10 +693,16 @@ def from_report(report, *, draft: bool) -> BusinessPlanData:
     growth, rows = _assumptions(report, len(plan))
     revenue_overridden = _ce01_overridden(report)
     plan_pids = [p.id for p in plan]
-    rows.append(AssumptionRow("Costi operativi / ricavi", "percent",
-                              tuple(lk.get("opex_ricavi", pid) for pid in plan_pids)))
-    rows.append(AssumptionRow("Ammortamenti", "eur", tuple(lk.get("ammortamenti", pid) for pid in plan_pids)))
-    rows.append(AssumptionRow("Rimborso debito", "eur", tuple(lk.get("cf_rimborsi", pid) for pid in plan_pids)))
+    # Righe calcolate: una riga che vale zero in ogni anno di piano non e' un'ipotesi e non esce
+    # («Rimborso debito 2027: 0»); le righe d'input a zero restano, se l'utente le ha scritte.
+    for label, unit, key in (("Costi operativi / ricavi", "percent", "opex_ricavi"),
+                             ("Proventi finanziari", "eur", "proventi_fin"),
+                             ("Ammortamenti", "eur", "ammortamenti"),
+                             ("Rimborso debito", "eur", "cf_rimborsi")):
+        vals = tuple(lk.get(key, pid) for pid in plan_pids)
+        if all((v or 0) == 0 for v in vals):
+            continue
+        rows.append(AssumptionRow(label, unit, vals))
 
     n_word = _PIANO.get(len(plan), f"di {len(plan)} anni")
     partial_label = partial_dscr = residual = None
@@ -581,21 +729,27 @@ def from_report(report, *, draft: bool) -> BusinessPlanData:
         annex[st.id], zero[st.id] = _annex(st, cols)
     d_pids = [c.period_id for c in cols]
     d_headers = tuple(c.label for c in cols)
+    d_adj = None
+    present_ids = {ind.id for ind in report.indicator_catalog}
     if partial_label and len(cols) + 1 <= 6:
-        d_pids, d_headers = [adj.id] + d_pids, (partial_label,) + d_headers
+        d_pids, d_headers, d_adj = [adj.id] + d_pids, (partial_label,) + d_headers, 0
     return BusinessPlanData(
         company_name=report.company.name, workflow=wf, columns=cols, base_description=base_description,
         values=values, growth=growth, revenue_overridden=revenue_overridden, assumptions=tuple(rows), partial_label=partial_label,
         partial_dscr=partial_dscr, residual_revenue=residual, starting_point=starting,
         annex=annex, annex_zero_labels=zero,
         indicators_practice_headers=d_headers,
-        indicators_practice=_indicators(report, _PRACTICE_D, d_pids),
+        indicators_practice=_annualizza(
+            _indicators(report, _PRACTICE_D, d_pids),
+            tuple(k.removeprefix("practice.") for k in _PRACTICE_D if k in present_ids),
+            adj.period_months if adj is not None else None, d_adj),
         indicators_analytical=_indicators(
             report, [i.id for i in report.indicator_catalog
                      if i.id.startswith("analytical.") and i.id not in _DUPLICATI_E],
             [c.period_id for c in cols]),
         draft=draft,
-        avvisi=_avvisi(report),
+        avvisi=_avvisi(report), finanziamenti_tabella=_finanziamenti(report),
+        ipotesi_puntuali=_puntuali(report), avvisi_motore=_avvisi_motore(report),
     )
 
 

@@ -514,6 +514,8 @@ export interface ImposteDetail {
   credito_compensato?: number;
   /** I crediti tributari del consuntivo, fuori dal meccanismo e costanti. */
   crediti_tributari_consuntivo?: number;
+  /** Acconti inseriti sotto sia l'imposta dell'anno prima sia quella dell'anno (#62 S28); `null` = nessun avviso. */
+  avviso_acconti?: { acconti: number; minimo_storico: number; minimo_previsionale: number } | null;
   mode: "saldo_acconto" | "manual";
 }
 
@@ -540,6 +542,7 @@ export interface BudgetAssumptions {
   payables_short_growth_pct: number;
   dso_days: number | null;
   dio_days: number | null;
+  dio_pf_days: number | null;
   dpo_days: number | null;
   existing_debt_repayment_years: number | null;
   altri_finanz_repayment_years: number | null;
@@ -550,6 +553,8 @@ export interface BudgetAssumptions {
   overdraft_allowed: boolean;
   /** Tetto dello scoperto; `null` = concesso senza tetto. */
   overdraft_limit: number | null;
+  /** Compensa il credito tributario del consuntivo non incassato dal piano con le imposte da versare. */
+  compensa_crediti_tributari: boolean;
   tfr_accrual_suspended: boolean;
   previdenza_scales_with_personnel: boolean;
   inflation_pct: number | null;
@@ -651,6 +656,7 @@ export interface BudgetAssumptionsCreate {
   payables_short_growth_pct?: number;
   dso_days?: number | null;
   dio_days?: number | null;
+  dio_pf_days?: number | null;
   dpo_days?: number | null;
   existing_debt_repayment_years?: number | null;
   altri_finanz_repayment_years?: number | null;
@@ -658,6 +664,7 @@ export interface BudgetAssumptionsCreate {
   cash_sweep_min_cash?: number | null;
   overdraft_allowed?: boolean;
   overdraft_limit?: number | null;
+  compensa_crediti_tributari?: boolean;
   tfr_accrual_suspended?: boolean;
   previdenza_scales_with_personnel?: boolean;
   inflation_pct?: number | null;
@@ -1232,9 +1239,23 @@ export interface DebitoBancarioAnno {
 }
 
 export interface ForecastYearDetails {
+  /** Avvisi del motore (canale unico), sempre presente, anche vuoto. */
+  avvisi?: string[];
   ce05_fixed: number | null; ce05_variable: number | null;
   ce06_fixed: number | null; ce06_variable: number | null;
   dso_applied: number; dio_applied: number; dpo_applied: number;
+  /** Giorni applicati al gruppo 2 (prodotti finiti e merci, sui ricavi). */
+  dio_pf_applied?: number;
+  /** Rimanenze per gruppo (#62 S04): apertura, chiusura, giorni e se il giorno e' degenere. */
+  rimanenze?: Record<"materie_semilavorati" | "prodotti_finiti" | "lavori_in_corso", {
+    apertura: number; chiusura: number; giorni: number; base_giorni: number | null;
+    degenere: boolean; override: boolean; contropartita: string;
+  }>;
+  /** Giorni inseriti che spostano il magazzino oltre soglia: sempre presente, anche vuoto. */
+  avviso_rimanenze?: {
+    gruppo: "materie_semilavorati" | "prodotti_finiti";
+    apertura: number; chiusura: number; variazione: number; giorni: number;
+  }[];
   /** I giorni medi DEDOTTI caduti nella guardia (`'dso' | 'dio' | 'dpo'`):
    *  il motore ha riportato il saldo dell'anno base invece di scalarlo.
    *  Sempre presente, vuoto quando non scatta nulla. */
@@ -1300,6 +1321,11 @@ export interface ForecastYearDetails {
    *  dichiara in italiano, gia' pronto per lo schermo; `null`/assente quando non scatta o
    *  fuori dal regime esplicito. */
   avviso_fidi?: string | null;
+  /** Altri debiti oltre 12 mesi scesi fra l'anno prima della base e la base, senza piano `altri_debiti`
+   *  (#62 S18). `null` quando non scatta o l'anno prima non c'e': solo un avviso, i numeri non si muovono. */
+  avviso_altri_debiti_breve?: {
+    oltre_prima: number; oltre_base: number; entro_base: number; anno_prima: number;
+  } | null;
 }
 
 export interface ForecastPreviewYear {

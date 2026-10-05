@@ -117,6 +117,7 @@ _DRIVER_ROWS: tuple[tuple[str, str, str], ...] = (
     ("costi", "rent_growth_pct", "percent"),
     ("circolante", "dso_days", "days"),
     ("circolante", "dio_days", "days"),
+    ("circolante", "dio_pf_days", "days"),
     ("circolante", "dpo_days", "days"),
     ("patrimoniale-piano", "tangible_investments", "eur"),
     ("patrimoniale-piano", "depreciation_rate", "percent"),

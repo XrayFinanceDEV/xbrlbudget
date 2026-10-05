@@ -111,7 +111,7 @@ const formulaTooltips: Record<string, string> = {
   "MON/RIC": "MON = Margine Operativo Netto (EBIT), RIC = Ricavi delle Vendite",
   "OF/DF": "OF = Oneri Finanziari, DF = Debiti Finanziari (banche, altri finanziatori, obbligazioni)",
   "(ROI-ROD)": "Differenza tra rendimento del capitale investito e costo del debito",
-  "(PC+PF)/CN": "PC = Passivo Corrente, PF = Passivo Fisso, CN = Capitale Netto",
+  "TA/CN": "TA = Totale Attivo, CN = Capitale Netto (Patrimonio Netto)",
   "MOL/RIC": "MOL = Margine Operativo Lordo (EBITDA), RIC = Ricavi delle Vendite",
   "OF/RIC": "OF = Oneri Finanziari, RIC = Ricavi delle Vendite",
   "RIC/CL": "RIC = Ricavi delle Vendite, CL = Costo del Lavoro",
@@ -1062,10 +1062,10 @@ export default function AnalysisPage() {
                   </tr>
                   <tr className="border-b border-border hover:bg-muted/50">
                     <td className="py-2 px-4 sticky left-0 bg-background">EFFETTO DI LEVA FINANZIARIA O TASSO DI RISCHIO</td>
-                    <FormulaCell formula="(PC+PF)/CN" />
+                    <FormulaCell formula="TA/CN" />
                     {multiYearRatios.ratios.map((r, i) => (
                       <td key={i} className="py-2 px-4 text-right font-medium">
-                        {formatPercentage(r.extended_profitability.financial_leverage_effect)}
+                        {formatNumberOrNA(r.extended_profitability.financial_leverage_effect, 2)}
                       </td>
                     ))}
                   </tr>

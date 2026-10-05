@@ -345,3 +345,17 @@ export function accontiRow(preview: ForecastPreviewResponse | null | undefined, 
     },
   };
 }
+
+/**
+ * L'avviso del motore sugli acconti inseriti sotto il minimo (#62 S28): letto
+ * dal dettaglio STRUTTURATO dell'anno (`details.imposte.avviso_acconti`), mai
+ * da un filtro sul testo di `details.avvisi`. `null` = nessun avviso.
+ */
+export function avvisoAcconti(
+  details: { imposte?: { avviso_acconti?: { acconti: number | string; minimo_storico: number | string; minimo_previsionale: number | string } | null } } | null | undefined,
+  year?: number,
+): string | null {
+  const a = details?.imposte?.avviso_acconti;
+  if (!a) return null;
+  return `${year != null ? `Nel ${year} gli` : "Gli"} acconti inseriti (${euro(num(a.acconti))}) sono sotto sia all'imposta dell'anno prima (${euro(num(a.minimo_storico))}) sia a quella dell'anno (${euro(num(a.minimo_previsionale))}): sotto il minimo di legge si pagano sanzioni e interessi.`;
+}

@@ -142,7 +142,8 @@ FIELD_LABELS: Mapping[str, str] = {
     "ce_overrides": "Override CE",
     # circolante
     "dso_days": "DSO (giorni incasso)",
-    "dio_days": "DIO (giorni magazzino)",
+    "dio_days": "Giorni materie prime e semilavorati (sul consumo)",
+    "dio_pf_days": "Giorni prodotti finiti e merci (sui ricavi)",
     "dpo_days": "DPO (giorni pagamento)",
     "receivables_long_growth_pct": "Crescita crediti verso soci (lungo) %",
     "sp01_growth_pct": "Crescita crediti verso soci %",
@@ -176,6 +177,7 @@ FIELD_LABELS: Mapping[str, str] = {
     "cash_sweep_enabled": "Cash sweep",
     "cash_sweep_min_cash": "Cassa minima del cash sweep",
     "overdraft_allowed": "Scoperto di conto consentito",
+    "compensa_crediti_tributari": "Compensazione del credito tributario residuo con le imposte",
     "overdraft_limit": "Tetto dello scoperto",
     "bank_lines_amount": "Fidi, Anticipi Ft e Scoperti CC",
     "bank_lines_rate": "Tasso fidi e scoperto %",

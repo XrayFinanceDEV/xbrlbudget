@@ -93,20 +93,15 @@ def test_c_engine_version_stale_diagnostica_e_frase():
     assert FRASE_ENGINE_STALE.lower() in testo
 
 
-def test_d_engine_meta_none_nessuna_diagnostica():
-    """(d) `engine_meta = None` non è un "prima": nessuna diagnostica `engine_version_stale`."""
-    _bp()
-
-    def ritocca(db, scenario_id):
-        from database.models import ForecastYear
-        rows = db.query(ForecastYear).filter(ForecastYear.scenario_id == scenario_id).all()
-        assert rows, "precondizione: nessun ForecastYear da ritoccare"
-        for row in rows:
-            row.engine_meta = None
-
-    e = generato(genera(righe(), report=True, ritocca=ritocca))
-    assert not any(d.code == "engine_version_stale" for d in e.rep.diagnostics), e.rep.diagnostics
-    assert FRASE_ENGINE_STALE not in e.data.avvisi
+def test_d_engine_meta_none_su_budget_e_da_rigenerare():
+    from backend.app.services.final_report_service import _engine_version_stale
+    class FY:  # riga senza firma, come i previsionali generati prima del 2026-09-26
+        engine_meta = None
+    assert _engine_version_stale("bilancio", [FY()]) is True
+    assert _engine_version_stale("infrannuale", [FY()]) is False
+    class FY2:
+        engine_meta = {"pareggio": None}  # senza engine_version
+    assert _engine_version_stale("bilancio", [FY2()]) is True
 
 
 def test_e_report_pulito_nessun_avviso():
@@ -138,11 +133,11 @@ def test_helper_infrannuale_non_e_mai_candidato():
     assert _engine_version_stale("startup", righe_vecchie) is True
 
 
-def test_helper_engine_meta_assente_o_senza_versione_non_e_stale():
+def test_helper_engine_meta_assente_o_senza_versione_e_stale_sul_budget():
     from backend.app.services.final_report_service import _engine_version_stale
     from calculations.forecast_engine import ENGINE_VERSION
-    assert _engine_version_stale("bilancio", [_RigaFinta(None)]) is False
-    assert _engine_version_stale("bilancio", [_RigaFinta({"pareggio": None})]) is False
+    assert _engine_version_stale("bilancio", [_RigaFinta(None)]) is True
+    assert _engine_version_stale("bilancio", [_RigaFinta({"pareggio": None})]) is True
     assert _engine_version_stale("bilancio", [_RigaFinta({"engine_version": ENGINE_VERSION})]) is False
 
 
@@ -552,3 +547,32 @@ def test_tdccn_turnover_sul_nuovo_ccn():
     ccn = attivo_corrente(field_value) - passivo_corrente(field_value)
     atteso = (BASE_CE["ce01_ricavi_vendite"] / ccn).quantize(D("0.0001"), rounding=ROUND_HALF_UP)
     assert turnover.working_capital_turnover == atteso
+
+
+def test_I1_rod_sulla_media_fra_inizio_e_fine():
+    """I1 (#61 S11) · ROD = oneri / debito finanziario MEDIO fra inizio e fine anno."""
+    bs_prev, _ = _statements({"sp16a_debiti_banche_breve": D("100000")}, {})
+    bs, inc = _statements({"sp16a_debiti_banche_breve": D("300000")}, {"ce15_oneri_finanziari": D("10000")})
+    rod = FinancialRatiosCalculator(bs, inc, previous_balance_sheet=bs_prev) \
+        .calculate_profitability_ratios().rod
+    media = (bs_prev.financial_debt_total + bs.financial_debt_total) / 2
+    assert rod == FinancialRatiosCalculator.round_decimal(D("10000") / media, 4)
+    assert rod != FinancialRatiosCalculator(bs, inc).calculate_profitability_ratios().rod
+
+
+def test_I1_senza_inizio_resta_la_fine_anno():
+    bs, inc = _statements({}, {"ce15_oneri_finanziari": D("10000")})
+    fine = FinancialRatiosCalculator(bs, inc).calculate_profitability_ratios().rod
+    assert fine == FinancialRatiosCalculator.round_decimal(D("10000") / bs.financial_debt_total, 4)
+    assert FinancialRatiosCalculator(bs, inc, previous_balance_sheet=None) \
+        .calculate_profitability_ratios().rod == fine
+
+
+def test_I2_leva_e_totale_attivo_su_pn_e_non_duplica_l_indebitamento():
+    from calculations.ratios import FinancialRatiosCalculator
+    bs, inc = _statements({}, {})
+    assert bs.total_assets > 0 and bs.total_equity > 0
+    calc = FinancialRatiosCalculator(bs, inc)
+    leva = calc.calculate_extended_profitability_ratios().financial_leverage_effect
+    assert leva == FinancialRatiosCalculator.round_decimal(bs.total_assets / bs.total_equity, 4)
+    assert leva != calc.calculate_solvency_ratios().leverage_ratio

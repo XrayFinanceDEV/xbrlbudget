@@ -321,6 +321,7 @@ class BudgetAssumptionsBase(BaseModel):
     # Working capital turnover days (None = auto-compute from base year)
     dso_days: Optional[Decimal] = None
     dio_days: Optional[Decimal] = None
+    dio_pf_days: Optional[Decimal] = None
     dpo_days: Optional[Decimal] = None
 
     # Existing financial debt repayment (None = keep constant)
@@ -334,6 +335,8 @@ class BudgetAssumptionsBase(BaseModel):
     # Scoperto di c/c (opt-in): un fabbisogno scoperto diventa sp16a generato dal
     # piano invece di far alzare il motore. Spento = comportamento di sempre.
     overdraft_allowed: bool = False
+    # #62 S14/S18: compensazione del credito tributario del consuntivo; per scenario, letta sulla prima riga.
+    compensa_crediti_tributari: bool = False
     # None = concesso senza tetto; negativo non ha senso (un fido non e' un credito).
     overdraft_limit: Optional[Decimal] = Field(default=None, ge=0)
 
@@ -480,12 +483,14 @@ class BudgetAssumptionsUpdate(BaseModel):
     payables_short_growth_pct: Optional[Decimal] = None
     dso_days: Optional[Decimal] = None
     dio_days: Optional[Decimal] = None
+    dio_pf_days: Optional[Decimal] = None
     dpo_days: Optional[Decimal] = None
     existing_debt_repayment_years: Optional[Decimal] = None
     altri_finanz_repayment_years: Optional[Decimal] = None
     cash_sweep_enabled: Optional[bool] = None
     cash_sweep_min_cash: Optional[Decimal] = None
     overdraft_allowed: Optional[bool] = None
+    compensa_crediti_tributari: Optional[bool] = None
     overdraft_limit: Optional[Decimal] = Field(None, ge=0)
     tfr_accrual_suspended: Optional[bool] = None
     previdenza_scales_with_personnel: Optional[bool] = None

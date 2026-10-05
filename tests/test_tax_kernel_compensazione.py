@@ -53,3 +53,27 @@ def test_acconti_storici_eccedenti_restano_credito_per_l_anno_dopo():
     assert t.credito_compensato == D("100")
     assert t.opening_credit_left == D("800")
     assert t.cash_out == D("0")
+
+
+# ── #62 S14/S18: il credito storico si compensa con cio' che resta da versare ──
+def test_credito_storico_compensa_dopo_il_credito_da_acconti():
+    t = _k(opening_credit=D("1000"), saldo_due=D("3000"), rate_due=D("0"), current_tax=D("5000"),
+           previous_tax=D("4000"), credito_storico_compensabile=D("10000"))
+    assert t.credito_compensato == D("1000")
+    assert t.credito_storico_compensato == D("3000") + D("4000") - D("1000")
+    assert t.generated_debt == D("1000")  # 5000 - 4000 acconti: il debito non cambia
+    assert t.cash_out == D("0")
+
+
+def test_credito_storico_limitato_dal_compensabile():
+    t = _k(saldo_due=D("3000"), current_tax=D("5000"), previous_tax=D("4000"),
+           credito_storico_compensabile=D("500"))
+    assert t.credito_storico_compensato == D("500")
+    assert t.cash_out == D("6500")
+
+
+def test_senza_credito_storico_nulla_cambia():
+    kw = dict(saldo_due=D("3000"), current_tax=D("5000"), previous_tax=D("4000"))
+    a = _k(**kw)
+    b = _k(credito_storico_compensabile=D("0"), **kw)
+    assert a == b and b.credito_storico_compensato == D("0")

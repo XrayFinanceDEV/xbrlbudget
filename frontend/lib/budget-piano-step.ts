@@ -152,6 +152,22 @@ export function avvisiFidi(years: ForecastPreviewYear[]): string[] {
     .filter((m): m is string => typeof m === "string" && m.length > 0);
 }
 
+/** L'avviso sugli altri debiti passati da oltre a entro 12 mesi (#62 S18), dal dato STRUTTURATO
+ *  `details.avviso_altri_debiti_breve` (mai dal testo di `details.avvisi`): un anno solo, il primo. */
+export function avvisiAltriDebiti(years: ForecastPreviewYear[], baseYear: number): string[] {
+  const out: string[] = [];
+  for (const y of years) {
+    const a = y.details?.avviso_altri_debiti_breve;
+    if (!a) continue;
+    out.push(
+      `Gli altri debiti oltre 12 mesi sono scesi da ${eur0(a.oltre_prima)} (${a.anno_prima}) a ` +
+      `${eur0(a.oltre_base)} (${baseYear}) e quelli entro 12 mesi ora crescono con i ricavi: se sono ` +
+      `debiti che si pagheranno a rate, scadenziali al passo 5 «Patrimoniale pregresso».`,
+    );
+  }
+  return out;
+}
+
 // ── Debito, cassa e PFN (spec §4.6) ─────────────────────────────────────
 
 /** Il debito finanziario totale del bilancio (banche + altri finanziatori +

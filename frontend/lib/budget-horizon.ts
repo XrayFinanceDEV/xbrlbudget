@@ -45,7 +45,8 @@ export type BoolAssumptionField =
   | "previdenza_scales_with_personnel"
   | "tfr_accrual_suspended"
   | "cash_sweep_enabled"
-  | "overdraft_allowed";
+  | "overdraft_allowed"
+  | "compensa_crediti_tributari";
 
 /**
  * Un interruttore e' un'ipotesi PER ANNO — il motore la applica riga per
@@ -132,12 +133,14 @@ export function hydrateAssumptions(
       asset_disposal_proceeds: a.asset_disposal_proceeds,
       dso_days: a.dso_days,
       dio_days: a.dio_days,
+      dio_pf_days: a.dio_pf_days,
       dpo_days: a.dpo_days,
       existing_debt_repayment_years: a.existing_debt_repayment_years,
       altri_finanz_repayment_years: a.altri_finanz_repayment_years,
       cash_sweep_enabled: a.cash_sweep_enabled ?? false,
       cash_sweep_min_cash: a.cash_sweep_min_cash,
       overdraft_allowed: a.overdraft_allowed ?? false,
+      compensa_crediti_tributari: a.compensa_crediti_tributari ?? false,
       overdraft_limit: a.overdraft_limit ?? null,
       tfr_accrual_suspended: a.tfr_accrual_suspended ?? false,
       previdenza_scales_with_personnel: a.previdenza_scales_with_personnel ?? false,
@@ -290,12 +293,14 @@ export function defaultAssumption(
     receivables_long_growth_pct: 0,
     dso_days: null,
     dio_days: null,
+    dio_pf_days: null,
     dpo_days: null,
     existing_debt_repayment_years: null,
     altri_finanz_repayment_years: null,
     cash_sweep_enabled: false,
     cash_sweep_min_cash: null,
     overdraft_allowed: false,
+    compensa_crediti_tributari: false,
     overdraft_limit: null,
     tfr_accrual_suspended: false,
     previdenza_scales_with_personnel: false,

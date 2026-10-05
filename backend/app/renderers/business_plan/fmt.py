@@ -60,6 +60,10 @@ def value(v: Num, unit: str) -> str:
         return pct(v)
     if unit == "days":
         return days(v)
+    if unit == "bool":
+        return ND if v is None else ("Sì" if v else "No")
+    if unit == "years":
+        return ND if v is None else f"{_dec(v):.0f} anni"
     return ratio(v) if unit == "ratio" else _signed(v, 2)
 
 

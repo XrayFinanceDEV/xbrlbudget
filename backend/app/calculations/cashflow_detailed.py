@@ -62,6 +62,7 @@ class DetailedCashFlowCalculator:
         inc_current: IncomeStatement,
         year: int,
         erogazioni: Optional[Decimal] = None,
+        imposte_versate: Optional[Decimal] = None,
     ) -> DetailedCashFlowStatement:
         """
         Calculate detailed cash flow statement for a year
@@ -74,6 +75,9 @@ class DetailedCashFlowCalculator:
             erogazioni: le erogazioni note dell'anno (C08, lotto 2 fix rilievi 2026-09-26), da
                 `ForecastYear.engine_meta['erogazioni']` — `None` su un anno storico o su un anno
                 di piano senza `engine_meta` (comportamento di prima: mezzi di terzi netti).
+            imposte_versate: i versamenti d'imposta dell'anno (#62 S13), da
+                `ForecastYear.engine_meta['imposte_versate']`; `None` (storico, infrannuale, via manuale,
+                scenari prima della v3) = la riga «imposte pagate» resta l'imposta di CE (ce20).
 
         Returns:
             DetailedCashFlowStatement with all components
@@ -201,6 +205,11 @@ class DetailedCashFlowCalculator:
             return (D(bs.sp16e_debiti_tributari_breve) + D(bs.sp17e_debiti_tributari_lungo)
                     - D(bs.sp06e_crediti_tributari_breve) - D(bs.sp07e_crediti_tributari_lungo))
         delta_tax = _tax_position(bs_current) - _tax_position(bs_previous)
+        # #62 S13: con i versamenti del motore la riga «imposte pagate» e' quella vera; la variazione della
+        # posizione tributaria nel circolante assorbe la differenza (imposta di CE - versato), e la cassa
+        # resta la stessa. delta_tax positivo e' una fonte di cassa.
+        if imposte_versate is not None:
+            delta_tax = delta_tax + (imposte_versate - income_taxes)
 
         # Payables: increase is positive (defer payment)
         # Only OPERATING debts belong in working capital (fornitori, tributari, previdenziali,
@@ -268,7 +277,7 @@ class DetailedCashFlowCalculator:
         interest_paid_received = -interest_expense_income
 
         # Taxes paid (negative because it's an outflow)
-        taxes_paid = -income_taxes
+        taxes_paid = -income_taxes if imposte_versate is None else -imposte_versate
 
         # Dividends received (OIC 10): `ce13` was taken out of profit above as a non-operating item
         # (`profit_before_adjustments`); in the projection it is cash — nothing books it as a

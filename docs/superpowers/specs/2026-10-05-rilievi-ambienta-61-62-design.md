@@ -7,7 +7,7 @@ Ogni voce dice **che cosa cambia**, **dove**, **quali numeri si muovono sugli sc
 **l'accettazione**. Regola di sempre: ogni cambio di regola del motore porta la propria diagnostica in
 `details`, e una chiave assente non vale «tutto regolare».
 
-`ENGINE_VERSION` sale a `"3"`: i rilievi M1–M4 cambiano i numeri del motore.
+`ENGINE_VERSION` sale a `"3"`: i rilievi M1–M4 e M7 cambiano i numeri del motore.
 
 ---
 
@@ -120,6 +120,45 @@ imposte.** Nessuna riclassifica automatica a oltre 12 mesi.
 - Visibile nel passo 6 e nella sezione 10 del Business plan, col suggerimento di scadenziarli al
   passo 5.
 
+### M7 · Nota S04 — Giorni di magazzino in due gruppi, e il magazzino passa dal CE
+
+**Decisione (2026-10-05):** due caselle di giorni nel passo 4, e le variazioni di rimanenze di
+prodotti e lavori in corso si derivano dallo SP, come B01 fa per le materie.
+
+Il problema misurato su AMBIENTA (scenario 18 locale). L'import ha messo tutte le rimanenze su
+`sp05a` (287.312). Sul consumo di materie (128.091) quel magazzino vale ~807 gg. Il DIO di 25 gg
+inserito dall'utente (che sui ricavi è proprio lo storico) porta `sp05a` a 27.473 e `ce10` a +259.839
+di costo nel 2027, quindi il PN va sotto zero. A parte, **`ce02` e `ce03` restano fissi all'anno base**
+(`forecast_engine.py:3295`) mentre `sp05b/c/d` seguono i ricavi: il magazzino prodotti assorbe cassa
+senza passare dal CE, lo stesso difetto che B01 ha corretto per le materie.
+
+- **Gruppo 1, «Materie prime e semilavorati»** (`sp05a + sp05b`): `dio_days` (la colonna esistente,
+  nuova etichetta), giorni sul **consumo di materie** (`ce05 + ce10`). Il saldo di gruppo si divide
+  fra `sp05a` e `sp05b` secondo il mix d'apertura del gruppo (il primo anno quello della base),
+  risolvendo in forma chiusa la circolarità di `ce10`, come fa oggi `rimanenze_materie`. Senza
+  materie in apertura, il gruppo è tutto `sp05b`. Il DIO derivato si misura sullo stesso gruppo.
+- **Gruppo 2, «Prodotti finiti e merci»** (`sp05d`): una colonna nuova `dio_pf_days` (Numeric,
+  nullable, con la migrazione e gli schemi), giorni sui **ricavi**. Il DIO derivato sulla stessa base,
+  con la soglia `soglia_giorni_magazzino` di sempre.
+- `sp05c` (lavori in corso su ordinazione) e `sp05e` (acconti): giorni dedotti dai ricavi, come oggi,
+  senza una casella.
+- **Contropartite di CE (OIC):** `ce10` = −Δ`sp05a` (B11, invariato); **`ce02` = Δ(`sp05b + sp05d`)**
+  (A2); **`ce03` = Δ`sp05c`** (A3). Un `ce02_override`/`ce03_override` vince e lo SP lo segue, come
+  per `ce10` (un override che svuoterebbe il gruppo sotto zero si rifiuta con un errore italiano).
+  Diagnostica: `details['rimanenze']` per gruppo (`apertura`, `chiusura`, `giorni`, `base_giorni`,
+  `contropartita`).
+- **Avviso** quando i giorni inseriti per un gruppo portano la variazione dell'anno oltre il 50% del
+  saldo d'apertura del gruppo, o oltre il consumo (ricavi per il gruppo 2) annuo:
+  `details['avviso_rimanenze']` con i numeri («25 gg sul consumo portano il magazzino da 287.312 a
+  27.473: 259.839 € di costo nel 2027»). Visibile nel passo 4 e nella sezione 10.
+- **Il passo 4 mostra accanto a ogni casella il DIO storico del gruppo**, anche quando è degenere
+  («807 gg sul consumo — oltre la soglia, il motore riporterebbe il saldo»), così chi scrive 25 vede
+  da che cosa parte.
+- Si muovono: ogni scenario con `sp05b`, `sp05c` o `sp05d` diversi da zero, perché la loro variazione
+  ora passa dal CE (A2/A3) e non solo dalla cassa; gli scenari con un `dio_days` salvato e `sp05b`
+  diverso da zero, perché il gruppo ora comprende i semilavorati. Su AMBIENTA la correzione resta
+  dell'utente: spostare in Rettifiche le rimanenze che non sono materie, poi rivedere i giorni.
+
 ---
 
 ## Parte I — Indici (`calculations/ratios.py`, `calculations/report_indicators.py`)
@@ -215,14 +254,14 @@ del 26/09.
 
 ## Fuori perimetro
 
-- **S04, l'avviso sul DIO**: un avviso per una variazione di magazzino molto grande rispetto alla base
-  resta da valutare, e non è chiesto.
+- L'import che mette su `sp05a` tutte le rimanenze di un bilancio senza dettaglio: è un lavoro
+  sull'import, da tracciare in un'issue a parte.
 - La riclassifica automatica del credito tributario a oltre 12 mesi (prima metà di S18): sostituita
   dalla compensazione a scelta (M4).
 
 ## Documentazione
 
-CLAUDE.md: aggiornare i bullet toccati («Un solo DSO», «Indice di indebitamento», ROD, imposte a
+CLAUDE.md: aggiornare i bullet toccati (B01 sulle rimanenze, «DIO sul consumo di materie», «Un solo DSO», «Indice di indebitamento», ROD, imposte a
 saldo + acconto, TFR/B03, `engine_meta`), più `docs/budget/FORECASTING_GUIDE.md` e
 `docs/budget/API-PREVISIONALE.md` per la nuova colonna.
 

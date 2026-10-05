@@ -744,7 +744,9 @@ def load_forecast_source(db: Session, scenario_id: int) -> ForecastSource:
         )
 
     # L'anno prima della base (#62 S18): letto solo per l'avviso sugli altri debiti; assente = «non lo so».
-    prev_fy = get_fy_prefer_full(db, scenario.company_id, scenario.base_year - 1)
+    # Solo l'anno ANNUALE (get_fy_full): un parziale a meta' anno confrontato con la base darebbe un falso avviso.
+    from database.queries import get_fy_full
+    prev_fy = get_fy_full(db, scenario.company_id, scenario.base_year - 1)
     prev_base_bs = prev_fy.balance_sheet if prev_fy is not None else None
 
     return ForecastSource(scenario=scenario, base_fy=base_fy,

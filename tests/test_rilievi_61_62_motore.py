@@ -211,3 +211,26 @@ def test_M6_avviso_quando_l_oltre_si_e_spostato_entro():
 def test_M6_senza_anno_prima_nessun_avviso():
     e = generato(genera(righe()))
     assert e.det[2027]["avviso_altri_debiti_breve"] is None
+
+
+def _prima_con_oltre(importo="201851.00"):
+    return {**BASE_BS, "sp17g_altri_debiti_lungo": D(importo),
+            "sp16g_altri_debiti_breve": BASE_BS["sp16g_altri_debiti_breve"] - D(importo)}
+
+
+def test_M6_un_anno_prima_solo_parziale_non_da_avviso():
+    e = generato(genera(righe(), anno_prima_bs=_prima_con_oltre(), anno_prima_mesi=6))
+    assert e.det[2027]["avviso_altri_debiti_breve"] is None
+
+
+def test_M6_con_piano_altri_debiti_nessun_avviso():
+    rows = righe()
+    rows[0]["pregresso"] = {"altri_debiti": {"opening": BASE_BS["sp16g_altri_debiti_breve"],
+                                             "amounts": [BASE_BS["sp16g_altri_debiti_breve"]]}}
+    e = generato(genera(rows, anno_prima_bs=_prima_con_oltre()))
+    assert e.det[2027]["avviso_altri_debiti_breve"] is None
+
+
+def test_M6_oltre_prima_non_superiore_nessun_avviso():
+    e = generato(genera(righe(), anno_prima_bs=_prima_con_oltre("0.00")))
+    assert e.det[2027]["avviso_altri_debiti_breve"] is None

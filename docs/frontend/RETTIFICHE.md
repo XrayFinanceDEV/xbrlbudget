@@ -71,6 +71,24 @@ apre il **dialogo di proposta**, che offre tre modi — non uno solo:
 | **Riclassifica** | partita doppia **dentro** lo stesso lato: SP→SP, CE→CE. Non tocca il risultato | obbligatoria, filtrata alla stessa categoria |
 | **Correggi Import** | correzione a **partita singola**: il dato importato era semplicemente sbagliato | nessuna |
 
+**Una modifica scritta su un totale va su una sua sotto-voce.** Quattro totali hanno una casella
+modificabile: `sp05`, `sp06`, `sp07` e `ce08`. Su un totale, però, `recalcAggregates` ricostruisce il valore
+dalle sotto-voci e cancellerebbe la modifica, lasciando la sola contropartita: lo sbilancio sarebbe
+l'intero importo (AMBIENTA 2026-10-05: +200.000 sui costi del personale, rifiutato dal server a
+200.000,03). `destinazioneModifica` (`lib/pratica-rettifiche-rules.ts`) manda la modifica sulla
+sotto-voce che la regola di proposta descrive:
+
+| Totale | Sotto-voce che riceve la modifica |
+|---|---|
+| `sp05` | `sp05d` prodotti finiti |
+| `sp06` | `sp06a` crediti verso clienti |
+| `sp07` | `sp07a` crediti verso clienti |
+| `ce08` | `ce08b` salari e stipendi |
+
+Il dialogo nomina la sotto-voce («9) Per il personale › a) Salari e stipendi»), ed è lei
+la voce registrata nel giornale. Il delta è misurato dal valore **mostrato**, arrotondato all'euro:
+chi scrive +200.000 registra 200.000, non 200.000 più i centesimi nascosti.
+
 Il modo si sceglie nel dialogo (`ProposalMode = "rettifica" | "riclassifica" | "correggi_import"`,
 `lib/pratica-rettifiche-rules.ts`); cambiarlo azzera la contropartita già scelta.
 

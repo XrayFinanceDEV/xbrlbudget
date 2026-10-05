@@ -65,6 +65,7 @@ import {
   NON_POSTABLE_FIELDS,
   allowedCounterpartCategories,
   computeCpDelta,
+  destinazioneModifica,
   spiegazioneRiclassifica,
   COUNTERPART_GROUPS,
   RETTIFICHE_BS_ATTIVO,
@@ -241,7 +242,10 @@ export function RettificheTab({
     const pending = pendingEdits[field];
     if (pending === undefined) return;
     const committed = corrections[field] ?? original[field] ?? 0;
-    const editDelta = pending - committed;
+    // La casella mostra il valore arrotondato all'euro: la modifica e' la differenza
+    // da QUEL valore, cioe' l'importo che l'utente ha scritto (+200.000, non
+    // +200.000,03 su un valore con i centesimi).
+    const editDelta = pending - Math.round(committed);
     if (Math.abs(editDelta) < 0.01) {
       setPendingEdits((prev) => { const u = { ...prev }; delete u[field]; return u; });
       return;
@@ -267,11 +271,15 @@ export function RettificheTab({
       const activeSplitAlt = useNeg ? rule.splitAltNeg : rule.splitAlt;
       if (activeSplitAlt) splitAlt = { field: activeSplitAlt.field, label: activeSplitAlt.label, amount: 0 };
     }
+    // Un totale (rimanenze, crediti, personale) viene ricostruito dalle sotto-voci:
+    // la modifica va sulla sotto-voce, o sparirebbe lasciando la sola contropartita.
+    const target = destinazioneModifica(field);
     setActiveProposal({
       id: Date.now(),
       mode: "rettifica",
-      editedField: field,
-      editedLabel: labelOf(field),
+      editedField: target,
+      editedLabel: target === field ? labelOf(field) : `${labelOf(field)} › ${labelOf(target)}`,
+      pendingKey: field,
       delta: editDelta,
       counterpartField,
       counterpartLabel: labelOf(counterpartField),
@@ -408,7 +416,7 @@ export function RettificheTab({
       if (!ok) return;
       setCorrections(final);
       setLog(newLog);
-      setPendingEdits((prev) => { const u = { ...prev }; delete u[p.editedField]; return u; });
+      setPendingEdits((prev) => { const u = { ...prev }; delete u[p.pendingKey ?? p.editedField]; return u; });
       setActiveProposal(null);
       return;
     }
@@ -457,13 +465,13 @@ export function RettificheTab({
     if (!ok) return;
     setCorrections(final);
     setLog(newLog);
-    setPendingEdits((prev) => { const u = { ...prev }; delete u[p.editedField]; return u; });
+    setPendingEdits((prev) => { const u = { ...prev }; delete u[p.pendingKey ?? p.editedField]; return u; });
     setActiveProposal(null);
   };
 
   const cancelActiveEdit = () => {
     if (activeProposal) {
-      setPendingEdits((prev) => { const u = { ...prev }; delete u[activeProposal.editedField]; return u; });
+      setPendingEdits((prev) => { const u = { ...prev }; delete u[activeProposal.pendingKey ?? activeProposal.editedField]; return u; });
     }
     setActiveProposal(null);
   };

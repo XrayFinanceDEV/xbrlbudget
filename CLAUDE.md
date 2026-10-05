@@ -1234,7 +1234,7 @@ giusto è il codice, non `/docs`.
 | Una classe Tailwind non produce alcuno stile e non c'è errore? | [docs/frontend/TAILWIND-E-CLASSI.md](docs/frontend/TAILWIND-E-CLASSI.md) |
 | Un utente segnala un import sbagliato e ti serve il file esatto che ha caricato? | [docs/deployment/UPLOAD-TRACKING.md](docs/deployment/UPLOAD-TRACKING.md) |
 | Come si incastra l'app nell'iframe di Formula Finance, JWT compreso? | [docs/deployment/IFRAME_INTEGRATION.md](docs/deployment/IFRAME_INTEGRATION.md) |
-| Come si rilascia, e che cosa va configurato in produzione? | [docs/deployment/](docs/deployment/) (`README_DEPLOYMENT`, `PRODUCTION_CONFIG`, `NETLIFY_CHECKLIST`, `DEPLOYMENT_SUMMARY`) |
+| Come si rilascia, e che cosa va configurato in produzione? | [docs/deployment/](docs/deployment/) (`DEPLOY-JENKINS-DOCKER`, `PRODUCTION_CONFIG`) |
 | Perché una scelta è stata fatta così? | `docs/superpowers/specs/` (design) e `docs/superpowers/plans/` (esecuzione) |
 | La documentazione dice ancora il vero? | `/riallinea` (`.claude/skills/riallinea/`), rapporti in `docs/superpowers/allineamento/` |
 

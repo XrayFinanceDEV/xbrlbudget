@@ -93,8 +93,6 @@ dominio. Sono le tre risposte che una sessione nuova deve trovare da sola; la se
 | Doc | Cosa copre |
 |-----|------------|
 | [UPLOAD-TRACKING.md](deployment/UPLOAD-TRACKING.md) | Ogni file importato è su disco e in tabella: dove finisce, come si ritrova via `/admin/uploads`, quanto resta |
-| [DEPLOYMENT_SUMMARY.md](deployment/DEPLOYMENT_SUMMARY.md) | Checklist deploy backend + frontend |
-| [README_DEPLOYMENT.md](deployment/README_DEPLOYMENT.md) | Procedura di deploy del frontend |
+| [DEPLOY-JENKINS-DOCKER.md](deployment/DEPLOY-JENKINS-DOCKER.md) | Il deploy reale: push → Jenkins → immagini Docker dietro nginx |
 | [PRODUCTION_CONFIG.md](deployment/PRODUCTION_CONFIG.md) | Configurazione di produzione (env, URL, porte) |
-| [NETLIFY_CHECKLIST.md](deployment/NETLIFY_CHECKLIST.md) | Checklist specifica Netlify |
 | [IFRAME_INTEGRATION.md](deployment/IFRAME_INTEGRATION.md) | Embedding dell'app via iframe (Formula Finance) + JWT Supabase `postMessage`, CORS, env |

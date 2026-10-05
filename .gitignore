@@ -158,3 +158,8 @@ tests/.banco-business-plan/
 
 # Banco del report infrannuale: PDF del committente e PNG di confronto, mai in git
 tests/.banco-infrannuale/
+
+# Spazi di lavoro locali degli agenti e backup del DB: mai in git
+.superpowers/
+.pi/
+backups/

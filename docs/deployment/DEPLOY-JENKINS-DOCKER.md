@@ -90,7 +90,7 @@ un altro nginx, anche lì serve un timeout generoso o l'import esce in 504.
 
 ## Netlify
 
-`netlify.toml` è ancora nel repository ma **nessuna fase della pipeline lo usa**: il
-frontend viene costruito da `Dockerfile.frontend`. Se il percorso Netlify è definitivamente
-abbandonato, quel file e le tre guide dedicate vanno tolti da qui; finché la decisione non è
-presa, restano marcati come non correnti.
+Il percorso Netlify è dismesso (decisione del proprietario, 2026-10-05): `netlify.toml` e
+`runtime.txt` sono stati tolti dal repository, e le tre guide dedicate (`README_DEPLOYMENT`,
+`NETLIFY_CHECKLIST`, `DEPLOYMENT_SUMMARY`) stanno in `archive/netlify/` come traccia. Il
+frontend viene costruito da `Dockerfile.frontend`.

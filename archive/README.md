@@ -11,4 +11,4 @@ Materiale **storico o superato**, tenuto solo come traccia. **Non è documentazi
 | `REIMPORT_INSTRUCTIONS.md` | Istruzioni one-off di validazione post-deploy del parser potenziato |
 | `PDF-IMPORT-STATUS-2026-06-11.md` | Snapshot di stato dei fix import (punto nel tempo) |
 | `CHANGELOG-unreleased.md` | Log di lavoro di modifiche non committate (snapshot) |
-| `kps_extracted.md` | Dump dati di un singolo bilancio (fixture di test) |
+| `netlify/` | Le tre guide del deploy Netlify (`README_DEPLOYMENT`, `NETLIFY_CHECKLIST`, `DEPLOYMENT_SUMMARY`), dismesso il 2026-10-05 — i loro link relativi a `docs/deployment/` non funzionano più da qui |

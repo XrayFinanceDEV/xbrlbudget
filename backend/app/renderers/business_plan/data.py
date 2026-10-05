@@ -405,7 +405,7 @@ def _finanziamenti(report) -> tuple:
                     continue
                 out.append(FinanziamentoRow(ln.name or "Finanziamento", "Nuovo" if nuovo else "Pregresso",
                                             ln.amount if nuovo else ln.opening_residual, ln.interest_rate,
-                                            ln.duration_years or (len(ln.repayments) if ln.repayments else None)))
+                                            ln.duration_years))
             for ol in (a.other_lenders or []) if a.field == "other_lenders" else []:
                 out.append(FinanziamentoRow(ol.name or "Altro finanziatore", "Altro finanziatore",
                                             ol.opening_residual, ol.interest_rate, len(ol.repayments) or None))

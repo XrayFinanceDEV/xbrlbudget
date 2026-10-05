@@ -75,3 +75,24 @@ def test_R2_avvisi_del_motore_arrivano_al_report():
     assert any("magazzino" in a for a in e.data.avvisi_motore)
     assert len(set(e.data.avvisi_motore)) == len(e.data.avvisi_motore)  # deduplicate fra gli anni
     assert "Avvisi del motore" in _sez10(e)
+
+
+def test_R2_liquidazioni_tfr_compaiono_con_gli_importi():
+    rows = righe()
+    for r, v in zip(rows, (1000, 2000, 3000)):
+        r["tfr_payments"] = v
+    e = generato(genera(rows, report=True))
+    riga = next(r for r in e.data.assumptions if r.label == "Liquidazioni TFR")
+    assert riga.values == (D(1000), D(2000), D(3000))
+    assert "Liquidazioni TFR" in _sez10(e)
+
+
+def test_R2_durata_finanziamento_non_dedotta_dalle_rate():
+    e = generato(genera(_con_prestito(), report=True))
+    assert e.data.finanziamenti_tabella[0].durata_anni is None
+
+
+def _con_prestito():
+    rows = righe()
+    rows[0]["financing_loans"] = [_FIN]
+    return rows

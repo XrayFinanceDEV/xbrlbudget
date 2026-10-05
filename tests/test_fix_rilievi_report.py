@@ -571,6 +571,7 @@ def test_I1_senza_inizio_resta_la_fine_anno():
 def test_I2_leva_e_totale_attivo_su_pn_e_non_duplica_l_indebitamento():
     from calculations.ratios import FinancialRatiosCalculator
     bs, inc = _statements({}, {})
+    assert bs.total_assets > 0 and bs.total_equity > 0
     calc = FinancialRatiosCalculator(bs, inc)
     leva = calc.calculate_extended_profitability_ratios().financial_leverage_effect
     assert leva == FinancialRatiosCalculator.round_decimal(bs.total_assets / bs.total_equity, 4)

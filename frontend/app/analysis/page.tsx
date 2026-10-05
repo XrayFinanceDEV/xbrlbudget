@@ -111,7 +111,7 @@ const formulaTooltips: Record<string, string> = {
   "MON/RIC": "MON = Margine Operativo Netto (EBIT), RIC = Ricavi delle Vendite",
   "OF/DF": "OF = Oneri Finanziari, DF = Debiti Finanziari (banche, altri finanziatori, obbligazioni)",
   "(ROI-ROD)": "Differenza tra rendimento del capitale investito e costo del debito",
-  "(PC+PF)/CN": "PC = Passivo Corrente, PF = Passivo Fisso, CN = Capitale Netto",
+  "TA/CN": "TA = Totale Attivo, CN = Capitale Netto (Patrimonio Netto)",
   "MOL/RIC": "MOL = Margine Operativo Lordo (EBITDA), RIC = Ricavi delle Vendite",
   "OF/RIC": "OF = Oneri Finanziari, RIC = Ricavi delle Vendite",
   "RIC/CL": "RIC = Ricavi delle Vendite, CL = Costo del Lavoro",

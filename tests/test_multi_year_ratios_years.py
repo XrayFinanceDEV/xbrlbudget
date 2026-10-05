@@ -211,3 +211,20 @@ def test_analysis_rod_anno_di_piano_con_base_senza_dettaglio_non_si_raddoppia(db
     rod = {y: D(str(v["ratios"]["profitability"]["rod"])) for y, v in by_year.items() if v["ratios"]["profitability"]["rod"] is not None}
     assert abs(rod["2026"] - D("10000") / D("200000")) < D("0.0001")      # non 10000/350000 ne' doppiato
     assert abs(rod["2024"] - D("10000") / D("200000")) < D("0.0001")      # media 2023-2024
+
+
+def test_rod_chiusura_senza_dettaglio_finanziario_e_none_anche_con_apertura_dettagliata(db):
+    """Residuo fix finale 1 · apertura dettagliata + chiusura non classificata: niente media (dimezzerebbe
+    il debito), il debito di chiusura vale 0 e il ROD e' None, coerente con F1."""
+    company = Company(name="NoDetC S.r.l.", tax_id="00000000006", sector=1, user_id="test-user")
+    db.add(company)
+    db.flush()
+    _storico(db, company, 2024, sp16_debiti_breve=D("300000"), sp16a_debiti_banche_breve=D("300000"))
+    _storico(db, company, 2025, sp16_debiti_breve=D("500000"), sp16d_debiti_fornitori_breve=D("500000"))
+    scenario = BudgetScenario(company_id=company.id, name="B", base_year=2025, scenario_type="budget")
+    db.add(scenario)
+    db.commit()
+    result = calculation_service.calculate_ratios_historical_and_forecast(
+        db=db, company_id=company.id, scenario_id=scenario.id, base_year=2025)
+    rod = {y: r["profitability"]["rod"] for y, r in zip(result["years"], result["ratios"])}
+    assert rod[2025] is None

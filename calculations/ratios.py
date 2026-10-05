@@ -278,7 +278,8 @@ class FinancialRatiosCalculator(BaseCalculator):
         debito_fine = self.bs.financial_debt_total
         # Media solo se ENTRAMBI i bilanci hanno il dettaglio finanziario: un'apertura senza
         # dettaglio (98% dei bilanci annuali) dimezzerebbe il debito di chiusura (ROD raddoppiato).
-        if self.prev_bs is not None and not self.prev_bs.financial_debt_undetailed:
+        if (self.prev_bs is not None and not self.prev_bs.financial_debt_undetailed
+                and not self.bs.financial_debt_undetailed):
             financial_debt = (self.prev_bs.financial_debt_total + debito_fine) / 2
         else:
             financial_debt = debito_fine

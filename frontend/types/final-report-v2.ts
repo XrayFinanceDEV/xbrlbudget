@@ -107,9 +107,18 @@ function structureGroup(v: unknown, expectedId: string, statements: DetailedStat
       if (passivoRow[i] === null && series.other_liabilities.values[i] !== null) return false;
     } else if (expectedId === "break_even") {
       const ce01 = rowsOf("income_statement", "income_statement:ce01_ricavi_vendite");
-      const costRows = ["ce05_materie_prime", "ce06_servizi", "ce07_godimento_beni", "ce08_costi_personale", "ce12_oneri_diversi"].map(c => rowsOf("income_statement", `income_statement:${c}`));
-      if (!ce01 || costRows.some(r => !r)) return false;
-      const costs = costRows.reduce<bigint | null>((acc, r) => acc === null || r === null || r[i] === null ? null : acc + S(r[i] as string), 0n);
+      // F5 (2026-09-26), stessa identita' di `final_report_v2.py`: i fissi sono i
+      // `costi_fissi_operativi` del motore, riconciliati sul MOL, quindi fissi + variabili =
+      // ce05+ce06+ce07+ce08+ce12 + ce10+ce11+ce11b - ce04-ce02-ce03-ce03a. Controllare le sole
+      // cinque voci di costo rifiutava ogni dossier con altri ricavi o variazioni di rimanenze.
+      const ceRows = (codes: string[]) => codes.map(c => rowsOf("income_statement", `income_statement:${c}`));
+      const costRows = ceRows(["ce05_materie_prime", "ce06_servizi", "ce07_godimento_beni", "ce08_costi_personale", "ce12_oneri_diversi",
+        "ce10_var_rimanenze_mat_prime", "ce11_accantonamenti", "ce11b_altri_accantonamenti"]);
+      const subtractedRows = ceRows(["ce04_altri_ricavi", "ce02_variazioni_rimanenze", "ce03_lavori_interni", "ce03a_incrementi_immobilizzazioni"]);
+      if (!ce01 || costRows.some(r => !r) || subtractedRows.some(r => !r)) return false;
+      const sumAt = (rows: ((string | null)[] | null)[]) => rows.reduce<bigint | null>((acc, r) => acc === null || r === null || r[i] === null ? null : acc + S(r[i] as string), 0n);
+      const added = sumAt(costRows), subtracted = sumAt(subtractedRows);
+      const costs = added === null || subtracted === null ? null : added - subtracted;
       if (costs !== null && series.fixed_costs.values[i] !== null && series.variable_costs.values[i] !== null
         && !near(S(series.fixed_costs.values[i] as string) + S(series.variable_costs.values[i] as string), costs)) return false;
       if (series.contribution_margin.values[i] !== null && series.variable_costs.values[i] !== null && ce01[i] !== null

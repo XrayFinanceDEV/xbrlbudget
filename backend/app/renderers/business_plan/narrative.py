@@ -109,6 +109,13 @@ def _span(data: BusinessPlanData) -> str:
     return f"{y[0]}–{y[-1]}" if len(y) > 1 else str(y[0])
 
 
+def _debito_lordo_scende(data: BusinessPlanData):
+    """#61 S17: True/False se il debito finanziario LORDO (`debiti_finanziari`) scende fra
+    prima e ultima colonna; None se manca — «non lo so» non autorizza a dire deleveraging."""
+    g0, gn = _ends(data, "debiti_finanziari")
+    return None if not _all(g0, gn) else gn < g0
+
+
 # ---------------------------------------------------------------- punti chiave (sezione 1)
 def key_points(data: BusinessPlanData) -> list:
     out = []
@@ -157,8 +164,14 @@ def key_points(data: BusinessPlanData) -> list:
     pe0, pen = _ends(data, "pfn_ebitda")
     if op and _all(*op, *inv, *rimb, f0, fn, pe0, pen):
         s_op, s_inv = sum(op, D(0)), sum(inv, D(0))
-        lead = ("Generazione di cassa e deleveraging." if s_op > 0 and fn < f0 else
-                "Generazione di cassa." if s_op > 0 else "Assorbimento di cassa.")
+        lordo = _debito_lordo_scende(data)
+        if s_op > 0 and fn < f0 and lordo:
+            lead = "Generazione di cassa e deleveraging."
+        elif s_op > 0 and fn < f0 and lordo is False:
+            # scende la sola PFN (la liquidità sale): non è deleveraging
+            lead = "Generazione di cassa e riduzione della PFN per accumulo di liquidità."
+        else:
+            lead = "Generazione di cassa." if s_op > 0 else "Assorbimento di cassa."
         # C08: i rimborsi si citano anno per anno, non il cumulato — dal lotto 2 escono su una
         # riga separata dalle erogazioni nel rendiconto, e la sintesi segue lo stesso taglio.
         rimb_testo = _eur_per_anno(data, rimb)
@@ -215,11 +228,15 @@ def strengths_weaknesses(data: BusinessPlanData) -> tuple:
     pe0, pen = _ends(data, "pfn_ebitda")
     dscr_plan = [v for v in _plan_values(data, "dscr") if v is not None]
     if _all(f0, fn, pe0, pen):
-        if fn < f0 and pen < pe0:
+        lordo = _debito_lordo_scende(data)
+        if fn < f0 and pen < pe0 and lordo is not None:
             txt = f"PFN da € {fmt.eur(f0)} a € {fmt.eur(fn)} e PFN/EBITDA da {fmt.ratio(pe0)} a {fmt.ratio(pen)}."
             if dscr_plan:
                 txt += f" DSCR mai inferiore a {fmt.floor_ratio(min(dscr_plan), 1)}."
-            forza.append(Finding("deleveraging", "Rapido deleveraging", txt))
+            if lordo:
+                forza.append(Finding("deleveraging", "Rapido deleveraging", txt))
+            else:
+                forza.append(Finding("riduzione_pfn", "Riduzione della PFN per accumulo di liquidità", txt))
         if pen > SOGLIE["pfn_ebitda_alto"]:
             debolezza.append(Finding("indebitamento", "Indebitamento elevato",
                                      f"PFN/EBITDA pari a {fmt.ratio(pen)} nel {data.last.year}."))
@@ -385,5 +402,16 @@ def subtitle_flussi(data: BusinessPlanData) -> str:
         return base
     neg = [str(c.year) for c, v in plan if v < 0]
     if not neg:
-        return base + " Il piano genera cassa in ogni anno, sufficiente a finanziare investimenti e rimborsi."
+        op, inv, rimb = (_plan_values(data, k) for k in ("cf_operativo", "cf_investimenti", "cf_rimborsi"))
+        if not _all(*op, *inv, *rimb):
+            return base + " La cassa non scende in nessun anno."
+        # #61 S17: «sufficiente a finanziare» solo se il flusso operativo copre, ogni anno,
+        # investimenti e rimborsi; altrimenti la cassa regge grazie a nuovo debito, e si dice quale.
+        if all(o >= abs(i) + r for o, i, r in zip(op, inv, rimb)):
+            return base + " Il piano genera cassa in ogni anno, sufficiente a finanziare investimenti e rimborsi."
+        nuovo = _plan_values(data, "cf_nuovo_debito")
+        if _all(*nuovo) and any(n > 0 for n in nuovo):
+            return base + (" La cassa non scende in nessun anno, sostenuta da nuovi finanziamenti per "
+                           f"{_eur_per_anno(data, nuovo)}.")
+        return base + " La cassa non scende in nessun anno."
     return base + f" La cassa diminuisce nel {_join(neg)}."

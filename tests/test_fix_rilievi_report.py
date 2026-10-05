@@ -547,3 +547,22 @@ def test_tdccn_turnover_sul_nuovo_ccn():
     ccn = attivo_corrente(field_value) - passivo_corrente(field_value)
     atteso = (BASE_CE["ce01_ricavi_vendite"] / ccn).quantize(D("0.0001"), rounding=ROUND_HALF_UP)
     assert turnover.working_capital_turnover == atteso
+
+
+def test_I1_rod_sulla_media_fra_inizio_e_fine():
+    """I1 (#61 S11) · ROD = oneri / debito finanziario MEDIO fra inizio e fine anno."""
+    bs_prev, _ = _statements({"sp16a_debiti_banche_breve": D("100000")}, {})
+    bs, inc = _statements({"sp16a_debiti_banche_breve": D("300000")}, {"ce15_oneri_finanziari": D("10000")})
+    rod = FinancialRatiosCalculator(bs, inc, previous_balance_sheet=bs_prev) \
+        .calculate_profitability_ratios().rod
+    media = (bs_prev.financial_debt_total + bs.financial_debt_total) / 2
+    assert rod == FinancialRatiosCalculator.round_decimal(D("10000") / media, 4)
+    assert rod != FinancialRatiosCalculator(bs, inc).calculate_profitability_ratios().rod
+
+
+def test_I1_senza_inizio_resta_la_fine_anno():
+    bs, inc = _statements({}, {"ce15_oneri_finanziari": D("10000")})
+    fine = FinancialRatiosCalculator(bs, inc).calculate_profitability_ratios().rod
+    assert fine == FinancialRatiosCalculator.round_decimal(D("10000") / bs.financial_debt_total, 4)
+    assert FinancialRatiosCalculator(bs, inc, previous_balance_sheet=None) \
+        .calculate_profitability_ratios().rod == fine

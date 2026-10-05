@@ -215,13 +215,17 @@ def _get_complete_analysis(
         calculations_by_year = {}
 
         # Calculate for each year
-        for year_data in all_years_data:
+        for pos, year_data in enumerate(all_years_data):
             year = year_data["year"]
             bs = year_data["balance_sheet"]
             inc = year_data["income_statement"]
             sector = scenario.company.sector
 
-            year_calculations = _calculate_year_metrics(bs, inc, sector)
+            # #61 S11: SP d'inizio anno = fine dell'anno prima, solo se contiguo
+            prev_data = all_years_data[pos - 1] if pos > 0 else None
+            prev_bs = (prev_data["balance_sheet"]
+                       if prev_data is not None and prev_data["year"] == year - 1 else None)
+            year_calculations = _calculate_year_metrics(bs, inc, sector, prev_bs)
             calculations_by_year[str(year)] = year_calculations
 
         result["calculations"]["by_year"] = calculations_by_year
@@ -307,16 +311,18 @@ def _forecast_staleness(scenario) -> tuple:
 def _calculate_year_metrics(
     bs: models.BalanceSheet,
     inc: models.IncomeStatement,
-    sector: int
+    sector: int,
+    prev_bs: Optional[models.BalanceSheet] = None,
 ) -> Dict[str, Any]:
     """
     Calculate all financial metrics for a single year.
+    `prev_bs`: SP d'inizio anno, per il ROD sul debito finanziario medio (#61 S11).
 
     Returns:
         Dictionary with Altman, FGPMI, and all ratio categories
     """
     # Calculate ratios
-    ratios_calc = FinancialRatiosCalculator(bs, inc)
+    ratios_calc = FinancialRatiosCalculator(bs, inc, prev_bs)
     wc = ratios_calc.calculate_working_capital_metrics()
     liquidity = ratios_calc.calculate_liquidity_ratios()
     solvency = ratios_calc.calculate_solvency_ratios()

@@ -517,11 +517,21 @@ def calculate_ratios_historical_and_forecast(
     }
 
     # Calculate ratios for historical years
-    for fy in historical_years:
+    # #61 S11: il ROD usa il debito finanziario medio, quindi serve lo SP d'inizio anno (la fine
+    # dell'anno prima, se e' contigua). Prima colonna storica: lo cerca a DB; se manca, fine anno.
+    prev_bs = None
+    prev_year = None
+    for idx, fy in enumerate(historical_years):
         if not fy.balance_sheet or not fy.income_statement:
+            prev_bs, prev_year = None, None
             continue
 
-        calc = FinancialRatiosCalculator(fy.balance_sheet, fy.income_statement)
+        if idx == 0:
+            fy_prec = get_fy_prefer_full(db, company_id, fy.year - 1)
+            inizio = fy_prec.balance_sheet if fy_prec is not None else None
+        else:
+            inizio = prev_bs if prev_year == fy.year - 1 else None
+        calc = FinancialRatiosCalculator(fy.balance_sheet, fy.income_statement, inizio)
         all_ratios = calc.calculate_all_ratios()
 
         # Convert NamedTuples to dicts
@@ -531,13 +541,17 @@ def calculate_ratios_historical_and_forecast(
 
         result["years"].append(fy.year)
         result["ratios"].append(ratios_dict)
+        prev_bs, prev_year = fy.balance_sheet, fy.year
+        prev_bs, prev_year = fy.balance_sheet, fy.year
 
     # Calculate ratios for forecast years
     for fy in forecast_years:
         if not fy.balance_sheet or not fy.income_statement:
+            prev_bs, prev_year = None, None
             continue
 
-        calc = FinancialRatiosCalculator(fy.balance_sheet, fy.income_statement)
+        inizio = prev_bs if prev_year == fy.year - 1 else None
+        calc = FinancialRatiosCalculator(fy.balance_sheet, fy.income_statement, inizio)
         all_ratios = calc.calculate_all_ratios()
 
         # Convert NamedTuples to dicts

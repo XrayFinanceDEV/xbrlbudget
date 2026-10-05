@@ -272,7 +272,7 @@ def indicator_results(bs, inc, analytical_ratios=None, cashflow=None, *, is_fore
         'solvency.debt_to_production': 'Debiti totali / valore della produzione',
         'profitability.roe': 'Utile netto / patrimonio netto', 'profitability.roi': 'EBIT / totale attivo',
         'profitability.ros': 'Utile netto / ricavi: convenzione analitica distinta dal ROS operativo della pratica',
-        'profitability.rod': 'Oneri finanziari / debito finanziario (banche, altri finanziatori, obbligazioni)',
+        'profitability.rod': 'Oneri finanziari / debito finanziario medio (inizio e fine anno; senza inizio, fine anno)',
         'profitability.ebitda_margin': 'EBITDA / ricavi',
         'coverage.fixed_assets_coverage_with_equity_and_ltdebt': '(Patrimonio netto + debiti oltre 12 mesi + TFR) / immobilizzazioni',
         'coverage.fixed_assets_coverage_with_equity': 'Patrimonio netto / immobilizzazioni',

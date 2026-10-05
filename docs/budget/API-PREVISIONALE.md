@@ -311,6 +311,12 @@ scrittura hanno cinque comportamenti da conoscere:
    rollback del lotto intero; sul bulk è `forecast_generated: false` con l'override salvato
    comunque.
 
+Un `sp_overrides` su `sp05b` o `sp05d` (prodotti in corso, prodotti finiti) muove la **cassa**
+nell'anno N e arriva al CE solo nell'anno N+1, via `ce02`: `ce02` di N+1 è la variazione fra la
+giacenza forzata di N e la chiusura di N+1 — stesso schema di `sp05a` sotto B01 (`ce10`). Nell'anno
+dell'override `ce02` non si sposta, e il foglio quadra lo stesso perché la differenza passa per la
+cassa.
+
 Dopo gli override, le scomposizioni dei `details` seguono il persistito
 (`_realign_sp_declarations`): `details['imposte']`, le righe di `details['pregresso']` — i
 quattro saldi di debito e, dallo stesso giro, anche `crediti_commerciali` — e il `valore` di

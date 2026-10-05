@@ -4474,6 +4474,7 @@ class ForecastEngine:
         plan_tax = (pregresso or {}).get('debiti_tributari')
         manual_tax_position = getattr(assumption, 'sp16e_growth_pct', None) is not None
         tax_year = None
+        avviso_acconti = None
         tax_generated_short = None
         if manual_tax_position:
             sp16e = _prev('sp16e_debiti_tributari_breve') * (D('1') + _sp_growth('sp16e_growth_pct'))
@@ -4622,6 +4623,17 @@ class ForecastEngine:
                 explicit_advances=getattr(assumption, 'tax_advances_paid', None),
                 carry_excess_credit=acconti_tributari_storici > ZERO,
             )
+            # #62 S28: l'importo inserito vince (puo' essere voluto), ma sotto sia al metodo storico sia al
+            # previsionale espone a sanzioni: si dichiara, non si corregge.
+            esplicito = Decimal(str(getattr(assumption, 'tax_advances_paid', None) or 0))
+            if esplicito > ZERO and esplicito < previous_tax and esplicito < current_tax:
+                avviso_acconti = {'acconti': esplicito, 'minimo_storico': previous_tax,
+                                  'minimo_previsionale': current_tax}
+                if details is not None:
+                    details['avvisi'].append(
+                        f"Nel {assumption.forecast_year} gli acconti inseriti ({_importo_it(esplicito)}) sono sotto sia "
+                        f"all'imposta dell'anno prima ({_importo_it(previous_tax)}) sia a quella dell'anno "
+                        f"({_importo_it(current_tax)}): sotto il minimo di legge si pagano sanzioni e interessi.")
             tax_generated_short = tax_year.generated_debt
             sp16e = tax_year.generated_debt + r.residual_short
             sp17e = r.residual_long
@@ -5199,13 +5211,14 @@ class ForecastEngine:
                     'credito_compensato': tax_year.credito_compensato,
                     'crediti_tributari_consuntivo': crediti_consuntivo,
                     'mode': 'saldo_acconto',
+                    'avviso_acconti': avviso_acconti,
                 }
                 if tax_year is not None else
                 {
                     'current_tax': current_tax, 'saldo_paid': ZERO, 'acconti_paid': ZERO,
                     'rate_paid': ZERO, 'generated_debt': ZERO, 'generated_credit': ZERO,
                     'opening_credit_left': ZERO, 'credito_compensato': ZERO,
-                    'crediti_tributari_consuntivo': ZERO, 'mode': 'manual',
+                    'crediti_tributari_consuntivo': ZERO, 'mode': 'manual', 'avviso_acconti': None,
                 }
             )
 

@@ -34,6 +34,7 @@ import {
   SP17E_NOTA_AUTOMATICA,
   accontiRow,
   accontoPctValue,
+  avvisoAcconti,
   draftDisplay,
   impostePreview,
   manualTaxYears,
@@ -124,6 +125,13 @@ export function StepImposte(p: StepProps): JSX.Element {
       offYearsNote: "La crescita manuale dei debiti tributari non calcola gli acconti. Svuota Debiti tributari entro % per riattivarli.",
     }],
     [p.preview.data, pregresso, yearsManuali],
+  );
+  const avvisiAcconti = useMemo(
+    () => (p.preview.data?.forecast_years ?? []).flatMap((y) => {
+      const m = avvisoAcconti(y.details, y.year);
+      return m ? [m] : [];
+    }),
+    [p.preview.data],
   );
   const setPregresso = (next: Pregresso) => {
     p.updatePregresso(next);
@@ -322,6 +330,15 @@ export function StepImposte(p: StepProps): JSX.Element {
               rows={advancesRows}
               yearsAsRows
             />
+
+            {/* Acconti inseriti sotto il minimo (#62 S28): letti dal dettaglio
+                strutturato del motore, un box per anno. */}
+            {avvisiAcconti.map((m) => (
+              <div key={m} className="flex gap-2 rounded-md bg-amber-500/10 p-3 text-xs text-amber-700 dark:text-amber-300">
+                <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+                <span>{m}</span>
+              </div>
+            ))}
 
             {/* Saldo, rateizzato e rate si scadenziano al passo 5, non qui
                 (decisione del proprietario, 2026-09-15, Task 13b/16): questo

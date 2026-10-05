@@ -514,6 +514,8 @@ export interface ImposteDetail {
   credito_compensato?: number;
   /** I crediti tributari del consuntivo, fuori dal meccanismo e costanti. */
   crediti_tributari_consuntivo?: number;
+  /** Acconti inseriti sotto sia l'imposta dell'anno prima sia quella dell'anno (#62 S28); `null` = nessun avviso. */
+  avviso_acconti?: { acconti: number; minimo_storico: number; minimo_previsionale: number } | null;
   mode: "saldo_acconto" | "manual";
 }
 

@@ -104,7 +104,7 @@ def test_details_declare_the_three_keys_without_any_plan(monkeypatch):
                 assert set(details["imposte"]) == {"current_tax", "saldo_paid", "acconti_paid",
                                                    "rate_paid", "generated_debt", "generated_credit",
                                                    "opening_credit_left", "credito_compensato",
-                                                   "crediti_tributari_consuntivo", "mode"}
+                                                   "crediti_tributari_consuntivo", "mode", "avviso_acconti"}
     finally:
         engine.dispose()
 

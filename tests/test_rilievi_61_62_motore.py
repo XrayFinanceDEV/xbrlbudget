@@ -131,3 +131,16 @@ def test_M1_con_piano_crediti_commerciali_il_foglio_pareggia_e_il_trade_e_dichia
         att = sum(v for k, v in sp.items() if k in ("sp01_crediti_soci",) or k.startswith(("sp02_", "sp03_", "sp04_", "sp05_", "sp06_", "sp07_", "sp08_", "sp09_", "sp10_")))
         pas = sum(v for k, v in sp.items() if k.startswith(("sp11_", "sp12_", "sp13_", "sp14_", "sp15_", "sp16_", "sp17_", "sp18_")))
         assert abs(att - pas) <= D("0.02")
+
+
+def test_M5_acconti_sotto_entrambi_i_minimi_avvisano():
+    rows = righe(tax_advances_paid=1)  # 1 € esplicito: sotto qualunque imposta positiva
+    e = generato(genera(rows))
+    av = e.det[2028]["imposte"]["avviso_acconti"]
+    assert av is not None and av["acconti"] == D("1")
+    assert any("acconti" in a.lower() for a in e.det[2028]["avvisi"])
+
+
+def test_M5_acconti_non_dichiarati_non_avvisano():
+    e = generato(genera(righe()))
+    assert all(e.det[y]["imposte"]["avviso_acconti"] is None for y in (2027, 2028, 2029))

@@ -9,6 +9,7 @@ import {
   SP17E_NOTA_AUTOMATICA,
   accontiRow,
   accontoPctValue,
+  avvisoAcconti,
   draftDisplay,
   impostePreview,
   manualTaxPosition,
@@ -394,5 +395,20 @@ describe("accontiRow", () => {
     expect(r.placeholder(2027)).toBe(`auto ${euro(45000)}`);
     expect(r.placeholder(2028)).toBe("auto");
     expect(r.sub).toContain("100% delle imposte dell'anno prima");
+  });
+});
+
+describe("avvisoAcconti", () => {
+  it("legge il dettaglio strutturato dell'anno e dice i tre importi", () => {
+    const m = avvisoAcconti({ imposte: { avviso_acconti: { acconti: "1.00", minimo_storico: "30000.00", minimo_previsionale: "40000.00" } } }, 2028);
+    expect(m).toContain("Nel 2028");
+    expect(m).toContain(euro(1));
+    expect(m).toContain(euro(30000));
+    expect(m).toContain(euro(40000));
+  });
+  it("null quando il motore non avvisa, o manca il dettaglio", () => {
+    expect(avvisoAcconti({ imposte: { avviso_acconti: null } }, 2028)).toBeNull();
+    expect(avvisoAcconti({ imposte: {} }, 2028)).toBeNull();
+    expect(avvisoAcconti(undefined, 2028)).toBeNull();
   });
 });

@@ -1883,9 +1883,11 @@ class ForecastEngine:
     # `sp16a-c`/`sp17a-c` (confine PFN e confine del rendiconto: sono un
     # debito finanziario, mai il ripiego di un residuo di arrotondamento),
     # `sp05b_prodotti_in_corso`, `sp05c_lavori_in_corso`, `sp05d_prodotti_finiti`
-    # (nota S04 #62, 2026-10-05: sp05b/sp05d hanno ora una contropartita di CE — `ce02` —
-    # e un centesimo su di loro attraverserebbe il confine CE↔SP: restano neutri i soli
-    # acconti `sp05e`, che non passano dal CE),
+    # (nota S04 #62, 2026-10-05: sp05b/sp05d hanno una contropartita di CE — `ce02` — e un
+    # centesimo su di loro attraverserebbe il confine CE↔SP; `sp05c` NON ha contropartita
+    # (`ce03` non si deriva dallo SP) ma e' tenuta fuori lo stesso, per tenere il gruppo
+    # coerente col suo movimento dichiarato solo in cassa: restano neutri i soli acconti
+    # `sp05e`, che non passano dal CE),
     # `sp05a_materie_prime` (spec B01, 2026-09-26: confine CE↔SP, la chiusura
     # che il CE ha gia' calcolato dal consumo — un centesimo posato li' sopra
     # romperebbe l'identita' `ce10 persistito == Δsp05a persistito`).
@@ -3170,7 +3172,8 @@ class ForecastEngine:
                                   _pinc('ce08d_altri_costi_personale'))
         crescita_pers = Decimal('1') + assumption.personnel_growth_pct / Decimal('100')
         personale_ricomposto = None
-        if assumption.ce08_override is None and (prev_b + prev_c + prev_d) > 0:
+        if assumption.ce08_override is None and prev_b > 0:
+            # Serve il salario (ce08b > 0): senza, il TFR cadrebbe sul ripiego 70% sopra c e d (fix finale 4).
             # #61 S06 (decisione del proprietario 2026-10-05): ogni componente monetaria cresce col
             # personale, il TFR e' quello di legge (B03) e il totale e' la loro somma. Il totale non e'
             # piu' «anno prima x crescita»: si dichiara di quanto se ne scosta.
@@ -3572,7 +3575,9 @@ class ForecastEngine:
 
         def _avvisa(gruppo, etichetta, base_flusso, apertura, chiusura, giorni, flusso, costo):
             variazione = chiusura - apertura
-            if abs(variazione) > Decimal('0.5') * apertura or abs(variazione) > flusso:
+            # Il test del 50% dell'apertura ha senso solo con un'apertura: a zero ogni chiusura lo supererebbe
+            # (fix finale 5); resta il test sul flusso.
+            if (apertura > 0 and abs(variazione) > Decimal('0.5') * apertura) or abs(variazione) > flusso:
                 avvisi_rimanenze.append({'gruppo': gruppo, 'apertura': apertura, 'chiusura': chiusura,
                                          'variazione': variazione, 'giorni': giorni})
                 if costo:

@@ -42,6 +42,14 @@ def test_senza_giorni_espliciti_nessun_avviso_e_chiave_presente():
     assert "rimanenze" in e.det[2027]
 
 
+def test_apertura_zero_non_fa_scattare_il_test_del_50_percento():
+    # Fix finale 5: ap_d == 0 (AMBIENTA non ha prodotti finiti) e 1 giorno sui ricavi: una chiusura piccola
+    # non e' «oltre il 50% dell'apertura», e il flusso (ricavi) e' lontano.
+    e = generato(genera(righe(dio_pf_days=1)))
+    assert e.anni[2027][0]["sp05d_prodotti_finiti"] > 0
+    assert e.det[2027]["avviso_rimanenze"] == []
+
+
 def test_prodotti_finiti_seguono_i_ricavi_e_passano_da_ce02():
     e = generato(genera(righe(dio_pf_days=10), bs=BS_PF))
     sp, ce = e.anni[2027]

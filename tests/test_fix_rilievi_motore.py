@@ -55,6 +55,15 @@ def test_B03_nessuna_ricomposizione_dichiarata_quando_il_totale_regge():
     assert abs(ce["ce08a_tfr_accrual"] - ce["ce08b_salari_stipendi"] / D("13.5")) < D("0.01")
 
 
+def test_personale_senza_salari_va_al_ramo_aggregato_senza_gonfiare_il_totale():
+    # Fix finale 4: ce08b (salari) assente con c/d presenti: il ramo «componenti» darebbe al TFR il ripiego
+    # 70% del totale SOPRA c e d (totale ~3,9 mln su una base di 2,34 mln). Il ramo aggregato tiene il totale.
+    e = generato(genera(righe(), ce={"ce08b_salari_stipendi": D("0"),
+                                     "ce08d_altri_costi_personale": D("1810699.61")}))
+    assert e.det[2027]["personale"]["modo"] == "aggregato"
+    assert e.anni[2027][1]["ce08_costi_personale"] == D("2344742.00")
+
+
 def test_ammortamento_esistente_si_ferma_al_residuo():
     q, s = ammortamento_categoria(None, D("100"), D("60"), D("0"), D("0.1"), 2027, None)
     assert q == D("60") and s["esistente_residuo"] == D("40")

@@ -1232,6 +1232,8 @@ export interface DebitoBancarioAnno {
 }
 
 export interface ForecastYearDetails {
+  /** Avvisi del motore (canale unico), sempre presente, anche vuoto. */
+  avvisi?: string[];
   ce05_fixed: number | null; ce05_variable: number | null;
   ce06_fixed: number | null; ce06_variable: number | null;
   dso_applied: number; dio_applied: number; dpo_applied: number;

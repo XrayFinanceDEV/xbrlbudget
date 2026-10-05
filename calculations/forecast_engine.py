@@ -26,7 +26,7 @@ from calculations.ce_result import calculate_ce_result
 
 # Si incrementa a ogni cambiamento dei numeri che il motore produce a parità di ipotesi: un
 # ForecastYear con una versione più vecchia è un previsionale da rigenerare (lotto 2, A01-bis).
-ENGINE_VERSION = "2"
+ENGINE_VERSION = "3"
 
 
 def _erogazioni_anno(details: Dict[str, Any]) -> str:
@@ -101,7 +101,8 @@ def engine_meta(details: Dict[str, Any]) -> Dict[str, Any]:
         pareggio = {k: (None if v is None else str(Decimal(str(v)).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)))
                     for k, v in pareggio.items()}
     return {'engine_version': ENGINE_VERSION, 'pareggio': pareggio, 'erogazioni': _erogazioni_anno(details),
-            'rimborsi_piano': _rimborsi_piano_anno(details)}
+            'rimborsi_piano': _rimborsi_piano_anno(details),
+            'avvisi': [str(a) for a in (details.get('avvisi') or [])]}
 
 
 def _importo_it(value) -> str:
@@ -2556,7 +2557,9 @@ class ForecastEngine:
         prev_details: Optional[Dict[str, Any]] = None
         horizon = len(assumptions)
         for year_index, assumption in enumerate(assumptions):
-            details: Dict[str, Any] = {}
+            # Canale unico degli avvisi del motore: presente (anche vuoto) in ogni anno, PRIMA del CE,
+            # perche' le regole che avvisano lo riempiono sia nella fase CE sia in quella SP.
+            details: Dict[str, Any] = {'avvisi': []}
             # La concessione dello scoperto vale per ANNO, come ogni altra
             # ipotesi, e porta con se' il saldo in essere all'apertura: e' quello
             # che l'anno precedente ha dichiarato, non una lettura di `sp16a` —

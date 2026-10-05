@@ -352,8 +352,9 @@ esistente**, storico compreso, non solo su quelli generati dopo il lotto.
   `error`, come `forecast_stale`) blocca il "finale" del Business plan quando un `ForecastYear`
   porta un `engine_version` inferiore a quello corrente — mai per l'infrannuale. In intestazione
   solo la forma corta («BOZZA · da rigenerare»: la frase intera troncherebbe il nome azienda), le
-  frasi intere della spec una per riga in copertina. `engine_meta` `NULL` o senza
-  `engine_version` = nessun avviso («non lo so», non un verdetto negativo).
+  frasi intere della spec una per riga in copertina. Su un budget `engine_meta`
+  `NULL` o senza `engine_version` = «da rigenerare» (decisione del proprietario, 2026-10-05: i dati vecchi
+  non contano); sull'infrannuale nessun avviso.
 - **C09**: la frase sugli oneri finanziari sul MOL parte dal valore della colonna base/storica
   (`of_mol`) quando la base la dichiara, non più dal primo anno di piano; senza `of_mol` in base,
   ripiega sul primo anno di piano come prima.
@@ -568,10 +569,10 @@ esistente**, storico compreso, non solo su quelli generati dopo il lotto.
   zero — non più un riparto proporzionale che spostava la riga sbagliata quando clienti e altri
   crediti oltre 12 mesi convivono (`_consuma_in_ordine`). → sezione «Forecasting Engine (Budget)»
   sopra per i dettagli di ciascuna regola.
-- **`ForecastYear.engine_meta` è `NULL` su ogni previsionale generato prima di questo lotto: è
-  «non lo so», non un motore vecchio da segnalare.** Solo un confronto fra due firme lette (non fra
-  una firma e la sua assenza) può dire che un previsionale è stato generato da una versione
-  precedente del motore — la stessa regola di `forecast_stale` qualche bullet sopra.
+- **`ForecastYear.engine_meta` `NULL` su uno scenario budget vale «da rigenerare»** (decisione del
+  proprietario, 2026-10-05, #61: i dati vecchi non contano; prima era «non lo so»). Sull'infrannuale
+  non c'è alcun avviso. Gli avvisi del motore passano per un canale solo, `details['avvisi']`
+  (lista sempre presente, anche vuota), persistito in `engine_meta['avvisi']`.
 
 ### Frontend
 - **`PraticaProvider` sta SOPRA `AppProvider`** in `app/layout.tsx`. È quell'ordine a rendere
@@ -925,9 +926,9 @@ ENGINE_VERSION, "pareggio": details['pareggio']}` on every generation. The local
 migration run once (`python migrate_db.py financial_analysis.db`) — without it the column does not
 exist and every forecast read answers 500, not just a missing signature. `ENGINE_VERSION`
 (`calculations/forecast_engine.py`) is a string constant bumped whenever a lotto changes the
-engine's numbers — this lotto brings it to `"2"`. Existing `ForecastYear` rows have `engine_meta =
-NULL`: that means **«I don't know», never «stale»** — there is no earlier signature to compare
-against, so nothing downstream may read `NULL` as a negative verdict.
+engine's numbers — it is now `"3"` (#61/#62). Existing budget `ForecastYear` rows have `engine_meta =
+NULL`: that means **«da rigenerare»** (owner's decision 2026-10-05, old data do not count);
+infrannuale never raises the warning.
 
 ### Intra-Year Engine (Infrannuale)
 Projects a partial year (say 9 months) to a full 12 months, against a reference full year

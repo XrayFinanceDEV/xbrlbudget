@@ -93,20 +93,15 @@ def test_c_engine_version_stale_diagnostica_e_frase():
     assert FRASE_ENGINE_STALE.lower() in testo
 
 
-def test_d_engine_meta_none_nessuna_diagnostica():
-    """(d) `engine_meta = None` non è un "prima": nessuna diagnostica `engine_version_stale`."""
-    _bp()
-
-    def ritocca(db, scenario_id):
-        from database.models import ForecastYear
-        rows = db.query(ForecastYear).filter(ForecastYear.scenario_id == scenario_id).all()
-        assert rows, "precondizione: nessun ForecastYear da ritoccare"
-        for row in rows:
-            row.engine_meta = None
-
-    e = generato(genera(righe(), report=True, ritocca=ritocca))
-    assert not any(d.code == "engine_version_stale" for d in e.rep.diagnostics), e.rep.diagnostics
-    assert FRASE_ENGINE_STALE not in e.data.avvisi
+def test_d_engine_meta_none_su_budget_e_da_rigenerare():
+    from backend.app.services.final_report_service import _engine_version_stale
+    class FY:  # riga senza firma, come i previsionali generati prima del 2026-09-26
+        engine_meta = None
+    assert _engine_version_stale("bilancio", [FY()]) is True
+    assert _engine_version_stale("infrannuale", [FY()]) is False
+    class FY2:
+        engine_meta = {"pareggio": None}  # senza engine_version
+    assert _engine_version_stale("bilancio", [FY2()]) is True
 
 
 def test_e_report_pulito_nessun_avviso():
@@ -138,11 +133,11 @@ def test_helper_infrannuale_non_e_mai_candidato():
     assert _engine_version_stale("startup", righe_vecchie) is True
 
 
-def test_helper_engine_meta_assente_o_senza_versione_non_e_stale():
+def test_helper_engine_meta_assente_o_senza_versione_e_stale_sul_budget():
     from backend.app.services.final_report_service import _engine_version_stale
     from calculations.forecast_engine import ENGINE_VERSION
-    assert _engine_version_stale("bilancio", [_RigaFinta(None)]) is False
-    assert _engine_version_stale("bilancio", [_RigaFinta({"pareggio": None})]) is False
+    assert _engine_version_stale("bilancio", [_RigaFinta(None)]) is True
+    assert _engine_version_stale("bilancio", [_RigaFinta({"pareggio": None})]) is True
     assert _engine_version_stale("bilancio", [_RigaFinta({"engine_version": ENGINE_VERSION})]) is False
 
 

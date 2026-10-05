@@ -276,7 +276,9 @@ class FinancialRatiosCalculator(BaseCalculator):
         # dell'anno (inizio e fine), stesso perimetro della PFN. Senza un bilancio d'inizio
         # (prima colonna) resta la fine anno.
         debito_fine = self.bs.financial_debt_total
-        if self.prev_bs is not None:
+        # Media solo se ENTRAMBI i bilanci hanno il dettaglio finanziario: un'apertura senza
+        # dettaglio (98% dei bilanci annuali) dimezzerebbe il debito di chiusura (ROD raddoppiato).
+        if self.prev_bs is not None and not self.prev_bs.financial_debt_undetailed:
             financial_debt = (self.prev_bs.financial_debt_total + debito_fine) / 2
         else:
             financial_debt = debito_fine

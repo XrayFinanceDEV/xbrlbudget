@@ -26,6 +26,7 @@ from app.schemas import income_statement as inc_schemas
 from app.schemas import budget as budget_schemas
 from pdf_service.em_score import calculate_em_score, get_em_score_description
 from app.services.forecast_freshness import forecast_staleness
+from database.queries import get_fy_full
 
 
 # The established /analysis contract emits JSON-ready floats.  The dossier V2
@@ -225,6 +226,11 @@ def _get_complete_analysis(
             prev_data = all_years_data[pos - 1] if pos > 0 else None
             prev_bs = (prev_data["balance_sheet"]
                        if prev_data is not None and prev_data["year"] == year - 1 else None)
+            if pos == 0 and prev_data is None:
+                # Prima colonna: stessa ricerca a DB di /ratios (`get_fy_full(year-1)`), cosi'
+                # le due pagine mostrano lo stesso ROD sulla prima colonna.
+                fy_prec = get_fy_full(db, company_id, year - 1)
+                prev_bs = fy_prec.balance_sheet if fy_prec is not None else None
             year_calculations = _calculate_year_metrics(bs, inc, sector, prev_bs)
             calculations_by_year[str(year)] = year_calculations
 

@@ -331,6 +331,16 @@ class BalanceSheet(Base):
         return self.financial_debt_short + self.financial_debt_long
 
     @property
+    def financial_debt_undetailed(self) -> bool:
+        """Debiti (sp16+sp17) positivi con le sei sotto-voci finanziarie a zero: l'import non
+        ha classificato il debito, non e' "nessun debito" (stesso predicato F1 di
+        `report_indicators`)."""
+        return (
+            self.financial_debt_total == 0
+            and (self.sp16_debiti_breve + self.sp17_debiti_lungo) > 0
+        )
+
+    @property
     def operating_debt_short(self) -> Decimal:
         """Short-term Operating Debt (for working capital cashflow)"""
         return (
@@ -1030,6 +1040,16 @@ class ForecastBalanceSheet(Base):
     def financial_debt_total(self) -> Decimal:
         """Total Financial Debt (for financing cashflow)"""
         return self.financial_debt_short + self.financial_debt_long
+
+    @property
+    def financial_debt_undetailed(self) -> bool:
+        """Debiti (sp16+sp17) positivi con le sei sotto-voci finanziarie a zero: l'import non
+        ha classificato il debito, non e' "nessun debito" (stesso predicato F1 di
+        `report_indicators`)."""
+        return (
+            self.financial_debt_total == 0
+            and (self.sp16_debiti_breve + self.sp17_debiti_lungo) > 0
+        )
 
     @property
     def operating_debt_short(self) -> Decimal:

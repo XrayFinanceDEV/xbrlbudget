@@ -162,3 +162,52 @@ def test_rod_prima_colonna_ignora_un_anno_precedente_solo_parziale(db):
         db=db, company_id=company.id, scenario_id=scenario.id, base_year=2025)
     assert result["years"] == [2025]
     assert abs(D(str(result["ratios"][0]["profitability"]["rod"])) - D("10000") / D("300000")) < D("0.0001")
+
+
+def _storico(db, company, year, **bs):
+    fy = FinancialYear(company_id=company.id, year=year, period_months=None)
+    fy.balance_sheet = _bs(**bs)
+    fy.income_statement = _is(ce15_oneri_finanziari=D("10000"))
+    db.add(fy)
+
+
+def test_rod_apertura_senza_dettaglio_finanziario_resta_sulla_fine_anno(db):
+    """Fix finale 1 · sp16+sp17 > 0 con le sei sotto-voci finanziarie a zero e' un import non
+    classificato: la media inizio/fine dimezzerebbe il debito di chiusura e raddoppierebbe il ROD."""
+    company = Company(name="NoDet S.r.l.", tax_id="00000000004", sector=1, user_id="test-user")
+    db.add(company)
+    db.flush()
+    _storico(db, company, 2024, sp16_debiti_breve=D("500000"), sp16d_debiti_fornitori_breve=D("500000"))
+    _storico(db, company, 2025, sp16_debiti_breve=D("300000"), sp16a_debiti_banche_breve=D("300000"))
+    scenario = BudgetScenario(company_id=company.id, name="B", base_year=2025, scenario_type="budget")
+    db.add(scenario)
+    db.commit()
+    result = calculation_service.calculate_ratios_historical_and_forecast(
+        db=db, company_id=company.id, scenario_id=scenario.id, base_year=2025)
+    rod = {y: r["profitability"]["rod"] for y, r in zip(result["years"], result["ratios"])}
+    assert abs(D(str(rod[2025])) - D("10000") / D("300000")) < D("0.0001")
+
+
+def test_analysis_rod_anno_di_piano_con_base_senza_dettaglio_non_si_raddoppia(db):
+    """Fix finale 1 + 10 · /analysis: base 2025 senza dettaglio finanziario -> ROD del primo anno di
+    piano sul debito di fine anno; la prima colonna storica legge l'anno prima a DB come /ratios."""
+    from backend.app.services import analysis_service
+    company = Company(name="NoDetA S.r.l.", tax_id="00000000005", sector=1, user_id="test-user")
+    db.add(company)
+    db.flush()
+    _storico(db, company, 2023, sp16_debiti_breve=D("100000"), sp16a_debiti_banche_breve=D("100000"))
+    _storico(db, company, 2024, sp16_debiti_breve=D("300000"), sp16a_debiti_banche_breve=D("300000"))
+    _storico(db, company, 2025, sp16_debiti_breve=D("500000"), sp16d_debiti_fornitori_breve=D("500000"))
+    scenario = BudgetScenario(company_id=company.id, name="B", base_year=2025, scenario_type="budget")
+    db.add(scenario)
+    db.flush()
+    fcy = ForecastYear(scenario_id=scenario.id, year=2026)
+    fcy.balance_sheet = _forecast_bs(sp16_debiti_breve=D("200000"), sp16a_debiti_banche_breve=D("200000"))
+    fcy.income_statement = _forecast_is(ce15_oneri_finanziari=D("10000"))
+    db.add(fcy)
+    db.commit()
+    by_year = analysis_service.get_complete_analysis(
+        db=db, company_id=company.id, scenario_id=scenario.id)["calculations"]["by_year"]
+    rod = {y: D(str(v["ratios"]["profitability"]["rod"])) for y, v in by_year.items() if v["ratios"]["profitability"]["rod"] is not None}
+    assert abs(rod["2026"] - D("10000") / D("200000")) < D("0.0001")      # non 10000/350000 ne' doppiato
+    assert abs(rod["2024"] - D("10000") / D("200000")) < D("0.0001")      # media 2023-2024

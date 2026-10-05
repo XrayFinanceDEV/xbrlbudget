@@ -94,6 +94,22 @@ def _rimborsi_piano_anno(details: Dict[str, Any]) -> str:
     return str(totale.quantize(Decimal('0.01'), rounding=ROUND_HALF_UP))
 
 
+def _imposte_versate_anno(details: Dict[str, Any]):
+    """Le imposte VERSATE nell'anno (#62 S13), per la riga «Imposte sul reddito pagate» del rendiconto:
+    saldo + acconti + rate - credito compensato - credito storico compensato, al centesimo.
+    `None` senza kernel o in via manuale (importi di pagamento tutti zero per costruzione: non sono
+    versamenti veri, e il rendiconto resta com'era)."""
+    imp = details.get('imposte') or {}
+    if imp.get('mode') != 'saldo_acconto':
+        return None
+    z = Decimal('0')
+    def _d(k):
+        return Decimal(str(imp.get(k) or z))
+    totale = (_d('saldo_paid') + _d('acconti_paid') + _d('rate_paid')
+              - _d('credito_compensato') - _d('credito_storico_compensato'))
+    return str(totale.quantize(Decimal('0.01'), rounding=ROUND_HALF_UP))
+
+
 def engine_meta(details: Dict[str, Any]) -> Dict[str, Any]:
     """La firma persistita su `ForecastYear.engine_meta`: JSON puro, importi come stringhe al centesimo."""
     pareggio = details.get('pareggio')
@@ -102,6 +118,7 @@ def engine_meta(details: Dict[str, Any]) -> Dict[str, Any]:
                     for k, v in pareggio.items()}
     return {'engine_version': ENGINE_VERSION, 'pareggio': pareggio, 'erogazioni': _erogazioni_anno(details),
             'rimborsi_piano': _rimborsi_piano_anno(details),
+            'imposte_versate': _imposte_versate_anno(details),
             'avvisi': [str(a) for a in (details.get('avvisi') or [])]}
 
 

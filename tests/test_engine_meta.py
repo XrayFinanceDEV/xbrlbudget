@@ -11,7 +11,8 @@ def test_engine_meta_serializza_il_pareggio_in_stringhe():
     # F2 (decisione del proprietario, 2026-09-26): aggiunge `rimborsi_piano`, sempre presente.
     assert meta == {"engine_version": ENGINE_VERSION,
                     "pareggio": {"costi_variabili": "10.01", "fatturato_pareggio": None},
-                    "erogazioni": "0.00", "rimborsi_piano": "0.00", "avvisi": []}
+                    "erogazioni": "0.00", "rimborsi_piano": "0.00", "imposte_versate": None,
+                    "avvisi": []}
 
 
 def test_engine_meta_senza_pareggio_dichiara_none():
@@ -19,7 +20,8 @@ def test_engine_meta_senza_pareggio_dichiara_none():
     # ne' debito bancario ne' altri finanziatori ne' fidi ne' scoperto — zero vero, non assenza.
     # F2 (decisione del proprietario, 2026-09-26): stesso zero vero per `rimborsi_piano`.
     assert engine_meta({}) == {"engine_version": ENGINE_VERSION, "pareggio": None,
-                               "erogazioni": "0.00", "rimborsi_piano": "0.00", "avvisi": []}
+                               "erogazioni": "0.00", "rimborsi_piano": "0.00", "imposte_versate": None,
+                    "avvisi": []}
 
 
 def test_engine_meta_erogazioni_somma_contratti_altri_finanziatori_fidi_e_scoperto():

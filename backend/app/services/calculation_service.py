@@ -438,13 +438,16 @@ def calculate_detailed_cashflow_historical_and_forecast(
         engine_meta = forecast_year.engine_meta or {}
         erogazioni_raw = engine_meta.get("erogazioni")
         erogazioni = Decimal(str(erogazioni_raw)) if erogazioni_raw is not None else None
+        versate_raw = engine_meta.get("imposte_versate")  # #62 S13: stessa regola di analysis_service (F3)
+        imposte_versate = Decimal(str(versate_raw)) if versate_raw is not None else None
 
         forecast_cf = DetailedCashFlowCalculator.calculate(
             bs_current=forecast_year.balance_sheet,
             bs_previous=previous_bs,
             inc_current=forecast_year.income_statement,
             year=forecast_year.year,
-            erogazioni=erogazioni
+            erogazioni=erogazioni,
+            imposte_versate=imposte_versate
         )
         cashflows.append(forecast_cf)
 

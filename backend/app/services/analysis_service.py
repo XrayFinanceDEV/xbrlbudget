@@ -239,13 +239,16 @@ def _get_complete_analysis(
                 engine_meta = current_year_data.get("engine_meta") or {}
                 erogazioni_raw = engine_meta.get("erogazioni")
                 erogazioni = Decimal(str(erogazioni_raw)) if erogazioni_raw is not None else None
+                versate_raw = engine_meta.get("imposte_versate")  # #62 S13
+                imposte_versate = Decimal(str(versate_raw)) if versate_raw is not None else None
                 cf_result = _calculate_cashflow(
                     base_year_data["balance_sheet"],
                     base_year_data["income_statement"],
                     current_year_data["balance_sheet"],
                     current_year_data["income_statement"],
                     current_year_data["year"],
-                    erogazioni
+                    erogazioni,
+                    imposte_versate
                 )
                 cf_result["base_year"] = base_year_data["year"]
                 cashflow_years.append(cf_result)
@@ -370,7 +373,8 @@ def _calculate_cashflow(
     current_bs: models.BalanceSheet,
     current_inc: models.IncomeStatement,
     year: int,
-    erogazioni: Optional[Decimal] = None
+    erogazioni: Optional[Decimal] = None,
+    imposte_versate: Optional[Decimal] = None
 ) -> Dict[str, Any]:
     """
     Calculate detailed cashflow for one year.
@@ -388,7 +392,8 @@ def _calculate_cashflow(
         bs_previous=base_bs,
         inc_current=current_inc,
         year=year,
-        erogazioni=erogazioni
+        erogazioni=erogazioni,
+        imposte_versate=imposte_versate
     )
 
     return {

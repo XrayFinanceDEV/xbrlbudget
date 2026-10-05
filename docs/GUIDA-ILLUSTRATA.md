@@ -1,7 +1,8 @@
 # Guida illustrata all'applicazione
 
-> Última verifica: ottobre 2026, dalle schermate di sviluppo (azienda AMBIENTA, scenario
-> «Budget 2027–2029» #18 e infrannuale 6M 2026 #17). Ogni immagine è una schermata reale
+> Ultima verifica: ottobre 2026, dalle schermate di sviluppo (azienda AMBIENTA). Le schermate
+> del previsionale (09–21) sono tutte sullo scenario «Budget 2027–2029» #18, anno base 2026,
+> orizzonte 3 anni; quelle dell'analisi infrannuale (05–08) sulla pratica 2026 a 6 mesi. Ogni immagine è una schermata reale
 > dell'app; se una schermata cambia, aggiorna `docs/images/guida/` e questo file insieme.
 
 **A chi serve.** Questa è la mappa di *che cosa si vede e dove*: ogni pagina dell'applicazione,
@@ -29,18 +30,14 @@ La barra di stato in testa a ogni pagina dice sempre **dove sei del percorso** (
 
 ![Home](images/guida/01-home.png)
 
-L'elenco delle tue aziende (max 50 per utente). Ogni riga è un pulsante che apre la pratica:
+L'elenco delle tue aziende (max 50 per utente), a **schede espandibili**: ogni scheda mostra
+nome, settore, partita IVA e quante pratiche contiene. Espandendo la scheda compaiono i pulsanti
+**«Nuova pratica»** (la scelta fra **Da bilancio** e **Startup**) e **«Riprendi»** sugli anni già
+lavorati — «Riprendi» riparte dall'ultimo passaggio raggiunto (la cache è nel browser, ma viene
+riverificata sul server: se il server contraddice la cache, prevale il server).
 
-- **«Riprendi»** riparte dall'ultimo passaggio raggiunto (lo stato è nel browser, ma viene
-  riverificato sul server — se il server contraddice la cache, prevale il server).
-- **«Nuova pratica»** apre la scelta fra **Da bilancio** (importi un bilancio, anche solo di
-  verifica, e poi analizzi) e **Startup** (nessun bilancio, solo ipotesi).
-- **«Da bilancio esistente»** collega un anno già importato a uno scenario budget e porta
-  direttamente al wizard.
-
-In alto: ricerca, filtro percorso, ordinamento, ed «Eliminata di recente» (le aziende si
-cancellano in modo recuperabile). «Gestisci aziende» apre anagrafica, imponenza fiscale e
-settore (1 Industria … 6 Edilizia — il settore sceglie il modello Altman e le soglie FGPMI).
+Con **«Nuova azienda»** si apre un dialogo con **Nome\***, **Partita IVA** e **Settore\***
+(1 Industria … 6 Edilizia — il settore sceglie il modello Altman e le soglie FGPMI).
 
 ---
 
@@ -52,13 +49,9 @@ settore (1 Industria … 6 Edilizia — il settore sceglie il modello Altman e l
 
 ![Anagrafica](images/guida/02-anagrafiche.png)
 
-La carta d'identità dell'azienda: denominazione, CF/PIVA, sede, forma giuridica, codice ATECO
-(la lista propone i 77 settori cui `data/sectors.json` aggancia indici di settore e
-percentuali di crescita standard), imponenza fiscale. Sotto, il blocco **Conto Economico
-Strutturato** anteprima: le sezioni di CE come le vedrai in ogni tabella dell'app (A) valore
-della produzione, B) costi, differenza = MOL/EAV, più D) componenti finanziari ed E) componenti straordinari, fino al risultato. Qui non si
-modifica nulla — la scheda mostra ciò che è stato importato, per verificare di star lavorando
-sull'azienda giusta.
+La carta d'identità dell'azienda di pratica: **Nome\***, **Partita IVA** e **Settore\*** (a
+tendina, 1 Industria … 6 Edilizia), tutti modificabili, con **«Salva e prosegui»**. Il settore
+sceglie il modello Altman (1 = 5 componenti, 2–6 = 4) e le soglie FGPMI.
 
 ## 2. Import
 
@@ -117,8 +110,8 @@ tab sono l'«occhiale» sul dato; Proiezione è dove il dato diventa anno pieno.
 
 Riga per riga: il parziale contro l'anno di riferimento pieno, con la variazione. Il CE è
 annualizzato (`× 12 / mesi`), lo **stato patrimoniale no** — è un istante, non un flusso: la
-distinzione è scritta sotto le tabelle «Valori Istantanei». Da qui partono le percentuali di
-crescita che il passaggio 3 userà: cambiare un valore qui significa cambiare la proiezione.
+distinzione è scritta sotto le tabelle «Valori Istantanei». La pagina è di sola lettura: i
+valori si modificano nella tab Proiezione, non qui.
 
 ## 5. Proiezione
 
@@ -145,7 +138,7 @@ di fondo visibili qui:
 
 ![Indicatori infrannuale](images/guida/07-indicatori.png)
 
-Gli stessi blocknotes dell'analisi annuale (sotto § 9) sulla colonna proiettata, più i
+Le stesse schede di sintesi dell'analisi annuale (sotto § 14) sulla colonna proiettata, più i
 **15 segnali di allarme** della crisi d'impresa (14 concorrono al punteggio, `of_revenue` è
 informativo): verde/ambra/rosso, misurati **sul server** (`calculations/crisi_impresa.py`); la
 classe di rating A3→D si sceglie dal numero di segnali. I due grafici sono un componente solo
@@ -162,8 +155,8 @@ allegati A/B, con i **sei commenti AI** (generati da Haiku su Confronto/Proiezio
 poi editabili — allowlist di sei chiavi, un settimo verrebbe scartato in silenzio). Il pulsante
 vero è **«Scarica PDF»**: chiama `POST /scenarios/{id}/infrannuale/pdf`, lo stesso ReportLab
 del Business plan; la stampa del browser è solo un'anteprima. «Scarica Word» esporta lo stesso
-report in `.docx` dagli stessi flowable. Gli avvisi (es. *bilancio in perdita*) sono a squillo
-del testo; i commenti chiusi spariscono dal PDF. →
+report in `.docx` dagli stessi flowable. I **commenti AI** sono sei, generati e poi editabili;
+un commento *chiuso* sparisce dal PDF, il testo resta modificabile a schermo. →
 [REPORT-INFRANNUALE-PDF.md](budget/REPORT-INFRANNUALE-PDF.md)
 
 ---
@@ -171,6 +164,8 @@ del testo; i commenti chiusi spariscono dal PDF. →
 # FASE 3 · PREVISIONALE
 
 Cinque tab: **Budget** (il wizard), **CE Prev.**, **SP Prev.**, **Rendiconto**, **Report**.
+Le due pagine **Indici** e **Riclassificato** non sono tab di questo percorso: si aprono dal
+menu **«Previsionale»** della barra di navigazione in alto.
 
 ## 8. Il wizard in 7 passi
 
@@ -180,29 +175,29 @@ Cinque tab: **Budget** (il wizard), **CE Prev.**, **SP Prev.**, **Rendiconto**, 
 
 ![Wizard passo 1](images/guida/09-wizard-scenario.png)
 
-Nome, **anno base** (l'ultimo bilancio annuale che possiedi), **orizzonte 3 o 5 anni**, e
-l'inflazione (driver che «si propaga» ai costi che hanno la crescita automatica). In basso, la
-tabella degli scenari esistenti con gli indicatori sintetici di quadratura «Sb», «CF»
-(salvataggio e ricalcolo, «Salva e Calcola Previsionale», sono il pulsante nero a destra
-della barra).
+Nome, **anno base** (l'ultimo bilancio annuale che possiedi) e orizzonte: i pulsanti **«3
+anni» / «5 anni» più un campo numerico. A destra il riquadro **«Punto di partenza»** con
+**«Inflazione attesa»** e la tabella **«Tendenza»** dell'anno base (ricavi, costi, utile).
+L'inflazione **non tocca i ricavi**: precompila la crescita della sola **parte fissa** di
+materie prime e servizi al passo 3.
 
 ### Passo 2 · Fatturato
 
 ![Wizard passo 2](images/guida/10-wizard-fatturato.png)
 
 Una riga di crescita dei **ricavi** e una degli **altri ricavi** per ogni anno di piano.
-«Tutti gli anni»: un valore solo su tutto l'orizzonte (e se l'orizzonte è 5 ma i valori salvati
-sono 3, lo stesso pulsante estende l'orizzonte — è la scorciatoia per l'estensione multi-anno
-del 5×). A destra, l'anteprima dal vivo: il conto economico dell'anno base proiettato con
-queste ipotesi, riga per riga, delta a lato.
+A destra, l'anteprima dal vivo: il conto economico dell'anno base proiettato con queste
+ipotesi, riga per riga, con variazione assoluta e crescita cumulata a lato. L'anteprima si
+aggiorna mentre digiti e **non salva nulla**: per quello c'è il pulsante finale.
 
 ### Passo 3 · Costi
 
 ![Wizard passo 3](images/guida/11-wizard-costi.png)
 
-Per ogni famiglia di costo (materie, servizi, personale, locazioni, altri) due leve: la
-**quota fissa** (slider, di default 40% — è la separazione variabile/fisso su cui il motore
-divide ogni costo) e la **crescita** ( Automatica = PIL + inflazione, o Manuale). Note
+Per materie prime e servizi lo slider **«Quanto è fisso»** separa parte variabile e parte fissa
+(la variabile segue i ricavi, la fissa parte dall'**inflazione del passo 1**, precompilata nel
+tablo «Come si muovono i costi»). Le **ipotesi manuali** (personale, godimento beni di terzi,
+oneri diversi) hanno una crescita % per anno. Note
 importanti dalla prova: la quota fissa è una sola e **si applica a tutti gli anni** (il
 modello è per anno, l'interfaccia no — se uno scenario ha valori diversi fra anni, la
 schermata avvisa e allinea al primo tocco).
@@ -216,8 +211,8 @@ consumo)** e **prodotti finiti e merci (sui ricavi)** — i due gruppi del DIO (
 `dio_days` + `dio_pf_days`; il DIO storico di prima vale ora per il solo primo gruppo) —,
 **DPO** (pagamento fornitori), crescita dei crediti oltre 12 mesi. «Vuoto significa come
 nell'anno base». A destra il circolante proiettato con «cassa liberata/assorbita». Due note
-tecniche reali: i giorni del 2026 sono calcolati su soli clienti/fornitori al netto IVA e su
-360 giorni; un valore dedotto fuori scala (oltre un anno di rotazione) è **scartato** e il
+tecniche reali: i giorni sono calcolati sui soli crediti/debiti commerciali e su 360 giorni;
+un valore dedotto fuori scala (oltre un anno di rotazione) è **scartato** e il
 motore riporta lo stock dell'anno base — l'avviso ambra in figura lo dichiara.
 
 ### Passo 5 · Patrimoniale pregresso
@@ -225,14 +220,16 @@ motore riporta lo stock dell'anno base — l'avviso ambra in figura lo dichiara.
 ![Wizard passo 5](images/guida/13-wizard-pregresso.png)
 
 Che cosa succede ai saldi **già in bilancio** al 31/12 dell'anno base. Il lato breve senza
-piano si chiude nel primo anno di piano; «quelle oltre 12 mesi le scandisci tu, anno per
-anno», nelle sei righe «Altre voci pregresse · scadenzamento manuale» (crediti oltre 12 mesi,
-crediti tributari entro/oltre 12, altri debiti oltre 12, con caselle per anno e «resta
-aperto»). Poi i finanziamenti: **fidi, anticipi e scoperto** (importo + tasso; è il regime
-esplicito dei fidi: sotto di esso il fabbisogno non apre uno scoperto ma tira sui fidi),
-scadenza dei prestiti bancari pregressi (anno per anno), altri finanziatori. Le due righe
-«quadra/coerente» in fondo sono i controlli sul totale: la massa non riconosciuta non può
-finire sui debiti finanziari.
+piano si chiude nel primo anno di piano; «quelle oltre 12 mesi le scandenzi tu, anno per
+anno», nelle quattro righe «Altre voci pregresse · scadenzamento manuale» (crediti oltre 12
+mesi; altri crediti tributari entro e oltre 12 mesi; altri debiti oltre 12 mesi, con caselle
+per anno e «resta aperto»). Sotto «Altri crediti tributari · entro 12 mesi» c'è la casella
+**«compensa il credito residuo con le imposte da versare»**. Poi i finanziamenti: **fidi,
+anticipi e scoperti** (importo + tasso; è il regime esplicito dei fidi: sotto di esso il
+fabbisogno non apre uno scoperto ma tira sui fidi), scadenza dei prestiti bancari pregressi
+(anno per anno), altri finanziatori. I due controlli in fondo dicono: *fidi + residui dei
+finanziamenti = debiti verso banche a bilancio* («quadra»), *rimborsi del primo anno = quota
+mutui entro 12 mesi* («coerente").
 
 Un vincolo che qui fa rumore: **un anno in via manuale non può scaricare meno di quanto il
 piano tributario ripartirà l'anno dopo**, o la stessa rata uscirebbe due volte — il motore
@@ -243,15 +240,16 @@ rifiuta la combinazione con un errore in italiano che nomina l'anno e le tre vie
 
 ![Wizard passo 6](images/guida/14-wizard-piano.png)
 
-Che cosa il piano **genera**: immobilizzazioni (creste e dismissioni, con aliquota di
-ammortamento — i nuovi cespiti ammortizzano a metà aliquota nell'anno di entrata), nuovi
-finanziamenti (importo, anni, durata: la quota in scadenza l'anno dopo finisce
-correttamente a breve), debiti indicizzati al personale o all'inflazione (tendina per
-voce — il doppio comando «gli enti previdenziali scalano col personale» non esiste più),
-liquidazioni TFR (sopra il fondo disponibile: **rifiuto**, non clamp), e la **cassa**: sweep
-(pareggia prima lo scoperto, anche sotto il minimo di liquidità), minimo di liquidità, e
-«ammetti uno scoperto di banco» — spento di default, quindi un fabbisogno senza rimedio fa
-fallire la generazione con un errore, non un numero inventato.
+Che cosa il piano **genera**: «Altri saldi patrimoniali nel piano» (tendina per voce: *cresce
+con i ricavi*, *cresce con il costo del personale*, *manuale* con importi per anno), «Nuovi
+investimenti» materiali e immateriali (i nuovi cespiti ammortizzano a **metà aliquota**
+nell'anno di entrata), «Fondo TFR» con le liquidazioni anno per anno (oltre il fondo
+disponibile: **rifiuto**, non clamp), «Nuovi finanziamenti» (importo, anno di erogazione,
+durata, tasso: la quota in scadenza l'anno dopo finisce correttamente a breve) e «Cassa e
+scoperto»: sweep («Usa la cassa in eccesso per ridurre fidi, anticipi e scoperti di conto
+corrente», pareggia prima lo scoperto anche sotto il minimo di liquidità), e lo
+**scoperto di conto corrente** concesso o no — non concesso di default, quindi un fabbisogno
+senza rimedio fa fallire la generazione con un errore, non un numero inventato.
 
 ### Passo 7 · Imposte
 
@@ -262,8 +260,8 @@ una proiezione), 27,9 = IRES+IRAP quando non derivabile; l'aliquota è usata **c
 **Pagamento dei debiti tributari**: la regola di cassa del commercialista — ogni anno paga il
 **saldo** dell'anno prima + gli **acconti** dell'anno (100% dell'imposta dell'anno prima, o
 l'importo esplicito «già versato» se maggiore di zero; **zero nella casella non vuol dire
-«zero acconti»**, vuol dire «usa la percentuale»). «Compensa il credito residuo con le
-imposte da versare» è la scelta esplicita (#62 S14/S18). La cassa non è più gonfiata di
+«zero acconti»**, vuol dire «usa la percentuale»). La compensazione del credito residuo si
+sceglie al **passo 5**. La cassa non è più gonfiata di
 un'imposta all'anno come prima di questa regola, e «Uscita di cassa per imposte» nei righi a
 destra è proprio quella pagata.
 
@@ -304,9 +302,9 @@ scoperto se concesso.
 
 ![Riclassificato](images/guida/19-riclassificato.png)
 
-Lo SP riclassificato (attivo, passivo, patrimonio netto) e il **rendiconto finanziario
-riclassificato per indici** per anno: solidità patrimoniale, copertura delle immobilizzazioni,
-indici di liquidità, composizione delle fonti. Sotto, gli indicatori di performance con
+Lo **stato patrimoniale riclassificato** (attivo, passivo, patrimonio netto) con gli **indici**
+per anno: solidità patrimoniale, copertura delle immobilizzazioni, indici di liquidità,
+composizione delle fonti. Sotto, gli indicatori di performance con
 formula e soglia (DSCR, PFN/EBITDA, punto di pareggio e margine di sicurezza) — dove il
 denominatore manca, **n.d.**, mai zero.
 
@@ -331,13 +329,15 @@ debiti finanziari, che sono flusso di finanziamento: il confine è ancorato agli
 ![Report](images/guida/21-report.png)
 
 La pagina di consegna: selettore scenario, **«Anteprima PDF»**, «Scarica PDF finale» (finché un
-controllo blocca il documento il pulsante resta bloccato con la ragione accanto), «Scarica
-Word». Il banner di stato è il verdetto: **«Documento pronto»** / **«BOZZA · da rigenerare»**
-— quest'ultimo quando le ipotesi sono più recenti dell'ultima generazione o il motore è
-cambiato (`engine_version_stale`); il testo intero della ragione è in copertina nel PDF, la
-forma corta qui per non troncare il nome azienda. Il PDF è ReportLab (13 pagine: copertina con
-indice, sintesi, CE, SP, circolante, debito, crisi d'impresa, segnali, allegati A/B) e le sue
-regole stanno in [BUSINESS-PLAN-PDF.md](budget/BUSINESS-PLAN-PDF.md).
+controllo blocca il documento il pulsante diventa «Scarica bozza» con la ragione accanto),
+«Scarica Word». Il banner di stato è il verdetto: **«Documento pronto»**, oppure **«Documento
+bloccato»** con la motivazione (per esempio «Forecast precedente alle ipotesi salvate.») e
+il pulsante **«Rigenera previsionale»**. Il PDF è ReportLab: **20 pagine**, copertina con
+indice e dieci sezioni (Sintesi del piano, Evoluzione economica, EBITDA margin e struttura dei
+costi, Costi fissi e variabili · break even point, Flussi di cassa, Sostenibilità del debito ·
+DSCR e PFN, Capitale circolante commerciale, Solidità patrimoniale liquidità e redditività,
+Punto di partenza, Assunzioni del piano) più gli Allegati A–E.
+Le sue regole stanno in [BUSINESS-PLAN-PDF.md](budget/BUSINESS-PLAN-PDF.md).
 
 Sotto, **«Vista web del dossier»**: lo stesso documento in HTML, con indice laterale (Perimetro
 · Sintesi · Fonti · Rettifiche · Chiusura · Ipotesi · CE · SP · Cassa · Indicatori ·
@@ -355,7 +355,7 @@ rispedire al file che l'ha prodotto.
 
 ![Indici](images/guida/16-indici.png)
 
-Il cruscotto sugli **indici di legge**: i blocknotes in alto (Ricavi, EBITDA, PN, ROE), Altman
+Il cruscotto sugli **indici di bilancio**: le schede di sintesi in alto (Ricavi, EBITDA, PN, ROE), Altman
 Z-Score con zona e componenti, **rating FGPMI** (V1–V7 su soglie di settore, classe AAA→BB-),
 i grafici radar/bar, e la tabella pluriennale con la **formula di ogni indice** accanto al
 valore. Da leggere con le scelte di perimetro in testa: il DSO è sui soli **crediti

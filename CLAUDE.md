@@ -280,7 +280,7 @@ esistente**, storico compreso, non solo su quelli generati dopo il lotto.
 - **ROD e PFN su un solo perimetro di debito finanziario**: `financial_debt_total` (banche +
   altri finanziatori + obbligazioni, sp16a-c/sp17a-c, somma incondizionata) — prima un ramo
   tagliava fuori gli altri finanziatori quando c'erano già banche, sottostimando ROD e PFN su
-  ogni azienda con debito misto. `rod` è `None` (mai zero) a perimetro zero. **ROD sul debito medio** (#61 S11, 2026-10-05): oneri / media del debito finanziario a inizio e fine anno (`FinancialRatiosCalculator(bs, inc, previous_balance_sheet=…)`, passato da `/ratios` e da `analysis_service`, quindi anche dal report); senza SP d'inizio (prima colonna) resta la fine anno. **`None`, non
+  ogni azienda con debito misto. `rod` è `None` (mai zero) a perimetro zero. **ROD sul debito medio** (#61 S11, 2026-10-05): oneri / media del debito finanziario a inizio e fine anno (`FinancialRatiosCalculator(bs, inc, previous_balance_sheet=…)`, passato da `/ratios` e da `analysis_service`, quindi anche dal report); senza SP d'inizio (prima colonna) resta la fine anno. La sintesi annuale `/calculations/complete` (e il PDF legacy) resta sulla fine anno; la media vale per `/ratios` e `/analysis`. **`None`, non
   "-cassa"/zero, quando il dettaglio manca** (revisione finale, F1): sp16a/b/c e sp17a/b/c tutti a
   zero mentre l'aggregato sp16+sp17 resta positivo non vuol dire "nessun debito finanziario" —
   vuol dire che l'import non l'ha classificato. PFN, PFN/EBITDA e ROD analitico diventano `None`

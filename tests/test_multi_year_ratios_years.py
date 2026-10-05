@@ -143,3 +143,22 @@ def test_rod_usa_il_debito_finanziario_medio_dalla_seconda_colonna(db):
     assert result["years"] == [2024, 2025]
     assert abs(D(str(rod[2024])) - D("10000") / D("100000")) < D("0.0001")
     assert abs(D(str(rod[2025])) - D("10000") / D("200000")) < D("0.0001")
+
+
+def test_rod_prima_colonna_ignora_un_anno_precedente_solo_parziale(db):
+    """#61 S11 · se year-1 esiste solo come record parziale, la prima colonna resta sulla fine anno."""
+    company = Company(name="Parz S.r.l.", tax_id="00000000003", sector=1, user_id="test-user")
+    db.add(company)
+    db.flush()
+    for year, mesi, debito in ((2024, 6, "100000"), (2025, None, "300000")):
+        fy = FinancialYear(company_id=company.id, year=year, period_months=mesi)
+        fy.balance_sheet = _bs(sp16a_debiti_banche_breve=D(debito))
+        fy.income_statement = _is(ce15_oneri_finanziari=D("10000"))
+        db.add(fy)
+    scenario = BudgetScenario(company_id=company.id, name="B", base_year=2025, scenario_type="budget")
+    db.add(scenario)
+    db.commit()
+    result = calculation_service.calculate_ratios_historical_and_forecast(
+        db=db, company_id=company.id, scenario_id=scenario.id, base_year=2025)
+    assert result["years"] == [2025]
+    assert abs(D(str(result["ratios"][0]["profitability"]["rod"])) - D("10000") / D("300000")) < D("0.0001")

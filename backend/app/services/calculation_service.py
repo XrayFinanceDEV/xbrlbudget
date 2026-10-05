@@ -12,7 +12,7 @@ if backend_path not in sys.path:
     sys.path.insert(0, backend_path)
 
 from database import models
-from database.queries import get_fy_prefer_full
+from database.queries import get_fy_prefer_full, get_fy_full
 from calculations.ratios import FinancialRatiosCalculator
 from calculations.altman import AltmanCalculator
 from calculations.rating_fgpmi import FGPMICalculator
@@ -527,7 +527,7 @@ def calculate_ratios_historical_and_forecast(
             continue
 
         if idx == 0:
-            fy_prec = get_fy_prefer_full(db, company_id, fy.year - 1)
+            fy_prec = get_fy_full(db, company_id, fy.year - 1)
             inizio = fy_prec.balance_sheet if fy_prec is not None else None
         else:
             inizio = prev_bs if prev_year == fy.year - 1 else None
@@ -541,7 +541,6 @@ def calculate_ratios_historical_and_forecast(
 
         result["years"].append(fy.year)
         result["ratios"].append(ratios_dict)
-        prev_bs, prev_year = fy.balance_sheet, fy.year
         prev_bs, prev_year = fy.balance_sheet, fy.year
 
     # Calculate ratios for forecast years

@@ -122,6 +122,24 @@ export const NON_POSTABLE_FIELDS = new Set([
   "ce08_costi_personale", "ce09_ammortamenti", "ce17_rettifiche_attivita_fin",
 ]);
 
+// Un totale modificabile (rimanenze, crediti, costi del personale) non puo'
+// ricevere la modifica: recalcAggregates lo ricostruisce dalle sotto-voci e la
+// cancella in silenzio, mentre la contropartita resta -- lo sbilancio e' l'intero
+// importo (AMBIENTA, 2026-10-05: +200.000 sui costi del personale, guardia del
+// server a 200.000,03). La modifica va sulla sotto-voce che la regola di
+// proposta descrive, e il dialogo la nomina.
+const DESTINAZIONE_AGGREGATO: Record<string, string> = {
+  sp05_rimanenze: "sp05d_prodotti_finiti", // contropartita: variazione rimanenze prodotti
+  sp06_crediti_breve: "sp06a_crediti_clienti_breve", // «più crediti commerciali»
+  sp07_crediti_lungo: "sp07a_crediti_clienti_lungo",
+  ce08_costi_personale: "ce08b_salari_stipendi", // conto principale, come in reconcileSubfields
+};
+
+/** Il campo che riceve davvero una modifica scritta su ``field``. */
+export function destinazioneModifica(field: string): string {
+  return DESTINAZIONE_AGGREGATO[field] ?? field;
+}
+
 // Field categorization for double-entry counterpart filtering.
 export type AcctCategory = "ATTIVO" | "PASSIVO" | "CE_POS" | "CE_NEG";
 export const CE_POSITIVE_FIELDS = new Set([
@@ -312,6 +330,9 @@ export interface DoubleEntryProposal {
   mode: ProposalMode;
   editedField: string;
   editedLabel: string;
+  // La casella in cui l'utente ha scritto, quando la modifica va su un'altra voce
+  // (un totale -> la sua sotto-voce, destinazioneModifica).
+  pendingKey?: string;
   delta: number;
   counterpartField: string;
   counterpartLabel: string;

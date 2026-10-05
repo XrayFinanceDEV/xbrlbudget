@@ -691,6 +691,19 @@ def rimanenze_materie(apertura: Decimal, acquisti: Decimal, giorni: Decimal) -> 
     return chiusura, ce10
 
 
+def rimanenze_gruppo_materie(apertura_a, apertura_b, acquisti, giorni) -> Tuple[Decimal, Decimal]:
+    """Materie prime (sp05a) e semilavorati (sp05b) come un solo magazzino di produzione, giorni sul consumo di
+    materie (#62 nota S04, decisione del proprietario 2026-10-05). La quota materie del gruppo resta quella
+    d'apertura; la chiusura delle materie si risolve in forma chiusa come `rimanenze_materie` (con q = 1 coincide).
+    Ritorna (chiusura_a, chiusura_b) a precisione piena: quantizzare e' del chiamante."""
+    a, b = Decimal(str(apertura_a or 0)), Decimal(str(apertura_b or 0))
+    acq, g = Decimal(str(acquisti or 0)), Decimal(str(giorni or 0))
+    q = Decimal('1') if a + b == 0 else a / (a + b)
+    chiusura_a = max(ZERO, q * (acq + a) * g / (Decimal('360') + q * g))
+    gruppo = max(ZERO, (acq + a - chiusura_a) * g / Decimal('360'))
+    return chiusura_a, max(ZERO, gruppo - chiusura_a)
+
+
 # ── Debito bancario: le regole condivise dai due motori (lotto 3A, Task 3) ──
 
 def e_contratto_pregresso(loan) -> bool:

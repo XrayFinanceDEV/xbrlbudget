@@ -64,7 +64,10 @@ def _budget(settore, campo="sp05a_materie_prime"):
 @pytest.mark.parametrize("settore", [5, 6])
 def test_immobiliare_ed_edilizia_scalano_le_rimanenze_coi_ricavi(settore):
     anni = _budget(settore, campo="sp05c_lavori_in_corso")
-    attesi = {2027: ("1100000.00", "44222.22"), 2028: ("1210000.00", "140704.44")}
+    # Nota S04 (#62, 2026-10-05): la variazione dei lavori in corso passa ora dal CE (ce03 = Δsp05c, +100.000
+    # e +110.000) invece di assorbire cassa senza P&L: la cassa 2027 sale esattamente di 100.000 (le imposte
+    # si pagano l'anno dopo), la 2028 di 154.200. Le rimanenze (sp05) e i 600 giorni non si muovono.
+    attesi = {2027: ("1100000.00", "144222.22"), 2028: ("1210000.00", "294904.44")}
     fuori = []
     for anno, (rimanenze, cassa) in attesi.items():
         sp, det = anni[anno]

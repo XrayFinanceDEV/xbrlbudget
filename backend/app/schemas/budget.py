@@ -321,6 +321,7 @@ class BudgetAssumptionsBase(BaseModel):
     # Working capital turnover days (None = auto-compute from base year)
     dso_days: Optional[Decimal] = None
     dio_days: Optional[Decimal] = None
+    dio_pf_days: Optional[Decimal] = None
     dpo_days: Optional[Decimal] = None
 
     # Existing financial debt repayment (None = keep constant)
@@ -480,6 +481,7 @@ class BudgetAssumptionsUpdate(BaseModel):
     payables_short_growth_pct: Optional[Decimal] = None
     dso_days: Optional[Decimal] = None
     dio_days: Optional[Decimal] = None
+    dio_pf_days: Optional[Decimal] = None
     dpo_days: Optional[Decimal] = None
     existing_debt_repayment_years: Optional[Decimal] = None
     altri_finanz_repayment_years: Optional[Decimal] = None

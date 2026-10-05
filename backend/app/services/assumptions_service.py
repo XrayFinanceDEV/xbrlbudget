@@ -235,6 +235,7 @@ def build_assumption_row(
         payables_short_growth_pct=data.get("payables_short_growth_pct", 0.0),
         dso_days=data.get("dso_days", None),
         dio_days=data.get("dio_days", None),
+        dio_pf_days=data.get("dio_pf_days", None),
         dpo_days=data.get("dpo_days", None),
         existing_debt_repayment_years=data.get("existing_debt_repayment_years", None),
         altri_finanz_repayment_years=data.get("altri_finanz_repayment_years", None),

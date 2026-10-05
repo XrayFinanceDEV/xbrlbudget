@@ -626,6 +626,7 @@ class BudgetAssumptions(Base):
     # Working capital turnover days (NULL = auto-compute from base year)
     dso_days = Column(Numeric(10, 2), nullable=True)  # Days Sales Outstanding
     dio_days = Column(Numeric(10, 2), nullable=True)  # Days Inventory Outstanding
+    dio_pf_days = Column(Numeric(10, 2), nullable=True)  # Giorni prodotti finiti e merci (sp05d), sui ricavi (#62 S04)
     dpo_days = Column(Numeric(10, 2), nullable=True)  # Days Payable Outstanding
 
     # Existing financial debt repayment (NULL = keep constant).

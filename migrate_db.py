@@ -102,6 +102,7 @@ MIGRATIONS = {
         ("tangible_investments",               "NUMERIC(15,2) DEFAULT 0 NOT NULL"),
         ("dso_days",                           "NUMERIC(10,2)"),
         ("dio_days",                           "NUMERIC(10,2)"),
+        ("dio_pf_days",                        "NUMERIC(10,2)"),
         ("dpo_days",                           "NUMERIC(10,2)"),
         ("existing_debt_repayment_years",      "NUMERIC(10,2)"),
         ("altri_finanz_repayment_years",       "NUMERIC(10,2)"),

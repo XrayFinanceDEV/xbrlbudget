@@ -1180,7 +1180,7 @@ rifiutato** (vedi «Invarianti e trappole › Previsionale»).
 - **Decimals**: monetary columns are `Numeric(15, 2)` — max 9.999.999.999.999,99. Backend serializes
   through `DecimalJSONResponse` (Decimal → float).
 - **Italian locale**: UI in Italian, European number formatting. No emojis — lucide-react icons.
-- **CORS**: localhost:3000-3002 (Next.js), 8000, 8501 (Streamlit legacy), the Netlify origin, plus
+- **CORS**: localhost:3000-3002 (Next.js), 8000, 8501 (Streamlit legacy), plus
   whatever `ALLOWED_ORIGINS` adds (comma-separated).
 - **Frontend**: shadcn/ui (new-york, slate base) + Tailwind v3 + next-themes + Recharts. Altman and
   FGPMI status colors are explicit green/yellow/red with `dark:` variants.

@@ -61,7 +61,7 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
     # Il nome del PDF scaricato arriva in Content-Disposition: senza esporla, da
-    # un'origine diversa (Netlify -> API) il browser la nasconde e il client ricade
+    # un'origine diversa (in sviluppo: localhost:3000 -> :8000) il browser la nasconde e il client ricade
     # su un nome di ripiego («Report Budget.pdf», anche per il report intermedio).
     expose_headers=["Content-Disposition"],
 )

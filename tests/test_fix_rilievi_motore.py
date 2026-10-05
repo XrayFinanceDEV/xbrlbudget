@@ -22,15 +22,17 @@ def test_consuma_in_ordine_crescita_proporzionale():
     assert _consuma_in_ordine(D("7"), [D("0")] * 5) == [D("7"), D("0"), D("0"), D("0"), D("0")]
 
 
-def test_B03_personale_ricomposto_quando_il_tfr_sfonda_il_totale():
-    # Sulla base AMBIENTA salari/13,5 + salari + oneri supera il totale del personale:
-    # il totale si ricompone come somma e lo si dichiara.
+def test_B03_ce08d_non_va_a_zero_e_il_totale_e_la_somma():
+    # #61 S06 (2026-10-05): ogni componente monetaria cresce col personale, il TFR e' salari/13,5
+    # e il totale e' la somma: nessuna ricomposizione da dichiarare.
     e = generato(genera(righe()))
-    ce, det = e.anni[2027][1], e.det[2027]["personale_ricomposto"]
-    somma = ce["ce08a_tfr_accrual"] + ce["ce08b_salari_stipendi"] + ce["ce08c_oneri_sociali"]
-    assert ce["ce08d_altri_costi_personale"] == D("0.00")
+    ce = e.anni[2027][1]
+    somma = (ce["ce08a_tfr_accrual"] + ce["ce08b_salari_stipendi"] + ce["ce08c_oneri_sociali"]
+             + ce["ce08d_altri_costi_personale"])
+    assert ce["ce08d_altri_costi_personale"] > 0
     assert ce["ce08_costi_personale"] == somma
-    assert det["tfr_limitato"] is False and D(str(det["eccedenza"])) > 0
+    assert e.det[2027]["personale_ricomposto"] is None
+    assert e.det[2027]["personale"]["modo"] == "componenti"
 
 
 def test_B03_override_del_totale_vince_e_limita_il_tfr():
@@ -44,10 +46,11 @@ def test_B03_override_del_totale_vince_e_limita_il_tfr():
 
 
 def test_B03_nessuna_ricomposizione_dichiarata_quando_il_totale_regge():
-    # Oneri sociali azzerati: salari/13,5 + salari sta sotto il totale.
+    # Oneri sociali azzerati: il totale e' la somma delle componenti, modo «componenti».
     e = generato(genera(righe(), ce={"ce08c_oneri_sociali": D("0"),
                                      "ce08d_altri_costi_personale": D("491380.40")}))
     assert e.det[2027]["personale_ricomposto"] is None
+    assert e.det[2027]["personale"]["modo"] == "componenti"
     ce = e.anni[2027][1]
     assert abs(ce["ce08a_tfr_accrual"] - ce["ce08b_salari_stipendi"] / D("13.5")) < D("0.01")
 

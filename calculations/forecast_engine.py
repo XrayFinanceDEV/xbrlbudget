@@ -3131,53 +3131,76 @@ class ForecastEngine:
             ce07 = _pinc('ce07_godimento_beni') * (Decimal('1') + assumption.rent_growth_pct / Decimal('100'))
 
         # Personnel
-        if assumption.ce08_override is not None:
-            ce08 = assumption.ce08_override
-        else:
-            ce08 = _pinc('ce08_costi_personale') * (Decimal('1') + assumption.personnel_growth_pct / Decimal('100'))
-
-        # Personnel sub-items — override or maintain same proportions as the previous year.
-        # Salari/oneri scale with the personnel total; TFR (ce08a) is the statutory accrual
-        # salari/13,5 (spec B03, 2026-09-26 — so the sp15 fund, which reads ce08a, grows every
-        # year even when the base import only carried the aggregate personnel cost); ce08d
-        # absorbs the remainder. When TFR+salari+oneri exceed the personnel total the total is
-        # RICOMPOSTO as their sum — unless the total itself is forced (ce08_override), in which
-        # case the forced total wins and TFR is capped at what salari+oneri leave, as before.
-        # Either way it is declared in details['personale_ricomposto'], always present (None
-        # when the four sub-items already fit inside the total).
         prev_ce08 = _pinc('ce08_costi_personale')
-        if prev_ce08 > 0:
-            growth_factor = ce08 / prev_ce08
-        else:
-            growth_factor = Decimal('1')
-        ce08b = assumption.ce08b_override if assumption.ce08b_override is not None else _pinc('ce08b_salari_stipendi') * growth_factor
-        ce08c = assumption.ce08c_override if assumption.ce08c_override is not None else _pinc('ce08c_oneri_sociali') * growth_factor
-        ce08a = assumption.ce08a_override if assumption.ce08a_override is not None else tfr_accrual_quota(ce08b, ce08)
-        resto = ce08 - ce08a - ce08b - ce08c
+        prev_b, prev_c, prev_d = (_pinc('ce08b_salari_stipendi'), _pinc('ce08c_oneri_sociali'),
+                                  _pinc('ce08d_altri_costi_personale'))
+        crescita_pers = Decimal('1') + assumption.personnel_growth_pct / Decimal('100')
         personale_ricomposto = None
-        if assumption.ce08d_override is not None:
-            ce08d = assumption.ce08d_override
-        elif resto < 0:
-            if assumption.ce08_override is not None:
-                ce08_ipotesi = ce08
-                ce08a = max(Decimal('0'), ce08 - ce08b - ce08c)
-                ce08d = Decimal('0')
-                personale_ricomposto = {
-                    'ce08_ipotesi': ce08_ipotesi, 'ce08': ce08,
-                    'eccedenza': -resto, 'tfr_limitato': True,
-                }
-            else:
-                ce08_ipotesi = ce08
-                ce08 = ce08a + ce08b + ce08c
-                ce08d = Decimal('0')
-                personale_ricomposto = {
-                    'ce08_ipotesi': ce08_ipotesi, 'ce08': ce08,
-                    'eccedenza': -resto, 'tfr_limitato': False,
-                }
+        if assumption.ce08_override is None and (prev_b + prev_c + prev_d) > 0:
+            # #61 S06 (decisione del proprietario 2026-10-05): ogni componente monetaria cresce col
+            # personale, il TFR e' quello di legge (B03) e il totale e' la loro somma. Il totale non e'
+            # piu' «anno prima x crescita»: si dichiara di quanto se ne scosta.
+            ce08b = assumption.ce08b_override if assumption.ce08b_override is not None else prev_b * crescita_pers
+            ce08c = assumption.ce08c_override if assumption.ce08c_override is not None else prev_c * crescita_pers
+            ce08d = assumption.ce08d_override if assumption.ce08d_override is not None else prev_d * crescita_pers
+            ce08a = assumption.ce08a_override if assumption.ce08a_override is not None else tfr_accrual_quota(ce08b, prev_ce08 * crescita_pers)
+            ce08_ipotesi = prev_ce08 * crescita_pers
+            ce08 = ce08a + ce08b + ce08c + ce08d
+            personale = {'modo': 'componenti', 'ce08_ipotesi': ce08_ipotesi, 'ce08': ce08,
+                         'differenza': ce08 - ce08_ipotesi, 'tfr_limitato': False}
         else:
-            ce08d = resto
+            if assumption.ce08_override is not None:
+                ce08 = assumption.ce08_override
+            else:
+                ce08 = _pinc('ce08_costi_personale') * (Decimal('1') + assumption.personnel_growth_pct / Decimal('100'))
+
+            # Personnel sub-items — override or maintain same proportions as the previous year.
+            # Salari/oneri scale with the personnel total; TFR (ce08a) is the statutory accrual
+            # salari/13,5 (spec B03, 2026-09-26 — so the sp15 fund, which reads ce08a, grows every
+            # year even when the base import only carried the aggregate personnel cost); ce08d
+            # absorbs the remainder. When TFR+salari+oneri exceed the personnel total the total is
+            # RICOMPOSTO as their sum — unless the total itself is forced (ce08_override), in which
+            # case the forced total wins and TFR is capped at what salari+oneri leave, as before.
+            # Either way it is declared in details['personale_ricomposto'], always present (None
+            # when the four sub-items already fit inside the total).
+            if prev_ce08 > 0:
+                growth_factor = ce08 / prev_ce08
+            else:
+                growth_factor = Decimal('1')
+            ce08b = assumption.ce08b_override if assumption.ce08b_override is not None else _pinc('ce08b_salari_stipendi') * growth_factor
+            ce08c = assumption.ce08c_override if assumption.ce08c_override is not None else _pinc('ce08c_oneri_sociali') * growth_factor
+            ce08a = assumption.ce08a_override if assumption.ce08a_override is not None else tfr_accrual_quota(ce08b, ce08)
+            resto = ce08 - ce08a - ce08b - ce08c
+            personale_ricomposto = None
+            if assumption.ce08d_override is not None:
+                ce08d = assumption.ce08d_override
+            elif resto < 0:
+                if assumption.ce08_override is not None:
+                    ce08_ipotesi = ce08
+                    ce08a = max(Decimal('0'), ce08 - ce08b - ce08c)
+                    ce08d = Decimal('0')
+                    personale_ricomposto = {
+                        'ce08_ipotesi': ce08_ipotesi, 'ce08': ce08,
+                        'eccedenza': -resto, 'tfr_limitato': True,
+                    }
+                else:
+                    ce08_ipotesi = ce08
+                    ce08 = ce08a + ce08b + ce08c
+                    ce08d = Decimal('0')
+                    personale_ricomposto = {
+                        'ce08_ipotesi': ce08_ipotesi, 'ce08': ce08,
+                        'eccedenza': -resto, 'tfr_limitato': False,
+                    }
+            else:
+                ce08d = resto
+            _ric = personale_ricomposto or {}
+            personale = {'modo': 'override' if assumption.ce08_override is not None else 'aggregato',
+                         'ce08_ipotesi': _ric.get('ce08_ipotesi', ce08), 'ce08': ce08,
+                         'differenza': ce08 - _ric.get('ce08_ipotesi', ce08),
+                         'tfr_limitato': bool(_ric.get('tfr_limitato'))}
         if details is not None:
             details['personale_ricomposto'] = personale_ricomposto
+            details['personale'] = personale
 
         # Depreciation — override total or calculate from investments
         depreciation_rate_tangible = assumption.depreciation_rate / Decimal('100')

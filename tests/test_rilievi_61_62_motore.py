@@ -39,3 +39,27 @@ def test_M3_perdita_non_accantona():
     sp = e.anni[2027][0]
     assert _q(sp["sp12c_riserva_legale"]) == _q(BASE_BS["sp12c_riserva_legale"])
     assert _q(e.det[2027]["riserva_legale"]["quota"]) == D("0.00")
+
+
+def test_M2_ce08d_cresce_col_personale_e_il_totale_e_la_somma():
+    rows = righe(personnel_growth_pct=4)
+    e = generato(genera(rows))
+    ce_base = BASE_CE
+    for i, y in enumerate((2027, 2028, 2029), start=1):
+        ce = e.anni[y][1]
+        atteso_d = ce_base["ce08d_altri_costi_personale"] * D("1.04") ** i
+        assert abs(ce["ce08d_altri_costi_personale"] - atteso_d) <= D("0.05")
+        somma = sum(ce[k] for k in ("ce08a_tfr_accrual", "ce08b_salari_stipendi",
+                                    "ce08c_oneri_sociali", "ce08d_altri_costi_personale"))
+        assert _q(ce["ce08_costi_personale"]) == _q(somma)
+        assert _q(ce["ce08a_tfr_accrual"]) == _q(ce["ce08b_salari_stipendi"] / D("13.5"))
+    assert e.det[2027]["personale"]["modo"] == "componenti"
+    assert e.det[2027]["personale_ricomposto"] is None
+
+
+def test_M2_senza_dettaglio_resta_la_regola_aggregata():
+    zero = {k: D("0") for k in ("ce08a_tfr_accrual", "ce08b_salari_stipendi",
+                                 "ce08c_oneri_sociali", "ce08d_altri_costi_personale")}
+    e = generato(genera(righe(personnel_growth_pct=4), ce=zero))
+    assert e.det[2027]["personale"]["modo"] == "aggregato"
+    assert _q(e.anni[2027][1]["ce08_costi_personale"]) >= _q(BASE_CE["ce08_costi_personale"] * D("1.04"))

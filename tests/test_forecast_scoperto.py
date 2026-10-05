@@ -288,17 +288,20 @@ def test_senza_concessione_lo_stesso_piano_si_ferma_come_sempre():
 # ricavi: dividono sul consumo di base (ce05 200.000, invariato), che qui resta piatto. Solo
 # `sp09` si sposta (+1.665,00 / +3.385,44 / +5.163,18, cumulato sull'anno prima): il totale attivo
 # resta lo stesso perche' la cassa in piu' e' esattamente lo stock di rimanenze in meno.
+#
+# #61 S06 (2026-10-05): ce08 e' la somma delle componenti (la base del kit ne somma 2.344.741,99, non
+# 2.344.742,00): il centesimo di differenza si sposta su sp09/sp13/totale attivo 2028 e sp16 2029.
 PARITA = {
     2027: {"sp09_disponibilita_liquide": "96251.96", "sp16a_debiti_banche_breve": "0.00",
            "sp16_debiti_breve": "140000.00", "sp17a_debiti_banche_lungo": "50000.00",
            "sp13_utile_perdita": "62855.97", "ce15_oneri_finanziari": "5000.00",
            "ce20_imposte": "24322.90", "_total_assets": "469147.26"},
-    2028: {"sp09_disponibilita_liquide": "233093.41", "sp16a_debiti_banche_breve": "0.00",
+    2028: {"sp09_disponibilita_liquide": "233093.42", "sp16a_debiti_banche_breve": "0.00",
            "sp16_debiti_breve": "144564.52", "sp17a_debiti_banche_lungo": "50000.00",
-           "sp13_utile_perdita": "74651.72", "ce15_oneri_finanziari": "5000.00",
-           "ce20_imposte": "28887.42", "_total_assets": "554724.62"},
+           "sp13_utile_perdita": "74651.73", "ce15_oneri_finanziari": "5000.00",
+           "ce20_imposte": "28887.42", "_total_assets": "554724.63"},
     2029: {"sp09_disponibilita_liquide": "355032.94", "sp16a_debiti_banche_breve": "0.00",
-           "sp16_debiti_breve": "144752.16", "sp17a_debiti_banche_lungo": "50000.00",
+           "sp16_debiti_breve": "144752.15", "sp17a_debiti_banche_lungo": "50000.00",
            "sp13_utile_perdita": "86932.38", "ce15_oneri_finanziari": "5000.00",
            "ce20_imposte": "33639.58", "_total_assets": "648276.37"},
 }

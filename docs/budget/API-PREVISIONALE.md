@@ -1076,7 +1076,7 @@ solo per compatibilità con un client vecchio).
   passo 6 del wizard («Patrimoniale piano», dove vivono dal giro di rilievi del 15/09 — prima
   stava al passo «Capitale circolante») lo scrive però su **tutti** gli anni di piano con lo
   stesso criterio delle altre caselle "uguali per tutto il piano" — si legge la scelta del primo
-  anno previsto (`spIndexingOf`, `frontend/lib/budget-circolante-step.ts:209-215`).
+  anno previsto (`spIndexingOf`, `frontend/lib/budget-circolante-step.ts:262-268`).
 - **Driver degenere** (denominatore dell'anno base ≤ 0): il motore non indicizza, ricade sul
   comportamento costante/percentuale e dichiara il motivo `"driver degenere"` — mai un fattore
   inventato da un `or 1` di comodo.

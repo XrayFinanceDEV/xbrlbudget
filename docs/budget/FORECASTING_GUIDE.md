@@ -153,7 +153,7 @@ usato.
 costo del personale che avresti (perché forzato in CE Prev. o troppo basso), il motore **ricompone
 il totale come somma** delle tre voci e azzera «altri costi del personale», dichiarando l'eccedenza;
 un totale forzato invece vince e limita l'accantonamento a quanto resta sotto. **Quando l'anno prima
-ha salari, oneri o altri costi del personale** (e il totale non è forzato) ogni componente cresce con la
+ha i salari** (`ce08b` maggiore di zero, e il totale non è forzato) ogni componente cresce con la
 crescita del personale e il totale del personale è la **somma** delle voci, TFR di legge compreso:
 `details['personale']` dichiara di quanto si scosta da «anno prima × crescita». **Proventi e oneri
 straordinari** valgono zero in ogni anno di piano — non sono ricorrenti per definizione — salvo un
@@ -217,7 +217,7 @@ e tutto il blocco è `null`, sull'anno interessato.
   hanno giorni dedotti dai ricavi. La variazione dei prodotti finiti e dei semilavorati passa dal CE
   (`ce02` = Δ`sp05b + sp05d`); `ce03` non si deriva dallo SP (negli import contiene i lavori interni)
   e il movimento di `sp05c` è solo di cassa. Giorni scritti da te che spostano un gruppo di oltre il
-  50% della giacenza d'apertura, o oltre il suo flusso, ricevono un avviso: il numero resta tuo. Un
+  50% della giacenza d'apertura (solo se l'apertura è positiva), o oltre il suo flusso, ricevono un avviso: il numero resta tuo. Un
   `ce10_override` (la variazione di rimanenze in CE Prev.) oltre la giacenza di materie in apertura
   si **rifiuta**: le rimanenze non possono scendere sotto zero, e lo SP segue sempre il CE su questa
   voce.

@@ -49,7 +49,8 @@ generazione), il "finale" si blocca anche con `engine_version_stale` — un `For
 precedente di `calculations/forecast_engine.ENGINE_VERSION` — mai per l'infrannuale. In intestazione compare solo
 la forma corta «BOZZA · da rigenerare» (la frase intera per esteso troncherebbe il nome dell'azienda); le frasi
 intere della spec stanno in copertina, una per riga (`BusinessPlanData.avvisi`, `data.py`). `engine_meta` assente,
-o senza la chiave `engine_version`, non genera alcun avviso.
+o senza la chiave `engine_version`, su uno scenario budget vale «da rigenerare» (decisione del proprietario
+2026-10-05: i previsionali senza firma sono anteriori al 2026-09-26); sull'infrannuale non c'è avviso.
 
 **Testi:** `narrative.py`, regole deterministiche con soglie in `SOGLIE`. Nessun LLM. Per cambiare una frase si
 cambia una regola o una soglia, e il test `tests/test_bp_narrative.py` ne fissa il comportamento su AMBIENTA.

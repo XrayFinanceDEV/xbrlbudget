@@ -573,7 +573,7 @@ esistente**, storico compreso, non solo su quelli generati dopo il lotto.
   questo si ricompone come somma e `ce08d` va a zero (`details['personale_ricomposto']`, `None`
   quando non serve ricomporre — un `ce08_override` invece vince e limita `ce08a`,
   `tfr_limitato: true`). **Dal 2026-10-05 (#61 S06) il ramo normale è un altro**: quando l'anno prima ha
-  salari, oneri o altri costi del personale e non c'è `ce08_override`, ogni componente cresce con
+  i salari (`ce08b > 0`) e non c'è `ce08_override`, ogni componente cresce con
   `personnel_growth_pct` e `ce08` è la **somma** (TFR di legge compreso), non più «anno prima × crescita»;
   `details['personale']` dichiara `modo` (`componenti`/`aggregato`/`override`), `ce08_ipotesi`, `ce08`,
   `differenza`, `tfr_limitato`. Con la sola aggregata a bilancio resta il ramo di prima. Gli ammortamenti tengono separati il residuo dei cespiti esistenti e quello
@@ -918,8 +918,8 @@ get days derived from revenue, no input. `ce02_variazioni_rimanenze` = Δ(`sp05b
 `sp05c`**: the importers write the A.4 «incrementi per lavori interni» line there, so deriving it would zero a
 real revenue — it stays the base value or the override, and the `sp05c` movement is cash only, declared
 `details['rimanenze']['lavori_in_corso']['contropartita'] = 'nessuna'`. `_CAMPI_NEUTRI_RESIDUO['sp05_rimanenze']`
-is now `sp05e` alone. Explicit days that move a group by more than 50% of its opening stock, or more than its
-flow, are only flagged (`details['avvisi']`, `details['avviso_rimanenze']`): the user keeps the number. A
+is now `sp05e` alone. Explicit days that move a group by more than 50% of its opening stock (tested only when the opening is
+positive), or more than its flow, are only flagged (`details['avvisi']`, `details['avviso_rimanenze']`): the user keeps the number. A
 `ce10_override` beyond the opening materials stock is **refused** (stock cannot go negative, Italian
 `ValueError`); at or below it, the override wins and `sp05a` follows exactly (`details['rimanenze_materie']`).
 Existing scenarios move: materials used to scale with revenue like every other stock line, so a

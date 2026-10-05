@@ -89,6 +89,7 @@ dmypy.json
 .env
 .env.local
 .env.staging
+.env.snello
 # Credenziali locali (account di prova, token): mai nel repo, a nessuna profondita'
 .env*.local
 **/.env*.local

@@ -358,6 +358,32 @@ _PRACTICE_D = tuple("practice." + k for k in ("dscr", "ebitda_margin", "mt", "cc
                                               "ros", "of_mol", "of_revenue"))
 
 
+# Indicatori che su un periodo parziale (m < 12 mesi) si mostrano anche annualizzati, con il fattore che si applica
+# al valore del periodo: il ROI è un flusso su uno stock (× 12/m), la PFN/EBITDA ha lo stock al numeratore e il
+# flusso al denominatore (× m/12). Chiave del catalogo -> (etichetta annualizzata, fattore in funzione di m).
+_ANNUALIZZATI = {
+    "roi": ("ROI (annualizzato)", lambda m: Decimal(12) / Decimal(m)),
+    "pfn_ebitda": ("PFN / EBITDA (annualizzato)", lambda m: Decimal(m) / Decimal(12)),
+}
+
+
+def _annualizza(rows: tuple, keys: tuple, m: int | None, adj_i: int | None) -> tuple:
+    """Dopo ogni riga `keys[i]` inserisce la versione annualizzata. La colonna del periodo parziale (`adj_i`) è
+    scalata, le colonne di 12 mesi ripetono il valore; un valore assente resta assente (n.d.).
+    Senza periodo parziale (m >= 12 o assente, colonna assente) restituisce le righe com'erano."""
+    if not m or m >= 12 or adj_i is None:
+        return rows
+    out = []
+    for key, row in zip(keys, rows):
+        out.append(row)
+        if key in _ANNUALIZZATI:
+            label, factor = _ANNUALIZZATI[key]
+            vals = tuple(None if v is None else (v * factor(m) if i == adj_i else v)
+                         for i, v in enumerate(row.values))
+            out.append(IndicatorRow(label, row.unit, vals))
+    return tuple(out)
+
+
 def _indicators(report, ids, pids: list) -> tuple:
     by_id = {ind.id: ind for ind in report.indicator_catalog}
     out = []
@@ -461,10 +487,13 @@ def _starting_infrannuale(report, lk, cols, periods) -> StartingPoint:
                        (f"{m}M rettificato", "Stimato residuo", f"Forecast {y}"), ponte),
         ),
         indicator_headers=(f"{m}M {y} rettificato", f"Forecast {y}"),
-        indicators=tuple(IndicatorRow(label, UNITS.get(k, "eur"), (g(k, adj), g(k, clo))) for label, k in _START_IND),
+        indicators=_annualizza(
+            tuple(IndicatorRow(label, UNITS.get(k, "eur"), (g(k, adj), g(k, clo))) for label, k in _START_IND),
+            tuple(k for _, k in _START_IND), m, 0),
         checks=_checks(lk, cols, report),
         note=f"Periodi di durata diversa ({m} mesi e 12 mesi): gli indicatori reddituali vanno letti tenendo conto "
-             "di questa differenza.",
+             f"di questa differenza. Per il periodo di {m} mesi ROI e PFN / EBITDA compaiono sia sul periodo sia "
+             f"annualizzati (ROI × 12/{m}, PFN / EBITDA × {m}/12).",
         sources=(("Bilancio di verifica", f"{m}M {y}", "disponibile"),
                  ("Registro rettifiche", f"{n_rett} eventi",
                   "confermato" if report.adjustments.confirmed else "da confermare"),
@@ -582,15 +611,20 @@ def from_report(report, *, draft: bool) -> BusinessPlanData:
         annex[st.id], zero[st.id] = _annex(st, cols)
     d_pids = [c.period_id for c in cols]
     d_headers = tuple(c.label for c in cols)
+    d_adj = None
+    present_ids = {ind.id for ind in report.indicator_catalog}
     if partial_label and len(cols) + 1 <= 6:
-        d_pids, d_headers = [adj.id] + d_pids, (partial_label,) + d_headers
+        d_pids, d_headers, d_adj = [adj.id] + d_pids, (partial_label,) + d_headers, 0
     return BusinessPlanData(
         company_name=report.company.name, workflow=wf, columns=cols, base_description=base_description,
         values=values, growth=growth, revenue_overridden=revenue_overridden, assumptions=tuple(rows), partial_label=partial_label,
         partial_dscr=partial_dscr, residual_revenue=residual, starting_point=starting,
         annex=annex, annex_zero_labels=zero,
         indicators_practice_headers=d_headers,
-        indicators_practice=_indicators(report, _PRACTICE_D, d_pids),
+        indicators_practice=_annualizza(
+            _indicators(report, _PRACTICE_D, d_pids),
+            tuple(k.removeprefix("practice.") for k in _PRACTICE_D if k in present_ids),
+            adj.period_months if adj is not None else None, d_adj),
         indicators_analytical=_indicators(
             report, [i.id for i in report.indicator_catalog
                      if i.id.startswith("analytical.") and i.id not in _DUPLICATI_E],

@@ -283,7 +283,7 @@ def indicator_results(bs, inc, analytical_ratios=None, cashflow=None, *, is_fore
         'activity.cash_conversion_cycle': 'Giorni magazzino + giorni credito - giorni debito, prima degli arrotondamenti individuali',
         'activity.asset_turnover': 'Ricavi / totale attivo',
         'extended_profitability.spread': 'ROI - ROD, già arrotondati dal motore',
-        'extended_profitability.financial_leverage_effect': 'Debiti totali / patrimonio netto',
+        'extended_profitability.financial_leverage_effect': 'Totale attivo / patrimonio netto',
         'extended_profitability.ebitda_on_sales': 'EBITDA / ricavi',
         'extended_profitability.financial_charges_on_revenue': 'Oneri finanziari / ricavi',
         'efficiency.revenue_per_employee_cost': 'Ricavi / costo del personale',

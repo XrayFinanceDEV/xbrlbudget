@@ -566,3 +566,12 @@ def test_I1_senza_inizio_resta_la_fine_anno():
     assert fine == FinancialRatiosCalculator.round_decimal(D("10000") / bs.financial_debt_total, 4)
     assert FinancialRatiosCalculator(bs, inc, previous_balance_sheet=None) \
         .calculate_profitability_ratios().rod == fine
+
+
+def test_I2_leva_e_totale_attivo_su_pn_e_non_duplica_l_indebitamento():
+    from calculations.ratios import FinancialRatiosCalculator
+    bs, inc = _statements({}, {})
+    calc = FinancialRatiosCalculator(bs, inc)
+    leva = calc.calculate_extended_profitability_ratios().financial_leverage_effect
+    assert leva == FinancialRatiosCalculator.round_decimal(bs.total_assets / bs.total_equity, 4)
+    assert leva != calc.calculate_solvency_ratios().leverage_ratio

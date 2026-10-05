@@ -1062,10 +1062,10 @@ export default function AnalysisPage() {
                   </tr>
                   <tr className="border-b border-border hover:bg-muted/50">
                     <td className="py-2 px-4 sticky left-0 bg-background">EFFETTO DI LEVA FINANZIARIA O TASSO DI RISCHIO</td>
-                    <FormulaCell formula="(PC+PF)/CN" />
+                    <FormulaCell formula="TA/CN" />
                     {multiYearRatios.ratios.map((r, i) => (
                       <td key={i} className="py-2 px-4 text-right font-medium">
-                        {formatPercentage(r.extended_profitability.financial_leverage_effect)}
+                        {formatNumberOrNA(r.extended_profitability.financial_leverage_effect, 2)}
                       </td>
                     ))}
                   </tr>

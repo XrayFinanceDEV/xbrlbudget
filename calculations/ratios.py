@@ -72,7 +72,7 @@ class TurnoverRatios(NamedTuple):
 class ExtendedProfitabilityRatios(NamedTuple):
     """Extended profitability indices"""
     spread: Optional[Decimal]            # ROI - ROD; None se il ROD è None (nessun debito finanziario)
-    financial_leverage_effect: Decimal   # (PC+PF)/CN
+    financial_leverage_effect: Decimal   # TA/CN (totale attivo / patrimonio netto)
     ebitda_on_sales: Decimal            # MOL/RIC
     financial_charges_on_revenue: Decimal  # OF/RIC
 
@@ -519,10 +519,10 @@ class FinancialRatiosCalculator(BaseCalculator):
         # zero dichiarerebbe un costo del denaro che non è mai stato misurato.
         spread = profitability.roi - profitability.rod if profitability.rod is not None else None
 
-        # Financial Leverage Effect = (PC+PF)/CN
-        total_liabilities = self.bs.current_liabilities + self.bs.sp17_debiti_lungo
+        # Leva finanziaria = Totale attivo / Patrimonio netto (#62 S20): prima era (PC+PF)/CN, cioe'
+        # debiti/PN, numericamente identica all'Indice di indebitamento accanto.
         financial_leverage_effect = self.safe_divide(
-            total_liabilities,
+            self.bs.total_assets,
             self.bs.total_equity
         )
 

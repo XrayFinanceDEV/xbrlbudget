@@ -87,7 +87,7 @@ class ExtendedProfitabilityRatios(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     spread: Optional[float] = None     # ROI - ROD; None se il ROD è None (nessun debito finanziario)
-    financial_leverage_effect: float   # (PC+PF)/CN
+    financial_leverage_effect: float   # TA/CN (totale attivo / patrimonio netto)
     ebitda_on_sales: float            # MOL/RIC
     financial_charges_on_revenue: float  # OF/RIC
 

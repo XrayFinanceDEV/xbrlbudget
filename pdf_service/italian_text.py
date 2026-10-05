@@ -232,7 +232,7 @@ RATIO_LABELS = {
     "net_margin": ("Net Margin", "RN/RIC"),
     # Extended Profitability
     "spread": ("Spread (ROI - ROD)", "(ROI-ROD)"),
-    "financial_leverage_effect": ("Leva Finanziaria", "(PC+PF)/CN"),
+    "financial_leverage_effect": ("Leva Finanziaria", "TA/CN"),
     "ebitda_on_sales": ("MOL su Vendite", "MOL/RIC"),
     "financial_charges_on_revenue": ("Oneri Finanziari su Fatturato", "OF/RIC"),
     # Efficiency

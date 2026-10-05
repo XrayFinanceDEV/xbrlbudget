@@ -4006,13 +4006,29 @@ class ForecastEngine:
         # Reserve detail
         sp12a = _base('sp12a_riserva_sovrapprezzo')
         sp12b = _base('sp12b_riserve_rivalutazione')
-        sp12c = _base('sp12c_riserva_legale')
+        # Riserva legale (art. 2430 c.c., decisione del proprietario 2026-10-05, #62 S29): il 5% dell'utile
+        # dell'anno prima va a riserva legale finche' questa non raggiunge il 20% del capitale. Il movimento
+        # resta dentro il PN (sp12c contro sp12g): totale e cassa non cambiano. Una perdita non accantona.
+        sp12c_prev = _prev('sp12c_riserva_legale')
+        tetto_legale = sp11 * D('0.20')
+        quota_legale = ZERO
+        if previous_profit > ZERO:
+            # Al centesimo: sp12c e sp12g si muovono della stessa cifra, cosi' il centesimo di
+            # arrotondamento non attraversa il gruppo e non serve alcun residuo di quadratura.
+            quota_legale = min(previous_profit * D('0.05'), max(ZERO, tetto_legale - sp12c_prev)).quantize(
+                D('0.01'), rounding=ROUND_HALF_UP)
+        sp12c = sp12c_prev + quota_legale
         sp12d = _base('sp12d_riserve_statutarie')
         # Le imposte anticipate restano costanti; un override SP mantiene
         # la cassa come contropartita anche negli anni successivi.
         sp12e = _base('sp12e_altre_riserve')
         sp12f = _base('sp12f_riserva_copertura_flussi')
-        sp12g = _prev('sp12g_utili_perdite_portati') + previous_profit
+        sp12g = _prev('sp12g_utili_perdite_portati') + previous_profit - quota_legale
+        if details is not None:
+            details['riserva_legale'] = {
+                'utile': previous_profit, 'quota': quota_legale, 'tetto': tetto_legale,
+                'raggiunto': sp12c >= tetto_legale,
+            }
         sp12h = _base('sp12h_riserva_neg_azioni_proprie')
 
         # ── LIABILITIES (bottom-up from components) ──

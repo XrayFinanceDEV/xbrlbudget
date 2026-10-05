@@ -7,6 +7,20 @@ import type { BalanceSheet, ForecastPreviewError, ForecastPreviewYear, IncomeSta
 import type { HistoricalData } from "@/lib/budget-trend";
 import { computeAutoDays } from "@/lib/budget-turnover";
 import { euro, num, numOrNull, pctOf } from "@/lib/budget-format";
+
+/** L'etichetta di ciascuno dei tre giorni medi, in un posto solo: le righe
+ *  della tabella e gli avvisi devono chiamarli allo stesso modo.
+ *
+ *  `dio` (lotto 1 fix rilievi, rilievo I2 della revisione finale, 2026-09-26): dal B01 questo
+ *  campo e' i giorni delle sole MATERIE PRIME sul loro consumo (`ce05+ce10`), non piu' un giorno
+ *  di rotazione di tutto il magazzino sui ricavi — l'etichetta "(DIO)" da sola lo presenta ancora
+ *  come prima. */
+export const GIORNI_LABELS: Record<string, string> = {
+  dso: "Giorni incasso clienti (DSO)",
+  dio: "Giorni materie prime e semilavorati (sul consumo)",
+  dio_pf: "Giorni prodotti finiti e merci (sui ricavi)",
+  dpo: "Giorni pagamento fornitori (DPO)",
+};
 import type { ForecastPreviewResponse } from "@/types/api";
 
 export interface PreviewCell { value: number | null; pct?: number | null; days?: number | null; note?: string }
@@ -96,7 +110,7 @@ export function rowsAnnoBase(baseYear: number, historicalYears: number[], histor
   const molOf = (e: HistoricalData[number] | undefined): number | null =>
     e ? ceAggregates(e.income as unknown as Record<string, unknown>).mol : null;
 
-  const daysRow = (key: string, label: string, kind: "dso" | "dio" | "dpo"): PreviewRow => {
+  const daysRow = (key: string, label: string, kind: "dso" | "dio" | "dio_pf" | "dpo"): PreviewRow => {
     const cellFor = (e: HistoricalData[number] | undefined): PreviewCell =>
       ({ value: null, days: e ? computeAutoDays(kind, e.income, e.balance) : null });
     return row(key, label, "value", cellFor(baseEntry), restEntries.map(cellFor));
@@ -109,9 +123,10 @@ export function rowsAnnoBase(baseYear: number, historicalYears: number[], histor
     incidenceRow("ce06", "Servizi", "ce06_servizi"),
     incidenceRow("ce08", "Personale", "ce08_costi_personale"),
     row("mol", "MOL", "kpi", { value: molOf(baseEntry) }, restEntries.map((e) => ({ value: molOf(e) }))),
-    daysRow("dso", "Giorni incasso clienti (DSO)", "dso"),
-    daysRow("dio", "Giorni di scorta materie prime (sul consumo)", "dio"),
-    daysRow("dpo", "Giorni pagamento fornitori (DPO)", "dpo"),
+    daysRow("dso", GIORNI_LABELS.dso, "dso"),
+    daysRow("dio", GIORNI_LABELS.dio, "dio"),
+    daysRow("dio_pf", GIORNI_LABELS.dio_pf, "dio_pf"),
+    daysRow("dpo", GIORNI_LABELS.dpo, "dpo"),
   ];
 }
 
@@ -299,7 +314,7 @@ export function rowsCircolante(baseBs: BalanceSheet, baseInc: IncomeStatement, y
     row("fornitori", "Debiti verso fornitori", "value", { value: -bForn }, pick("forn")),
     row("ccn", "Capitale circolante commerciale", "total", { value: bCcn }, pick("ccn")),
     row("ccn-pct", "in % dei ricavi", "sub", { value: null, pct: pctOf(bCcn, bRev) }, pick("pct")),
-    row("cassa", "assorbimento di cassa nell'anno", "sub", { value: null }, pick("cash")),
+    row("cassa", "cassa liberata (+) / assorbita (−) dal circolante", "sub", { value: null }, pick("cash")),
   ];
 }
 

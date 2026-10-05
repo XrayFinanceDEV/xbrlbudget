@@ -19,7 +19,7 @@
 import { computeAutoDays } from "@/lib/budget-turnover";
 import type { AssumptionsMap } from "@/lib/budget-horizon";
 import { euro, numOrNull } from "@/lib/budget-format";
-import { rowsCircolante, type PreviewRow } from "@/lib/budget-preview-rows";
+import { GIORNI_LABELS, rowsCircolante, type PreviewRow } from "@/lib/budget-preview-rows";
 import type { YearCellOff } from "@/lib/budget-year-cell";
 import type { BalanceSheet, ForecastPreviewResponse, ForecastPreviewYear, IncomeStatement, SpIndexingDriver } from "@/types/api";
 
@@ -62,20 +62,6 @@ export function giorniMediAuto(
 
 const dayLabel = (n: number | null): string => (n === null ? "n/d" : `${n} gg`);
 const autoPlaceholder = (n: number | null) => () => (n === null ? "auto" : `auto ${n}`);
-
-/** L'etichetta di ciascuno dei tre giorni medi, in un posto solo: le righe
- *  della tabella e gli avvisi devono chiamarli allo stesso modo.
- *
- *  `dio` (lotto 1 fix rilievi, rilievo I2 della revisione finale, 2026-09-26): dal B01 questo
- *  campo e' i giorni delle sole MATERIE PRIME sul loro consumo (`ce05+ce10`), non piu' un giorno
- *  di rotazione di tutto il magazzino sui ricavi — l'etichetta "(DIO)" da sola lo presenta ancora
- *  come prima. */
-const GIORNI_LABELS: Record<string, string> = {
-  dso: "Giorni incasso clienti (DSO)",
-  dio: "Giorni materie prime e semilavorati (sul consumo)",
-  dio_pf: "Giorni prodotti finiti e merci (sui ricavi)",
-  dpo: "Giorni pagamento fornitori (DPO)",
-};
 
 /** Oltre un anno di giacenza il motore scarta il giorno dedotto e riporta il saldo. */
 const SOGLIA_GIORNI = 365;

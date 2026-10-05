@@ -62,7 +62,9 @@ export function StepCircolante(p: StepProps): JSX.Element {
             <p className="mt-2 text-xs text-muted-foreground">
               I giorni del {p.baseYear} sono calcolati sui soli crediti verso clienti e debiti verso fornitori, su
               360 giorni. Crediti e debiti del {p.baseYear} si chiudono nel {p.baseYear + 1} (passo 5): questi
-              giorni generano quelli nuovi.
+              giorni generano quelli nuovi. I giorni si applicano a ricavi e acquisti al netto dell&apos;IVA; i
+              saldi di crediti e debiti del bilancio sono al lordo. Un DSO/DPO misurato sui saldi storici risulta
+              quindi più alto di quello effettivo.
             </p>
             {/* Un giorno medio dedotto e poi SCARTATO dal motore va detto qui,
                 dove i giorni si leggono: altrimenti si guarda un numero che il

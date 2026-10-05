@@ -3,7 +3,7 @@ import type { BalanceSheet, ForecastPreviewYear, IncomeStatement } from "@/types
 import type { HistoricalData } from "@/lib/budget-trend";
 import { computeAutoDays } from "@/lib/budget-turnover";
 import {
-  ceAggregates, rowsAnnoBase, rowsCeAnteImposte, rowsCircolante, rowsCosti, rowsFatturato,
+  GIORNI_LABELS, ceAggregates, rowsAnnoBase, rowsCeAnteImposte, rowsCircolante, rowsCosti, rowsFatturato,
   rowsImposte, rowsImposteSaldoAcconto, unfundedFromError,
 } from "./budget-preview-rows";
 import { avvisiMotore, confermaCassaPositiva, scopertoAvvisi } from "./budget-preview-rows";
@@ -256,6 +256,8 @@ describe("rowsCircolante", () => {
     expect(rows.find((r) => r.key === "ccn-pct")!.years[0].pct).toBeCloseTo((220 / 1200) * 100, 6);
     // assorbimento di cassa = -(ccn - ccn_precedente) = -(220 - 180) = -40
     expect(rows.find((r) => r.key === "cassa")!.years[0].value).toBe(-40);
+    // #61 S27 / #62 S24: il segno e' dichiarato nell'etichetta, il valore non cambia
+    expect(rows.find((r) => r.key === "cassa")!.label).toBe("cassa liberata (+) / assorbita (−) dal circolante");
   });
 
   it("I2 (revisione finale, 2026-09-26): la riga Rimanenze non porta i giorni di dio_applied, che sono delle sole materie prime, non del totale sp05", () => {
@@ -616,5 +618,18 @@ describe("avvisiMotore", () => {
   it("raccoglie details.avvisi di tutti gli anni senza duplicati, ignorando l'assenza", () => {
     expect(avvisiMotore([y(2026, ["a", "b"]), y(2027, ["b", "c"]), y(2028)])).toEqual(["a", "b", "c"]);
     expect(avvisiMotore([])).toEqual([]);
+  });
+});
+
+describe("rowsAnnoBase — giorni di magazzino in due gruppi (#62 S04)", () => {
+  const inc = { ce01_ricavi_vendite: "3600", ce05_materie_prime: "1800" } as unknown as IncomeStatement;
+  const bal = { sp05a_materie_prime: "50", sp05d_prodotti_finiti: "100" } as unknown as BalanceSheet;
+  const rows = rowsAnnoBase(2024, [2024], { 2024: { income: inc, balance: bal } });
+  it("dio e dio_pf hanno le etichette del passo Circolante", () => {
+    expect(rows.find((r) => r.key === "dio")!.label).toBe(GIORNI_LABELS.dio);
+    expect(rows.find((r) => r.key === "dio_pf")!.label).toBe(GIORNI_LABELS.dio_pf);
+  });
+  it("dio_pf legge sp05d sui ricavi", () => {
+    expect(rows.find((r) => r.key === "dio_pf")!.base.days).toBe(10);
   });
 });

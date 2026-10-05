@@ -84,6 +84,8 @@ describe("budget-piano-step", () => {
     expect(regole.sp16f_debiti_previdenza_breve).toBe("variazione +2,0%");
     expect(regole.sp16g_altri_debiti_breve).toBe("segue i ricavi");
     expect(regole.sp14_fondi_rischi).toBe("costante");
+    // #61 S27: «Altri crediti a breve» (sp06g) e' costante senza ipotesi, e dopo il Task 4 lo e' davvero
+    expect(regole.sp06g_crediti_altri_breve).toBe("costante");
     const conImporto = regoleVociMinori(asMap({
       2027: { sp_overrides: { sp14_fondi_rischi: 45000 } }, 2028: {},
     }), [2027, 2028]);

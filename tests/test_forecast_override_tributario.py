@@ -883,7 +883,7 @@ def test_senza_piano_crediti_nessuna_sottovoce_si_rifiuta(monkeypatch):
 
 @pytest.mark.parametrize("campo,si_porta_avanti", [
     ("sp06a_crediti_clienti_breve", False),
-    ("sp06g_crediti_altri_breve", False),
+    ("sp06g_crediti_altri_breve", True),  # #61 S03: non e' piu' a giorni, cresce da prev
     ("sp16d_debiti_fornitori_breve", False),
     ("sp06e_crediti_tributari_breve", True),
     ("sp16a_debiti_banche_breve", True),

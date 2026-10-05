@@ -3880,29 +3880,8 @@ class ForecastEngine:
         }
         sp06f = deferred['short_asset']
 
-        # DSO → sp06 TRADE receivables (short-term). Auto-derive DSO from the base year
-        # TRADE receivables only (sp06 aggregate minus tax credits and deferred taxes),
-        # so carving those out above does not distort the ratio.
-        dso = getattr(assumption, 'dso_days', None)
-        if dso is not None:
-            dso = D(str(dso))
-            sp06_trade = forecast_revenue * dso / DAYS
-        else:
-            base_sp06_trade = max(
-                ZERO,
-                _base('sp06_crediti_breve')
-                - _base('sp06e_crediti_tributari_breve')
-                - _base('sp06f_imposte_anticipate_breve'),
-            )
-            dso = _derived_days(base_sp06_trade, base_revenue, 'dso')
-            if dso is None:
-                sp06_trade = _carry_unless_planned(base_sp06_trade, 'crediti_commerciali')
-                dso = _effective_days(sp06_trade, forecast_revenue)
-            else:
-                sp06_trade = forecast_revenue * dso / DAYS
-        if details is not None:
-            details['dso_applied'] = dso
-        sp06 = sp06_trade + sp06e + sp06f
+        # DSO → crediti verso clienti: calcolato piu' sotto, dopo il lato oltre (sp07a), perche'
+        # il DSO governa sp06a + sp07a insieme (#61 S03).
 
         # DIO → sp05 (inventory). Dal B01 (2026-09-26) `sp05a` (materie prime) non segue piu'
         # i ricavi: il CE l'ha gia' calcolata dal CONSUMO (`ce10`, prima delle imposte) e
@@ -3982,6 +3961,99 @@ class ForecastEngine:
                 sp07_non_deferred + sp07f if tax_difference_lines
                 else sp07 + r.residual - _prev('sp07e_crediti_tributari_lungo') * long_growth
             )
+        # ── DSO → i soli crediti verso CLIENTI (#61 S03/S27, decisione del proprietario 2026-10-05) ──
+        # sp06a + sp07a = DSO x ricavi / 360. Le altre voci commerciali (controllate, collegate,
+        # controllanti, altri: sp06b/c/d/g) non hanno una crescita propria e restano quelle
+        # dell'anno prima. Il lato oltre (sp07a) e' quello che il motore gia' calcola piu' sotto
+        # (stessa formula del riparto di `sp07`: un test li tiene allineati).
+        # Ripiego: una base senza alcun dettaglio commerciale (a+b+c+d+g == 0 con sp06 netto
+        # positivo) porta tutta la massa come «clienti», come faceva `_alloc` con `primary_idx=0`.
+        _trade_fields = ['sp06a_crediti_clienti_breve', 'sp06b_crediti_controllate_breve',
+                         'sp06c_crediti_collegate_breve', 'sp06d_crediti_controllanti_breve',
+                         'sp06g_crediti_altri_breve']
+        base_sp06_trade = max(
+            ZERO,
+            _base('sp06_crediti_breve')
+            - _base('sp06e_crediti_tributari_breve')
+            - _base('sp06f_imposte_anticipate_breve'),
+        )
+        base_trade_det = [_base(f) for f in _trade_fields]
+        base_senza_dettaglio = sum(base_trade_det, ZERO) == 0 and base_sp06_trade > 0
+        crediti_plan_dso = (pregresso or {}).get('crediti_commerciali')
+        dso = getattr(assumption, 'dso_days', None)
+        sp06_altri = [ZERO, ZERO, ZERO, ZERO]  # b, c, d, g (anno prima)
+        sp07a_stimato = ZERO
+        dso_target = ZERO
+        if crediti_plan_dso:
+            # Col piano la massa d'apertura comprende TUTTO il commerciale e il lato oltre e'
+            # tutto pregresso: il generato (target) va su sp06a, e b/c/d/g ricevono solo la loro
+            # quota del residuo a breve (piu' sotto). Qui il DSO derivato resta quello sull'intero
+            # commerciale a breve, come prima: il report misura in questo caso anche il pregresso,
+            # quindi l'identita' «DSO del report = input» vale SOLO senza piano.
+            if dso is not None:
+                dso = D(str(dso))
+                dso_target = forecast_revenue * dso / DAYS
+            else:
+                dso = _derived_days(base_sp06_trade, base_revenue, 'dso')
+                if dso is None:
+                    dso_target = _carry_unless_planned(base_sp06_trade, 'crediti_commerciali')
+                    dso = _effective_days(dso_target, forecast_revenue)
+                else:
+                    dso_target = forecast_revenue * dso / DAYS
+            sp06a_gen = dso_target
+        else:
+            def _quota_prima(importo, campi):
+                vals = [_base(f) for f in campi]
+                tot = sum(vals, ZERO)
+                return importo * (vals[0] / tot) if tot > 0 else importo
+            if piano_crediti_tributari_lungo:
+                _comm = ['sp07a_crediti_clienti_lungo', 'sp07b_crediti_controllate_lungo',
+                         'sp07c_crediti_collegate_lungo', 'sp07d_crediti_controllanti_lungo',
+                         'sp07g_crediti_altri_lungo']
+                sp07a_stimato = _quota_prima(
+                    sp07_non_deferred - pregresso_runoff['crediti_tributari_lungo'].residual, _comm)
+            elif tax_difference_lines:
+                sp07a_stimato = _quota_prima(sp07_non_deferred, [
+                    'sp07a_crediti_clienti_lungo', 'sp07b_crediti_controllate_lungo',
+                    'sp07c_crediti_collegate_lungo', 'sp07d_crediti_controllanti_lungo',
+                    'sp07e_crediti_tributari_lungo', 'sp07g_crediti_altri_lungo'])
+            else:
+                sp07a_stimato = _quota_prima(sp07, [
+                    'sp07a_crediti_clienti_lungo', 'sp07b_crediti_controllate_lungo',
+                    'sp07c_crediti_collegate_lungo', 'sp07d_crediti_controllanti_lungo',
+                    'sp07e_crediti_tributari_lungo', 'sp07f_imposte_anticipate_lungo',
+                    'sp07g_crediti_altri_lungo'])
+            sp06_altri = [_prev(f) for f in _trade_fields[1:]]
+            if dso is not None:
+                dso = D(str(dso))
+                dso_target = forecast_revenue * dso / DAYS
+            else:
+                base_sp07a = _base('sp07a_crediti_clienti_lungo')
+                if sum((_base(f) for f in (
+                        'sp07a_crediti_clienti_lungo', 'sp07b_crediti_controllate_lungo',
+                        'sp07c_crediti_collegate_lungo', 'sp07d_crediti_controllanti_lungo',
+                        'sp07e_crediti_tributari_lungo', 'sp07g_crediti_altri_lungo')), ZERO) == 0:
+                    # lato oltre senza alcun dettaglio: tutto «clienti», come il riparto di sp07
+                    base_sp07a = max(ZERO, _base('sp07_crediti_lungo')
+                                     - _base('sp07f_imposte_anticipate_lungo'))
+                base_clienti = (base_sp06_trade if base_senza_dettaglio else base_trade_det[0]) \
+                    + base_sp07a
+                dso = _derived_days(base_clienti, base_revenue, 'dso')
+                if dso is None:
+                    dso_target = _carry_unless_planned(base_clienti, 'crediti_commerciali')
+                    dso = _effective_days(dso_target, forecast_revenue)
+                else:
+                    dso_target = forecast_revenue * dso / DAYS
+            sp06a_gen = max(ZERO, dso_target - sp07a_stimato)
+        sp06_trade = sp06a_gen + sum(sp06_altri, ZERO)
+        if details is not None:
+            details['dso_applied'] = dso
+            details['dso_clienti'] = {
+                'target': dso_target, 'sp07a': sp07a_stimato, 'sp06a': sp06a_gen,
+                'scarto': max(ZERO, sp07a_stimato - dso_target),
+            }
+        sp06 = sp06_trade + sp06e + sp06f
+
         generated: Dict[str, Decimal] = {'crediti_commerciali': sp06_trade}
         crediti_plan = (pregresso or {}).get('crediti_commerciali')
         if crediti_plan:
@@ -4846,7 +4918,17 @@ class ForecastEngine:
         sp06_trade_fields = ['sp06a_crediti_clienti_breve', 'sp06b_crediti_controllate_breve',
                              'sp06c_crediti_collegate_breve', 'sp06d_crediti_controllanti_breve',
                              'sp06g_crediti_altri_breve']
-        sp06a, sp06b, sp06c, sp06d, sp06g = _alloc(sp06_trade, sp06_trade_fields)
+        # #61 S03 (decisione del proprietario 2026-10-05): il DSO governa i soli clienti, sp06a + sp07a =
+        # DSO x ricavi / 360. Le altre voci commerciali restano quelle dell'anno prima, come dichiara il passo 6.
+        # Col piano `crediti_commerciali` il generato e' tutto su sp06a e il residuo a breve si ripartisce
+        # sul mix base a/b/c/d/g (tutto su sp06a se la base non ha dettaglio).
+        if crediti_plan:
+            quote_res = _alloc(runoff_crediti.residual_short, sp06_trade_fields)
+            sp06a = sp06a_gen + quote_res[0]
+            sp06b, sp06c, sp06d, sp06g = quote_res[1:]
+        else:
+            sp06a = sp06a_gen
+            sp06b, sp06c, sp06d, sp06g = sp06_altri
 
         sp07_non_deferred_fields = [
             'sp07a_crediti_clienti_lungo', 'sp07b_crediti_controllate_lungo',

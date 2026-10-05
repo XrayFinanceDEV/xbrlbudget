@@ -63,3 +63,71 @@ def test_M2_senza_dettaglio_resta_la_regola_aggregata():
     e = generato(genera(righe(personnel_growth_pct=4), ce=zero))
     assert e.det[2027]["personale"]["modo"] == "aggregato"
     assert _q(e.anni[2027][1]["ce08_costi_personale"]) >= _q(BASE_CE["ce08_costi_personale"] * D("1.04"))
+
+
+def test_M1_dso_del_report_uguale_all_input_senza_piano():
+    rows = righe(dso_days=90)
+    e = generato(genera(rows, report=True))
+    for y in (2027, 2028, 2029):
+        sp, ce = e.anni[y]
+        dso = (sp["sp06a_crediti_clienti_breve"] + sp["sp07a_crediti_clienti_lungo"]) / ce["ce01_ricavi_vendite"] * 360
+        assert abs(dso - D("90")) < D("0.05")
+
+
+def test_M1_altri_crediti_restano_costanti():
+    e = generato(genera(righe(dso_days=90, revenue_growth_pct=10)))
+    # tolleranza di un centesimo: sp06g e' il primo campo neutro del centesimo di quadratura
+    for y in (2027, 2029):
+        for k in ("sp06b_crediti_controllate_breve", "sp06c_crediti_collegate_breve",
+                  "sp06d_crediti_controllanti_breve", "sp06g_crediti_altri_breve"):
+            assert abs(e.anni[y][0].get(k, D(0)) - BASE_BS.get(k, D(0))) <= D("0.01")
+
+
+def test_M1_dso_derivato_a_crescita_zero_non_muove_i_clienti():
+    e = generato(genera(righe()))
+    sp = e.anni[2027][0]
+    assert abs(sp["sp06a_crediti_clienti_breve"] + sp["sp07a_crediti_clienti_lungo"]
+               - BASE_BS["sp06a_crediti_clienti_breve"] - BASE_BS["sp07a_crediti_clienti_lungo"]) < D("1")
+
+
+def test_M1_base_senza_dettaglio_ripiega_sull_aggregato():
+    # tutti i dettagli di sp06/sp07 a zero, gli aggregati restano: la base non ha dettaglio commerciale
+    piatto = {k: D("0") for k in ("sp06a_crediti_clienti_breve", "sp06e_crediti_tributari_breve",
+                                    "sp06g_crediti_altri_breve", "sp07a_crediti_clienti_lungo",
+                                    "sp07e_crediti_tributari_lungo")}
+    commerciale = BASE_BS["sp06_crediti_breve"]
+    e = generato(genera(righe(), bs=piatto))
+    sp = e.anni[2027][0]
+    assert sp["sp06a_crediti_clienti_breve"] > D("0")
+    assert abs(sp["sp06a_crediti_clienti_breve"] - commerciale) < D("1")
+    assert sp["sp06g_crediti_altri_breve"] == D("0")
+
+
+def test_M1_dso_clienti_dichiarato_e_sp07a_allineato():
+    e = generato(genera(righe(dso_days=90, revenue_growth_pct=10)))
+    for y in (2027, 2028, 2029):
+        d = e.det[y]["dso_clienti"]
+        sp = e.anni[y][0]
+        assert abs(d["sp07a"] - sp["sp07a_crediti_clienti_lungo"]) <= D("0.01")
+        assert abs(d["sp06a"] - sp["sp06a_crediti_clienti_breve"]) <= D("0.01")
+
+
+def test_M1_con_piano_crediti_commerciali_il_foglio_pareggia_e_il_trade_e_dichiarato():
+    massa = (BASE_BS["sp06a_crediti_clienti_breve"] + BASE_BS["sp06g_crediti_altri_breve"]
+             + BASE_BS["sp07a_crediti_clienti_lungo"])
+    rows = righe()
+    meta = massa / 2
+    rows[0]["pregresso"] = {"crediti_commerciali": {
+        "opening": float(massa), "amounts": [float(meta), float(massa - meta)], "writeoff": [0, 0]}}
+    e = generato(genera(rows))
+    for y in (2027, 2028):
+        sp = e.anni[y][0]
+        trade = sum(sp.get(k, D(0)) for k in (
+            "sp06a_crediti_clienti_breve", "sp06b_crediti_controllate_breve",
+            "sp06c_crediti_collegate_breve", "sp06d_crediti_controllanti_breve",
+            "sp06g_crediti_altri_breve"))
+        resto = sp["sp06e_crediti_tributari_breve"] + sp.get("sp06f_imposte_anticipate_breve", D(0))
+        assert abs(sp["sp06_crediti_breve"] - trade - resto) <= D("0.01")
+        att = sum(v for k, v in sp.items() if k in ("sp01_crediti_soci",) or k.startswith(("sp02_", "sp03_", "sp04_", "sp05_", "sp06_", "sp07_", "sp08_", "sp09_", "sp10_")))
+        pas = sum(v for k, v in sp.items() if k.startswith(("sp11_", "sp12_", "sp13_", "sp14_", "sp15_", "sp16_", "sp17_", "sp18_")))
+        assert abs(att - pas) <= D("0.02")

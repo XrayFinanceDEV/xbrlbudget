@@ -304,3 +304,33 @@ describe("degenerateDaysAvvisi", () => {
     expect(p.degenerateDays[0]).toContain("(DSO)");
   });
 });
+
+describe("soglia dei giorni di magazzino per settore (fix finale 8)", () => {
+  const degenere = () => giorniMediAuto(
+    income({ ce05_materie_prime: "1000", ce10_var_rimanenze_mat_prime: "0" }),
+    balance({ sp05_rimanenze: "5000", sp05a_materie_prime: "5000" }),
+  );
+
+  it("settore generico: oltre 365 gg il segnaposto resta «auto» e la nota dice «oltre la soglia»", () => {
+    const row = giorniMediRows(degenere(), 2025, 1).find((r) => r.field === "dio_days")!;
+    expect(row.placeholder?.(2026)).toBe("auto");
+    expect(row.sub).toContain("oltre la soglia");
+  });
+
+  it("settori 5 e 6: nessuna soglia, il giorno e' promesso e la nota non lo dichiara scartato", () => {
+    for (const settore of [5, 6]) {
+      const row = giorniMediRows(degenere(), 2025, settore).find((r) => r.field === "dio_days")!;
+      expect(row.placeholder?.(2026)).toBe("auto 1800");
+      expect(row.sub).not.toContain("oltre la soglia");
+    }
+  });
+
+  it("GIORNI_LABELS ha la voce di dio_altre: l'avviso degenere non stampa la chiave grezza", () => {
+    const out = degenerateDaysAvvisi({
+      scenario_id: 1, base_year: 2024, error: null,
+      forecast_years: [{ year: 2025, details: { degenerate_turnover_ratio: ["dio_altre"] } }],
+    } as unknown as ForecastPreviewResponse);
+    expect(out[0]).toContain("Giorni lavori in corso e acconti (sui ricavi)");
+    expect(out[0]).not.toContain("dio_altre");
+  });
+});

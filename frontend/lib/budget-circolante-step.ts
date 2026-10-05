@@ -51,9 +51,10 @@ export interface GiorniMedi {
 export function giorniMediAuto(
   baseInc: IncomeStatement | undefined | null,
   baseBs: BalanceSheet | undefined | null,
+  pianoCrediti = false,
 ): GiorniMedi {
   return {
-    dso: computeAutoDays("dso", baseInc ?? undefined, baseBs ?? undefined),
+    dso: computeAutoDays("dso", baseInc ?? undefined, baseBs ?? undefined, { pianoCrediti }),
     dio: computeAutoDays("dio", baseInc ?? undefined, baseBs ?? undefined),
     dio_pf: computeAutoDays("dio_pf", baseInc ?? undefined, baseBs ?? undefined),
     dpo: computeAutoDays("dpo", baseInc ?? undefined, baseBs ?? undefined),
@@ -63,31 +64,40 @@ export function giorniMediAuto(
 const dayLabel = (n: number | null): string => (n === null ? "n/d" : `${n} gg`);
 const autoPlaceholder = (n: number | null) => () => (n === null ? "auto" : `auto ${n}`);
 
-/** Oltre un anno di giacenza il motore scarta il giorno dedotto e riporta il saldo. */
-const SOGLIA_GIORNI = 365;
+/** Oltre un anno di giacenza il motore scarta il giorno dedotto e riporta il saldo, tranne in
+ *  Immobiliare (5) ed Edilizia (6), dove un magazzino lungo e' il mestiere: nessuna soglia
+ *  (`soglia_giorni_magazzino`, `calculations/projection_common.py`). */
+export function sogliaGiorniMagazzino(settore?: number | null): number | null {
+  return settore === 5 || settore === 6 ? null : 365;
+}
 
 /** Il segnaposto promette solo cio' che il motore applica: oltre soglia resta «auto». */
-const autoPlaceholderMagazzino = (n: number | null) => () =>
-  (n === null || n > SOGLIA_GIORNI ? "auto" : `auto ${n}`);
+const autoPlaceholderMagazzino = (n: number | null, soglia: number | null) => () =>
+  (n === null || (soglia !== null && n > soglia) ? "auto" : `auto ${n}`);
 
 /** La nota sotto la casella: il giorno storico del gruppo, anche degenere. */
-function notaStorico(n: number | null, baseYear: number | undefined, base: string): string | undefined {
+function notaStorico(
+  n: number | null, baseYear: number | undefined, base: string, soglia: number | null,
+): string | undefined {
   if (n === null) return undefined;
   const anno = baseYear === undefined ? "" : ` ${baseYear}`;
   const testo = `Storico${anno}: ${n} gg ${base}`;
-  return n > SOGLIA_GIORNI
+  return soglia !== null && n > soglia
     ? `${testo} — oltre la soglia: senza un valore il motore riporta il saldo`
     : testo;
 }
 
 /** Le quattro righe "Giorni medi": DSO, DIO materie, DIO prodotti finiti, DPO. */
-export function giorniMediRows(auto: GiorniMedi, baseYear?: number): CircolanteTableRow[] {
+export function giorniMediRows(
+  auto: GiorniMedi, baseYear?: number, settore?: number | null,
+): CircolanteTableRow[] {
+  const soglia = sogliaGiorniMagazzino(settore);
   return [
     { field: "dso_days", label: GIORNI_LABELS.dso, baseLabel: dayLabel(auto.dso), placeholder: autoPlaceholder(auto.dso) },
     { field: "dio_days", label: GIORNI_LABELS.dio, baseLabel: dayLabel(auto.dio),
-      sub: notaStorico(auto.dio, baseYear, "sul consumo"), placeholder: autoPlaceholderMagazzino(auto.dio) },
+      sub: notaStorico(auto.dio, baseYear, "sul consumo", soglia), placeholder: autoPlaceholderMagazzino(auto.dio, soglia) },
     { field: "dio_pf_days", label: GIORNI_LABELS.dio_pf, baseLabel: dayLabel(auto.dio_pf),
-      sub: notaStorico(auto.dio_pf, baseYear, "sui ricavi"), placeholder: autoPlaceholderMagazzino(auto.dio_pf) },
+      sub: notaStorico(auto.dio_pf, baseYear, "sui ricavi", soglia), placeholder: autoPlaceholderMagazzino(auto.dio_pf, soglia) },
     { field: "dpo_days", label: GIORNI_LABELS.dpo, baseLabel: dayLabel(auto.dpo), placeholder: autoPlaceholder(auto.dpo) },
   ];
 }

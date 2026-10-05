@@ -17,7 +17,7 @@
 import type { JSX } from "react";
 import { useMemo } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { avvisiMagazzino, circolantePreview, giorniMediAuto, giorniMediRows } from "@/lib/budget-circolante-step";
+import { avvisiMagazzino, circolantePreview, giorniMediAuto, giorniMediRows, pianiPregressoOf } from "@/lib/budget-circolante-step";
 import { fornitoriZeroAvviso } from "@/lib/budget-fornitori-zero";
 import { AlertTriangle } from "lucide-react";
 import { previewNotice } from "@/lib/budget-preview-notice";
@@ -29,8 +29,10 @@ export function StepCircolante(p: StepProps): JSX.Element {
   const baseInc = p.historical[p.baseYear]?.income;
   const baseBs = p.historical[p.baseYear]?.balance;
 
-  const auto = useMemo(() => giorniMediAuto(baseInc, baseBs), [baseInc, baseBs]);
-  const giorniRows = useMemo(() => giorniMediRows(auto, p.baseYear), [auto, p.baseYear]);
+  // Col piano `crediti_commerciali` il motore deriva il DSO sull'intero commerciale a breve.
+  const pianoCrediti = pianiPregressoOf(p.assumptions, p.forecastYears).includes("crediti_commerciali");
+  const auto = useMemo(() => giorniMediAuto(baseInc, baseBs, pianoCrediti), [baseInc, baseBs, pianoCrediti]);
+  const giorniRows = useMemo(() => giorniMediRows(auto, p.baseYear, p.sector), [auto, p.baseYear, p.sector]);
   const avviso = useMemo(() => fornitoriZeroAvviso(p.baseYear, baseBs, baseInc), [p.baseYear, baseBs, baseInc]);
   const avvisiRimanenze = useMemo(() => avvisiMagazzino(p.preview.data?.forecast_years ?? []), [p.preview.data]);
   const preview = useMemo(() => circolantePreview(baseBs, baseInc, p.preview.data), [baseBs, baseInc, p.preview.data]);

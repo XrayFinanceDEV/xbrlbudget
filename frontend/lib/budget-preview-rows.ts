@@ -20,6 +20,7 @@ export const GIORNI_LABELS: Record<string, string> = {
   dio: "Giorni materie prime e semilavorati (sul consumo)",
   dio_pf: "Giorni prodotti finiti e merci (sui ricavi)",
   dpo: "Giorni pagamento fornitori (DPO)",
+  dio_altre: "Giorni lavori in corso e acconti (sui ricavi)",
 };
 import type { ForecastPreviewResponse } from "@/types/api";
 

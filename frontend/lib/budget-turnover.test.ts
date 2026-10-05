@@ -158,3 +158,37 @@ describe("computeAutoDays — dati mancanti", () => {
     expect(computeAutoDays("dso", income({}), undefined)).toBeNull();
   });
 });
+
+describe("computeAutoDays — dso sui soli clienti, come il motore (fix finale 2)", () => {
+  // Numeri tipo AMBIENTA: clienti 1.000.000 breve + 200.000 oltre, altri crediti non commerciali nell'aggregato.
+  const ricavi = income({ ce01_ricavi_vendite: "7200000" });
+  const bs = balance({
+    sp06_crediti_breve: "1500000",
+    sp06a_crediti_clienti_breve: "1000000",
+    sp06g_crediti_altri_breve: "300000",
+    sp06e_crediti_tributari_breve: "200000",
+    sp07_crediti_lungo: "250000",
+    sp07a_crediti_clienti_lungo: "200000",
+    sp07e_crediti_tributari_lungo: "50000",
+  });
+
+  it("senza piano: (sp06a + sp07a) / ricavi x 360", () => {
+    // (1.000.000 + 200.000) / 7.200.000 x 360 = 60
+    expect(computeAutoDays("dso", ricavi, bs)).toBe(60);
+  });
+
+  it("col piano crediti_commerciali: l'intero commerciale a breve", () => {
+    // (1.500.000 - 200.000) / 7.200.000 x 360 = 65
+    expect(computeAutoDays("dso", ricavi, bs, { pianoCrediti: true })).toBe(65);
+  });
+
+  it("senza dettaglio breve: tutta la massa commerciale e' clienti; senza dettaglio oltre: sp07 - sp07f", () => {
+    const nodet = balance({
+      sp06_crediti_breve: "1300000",
+      sp07_crediti_lungo: "250000",
+      sp07f_imposte_anticipate_lungo: "50000",
+    });
+    // (1.300.000 + 200.000) / 7.200.000 x 360 = 75
+    expect(computeAutoDays("dso", ricavi, nodet)).toBe(75);
+  });
+});

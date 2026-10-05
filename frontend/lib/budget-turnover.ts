@@ -6,6 +6,10 @@ import { num } from "@/lib/budget-format";
  * applica quando il campo resta vuoto, ed è quindi il valore che il segnaposto
  * `auto:` può promettere.
  *
+ * Il ramo `dso` (ULTIMO allineamento, fix finale 2): senza piano `crediti_commerciali` e' il DSO sui
+ * soli clienti (sp06a + sp07a, con i ripieghi del motore); col piano resta quello sull'intero
+ * commerciale a breve, come il motore. Il resto di questo paragrafo descrive lo scorporo.
+ *
  * Il ramo `dso` scorpora dall'aggregato dei crediti a breve i crediti tributari
  * (`sp06e`) e le imposte anticipate (`sp06f`), perché il motore fa lo stesso:
  * non sono crediti commerciali e non devono scalare coi ricavi, quindi li porta
@@ -39,6 +43,7 @@ export function computeAutoDays(
   kind: "dso" | "dio" | "dio_pf" | "dpo",
   income: IncomeStatement | undefined,
   balance: BalanceSheet | undefined,
+  opzioni: { pianoCrediti?: boolean } = {},
 ): number | null {
   if (!income || !balance) return null;
   const revenue = num(income.ce01_ricavi_vendite);
@@ -46,12 +51,31 @@ export function computeAutoDays(
   let numerator = 0;
   let denominator = 0;
   if (kind === "dso") {
-    numerator = Math.max(
+    const comm = Math.max(
       0,
       num(balance.sp06_crediti_breve)
         - num(balance.sp06e_crediti_tributari_breve)
         - num(balance.sp06f_imposte_anticipate_breve),
     );
+    if (opzioni.pianoCrediti) {
+      // Col piano `crediti_commerciali` il motore deriva il DSO sull'intero commerciale a breve.
+      numerator = comm;
+    } else {
+      // Senza piano (#61 S03/S27) il DSO governa i soli CLIENTI, breve + oltre: sp06a + sp07a,
+      // con gli stessi ripieghi del motore (`_calcola_stato_patrimoniale`, blocco DSO).
+      const dettaglioBreve = ["sp06a_crediti_clienti_breve", "sp06b_crediti_controllate_breve",
+        "sp06c_crediti_collegate_breve", "sp06d_crediti_controllanti_breve", "sp06g_crediti_altri_breve"]
+        .reduce((a, f) => a + num(balance[f as keyof BalanceSheet] as string), 0);
+      const clientiBreve = dettaglioBreve === 0 && comm > 0 ? comm : num(balance.sp06a_crediti_clienti_breve);
+      const dettaglioOltre = ["sp07a_crediti_clienti_lungo", "sp07b_crediti_controllate_lungo",
+        "sp07c_crediti_collegate_lungo", "sp07d_crediti_controllanti_lungo",
+        "sp07e_crediti_tributari_lungo", "sp07g_crediti_altri_lungo"]
+        .reduce((a, f) => a + num(balance[f as keyof BalanceSheet] as string), 0);
+      const clientiOltre = dettaglioOltre === 0
+        ? Math.max(0, num(balance.sp07_crediti_lungo) - num(balance.sp07f_imposte_anticipate_lungo))
+        : num(balance.sp07a_crediti_clienti_lungo);
+      numerator = clientiBreve + clientiOltre;
+    }
     denominator = revenue;
   }
   if (kind === "dio") {

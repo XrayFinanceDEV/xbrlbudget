@@ -16,6 +16,8 @@ export interface StepProps {
   scenarioId: number | null;
   isNew: boolean;
   baseYear: number;
+  /** Settore dell'azienda (1-6): decide la soglia dei giorni di magazzino (5 e 6 non ne hanno). */
+  sector?: number;
   forecastYears: number[];
   assumptions: AssumptionsMap;
   historical: HistoricalData;

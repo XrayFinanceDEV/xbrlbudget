@@ -111,6 +111,34 @@ describe("computeAutoDays — dio sul consumo delle materie (B01)", () => {
   });
 });
 
+// #62 nota S04: due gruppi di giorni. `dio` = materie + semilavorati sul consumo; `dio_pf` =
+// prodotti finiti sui ricavi. Il numero si restituisce anche oltre 365: decide il chiamante.
+describe("computeAutoDays — due gruppi di magazzino (#62 S04)", () => {
+  it("dio somma materie e semilavorati sul consumo", () => {
+    const bs = balance({ sp05_rimanenze: "60", sp05a_materie_prime: "36", sp05b_prodotti_in_corso: "24" });
+    const is = income({ ce01_ricavi_vendite: "1000", ce05_materie_prime: "260", ce10_var_rimanenze_mat_prime: "0" });
+    // (36 + 24) / 260 x 360 = 83,08 -> 83.
+    expect(computeAutoDays("dio", is, bs)).toBe(83);
+  });
+
+  it("dio_pf = sp05d / ricavi x 360", () => {
+    const bs = balance({ sp05_rimanenze: "100", sp05d_prodotti_finiti: "100" });
+    const is = income({ ce01_ricavi_vendite: "1000", ce05_materie_prime: "260" });
+    expect(computeAutoDays("dio_pf", is, bs)).toBe(36);
+  });
+
+  it("dio_pf tace senza ricavi", () => {
+    const bs = balance({ sp05d_prodotti_finiti: "100" });
+    expect(computeAutoDays("dio_pf", income({ ce01_ricavi_vendite: "0" }), bs)).toBeNull();
+  });
+
+  it("dio oltre 365 restituisce il numero (807, caso AMBIENTA), non null", () => {
+    const bs = balance({ sp05_rimanenze: "287312", sp05a_materie_prime: "287312" });
+    const is = income({ ce05_materie_prime: "129308", ce10_var_rimanenze_mat_prime: "-1217" });
+    expect(computeAutoDays("dio", is, bs)).toBe(807);
+  });
+});
+
 describe("computeAutoDays — dpo resta invariato", () => {
   it("dpo sui fornitori sugli acquisti (materie + servizi)", () => {
     const bs = balance({ sp16d_debiti_fornitori_breve: "470000" });

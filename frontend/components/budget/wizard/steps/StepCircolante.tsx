@@ -17,7 +17,7 @@
 import type { JSX } from "react";
 import { useMemo } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { circolantePreview, giorniMediAuto, giorniMediRows } from "@/lib/budget-circolante-step";
+import { avvisiMagazzino, circolantePreview, giorniMediAuto, giorniMediRows } from "@/lib/budget-circolante-step";
 import { fornitoriZeroAvviso } from "@/lib/budget-fornitori-zero";
 import { AlertTriangle } from "lucide-react";
 import { previewNotice } from "@/lib/budget-preview-notice";
@@ -30,8 +30,9 @@ export function StepCircolante(p: StepProps): JSX.Element {
   const baseBs = p.historical[p.baseYear]?.balance;
 
   const auto = useMemo(() => giorniMediAuto(baseInc, baseBs), [baseInc, baseBs]);
-  const giorniRows = useMemo(() => giorniMediRows(auto), [auto]);
+  const giorniRows = useMemo(() => giorniMediRows(auto, p.baseYear), [auto, p.baseYear]);
   const avviso = useMemo(() => fornitoriZeroAvviso(p.baseYear, baseBs, baseInc), [p.baseYear, baseBs, baseInc]);
+  const avvisiRimanenze = useMemo(() => avvisiMagazzino(p.preview.data?.forecast_years ?? []), [p.preview.data]);
   const preview = useMemo(() => circolantePreview(baseBs, baseInc, p.preview.data), [baseBs, baseInc, p.preview.data]);
 
   return (
@@ -69,6 +70,18 @@ export function StepCircolante(p: StepProps): JSX.Element {
             {preview.degenerateDays.length > 0 && (
               <div className="mt-2 space-y-1 rounded-md bg-amber-500/10 p-3 text-xs text-amber-700 dark:text-amber-300">
                 {preview.degenerateDays.map((m) => (
+                  <div key={m} className="flex gap-2">
+                    <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+                    <span>{m}</span>
+                  </div>
+                ))}
+              </div>
+            )}
+            {/* Le frasi vengono dall'elenco strutturato `avviso_rimanenze`: gli avvisi di
+                imposte e debiti sono di altri passi e qui non si filtrano a testo. */}
+            {avvisiRimanenze.length > 0 && (
+              <div className="mt-2 space-y-1 rounded-md bg-amber-500/10 p-3 text-xs text-amber-700 dark:text-amber-300">
+                {avvisiRimanenze.map((m) => (
                   <div key={m} className="flex gap-2">
                     <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
                     <span>{m}</span>

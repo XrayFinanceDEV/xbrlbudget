@@ -29,9 +29,14 @@ import { num } from "@/lib/budget-format";
  * la stessa regola di `_materie_base` nel motore: un `sp05a` a zero con un'altra
  * sotto-voce valorizzata (es. `sp05c`) NON è "nessun dettaglio", è materie davvero a
  * zero, e il ripiego la confonderebbe con un'altra rimanenza.
+ *
+ * #62 nota S04: `dio` è il gruppo 1 (`sp05a + sp05b`, materie e semilavorati, sul consumo) e
+ * `dio_pf` il gruppo 2 (`sp05d` sui ricavi). Il numero si restituisce anche quando supera 365
+ * (807 gg su AMBIENTA): è il dato storico, e decide il chiamante se mostrarlo come
+ * segnaposto o solo come nota — il motore, in quel caso, riporta il saldo.
  */
 export function computeAutoDays(
-  kind: "dso" | "dio" | "dpo",
+  kind: "dso" | "dio" | "dio_pf" | "dpo",
   income: IncomeStatement | undefined,
   balance: BalanceSheet | undefined,
 ): number | null {
@@ -50,17 +55,22 @@ export function computeAutoDays(
     denominator = revenue;
   }
   if (kind === "dio") {
-    const materiePrime = num(balance.sp05a_materie_prime);
-    const sottoVociTotale = materiePrime
-      + num(balance.sp05b_prodotti_in_corso)
+    // Gruppo 1 (#62 nota S04): materie prime + semilavorati sul consumo.
+    const gruppo1 = num(balance.sp05a_materie_prime) + num(balance.sp05b_prodotti_in_corso);
+    const sottoVociTotale = gruppo1
       + num(balance.sp05c_lavori_in_corso)
       + num(balance.sp05d_prodotti_finiti)
       + num(balance.sp05e_acconti);
     const aggregato = num(balance.sp05_rimanenze);
     numerator = sottoVociTotale === 0 && aggregato > 0
       ? aggregato - num(balance.sp05e_acconti)
-      : materiePrime;
+      : gruppo1;
     denominator = num(income.ce05_materie_prime) + num(income.ce10_var_rimanenze_mat_prime);
+  }
+  if (kind === "dio_pf") {
+    // Gruppo 2: prodotti finiti e merci sui ricavi.
+    numerator = num(balance.sp05d_prodotti_finiti);
+    denominator = revenue;
   }
   if (kind === "dpo") { numerator = num(balance.sp16d_debiti_fornitori_breve); denominator = purchases; }
   if (denominator <= 0) return null;

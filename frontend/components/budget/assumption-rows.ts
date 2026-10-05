@@ -23,7 +23,7 @@ export type AssumptionRowDef = {
   /** empty input maps to null instead of 0 (auto/constant semantics) */
   nullable?: boolean;
   /** placeholder shows the auto-derived base-year value */
-  autoPlaceholder?: "dso" | "dio" | "dpo";
+  autoPlaceholder?: "dso" | "dio" | "dio_pf" | "dpo";
   step?: string;
   min?: number;
   max?: number;
@@ -89,7 +89,8 @@ export const ADVANCED_GROUPS: { title: string; rows: AssumptionRowDef[] }[] = [
     title: "Capitale circolante",
     rows: [
       rule(["dso_days"], { key: "dso", label: "Giorni incasso clienti (DSO)", autoPlaceholder: "dso" }),
-      rule(["dio_days"], { key: "dio", label: "Giorni di scorta materie prime (sul consumo)", autoPlaceholder: "dio" }),
+      rule(["dio_days"], { key: "dio", label: "Giorni materie prime e semilavorati (sul consumo)", autoPlaceholder: "dio" }),
+      rule(["dio_pf_days"], { key: "dio-pf", label: "Giorni prodotti finiti e merci (sui ricavi)", autoPlaceholder: "dio_pf" }),
       rule(["dpo_days"], { key: "dpo", label: "Giorni pagamento fornitori (DPO)", autoPlaceholder: "dpo" }),
       rule(["receivables_long_growth_pct"], { key: "crediti-oltre", label: "Crediti oltre 12 mesi %" }),
     ],

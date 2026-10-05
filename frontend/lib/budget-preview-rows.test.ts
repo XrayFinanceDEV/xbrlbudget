@@ -6,7 +6,7 @@ import {
   ceAggregates, rowsAnnoBase, rowsCeAnteImposte, rowsCircolante, rowsCosti, rowsFatturato,
   rowsImposte, rowsImposteSaldoAcconto, unfundedFromError,
 } from "./budget-preview-rows";
-import { confermaCassaPositiva, scopertoAvvisi } from "./budget-preview-rows";
+import { avvisiMotore, confermaCassaPositiva, scopertoAvvisi } from "./budget-preview-rows";
 import { euro } from "@/lib/budget-format";
 
 const baseInc = {
@@ -607,5 +607,14 @@ describe("scopertoAvvisi · cassa sotto il minimo, e confermaCassaPositiva (Task
     expect(confermaCassaPositiva(conScoperto, scopertoAvvisi(conScoperto.forecast_years))).toBe(false);
     const pulita = risposta([conDettagli(2027, { cassa_assorbita: 1234.56 })]);
     expect(confermaCassaPositiva(pulita, scopertoAvvisi(pulita.forecast_years))).toBe(true);
+  });
+});
+
+describe("avvisiMotore", () => {
+  const y = (year: number, avvisi?: string[]) =>
+    ({ year, income_statement: {}, balance_sheet: {}, details: { avvisi } } as unknown as ForecastPreviewYear);
+  it("raccoglie details.avvisi di tutti gli anni senza duplicati, ignorando l'assenza", () => {
+    expect(avvisiMotore([y(2026, ["a", "b"]), y(2027, ["b", "c"]), y(2028)])).toEqual(["a", "b", "c"]);
+    expect(avvisiMotore([])).toEqual([]);
   });
 });

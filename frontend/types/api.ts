@@ -540,6 +540,7 @@ export interface BudgetAssumptions {
   payables_short_growth_pct: number;
   dso_days: number | null;
   dio_days: number | null;
+  dio_pf_days: number | null;
   dpo_days: number | null;
   existing_debt_repayment_years: number | null;
   altri_finanz_repayment_years: number | null;
@@ -651,6 +652,7 @@ export interface BudgetAssumptionsCreate {
   payables_short_growth_pct?: number;
   dso_days?: number | null;
   dio_days?: number | null;
+  dio_pf_days?: number | null;
   dpo_days?: number | null;
   existing_debt_repayment_years?: number | null;
   altri_finanz_repayment_years?: number | null;
@@ -1237,6 +1239,18 @@ export interface ForecastYearDetails {
   ce05_fixed: number | null; ce05_variable: number | null;
   ce06_fixed: number | null; ce06_variable: number | null;
   dso_applied: number; dio_applied: number; dpo_applied: number;
+  /** Giorni applicati al gruppo 2 (prodotti finiti e merci, sui ricavi). */
+  dio_pf_applied?: number;
+  /** Rimanenze per gruppo (#62 S04): apertura, chiusura, giorni e se il giorno e' degenere. */
+  rimanenze?: Record<"materie_semilavorati" | "prodotti_finiti" | "lavori_in_corso", {
+    apertura: number; chiusura: number; giorni: number; base_giorni: number | null;
+    degenere: boolean; override: boolean; contropartita: string;
+  }>;
+  /** Giorni inseriti che spostano il magazzino oltre soglia: sempre presente, anche vuoto. */
+  avviso_rimanenze?: {
+    gruppo: "materie_semilavorati" | "prodotti_finiti";
+    apertura: number; chiusura: number; variazione: number; giorni: number;
+  }[];
   /** I giorni medi DEDOTTI caduti nella guardia (`'dso' | 'dio' | 'dpo'`):
    *  il motore ha riportato il saldo dell'anno base invece di scalarlo.
    *  Sempre presente, vuoto quando non scatta nulla. */

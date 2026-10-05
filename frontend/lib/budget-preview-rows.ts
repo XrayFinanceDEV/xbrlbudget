@@ -523,3 +523,14 @@ export function confermaCassaPositiva(data: ForecastPreviewResponse | null, avvi
   const tirato = (data.forecast_years ?? []).some((y) => num(y.details?.debito_bancario?.fidi?.tiraggio) > 0);
   return !tirato && avvisi.scoperto === null && avvisi.picco === null && avvisi.anni.every((a) => a.scopertoResiduo === 0);
 }
+
+/**
+ * Gli avvisi che il motore dichiara in `details.avvisi`, raccolti su tutti gli anni
+ * senza duplicati. Raccolta pura: niente filtro sul testo — chi serve un solo passo
+ * legge l'elenco strutturato del proprio tema (es. `avvisiMagazzino`).
+ */
+export function avvisiMotore(years: ForecastPreviewYear[]): string[] {
+  const visti = new Set<string>();
+  for (const y of years) for (const a of y.details?.avvisi ?? []) visti.add(a);
+  return [...visti];
+}

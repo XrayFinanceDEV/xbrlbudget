@@ -84,13 +84,16 @@ imposte.** Nessuna riclassifica automatica a oltre 12 mesi.
   solo sulla riga del primo anno di piano, come `pregresso`), con la migrazione in `migrate_db.py` e
   nello schema bulk (`BudgetAssumptionsBulkRow`), poi in `frontend/types/api.ts`.
 - UI: una casella nel passo 5 «Patrimoniale pregresso», accanto al piano dei crediti tributari:
-  «Compensa il credito residuo con le imposte dell'anno (F24)», con una riga di spiegazione.
+  «compensa il credito residuo con le imposte da versare», con una riga di spiegazione (F24).
 - Kernel (`tax_settlement_saldo_acconto`): un nuovo argomento `credito_storico_compensabile`.
   L'ordine è questo: il credito da acconti si compensa per primo, esattamente come oggi; poi il
   credito storico compensa ciò che resta di `saldo + acconti + rate`, fino a capienza.
   `TaxYear.credito_storico_compensato` lo dichiara.
-- Effetto: `cash_out` e il credito storico (`crediti_tributari_consuntivo`, quindi `sp06e`) scendono
-  dello **stesso importo**. Il debito d'imposta generato non cambia: gli acconti risultano versati,
+- Effetto: il credito storico (`crediti_tributari_consuntivo`, quindi `sp06e`) e le imposte versate
+  scendono dello **stesso importo**. `TaxYear.cash_out` resta descrittivo (non lo legge nessuno in
+  produzione): la cassa è il plug dello SP, e l'effetto le arriva da `sp06e`. Col piano
+  `crediti_tributari_breve` la compensazione si accumula in `credito_storico_compensato_cumulato`,
+  al massimo il residuo del piano. Il debito d'imposta generato non cambia: gli acconti risultano versati,
   in compensazione. Col piano acceso, il residuo da compensare è quello che resta **dopo** l'incasso
   dell'anno.
 - Casella spenta = comportamento di oggi, al centesimo. Nessuno scenario esistente si muove.
@@ -103,6 +106,10 @@ imposte.** Nessuna riclassifica automatica a oltre 12 mesi.
 
 ### M5 · S28 — Avviso sugli acconti sotto il minimo
 
+- **Canale unico degli avvisi del motore:** `details['avvisi']`, una lista di frasi italiane presente
+  in ogni anno di piano e persistita in `engine_meta['avvisi']`; il report la legge come diagnostica
+  `engine_avviso` (severità `info`, non tiene in bozza) e la mostra nella sezione 10. Le chiavi
+  strutturali citate qui sotto restano come dato, non come secondo canale.
 - Quando `tax_advances_paid` > 0 è **inferiore sia** all'imposta dell'anno prima (metodo storico) **sia**
   all'imposta dell'anno (metodo previsionale), il motore lo dichiara:
   `details['imposte']['avviso_acconti']` = `{acconti, minimo_storico, minimo_previsionale}`.
@@ -113,10 +120,10 @@ imposte.** Nessuna riclassifica automatica a oltre 12 mesi.
 ### M6 · S18 (seconda parte) — Avviso sugli altri debiti passati da oltre a entro 12 mesi
 
 - Quando nell'anno base la quota oltre 12 mesi degli altri debiti (`sp17g`) è **scesa** rispetto al
-  bilancio che la precede (l'anno annuale prima, o il riferimento dell'infrannuale da cui il base è
-  stato promosso), e il piano `altri_debiti` non la scadenzia, `details['avviso_altri_debiti_breve']`
+  bilancio che la precede (l'anno prima a periodo pieno, letto con `get_fy_full`: un parziale non vale),
+  e il piano `altri_debiti` non la scadenzia, `details['avviso_altri_debiti_breve']`
   dichiara gli importi.
-- Senza un bilancio precedente da confrontare non c'è alcun avviso: «non lo so».
+- Senza un bilancio precedente da confrontare (o con il solo parziale) non c'è alcun avviso: «non lo so».
 - Visibile nel passo 6 e nella sezione 10 del Business plan, col suggerimento di scadenziarli al
   passo 5.
 
@@ -143,8 +150,13 @@ senza passare dal CE, lo stesso difetto che B01 ha corretto per le materie.
 - `sp05c` (lavori in corso su ordinazione) e `sp05e` (acconti): giorni dedotti dai ricavi, come oggi,
   senza una casella.
 - **Contropartite di CE (OIC):** `ce10` = −Δ`sp05a` (B11, invariato); **`ce02` = Δ(`sp05b + sp05d`)**
-  (A2); **`ce03` = Δ`sp05c`** (A3). Un `ce02_override`/`ce03_override` vince e lo SP lo segue, come
-  per `ce10` (un override che svuoterebbe il gruppo sotto zero si rifiuta con un errore italiano).
+  (A2). **`ce03` NON si deriva da Δ`sp05c`** (corretto in esecuzione, 2026-10-05): gli importatori
+  scrivono in `ce03_lavori_interni` la voce A.4 «incrementi per lavori interni» (nel DB principale
+  `ce03` ≠ 0 in 3 bilanci su 504, tutti con `sp05c` = 0), quindi derivarlo dallo SP azzererebbe un
+  ricavo vero; `ce03` resta quello della base o l'override, e il movimento di `sp05c` è solo di cassa
+  (`details['rimanenze']['lavori_in_corso']['contropartita'] = 'nessuna'`). Un `ce02_override` vince
+  e lo SP lo segue, come per `ce10` (un override che svuoterebbe il gruppo sotto zero si rifiuta con un
+  errore italiano).
   Diagnostica: `details['rimanenze']` per gruppo (`apertura`, `chiusura`, `giorni`, `base_giorni`,
   `contropartita`).
 - **Avviso** quando i giorni inseriti per un gruppo portano la variazione dell'anno oltre il 50% del
@@ -169,7 +181,9 @@ senza passare dal CE, lo stesso difetto che B01 ha corretto per le materie.
 (banche + altri finanziatori + obbligazioni).
 
 - `rod` = oneri finanziari / media(`financial_debt_total` di inizio e di fine anno). Sulla prima
-  colonna, che non ha un inizio, si usa la fine anno con reason `rod_saldo_fine_anno`. La regola
+  colonna cerca l'anno prima a periodo pieno (`get_fy_full`) e, senza, usa la fine anno; **nessuna
+  reason apposta** (`rod_saldo_fine_anno` non esiste): la formula scritta nella colonna dichiara la media.
+  La sintesi `/calculations/complete` e il PDF legacy restano sulla fine anno. La regola
   «`None` a perimetro zero» e la regola F1 (dettaglio mancante) restano.
 - Vale in Indici e nel report, con la stessa formula in un solo punto. Si muove: il ROD di ogni
   scenario.
@@ -189,9 +203,10 @@ senza passare dal CE, lo stesso difetto che B01 ha corretto per le materie.
 **Decisione:** si mostrano tutte e due.
 
 - PFN/EBITDA e ROI del periodo parziale escono con il valore **del periodo** (come oggi) **e**
-  quello **annualizzato** (flussi × 12 / mesi), con le etichette «periodo (n mesi)» e «annualizzato».
-  I punti sono `report_indicators.py` :148, :178, :308, e le superfici che li rendono (report
-  infrannuale, Allegato E). Gli indici di stock (PFN) non si annualizzano.
+  quello **annualizzato** (flussi × 12 / mesi). **Righe annualizzate solo nel Business plan**
+  (ReportLab): il report infrannuale annualizza già per conto suo e il dossier Typst non si tocca;
+  le righe originali mantengono l'etichetta e una nota spiega la differenza. Gli indici di stock (PFN)
+  non si annualizzano.
 - Accettazione (tester): PFN/EBITDA 6M = 10,76× (periodo) e 5,38× (annualizzato).
 
 ---

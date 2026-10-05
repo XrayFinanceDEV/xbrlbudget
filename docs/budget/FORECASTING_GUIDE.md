@@ -152,7 +152,10 @@ usato.
 **Il TFR** (`ce08a`) è sempre retribuzioni / 13,5. Se questo più salari e oneri sociali supera il
 costo del personale che avresti (perché forzato in CE Prev. o troppo basso), il motore **ricompone
 il totale come somma** delle tre voci e azzera «altri costi del personale», dichiarando l'eccedenza;
-un totale forzato invece vince e limita l'accantonamento a quanto resta sotto. **Proventi e oneri
+un totale forzato invece vince e limita l'accantonamento a quanto resta sotto. **Quando l'anno prima
+ha salari, oneri o altri costi del personale** (e il totale non è forzato) ogni componente cresce con la
+crescita del personale e il totale del personale è la **somma** delle voci, TFR di legge compreso:
+`details['personale']` dichiara di quanto si scosta da «anno prima × crescita». **Proventi e oneri
 straordinari** valgono zero in ogni anno di piano — non sono ricorrenti per definizione — salvo un
 importo forzato in CE Prev.
 
@@ -184,7 +187,9 @@ e tutto il blocco è `null`, sull'anno interessato.
 **Che cosa inserisci**
 
 - «Giorni medi», tre righe: **Giorni incasso clienti (DSO)**, **Giorni rotazione magazzino
-  (DIO)**, **Giorni pagamento fornitori (DPO)**. Il campo è annullabile e il segnaposto mostra
+  (DIO)**, **Giorni pagamento fornitori (DPO)**; il DIO ha due caselle, **materie prime e semilavorati**
+  (sul consumo) e **prodotti finiti e merci** (sui ricavi, `dio_pf_days`), con il DIO storico di ciascuno
+  accanto. Il campo è annullabile e il segnaposto mostra
   *auto N*: vuoto significa «usa il valore derivato dall'anno base», mai «zero giorni». La nota
   sotto ricorda che i giorni dell'anno base sono calcolati sui soli crediti e debiti commerciali,
   su 360 giorni, e che crediti e debiti dell'anno base si chiudono nell'anno successivo (passo 5):
@@ -204,8 +209,15 @@ e tutto il blocco è `null`, sull'anno interessato.
   dai saldi **commerciali**, non dagli aggregati: i crediti tributari e le imposte anticipate
   restano fuori dal DSO perché dipendono dalla posizione fiscale, non dal giro d'affari; il DPO
   guarda i soli **debiti verso fornitori**. Il circolante scala poi su ricavi e costi previsionali,
-  override compresi. **Il DIO delle materie prime ha come denominatore il loro consumo**
-  (acquisti + variazione di rimanenze), non il ricavo — le altre rimanenze restano sul ricavo. Un
+  override compresi. **Il DSO governa i soli crediti verso clienti** (`sp06a + sp07a = DSO × ricavi / 360`):
+  le altre voci commerciali restano quelle dell'anno prima, e con 90 giorni in input il report legge 90
+  (con un piano sui crediti commerciali no: il generato va su `sp06a`, e il report misura anche il pregresso).
+  **Il magazzino ha due gruppi di giorni**: materie e semilavorati hanno come denominatore il loro consumo
+  (acquisti + variazione di rimanenze), i prodotti finiti e merci i ricavi; lavori in corso e acconti
+  hanno giorni dedotti dai ricavi. La variazione dei prodotti finiti e dei semilavorati passa dal CE
+  (`ce02` = Δ`sp05b + sp05d`); `ce03` non si deriva dallo SP (negli import contiene i lavori interni)
+  e il movimento di `sp05c` è solo di cassa. Giorni scritti da te che spostano un gruppo di oltre il
+  50% della giacenza d'apertura, o oltre il suo flusso, ricevono un avviso: il numero resta tuo. Un
   `ce10_override` (la variazione di rimanenze in CE Prev.) oltre la giacenza di materie in apertura
   si **rifiuta**: le rimanenze non possono scendere sotto zero, e lo SP segue sempre il CE su questa
   voce.
@@ -468,6 +480,14 @@ l'acconto di N è di default il **100%** dell'imposta N−1 — o l'importo che 
 «Acconti versati nell'anno», **a condizione che sia maggiore di zero**: zero in quella casella non
 vuol dire «zero acconti», vuol dire «non dichiarato», e il motore ricade sulla percentuale. Le
 rate del piano, scadenziate al passo 5, muovono il solo rateizzato, mai il saldo.
+
+**Il credito tributario del consuntivo** (IVA, ritenute) resta fuori da questo meccanismo, salvo che tu
+spunti al passo 5 «compensa il credito residuo con le imposte da versare»: allora ogni anno si scala da
+saldo, acconti e rate, e calano insieme credito e imposte pagate (non vale con le imposte in via manuale).
+Un acconto che scrivi sotto sia all'imposta dell'anno prima sia a quella dell'anno riceve un avviso, senza
+che nessun numero si muova. **Riserva legale**: ogni anno di piano il 5% dell'utile dell'anno prima (per il
+primo, quello dell'anno base) passa da utili portati a riserva legale, finché questa non raggiunge il 20% del
+capitale; una perdita non accantona, e cassa e totale del patrimonio netto non cambiano.
 
 La **via manuale del budget** si attiva valorizzando *Debiti tributari entro %*
 (`sp16e_growth_pct`) al passo 7: i debiti tributari si muovono per crescita e il motore

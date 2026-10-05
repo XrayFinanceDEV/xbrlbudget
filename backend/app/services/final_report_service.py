@@ -417,6 +417,14 @@ def assemble_final_report(db: Session, company_id: int, scenario_id: int, *, sch
                                            "Forecast generato da una versione precedente del motore."))
 
         by_forecast_year = {row.year: row for row in scenario.forecast_years}
+        # Le frasi d'avviso del motore (`engine_meta['avvisi']`) arrivano al Business plan come
+        # diagnostiche `info`: non cambiano la prontezza (che guarda errori e warning), e le deduplica
+        # chi le legge. Un `engine_meta` assente o senza `avvisi` e' «non lo so», non un avviso.
+        for year in wanted:
+            meta = getattr(by_forecast_year.get(year), "engine_meta", None)
+            for frase in (meta.get("avvisi") if isinstance(meta, dict) else None) or []:
+                if isinstance(frase, str) and frase:
+                    diagnostics.append(_diagnostic("engine_avviso", "info", "forecast", frase))
         for year in wanted:
             row = by_forecast_year.get(year)
             if row is None:

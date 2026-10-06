@@ -54,12 +54,12 @@ dove il giornale delle Rettifiche non c'è più — compare il banner **«Pratic
 anche solo di verifica, e poi analizzi) e **Startup** (nessun bilancio, solo ipotesi; sezione 15).
 
 **«Nuova azienda»** apre un dialogo con **Nome\***, **Partita IVA** (11 cifre) e **Settore\*** a
-tendina (Industria, Commercio, Servizi, Autotrasporti, Immobiliare, Edilizia). Il settore non è
-un'etichetta: sceglie il modello Altman (Industria usa i 5 componenti, gli altri 4) e le soglie
-FGPMI.
+tendina: le sei descrizioni sono lunghe (per esempio «1. Industria, Alberghi (Proprietari),
+Agricoltura, Pesca») e se l'azienda è mista fa fede il settore del fatturato principale. Il
+settore non è un'etichetta: sceglie il modello Altman (settore 1 a 5 componenti, settori 2-6 a
+4) e le soglie FGPMI.
 
-> ⚠ L'unica ricerca e l'unico filtro che la home conosce sono il tuo occhio: le aziende sono
-> schede in elenco, senza barra di ricerca né ordinamento.
+> La home non ha barra di ricerca né ordinamento: le aziende sono solo schede in elenco.
 
 ---
 
@@ -110,19 +110,19 @@ bilancio non quadra viene **importato comunque con un avviso**, non «aggiustato
 
 ![Esito dell'import](images/guida/03b-import-esito.jpg)
 
-**Che cosa dichiara l'esito.** Attivo = passivo, il totale di CE che quadrà con l'utile in
+**Che cosa dichiara l'esito.** Attivo = passivo, il totale di CE che quadra con l'utile in
 stato patrimoniale, e gli scarti **misurati e non tappati** (un divario fra aggregato e dettagli,
 una riga non riconosciuta): tutto diventa riga da correggere in Rettifiche, mai un importo
-inventato. Un **parziale** e un **annuale** dello stesso anno coesistono di proposito: l'app
-sceglie quale leggere a seconda dello schermo, e tu non devi cancellare l'uno per importare
-l'altro.
+inventato. Un **parziale** e un **annuale** dello stesso anno coesistono di proposito: gli
+schermi che leggono lo storico (Indici, anno base del previsionale) danno precedenza
+all'annuale, il percorso infrannuale (Confronto, Proiezione) lavora sul parziale. Non devi
+cancellare l'uno per importare l'altro.
 
 **Attenzione a**
 
 - Un file che non è un bilancio (un riepilogo di poche righe, un foglio export) viene
   **rifiutato con un errore**: è il comportamento giusto, non un guasto.
-- L'import PDF non è deterministico: lo stesso file può quadrare in modo diverso a due esecuzioni.
-  Un sospetto si conferma rieseguendo, mai su una prova sola.
+- Se un PDF dà un risultato strano, riprova l'import; se resta strano, correggi in Rettifiche.
 
 **Approfondisci** → [REGOLE-IMPORT-00-INDICE.md](import/REGOLE-IMPORT-00-INDICE.md)
 
@@ -214,7 +214,7 @@ digitare a mano, e uno stato patrimoniale proiettato che **il server** adatta di
 **Che cosa c'è a schermo**
 
 - La griglia CE modificabile con i subtotali che si aggiornano mentre digiti (valore della
-  produzione, costi, MOL, EBIT, risultato ante e poste imposte, utile).
+  produzione, costi, MOL, EBIT, risultato ante e post imposte, utile).
 - **«Genera proiezione e indicatori di crisi»**: salva le ipotesi, fa rigenerare il motore e
   rilegge. Non c'è un secondo calcolatore a schermo: proiezione, indicatori e stampa leggono
   **lo stesso risultato**.
@@ -273,8 +273,8 @@ CE, costi, SP, circolante, debito, crisi d'impresa, segnali, allegati A/B), gene
 **Attenzione a**
 
 - La stampa del browser è un'anteprima: per consegnare il documento usa «Scarica PDF».
-- I commenti AI hanno sei chiavi precise: un settimo commento aggiunto altrove viene **scartato
-  in silenzio**. Un commento *chiuso* sparisce dal PDF ma il testo resta a schermo.
+- I commenti AI sono **sei, fissi**: corrispondono agli schermi del percorso (uno complessivo,
+  CE e SP del Confronto, CE e SP della Proiezione, indicatori).
 
 **Approfondisci** → [REPORT-INFRANNUALE-PDF.md](budget/REPORT-INFRANNUALE-PDF.md)
 
@@ -336,7 +336,6 @@ proiezione — la schermata lo avvisa con queste parole.
 **4.314.986 €** (+205.476 €); portando quella cella a +7,5% diventano **4.417.723 €**
 (+308.213 €) e tutto il resto del piano si riposiziona: la crescita si compone anno su anno,
 quindi il +6% del 2028 lavora sui 4,42 milioni nuovi, non sui 4,31 vecchi.
-L'incremento di magazzino è già stimato con i ricavi al passo 4.
 
 **Attenzione a.** Una cella vuota non vale zero: è «non dichiarato», e il motore usa il suo
 default. E se la riga è stata forzata in **CE Previsionale** (§ 9), sotto la tabella compare
@@ -401,14 +400,15 @@ politica di cassa: se vuoi che duri, metti gli stessi giorni su tutti gli anni.
 
 **Attenzione a.** Se i giorni di un anno hanno un denominatore non positivo (ricavi o consumi a
 zero) o implicano oltre un anno di rotazione, il valore è **scartato**: il motore riporta lo
-stock dell'anno base e l'anteprima lo dichiara con l'avviso. Non è un bug, è il guard-rail.
+stock dell'anno base e l'anteprima lo dichiara con l'avviso. Non è un guasto: è il controllo
+che il motore fa per non inventare una rotazione che i dati non mostrano.
 
 ### Passo 5 · Patrimoniale pregresso
 
 ![Wizard passo 5](images/guida/13-wizard-pregresso.jpg)
 
 **A che cosa serve.** Che fine fanno i saldi **già in bilancio al 31/12 dell'anno base**: il
-lato breve si chiude nel primo anno di piano, quello oltre 12 mesi lo scandenzi tu.
+lato breve si chiude nel primo anno di piano, quello oltre 12 mesi lo scadenzi tu.
 
 **Che cosa c'è a schermo**
 
@@ -426,19 +426,20 @@ lato breve si chiude nel primo anno di piano, quello oltre 12 mesi lo scandenzi 
   bilancio* (**quadra**), *rimborsi primo anno = quota mutui entro 12 mesi* (**coerente**).
 - **«Altri finanziatori»**, stessa forma.
 
-![Le voci pregresse scandenziate a mano](images/guida/13a-wizard-pregresso-voci.jpg)
+![Le voci pregresse scadenziate a mano](images/guida/13a-wizard-pregresso-voci.jpg)
 
 ![Il pregresso bancario](images/guida/13b-wizard-pregresso-banche.jpg)
 
 **Esempio (AMBIENTA).** Debiti verso banche 2026 = **960.937 €**, «di cui 493.409 € a breve»:
 fidi 400.000 € (tasso 6%) + 93.409 € di rate 2027 dei due finanziamenti. Il credito oltre 12
-mesi da 45.000 € scandenziato a 5.000 €/anno chiude il piano con **30.000 € «resta aperto»** —
-li riproietti anche nel 2030, se esisti ancora.
+mesi da 45.000 € scadenziato a 5.000 €/anno chiude il piano con **30.000 € «resta aperto»** —
+quei 30.000 € restano nello stato patrimoniale a fine piano, e nessun anno di piano li vedrà
+scadere.
 
 **Attenzione a.** Un anno forzato in **via manuale** (passo 6) non può scaricare meno di quanto
 il piano tributario ripartirà l'anno dopo, o la stessa rata uscirebbe due volte: il motore lo
 rifiuta con un errore che nomina l'anno e le tre vie d'uscita. E un residuo oltre 12 mesi che
-non scandenzi **non sparisce**: resta in bilancio per tutto il piano.
+non scadenzi **non sparisce**: resta in bilancio per tutto il piano.
 
 **Approfondisci** → [API-PREVISIONALE.md](budget/API-PREVISIONALE.md)
 
@@ -676,7 +677,7 @@ pluriennale con la **formula di ogni indice** accanto al valore.
   l'indice è **n.d.**, non zero.
 - Il **DIO** è sul **consumo di materie**; ROD e PFN sull'intero perimetro del debito
   finanziario, ROD sul **debito medio** fra inizio e fine anno.
-- Il **CCN** è simmetrico sui ratei (attivo corrente: rimanze, crediti a breve, liquidità,
+- Il **CCN** è simmetrico sui ratei (attivo corrente: rimanenze, crediti a breve, liquidità,
   ratei/risconti attivi; passivo corrente: debiti entro l'anno e ratei/risconti passivi).
 - Un **n.d.** è una dichiarazione («non ho il dato per calcolarlo»), non un buco nell'app.
 
@@ -757,7 +758,7 @@ driver. Le griglie CE Prev./SP Prev. restano disponibili, con gli stessi overrid
 |---|---|
 | **Anno base** | L'ultimo bilancio annuale consuntivo da cui il previsionale parte. |
 | **Scenario / Budget** | La copia «cosa succede se» del bilancio: un set di ipotesi su N anni. |
-| **Pregresso** | Ciò che sta già in bilancio al 31/12 dell'anno base (debiti residui, crediti oltre anno) e va scandenziato. |
+| **Pregresso** | Ciò che sta già in bilancio al 31/12 dell'anno base (debiti residui, crediti oltre anno) e va scadenziato. |
 | **Override / cella forzata** | Un importo fissato a mano che vince sulla percentuale di crescita e sopravvive ai salvataggi. |
 | **DSO** | Giorni medi di incasso dei crediti commerciali (360 giorni, clienti, non crediti generici). |
 | **DIO** | Giorni medi di magazzino; in due gruppi: materie/semilavorati sul consumo, finito/merci sui ricavi. |
@@ -767,10 +768,10 @@ driver. Le griglie CE Prev./SP Prev. restano disponibili, con gli stessi overrid
 | **PFN** | Posizione finanziaria netta = debiti finanziari − liquidità. |
 | **CCN** | Capitale circolante netto = attivo corrente − passivo corrente. |
 | **DSCR** | (MOL − imposte) ÷ (oneri finanziari + quota capitale delle rate dei piani). |
-| **Break even point** | Il fatturato di pareggio, calcolato dalle quote fisse/variabili dei costi (non da un'ipotesi fissa 60/40). |
+| **Break even point** | Il fatturato di pareggio, calcolato dalle quote fisse/variabili dei costi di piano. |
 | **Infrannuale** | Periodo parziale (1-11 mesi) proiettato a 12 contro l'ultimo anno pieno. |
 | **Riclassificato** | Lo SP per aree omogenee con i relativi indici. |
-| **Quadratura** | Attivo = passivo (toleranza 0,01 €) e CE coerente con l'utile in SP. |
+| **Quadratura** | Attivo = passivo (tolleranza 0,01 €) e CE coerente con l'utile in SP. |
 
 ---
 

@@ -378,7 +378,7 @@ export function withNonIncassato(
  */
 export interface TributariOltreRow {
   key: "debiti_tributari";
-  label: "Debiti tributari rateizzati";
+  label: "Debiti tributari rateizzati (debiti tributari oltre 12 mesi)";
   dir: "out";
   /** Il rateizzato del piano (`plan.rateizzato`), non l'apertura intera
    *  (saldo + rateizzato): e' cio' che questa riga scadenzia. */
@@ -415,7 +415,7 @@ export function tributariOltreRow(
   const somma = amounts.reduce<number>((a, v) => a + (v ?? 0), 0);
   return {
     key: "debiti_tributari",
-    label: "Debiti tributari rateizzati",
+    label: "Debiti tributari rateizzati (debiti tributari oltre 12 mesi)",
     dir: "out",
     opening: cents(plan.rateizzato),
     amounts,

@@ -34,7 +34,7 @@ pratica a sinistra e il pulsante «Avanti: …» a destra.
 
 **Che cosa c'è a schermo**
 
-- «Aziende e pratiche», conteggio «N / 50 aziende», pulsante **«Nuova azienda»**.
+- Intestazione **«Aziende & Pratiche»** e pulsante **«Nuova azienda»**.
 - Una **scheda per azienda**: freccia per espandere, nome, settore, partita IVA, numero di
   pratiche, e un menu «…» a destra.
 - Il tema chiaro/scuro in alto a destra.
@@ -43,8 +43,10 @@ pratica a sinistra e il pulsante «Avanti: …» a destra.
 
 **Espandendo la scheda** compaiono gli anni già lavorati con **«Riprendi»** — riparte
 dall'ultimo passaggio raggiunto — e **«Nuova pratica»**. La cache di dove eri sta nel tuo
-browser, ma viene riverificata sul server: se le due versioni si contraddicono, prevale il
-server (vedrai il banner «Pratica da riaprire», § Troubleshooting).
+browser, ma il server la riverifica all'apertura: quando non riesce a ricostruire la pratica —
+per esempio una pratica vecchia con un budget salvato ma senza una pratica infrannuale dietro,
+dove il giornale delle Rettifiche non c'è più — compare il banner **«Pratica da riaprire»**
+(§ Troubleshooting).
 
 ![Dialogo Nuova pratica](images/guida/01c-home-dialogo-pratica.jpg)
 
@@ -81,8 +83,8 @@ essere sull'azienda giusta e correggi quello che l'import ha letto male.
 **Come si fa.** 1) correggi nome o partita IVA se l'import le ha sbagliate; 2) imposta il
 settore giusto (se non sai quale, scegli quello del fatturato principale); 3) «Salva e prosegui».
 
-**Esempio.** AMBIENTA è classificata **Servizi**: il suo rating userà le soglie FGPMI del
-settore 3 e il modello Altman a 4 componenti.
+**Esempio.** AMBIENTA è classificata **industria** (settore 1): il suo rating userà le soglie
+FGPMI del settore 1 e il modello Altman a 5 componenti.
 
 **Approfondisci** → [PRATICA-PERCORSO.md](frontend/PRATICA-PERCORSO.md)
 
@@ -151,9 +153,11 @@ a valle legge il giornale: l'app non ha una «versione sistemata» nascosta da q
 **Esempio.** La figura mostra una rettifica in partita doppia pronta da registrare: +500 € su
 «Crediti verso soci per versamenti ancora dovuti», contropartita «Altri ricavi e proventi» 500 €.
 Il dialogo stesso riassume il movimento («Più crediti vs soci → più altri ricavi»): dare e avere
-sono lo stesso importo, il totale del patrimonio non si muove, cambia la **classificazione**.
-Con **«Riclassifica (stessa sezione)»** muovi una voce fra due voci della stessa sezione senza
-toccare i totali; **«Correggi Import»** è la partita semplice (un campo solo) per errori
+sono lo stesso importo e il bilancio quadra come prima; ma qui la contropartita sta nel **CE**,
+e con 500 € di altri ricavi si muovono anche il risultato d'esercizio e il patrimonio netto.
+È il movimento giusto per un componente mai registrato (la più comune: una fattura da ricevere
+non registrata, servizi ↔ debiti verso fornitori). Se vuoi solo spostare una voce senza toccare
+i totali c'è **«Riclassifica (stessa sezione)»**: muovi una voce fra due voci della stessa sezione; **«Correggi Import»** è la partita semplice (un campo solo) per errori
 dell'importatore.
 
 **Attenzione a**
@@ -169,10 +173,12 @@ dell'importatore.
 
 ---
 
-# FASE 2 · ANALISI (infrannuale)
+# FASE 2 · ANALISI
 
-Si raggiunge solo con un **periodo parziale** importato e le Rettifiche confermate. È l'analisi
-del «non ancora chiuso»: il parziale proiettato a 12 mesi contro l'ultimo anno pieno.
+Si raggiunge con le Rettifiche confermate, **anche con un bilancio annuale**: le tab Confronto,
+Indicatori e Stampa ci sono sempre. La tab **Proiezione** compare solo con un **periodo
+parziale** (< 12 mesi) importato: è l'analisi del «non ancora chiuso», il parziale proiettato a
+12 mesi contro l'ultimo anno pieno.
 
 ## 4. Confronto
 
@@ -257,7 +263,10 @@ CE, costi, SP, circolante, debito, crisi d'impresa, segnali, allegati A/B), gene
 
 **Che cosa c'è a schermo**
 
-- L'anteprima a schermo, i **sei commenti AI** (generati e poi editabili), e le note chiudibili.
+- L'anteprima a schermo, i **sei commenti AI** (generati e poi editabili), e le note chiudibili:
+  una nota chiusa sparisce dal PDF ma il testo resta a schermo, e il commento si può riaprire.
+- In alto a destra, **«Prosegui al Budget»**: crea lo scenario con l'anno di questa pratica e
+  apre il wizard (§ 8); su un periodo parziale promuove prima la proiezione a bilancio annuale.
 - **«Scarica PDF»** — il pulsante che conta: produce lo stesso documento del server, non la
   pagina del browser. **«Scarica Word»** esporta lo stesso report in `.docx` per ritoccare i testi.
 
@@ -294,19 +303,21 @@ per il server finché non premi **«Salva e Calcola Previsionale»**.
 
 **Che cosa c'è a schermo**
 
-- **«Nome»**, l'**anno base** a tendina (gli anni annuali che possiedi), l'orizzonte: **«3
-  anni» / «5 anni»** più il campo numerico.
-- Il riquadro **«Punto di partenza»** con **«Inflazione attesa»** e la tabella **«Tendenza»**
-  (ricavi, costi, utile dell'anno base).
+- **«Nome»**, l'**anno base** — non è a scelta: un campo non modificabile con l'ultimo bilancio
+  annuale importato («2026 · bilancio annuale importato», fra l'altro segnato «ultimo anno
+  disponibile») — e l'orizzonte: **«3 anni» / «5 anni»** più il campo numerico.
+- Il riquadro **«Punto di partenza»** con **«Inflazione attesa»** e la tabella **«Tendenza»**,
+  che per ricavi, altri ricavi, materie prime, servizi, godimento beni di terzi, personale e
+  oneri diversi mostra la variazione % fra gli ultimi due anni annuali.
 - A destra, il riepilogo dell'anno base con i giorni storici (DSO/DIO/DPO) e la struttura dei
   costi: è da qui che il motore parte.
 
 **Che cosa fa l'inflazione.** **Non tocca i ricavi.** Precompila la crescita della sola **parte
 fissa** di materie prime e servizi al passo 3 (puoi correggerla lì).
 
-**Attenzione a.** Ridurre l'orizzonte (da 5 a 3 anni) cancella davvero gli anni in più solo se
-rigeneri il previsionale dopo il salvataggio; un previsionale vecchio di anni tagliati resta
-leggibile altrove.
+**Attenzione a.** Accorciare l'orizzonte non lascia anni fantasma: già al primo «Salva e calcola
+previsionale» le ipotesi degli anni tolti vengono cancellate, insieme ai loro anni di
+proiezione — la schermata lo avvisa con queste parole.
 
 ### Passo 2 · Fatturato
 
@@ -340,9 +351,9 @@ fa nulla finché non liberi l'override (pulsante «Usa la percentuale»).
 
 - **«Quanto è fisso»**: per **Materie prime** e **Servizi** uno slider con la % fissa e la barra
   che mostra i due importi.
-- **«Come si muovono i costi»**: la tabella **«PARTE VARIABLE»** (scostamento dalla crescita dei
-  ricavi in punti %, 0 = proporzionale), la **«PARTE FISSA»** (precompilata con l'inflazione del
-  passo 1) e le **«IPOTESI MANUALI»** — Personale, Godimento beni di terzi, Oneri diversi — con
+- **«Come si muovono i costi»**: la tabella **«Parte variabile»** (scostamento dalla crescita dei
+  ricavi in punti %, 0 = proporzionale), la **«Parte fissa»** (precompilata con l'inflazione del
+  passo 1) e le **«Ipotesi manuali»** — Personale, Godimento beni di terzi, Oneri diversi — con
   la variazione % per anno. Il pulsante **«Riallinea all'inflazione»** rimette
   la parte fissa sul valore dell'inflazione.
 - **«Calcolate in altri passi»**: ammortamenti (passo 6), oneri finanziari (passi 5 e 6),
@@ -374,11 +385,11 @@ lo azeri dal dialogo Ricalcola.
 
 - **«Giorni medi»** per anno: **DSO** (incasso clienti), **DIO** in due gruppi —
   materie/semilavorati (sul consumo) e prodotti finiti/merci (sui ricavi) — **DPO** (pagamento
-  fornitori), e i giorni delle altre voci minori (altri crediti, altri debiti).
+  fornitori): quattro righe, una colonna per anno di piano; le altre voci minori sono governate
+  dai passi 5 e 6, non dai giorni.
 - L'anteprima **«Capitale Circolante Commerciale»**: Crediti commerciali, rimanenze, debiti verso
   fornitori, CCN e — la riga che interessa — **«cassa liberata (+) / assorbita (−) dal
   circolante»**.
-- Il campo **«Cassa minima»** (sotto la tabella dei giorni).
 
 ![I giorni medi per anno](images/guida/12a-wizard-circolante-giorni.jpg)
 
@@ -441,8 +452,9 @@ TFR, altri saldi. La cassa chiude il foglio.
 **Che cosa c'è a schermo**
 
 - **«Altri saldi patrimoniali nel piano»**: tendina per voce — *Cresce con i ricavi*, *Cresce
-  con il costo del personale*, *Manuale* (e allora compaiono gli importi per anno, con lo storico a sinistra non
-  editabile) — e i «Saldi a zero nel 2026» raccoglitore.
+  con gli acquisti (materie e servizi)*, *Cresce con il costo del personale*, oppure *Manuale*
+  (e allora compaiono gli importi per anno, con lo storico a sinistra non editabile) — e i
+  «Saldi a zero nel 2026» raccoglitore.
 - **«Fondo TFR»**: saldo iniziale, casella per sospendere l'accantonamento (TFR a fondi esterni),
   riga per anno: accantonamento (calcolato), **liquidazioni** (le inserisci tu), fondo a fine
   anno. Le liquidazioni **oltre il fondo disponibile si rifiutano**, non si riducono.
@@ -451,8 +463,8 @@ TFR, altri saldi. La cassa chiude il foglio.
   aliquota** nell'anno di entrata.
 - **«Finanziamenti e cassa → Nuovi finanziamenti»**: nome, Importo, anno di erogazione, durata,
   preammortamento, tasso. **«Cassa e scoperto»**: «Usa la cassa in eccesso per
-  ridurre fidi, anticipi e scoperti di conto corrente» (sweep), minimo di liquidità, e la
-  concessione dello **scoperto di conto corrente** — **non concesso** di default: un fabbisogno
+  ridurre fidi, anticipi e scoperti di conto corrente» (sweep) con **«Cash sweep: cassa minima €»**,
+  e la concessione dello **scoperto di conto corrente** — **non concesso** di default: un fabbisogno
   senza rimedio fa **fallire la generazione** con un errore, invece di inventare un numero.
 
 ![I nuovi investimenti](images/guida/14b-wizard-piano-investimenti.jpg)
@@ -490,11 +502,13 @@ lì.
 
 ![Il pagamento delle imposte](images/guida/15b-wizard-imposte-pagamento.jpg)
 
-**Esempio (aliquota 30 → 24, AMBIENTA).** 2028: imposte da **−54.646 €** a **−43.716 €**, utile
-netto da 127.506 € a **138.435 €**; il saldo dovuto nel 2029 scende a 21.737 €. Nel 2027
-l'uscita di cassa per imposte (37.227 € = saldo 4.227 + acconti 33.000 − credito compensato
-−33.000) **non si muove**: l'aliquota tocca l'imposta maturata, non quella pagata. Questa è la
-riga che prima dei saldi+acconti restava gonfiata di un'imposta all'anno.
+**Esempio (AMBIENTA).** Nel 2027 l'uscita di cassa per imposte è **37.227 €**: saldo 2026
+**4.227 €** + acconto 2027 **33.000 €**, versati in un colpo solo. Nel 2028 l'uscita è
+**−33.000 €**: il primo anno di piano chiude in perdita, quindi non c'è saldo da pagare e
+l'acconto versato l'anno prima torna indietro come credito compensato; non a caso l'«acconto
+auto» del 2028 in anteprima è **0 €**: l'acconto di default è il 100% dell'imposta dell'anno
+prima, e quella del 2027 è zero. Nel 2029 si pagano saldo + acconto del 2028: **109.291 €**. Se
+l'aliquota proposta non ti convince la cambi: si applica così com'è.
 
 **Approfondisci** → [API-PREVISIONALE.md](budget/API-PREVISIONALE.md) §4
 
@@ -504,9 +518,10 @@ Il salvataggio che produce il previsionale. Due verità che vale sapere:
 
 - Un previsionale **rifiutato** (per esempio: *«Fabbisogno finanziario scoperto di … €:
   aggiungi un'ipotesi di finanziamento esplicita; nessun debito bancario è stato creato
-  automaticamente.»*) risponde comunque «ok» al
-  salvataggio: **leggi il toast**. Se è rosso la ragione è lì; se è verde («Previsionale
-  calcolato») il calcolo c'è.
+  automaticamente.»*) risponde comunque «ok» al salvataggio: le ipotesi restano
+  salvate e **la ragione arriva nel toast** — nel wizard a 7 passi è un errore che ti riporta
+  anche al passo che lo ha causato, nel modulo Startup un avviso giallo. Se il toast dice
+  «Previsionale calcolato» il calcolo c'è.
 - Dal dialogo **«Ricalcola»** (pulsante omonimo sulla lista scenari) puoi azzerare le modifiche
   manuali del CE: la casella **«Azzera le modifiche manuali del CE previsionale»** cancella solo
   quelle, **non** gli override dello SP Prev.
@@ -537,10 +552,11 @@ successivo: vince sulla percentuale e non si azzera da solo.
 
 ![Cella CE forzata](images/guida/17a-ce-cella-forzata.jpg)
 
-**Attenzione a.** Un override **negativo** su una cella di SP, o scritto su un campo che non
-esiste, diventa uno **zero silenzioso**; sul CE l'override che il motore rifiuta (perché
-sbilancerebbe il foglio) viene rigenerato e **non resta scritto**. Se il numero a schermo non
-cambia dopo una modifica, prima guarda se c'è un override attivo altrove.
+**Attenzione a.** L'override che il motore rifiuta — perché sbilancerebbe il foglio o perché la
+riga è governata da un piano — **non viene salvato**: l'errore appare a schermo e la cella torna
+com'era. Se il numero non cambia dopo una modifica, prima guarda se c'è un override attivo
+altrove: dove la riga è forzata, «prevale l'importo fissato in CE Prev.; la percentuale non
+viene applicata».
 
 ## 10. SP Previsionale
 
@@ -555,9 +571,13 @@ totali e la cassa vengono ricalcolati»).
 **Che cosa c'è a schermo.** La griglia SP storico vs previsionale, la stessa cassa che chiude il
 foglio, e i controlli che il motore fa valere:
 
-- Le righe **governate da un piano** (il pregresso che il passo 5 scadenzierà) si **rifiutano**:
+- Le righe **governate da un piano** (il pregresso che il passo 5 scadenzi) si **rifiutano**:
   l'override sopravviverebbe un anno e poi il piano lo cancellerebbe, con la cassa che assorbe
-  la differenza senza alcun flusso. Vedi il messaggio reale qui sotto.
+  la differenza senza alcun flusso. Il messaggio nomina la voce e il passo del wizard che la
+  scadenzia; la via d'uscita è svuotare la cella.
+- Un override **negativo** su una cella dello SP diventa uno **zero** senza lamentarsi, e una
+  chiave scritta male (campo che non esiste) è **ignorata** in silenzio. Sullo stato
+  patrimoniale è lecito; sul CE no (vedi § 9).
 - Le righe **a giorni** (DSO/DPO) valgono **un anno solo**: dall'anno dopo tornano alla formula.
 - Un override che squilibra il foglio **non** si chiude con cassa a zero: il fabbisogno viene
   misurato dopo l'override e, se lo scoperto non è concesso, la generazione viene rifiutata.
@@ -610,12 +630,14 @@ incremento/decremento di cassa, storico contro previsionale, con il controllo in
 
 ![Report](images/guida/21-report.jpg)
 
-**A che cosa serve.** Il documento da consegnare: un PDF **20 pagine** generato dal server (non
+**A che cosa serve.** Il documento da consegnare: un PDF generato dal server (non
 dalla pagina del browser) con copertina, indice e dieci sezioni — Sintesi del piano · Evoluzione
-economica · EBITDA margin e struttura dei costi · Costi fissi e variabili/break even · Flussi di
-cassa · Sostenibilità del debito (DSCR e PFN) · Capitale circolante commerciale · Solidità,
-liquidità e redditività · Punto di partenza · Assunzioni del piano — più gli **Allegati A–E**
-(prospetti completi e indicatori).
+economica dell'impresa · EBITDA margin e struttura dei costi · Costi fissi e variabili e punto
+di pareggio · Flussi di cassa · Sostenibilità del debito (DSCR e PFN) · Capitale circolante
+commerciale · Solidità patrimoniale, liquidità e redditività · Punto di partenza · Assunzioni
+del piano — più gli **Allegati A–E** (conto economico, stato patrimoniale e rendiconto
+completi, indicatori di sintesi, indici analitici). Le pagine crescono con l'orizzonte del
+piano: un 5 anni ne conta una in più dello stesso 3 anni.
 
 **Che cosa c'è a schermo**
 
@@ -691,34 +713,41 @@ driver. Le griglie CE Prev./SP Prev. restano disponibili, con gli stessi overrid
 
 # I due percorsi completi
 
-## A · Da un bilancio PDF a un Business plan (≈ 30-45 minuti)
+## A · Da un bilancio PDF a un Business plan
 
 1. **Home → Nuova azienda** (o espandi la scheda se l'azienda esiste già): nome, partita IVA,
    settore. → «Nuova pratica» → **Da bilancio**.
-2. **Import**: anno, «anno intero», trascina il PDF. Leggi la quadratura e gli avvisi
+2. **Anagrafica**: verifica nome e settore; «Salva e prosegui».
+3. **Import**: anno, «anno intero», trascina il PDF. Leggi la quadratura e gli avvisi
    (§ DATI › Import).
-3. **Rettifiche**: correggi in partita doppia finché attivo = passivo; **«Conferma rettifiche»**.
-   È il gate: niente ANALISI senza.
-4. **Anagrafica**: verifica nome e settore; «Salva e prosegui».
-5. **Previsionale**: dal menu in alto → «Scenario» (anno base = l'anno che hai importato).
-   Ora i 7 passi del wizard; all'ultimo **«Salva e Calcola Previsionale»** e controlla il toast.
-6. **Indici** (menu «Previsionale»): il quadro di rating che il documento riporterà.
-7. **Report**: seleziona lo scenario, leggi il banner e **«Scarica PDF finale»**; se il pulsante
+4. **Rettifiche**: correggi in partita doppia; **«Conferma rettifiche»**. È il gate: niente
+   ANALISI senza. Se il bilancio non quadra puoi confermare lo stesso: l'avviso resta.
+5. **Analisi**: Confronto, Indicatori, Stampa. Se hai importato un periodo sotto i 12 mesi,
+   compare in più la tab Proiezione.
+6. **«Prosegui al Budget»** (in alto a destra nella tab Stampa): crea lo scenario con l'anno base
+   che hai importato e apre il wizard al passo 1.
+7. I 7 passi del wizard; all'ultimo **«Salva e Calcola Previsionale»**, e leggi sempre il toast.
+8. **Indici** (menu «Previsionale»): il quadro di rating che il documento riporterà. Poi
+   **Report**: seleziona lo scenario, leggi il banner e **«Scarica PDF finale»**; se il pulsante
    è «Scarica bozza», risolvi prima i controlli bloccanti elencati nel banner.
 
-## B · Da un semestrale a un'analisi infrannuale (≈ 15 minuti)
+## B · Da un semestrale a un'analisi infrannuale
 
-1. **Import** con **periodo parziale = 6 mesi** e anno: il parziale coesiste con l'eventuale
-   annuale dello stesso anno, non lo sostituisce.
-2. **Rettifiche** della scheda «parziale» e conferma.
-3. **Confronto**: semestre annualizzato contro l'ultimo anno pieno.
-4. **Proiezione**: se serve, aggiusta le righe CE; **«Genera proiezione e indicatori di
+1. **Home → Nuova pratica → Da bilancio**; **Anagrafica**.
+2. **Import** con **periodo parziale = 6 mesi**: il parziale coesiste con l'eventuale annuale
+   dello stesso anno, non lo sostituisce.
+3. **Rettifiche** su entrambe le schede — storico e parziale — e conferma: ciascuna ha il suo
+   giornale e il suo tetto di 20 voci.
+4. **Confronto**: semestre annualizzato contro l'ultimo anno pieno.
+5. **Proiezione**: se serve, aggiusta le righe CE; **«Genera proiezione e indicatori di
    crisi»** (un fabbisogno scoperto qui esce in diagnosi di errore: lo scenario non è
    promuovibile finché non lo copri).
-5. **Indicatori**: gli indici proiettati e i 15 segnali della crisi.
-6. **Stampa**: i sei commenti AI (editali), poi **«Scarica PDF»** — *quello* è il documento.
-7. Se il semestre deve diventare base di un budget: **«Promuovi»** (sostituisce l'annuale di
-   quell'anno, è una cosa distruttiva — verifica prima il banner di quadratura).
+6. **Indicatori**, poi **Stampa**: i sei commenti AI (editabili) e **«Scarica PDF»** — *quello*
+   è il documento.
+7. Se il semestre deve diventare base di un budget: **«Prosegui al Budget»** — promuove la
+   proiezione copiandola nel bilancio annuale di quell'anno, **sostituendolo** se era già stato
+   importato (è l'unico passo distruttivo del percorso: verifica prima la quadratura), e apre il
+   wizard.
 
 ---
 
@@ -750,15 +779,14 @@ driver. Le griglie CE Prev./SP Prev. restano disponibili, con gli stessi overrid
 | Segnale a schermo | Significato | Cosa fare |
 |---|---|---|
 | *«Fabbisogno finanziario scoperto di …: aggiungi un'ipotesi di finanziamento esplicita; nessun debito bancario è stato creato automaticamente.»* | Le ipotesi producono cassa negativa e lo scoperto non è concesso | passi 5/6: finanzia davvero (prestito nuovo, fido, o concedi lo scoperto), o riallinea le ipotesi |
-| Toast verde + colonna Proiezione vuota | Il salvataggio bulk è riuscito ma il previsionale è stato **rifiutato** (risponde «ok» comunque) | leggi il messaggio del rifiuto nel toast: è la stessa ragione della riga sopra |
+| Toast che nomina una ragione e colonna «Previsione» vuota | Il salvataggio è riuscito ma il previsionale è stato **rifiutato** (risponde «ok» comunque) | il toast dice la ragione e il wizard ti riporta al passo che l'ha causata; correggi lì e salva di nuovo |
 | *«Previsionale calcolato»* | Salvataggio e generazione riusciti | — |
 | *«Documento bloccato · Forecast precedente alle ipotesi salvate.»* | Hai cambiato le ipotesi dopo l'ultima generazione | «Rigenera previsionale» nel banner giallo |
 | *«Fidi e anticipi incompatibili con … forzato: servono … di fidi, ma il totale della voce è fissato dall'override.»* | Un override SP pretende una cassa che il piano dei fidi non può fare | togli l'override o copri il fabbisogno con un finanziamento (passo 5/6) |
 | *«Massimo 20 rettifiche. Eliminane qualcuna per aggiungerne altre.»* | Il tetto del giornale di quell'anno | elimina rettifiche obsolete o raggruppale |
 | **«n.d.»** su un indice | Denominatore non positivo, o dettaglio (crediti commerciali, debito finanziario) che l'import non ha mai classificato | integra il dettaglio in Rettifiche; non cercare il «bug» |
 | Riga con delta pari a **2× l'importo** in Confronto/CE | una riga di costo è stata letta nella colonna dei ricavi (o viceversa) | rettifica di **direzione**, non di importo |
-| **«Pratica da riaprire»** | La cache del browser non torna col server (azienda/anno cambiati altrove) | chiudi la pratica e riaprila dalla home |
-| L'anteprima del PDF resta bianca | limite dell'anteprima embedded, non del documento | «Scarica PDF»: quello è il file vero |
+| **«Pratica da riaprire»** | Il server non riesce più a ricostruire la pratica (per esempio una pratica vecchia con un budget ma senza infrannuale dietro, o azienda/anno cambiati altrove) | riapri dalla home con «Nuova pratica»: i dati salvati restano |
 
 ---
 

@@ -6,6 +6,22 @@
 > 2026). I numeri citati negli esempi sono letti dall'app, non inventati; se rigeneri i dati di
 > prova, aggiornali qui insieme alle immagini in `docs/images/guida/`.
 
+## Indice
+
+- [0. La home](#0-la-home--aziende-e-pratiche)
+- **Fase 1 · DATI**: [1. Anagrafica](#1-anagrafica) · [2. Import](#2-import) ·
+  [3. Rettifiche](#3-rettifiche)
+- **Fase 2 · ANALISI**: [4. Confronto](#4-confronto) · [5. Proiezione](#5-proiezione) ·
+  [6. Indicatori](#6-indicatori) · [7. Stampa](#7-stampa)
+- **Fase 3 · PREVISIONALE**: [8. Il wizard](#8-il-wizard-in-7-passi) ·
+  [9. CE Prev.](#9-ce-previsionale) · [10. SP Prev.](#10-sp-previsionale) ·
+  [11. Riclassificato](#11-riclassificato) · [12. Rendiconto](#12-rendiconto) ·
+  [13. Report](#13-report--il-business-plan) · [14. Indici](#14-analisi-finanziaria-completa-indici) ·
+  [15. Startup](#15-il-percorso-startup)
+- [I due percorsi completi](#i-due-percorsi-completi) · [Glossario](#glossario) ·
+  [Che cosa succede quando qualcosa non torna](#che-cosa-succede-quando-qualcosa-non-torna) ·
+  [Dove andare dopo](#dove-andare-dopo)
+
 **A chi serve.** Questa è la guida d'uso: come si fa una cosa dall'inizio alla fine, con un
 esempio sui numeri veri per ogni schermata. Non è il manuale del motore — per le formule c'è
 [FORECASTING_GUIDE.md](budget/FORECASTING_GUIDE.md), per i contratti delle API
@@ -110,6 +126,10 @@ bilancio non quadra viene **importato comunque con un avviso**, non «aggiustato
 
 ![Esito dell'import](images/guida/03b-import-esito.jpg)
 
+La stessa forma, fuori dal percorso, è la pagina autonoma `/import`:
+
+![La pagina di import autonoma](images/guida/22-import-standalone.jpg)
+
 **Che cosa dichiara l'esito.** Attivo = passivo, il totale di CE che quadra con l'utile in
 stato patrimoniale, e gli scarti **misurati e non tappati** (un divario fra aggregato e dettagli,
 una riga non riconosciuta): tutto diventa riga da correggere in Rettifiche, mai un importo
@@ -196,6 +216,10 @@ parziale** (< 12 mesi) importato: è l'analisi del «non ancora chiuso», il par
 - Lo **«Stato Patrimoniale - Confronto»**: un'istantanea a fine periodo, **non annualizzata** —
   è una fotografia, non un flusso.
 
+**Esempio (figura).** Ricavi: **2.104.755 €** nei 6 mesi al 30/06/2026 diventano **4.209.510 €**,
+che è il loro × 12 / 6; contro i 3.761.088 € del 2025 fa **+11.9%** nella colonna «delta %». È
+quella variazione il punto da cui parte la proiezione.
+
 **Come si fa.** 1) guardi dove il periodo corre più dell'anno di riferimento (ricavi, costo del
 personale, EBITDA); 2) le percentuali che vedi qui sono le stesse che il motore userà per la
 proiezione — ma per cambiarle non sei qui: si cambiano in **Proiezione**.
@@ -223,6 +247,12 @@ digitare a mano, e uno stato patrimoniale proiettato che **il server** adatta di
   cassa a zero).
 - Lo stato patrimoniale proiettato sotto.
 
+**Esempio (figura).** Nella colonna 31/12/2026 alcune celle sono digitate a mano: le imposte
+forzate a **32.000 €**, gli oneri diversi a 37.530 €. I sottototali si ricompongono
+live — totale costi della produzione **4.249.644 €**, EBITDA **165.836 €**, risultato prima
+delle imposte 60.130 €, utile **28.130 €** — e sotto lo stato patrimoniale si adatta, con la
+cassa che chiude il foglio.
+
 **Attenzione a**
 
 - Gli ammortamenti sono **annualizzati**, mai «cresciuti».
@@ -249,6 +279,10 @@ proiettata, più i **segnali di allarme della crisi d'impresa**.
   l'ultimo (incidenza oneri finanziari sui ricavi) è informativo. Indicatori, punteggio e classe
   (A3→D) li calcola il server; la schermata conta i segnali.
 - I due grafici, che sono lo stesso componente della Stampa.
+
+**Esempio (figura).** **PFN/EBITDA: 5.17x** sullo storico e 5.38x sul semestre annualizzato,
+**1.65x** sulla proiezione. È il numero che pesa di più nel punteggio: il debito finanziario
+netto vale più di cinque anni di margine lordo, e scende sotto due solo se il piano tiene.
 
 **Approfondisci** → [INDICATORI-E-STAMPA.md](frontend/INDICATORI-E-STAMPA.md)
 
@@ -392,7 +426,9 @@ lo azeri dal dialogo Ricalcola.
 
 ![I giorni medi per anno](images/guida/12a-wizard-circolante-giorni.jpg)
 
-**Esempio (DSO 2027: da 96 a 60 giorni).** I crediti commerciali 2027 passano da **1.155.663 €**
+**Esempio (DSO 2027: da 96 a 60 giorni).** Il 96 è l'ipotesi salvata: la colonna 2026 mostra
+il valore **derivato** dall'anno base (97 gg) e una cella vuota ricade su di esso. I crediti
+commerciali 2027 passano da **1.155.663 €**
 a **724.164 €**, la «cassa liberata» 2027 da +227.248 € a **+658.747 €**. Ma attenzione al 2028:
 i giorni 2028 restano 95 e l'incasso straordinario del 2027 si **rovescia** in un assorbimento di
 **−458.688 €**. Un giorno medio modificato in un solo anno è una decisione *una tantum*, non una
@@ -477,8 +513,7 @@ scheda stessa dice «rata 50.000 €/anno dal 2027»; nell'anteprima «Debito, c
 prestito residua **200.000 €** a fine 2027, 150.000 € nel 2028, 100.000 € nel 2029 — e la rata
 che scade l'anno dopo sta **già** dentro i debiti bancari a breve dello SP Prev. (non resta
 tutta oltre i 12 mesi: sarebbe un errore che il pareggio attivo = passivo non vede, ma che
-falsa circolante e indici di liquidità). La cassa 2027 dell'anteprima (295.408 €) parte anche da
-lì.
+falsa circolante e indici di liquidità).
 
 **Approfondisci** → [FORECASTING_GUIDE.md](budget/FORECASTING_GUIDE.md)
 
@@ -623,7 +658,12 @@ incremento/decremento di cassa, storico contro previsionale, con il controllo in
 - Il debito finanziario **non passa dal circolante**: le variazioni dei debiti vanno in
   finanziamento, e il circolante prende gli aggregati al netto delle quote finanziarie.
 
-**Approfondisci** → [FORECASTING_GUIDE.md](budget/FORECASTING_GUIDE.md) § rendiconto
+**Esempio (figura).** 2027: l'operativo porta **+178.346 €**, gli investimenti −150.000 €
+(«(Investimenti)» nella sezione B), il finanziamento **+106.591 €** (incremento mezzi di terzi
+− rimborsi): **+134.937 €** di incremento, che sommati ai 55 € d'apertura chiudono a
+**134.991 €** di disponibilità liquide. Il «VERIFICA» in fondo è esattamente questo conto.
+
+**Approfondisci** → [FORECASTING_GUIDE.md](budget/FORECASTING_GUIDE.md)
 
 ## 13. Report — il Business plan
 
@@ -785,7 +825,7 @@ driver. Le griglie CE Prev./SP Prev. restano disponibili, con gli stessi overrid
 | *«Documento bloccato · Forecast precedente alle ipotesi salvate.»* | Hai cambiato le ipotesi dopo l'ultima generazione | «Rigenera previsionale» nel banner giallo |
 | *«Fidi e anticipi incompatibili con … forzato: servono … di fidi, ma il totale della voce è fissato dall'override.»* | Un override SP pretende una cassa che il piano dei fidi non può fare | togli l'override o copri il fabbisogno con un finanziamento (passo 5/6) |
 | *«Massimo 20 rettifiche. Eliminane qualcuna per aggiungerne altre.»* | Il tetto del giornale di quell'anno | elimina rettifiche obsolete o raggruppale |
-| **«n.d.»** su un indice | Denominatore non positivo, o dettaglio (crediti commerciali, debito finanziario) che l'import non ha mai classificato | integra il dettaglio in Rettifiche; non cercare il «bug» |
+| **«n.d.»** su un indice | Denominatore non positivo, o dettaglio (crediti commerciali, debito finanziario) che l'import non ha mai classificato | integra il dettaglio in Rettifiche: non è un guasto, è il dato che manca |
 | Riga con delta pari a **2× l'importo** in Confronto/CE | una riga di costo è stata letta nella colonna dei ricavi (o viceversa) | rettifica di **direzione**, non di importo |
 | **«Pratica da riaprire»** | Il server non riesce più a ricostruire la pratica (per esempio una pratica vecchia con un budget ma senza infrannuale dietro, o azienda/anno cambiati altrove) | riapri dalla home con «Nuova pratica»: i dati salvati restano |
 

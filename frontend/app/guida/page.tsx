@@ -4,7 +4,8 @@ import type { Metadata } from "next";
 import ReactMarkdown, { type Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
 import rehypeSlug from "rehype-slug";
-import { hrefGuida, srcImmagineGuida } from "@/lib/guida";
+import { hrefGuida, indiceGuida, srcImmagineGuida } from "@/lib/guida";
+import { IndiceLaterale } from "@/components/guida/IndiceLaterale";
 
 export const metadata: Metadata = {
   title: "Guida illustrata - XBRL Budget",
@@ -87,11 +88,20 @@ const componenti: Components = {
 };
 
 export default function GuidaPage() {
+  const guida = leggiGuida();
   return (
-    <div className="mx-auto max-w-4xl px-4 py-8 sm:px-6 lg:px-8">
-      <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeSlug]} components={componenti}>
-        {leggiGuida()}
-      </ReactMarkdown>
+    <div className="mx-auto flex max-w-7xl gap-10 px-4 py-8 sm:px-6 lg:px-8">
+      {/* Su schermi stretti l'indice laterale sparisce: resta quello in testa alla guida. */}
+      <aside className="hidden w-64 shrink-0 lg:block">
+        <div className="sticky top-4 max-h-[calc(100vh-2rem)] overflow-y-auto pb-4">
+          <IndiceLaterale voci={indiceGuida(guida)} />
+        </div>
+      </aside>
+      <article className="min-w-0 max-w-4xl flex-1">
+        <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeSlug]} components={componenti}>
+          {guida}
+        </ReactMarkdown>
+      </article>
     </div>
   );
 }

@@ -43,6 +43,9 @@ export function Navigation() {
   const { pratica } = usePratica();
   const isForecastActive = pathname.startsWith("/forecast");
 
+  // La guida è una lettura a sé: né la nav né lo stepper della pratica.
+  if (pathname.startsWith("/guida")) return null;
+
   // La home "Aziende & Pratiche" è una pagina intera, quindi la nav resta.
   // Dentro una pratica comanda lo stepper: mai due barre insieme.
   if (pratica && pathname !== "/") return <PraticaStepper />;

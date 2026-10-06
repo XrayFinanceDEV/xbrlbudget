@@ -17,6 +17,9 @@
 # production
 /build
 
+# guida illustrata: copiata da docs/images/guida da scripts/copia-guida.mjs
+/public/guida/
+
 # misc
 .DS_Store
 *.pem

@@ -1,8 +1,10 @@
 "use client";
 
+import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { BarChart3, CalendarClock } from "lucide-react";
+import { BarChart3, BookOpen, CalendarClock } from "lucide-react";
 import { ModeToggle } from "@/components/mode-toggle";
+import { Button } from "@/components/ui/button";
 import { useAuth } from "@/contexts/AuthContext";
 
 export function AppHeader() {
@@ -51,6 +53,12 @@ export function AppHeader() {
               )}
             </div>
           )}
+          <Button variant="outline" size="sm" asChild>
+            <Link href="/guida" title="Guida illustrata all'applicazione">
+              <BookOpen className="h-4 w-4" />
+              Guida
+            </Link>
+          </Button>
           <ModeToggle />
         </div>
       </div>

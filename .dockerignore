@@ -12,5 +12,7 @@ legacy/
 !.env.docker
 *.png
 *.jpg
+# le schermate della guida illustrata servono al build del frontend
+!docs/images/guida/*.jpg
 docs/examples/
 tests/

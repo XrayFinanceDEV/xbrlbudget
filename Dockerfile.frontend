@@ -10,6 +10,11 @@ COPY --from=deps /app/node_modules ./node_modules
 # Keep that path available in the builder rather than relying on a local
 # monorepo checkout being present inside the image.
 COPY contracts/ /contracts/
+# La guida illustrata (/guida) legge docs/GUIDA-ILLUSTRATA.md al build e
+# `npm run build` (prebuild, scripts/copia-guida.mjs) copia le schermate in
+# public/guida: entrambi cercano ../docs, cioe' /docs.
+COPY docs/GUIDA-ILLUSTRATA.md /docs/GUIDA-ILLUSTRATA.md
+COPY docs/images/guida/ /docs/images/guida/
 COPY frontend/ .
 # Ensure public dir exists (Next.js standalone expects it)
 RUN mkdir -p public

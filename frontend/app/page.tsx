@@ -691,7 +691,7 @@ export default function Home() {
             <AlertDialogCancel>Annulla</AlertDialogCancel>
             <AlertDialogAction
               onClick={() => { if (deletingId !== null) handleDelete(deletingId); setDeletingId(null); }}
-              className="bg-destructive text-destructive-foreground hover:bg-destructive/90">
+              className="bg-destructive-fill text-destructive-foreground hover:bg-destructive-fill/90">
               Elimina
             </AlertDialogAction>
           </AlertDialogFooter>

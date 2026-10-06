@@ -416,7 +416,7 @@ export function StampaContent({
   });
 
   return (
-    <div id="stampa-content" className="space-y-8 print:space-y-3 bg-white dark:bg-slate-950 -mx-4 sm:-mx-6 lg:-mx-8 px-4 sm:px-6 lg:px-8 -mt-8 pt-8 pb-8">
+    <div id="stampa-content" className="space-y-8 print:space-y-3 bg-white dark:bg-background -mx-4 sm:-mx-6 lg:-mx-8 px-4 sm:px-6 lg:px-8 -mt-8 pt-8 pb-8">
       {/* Action buttons */}
       <div className="flex justify-end gap-2 print:hidden">
         {companyId && scenarioId && (

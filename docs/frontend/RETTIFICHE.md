@@ -89,6 +89,20 @@ Il dialogo nomina la sotto-voce («9) Per il personale › a) Salari e stipendi�
 la voce registrata nel giornale. Il delta è misurato dal valore **mostrato**, arrotondato all'euro:
 chi scrive +200.000 registra 200.000, non 200.000 più i centesimi nascosti.
 
+**Sulle immobilizzazioni la sotto-voce la sceglie l'utente, in un secondo menu.** `sp02` e `sp03`
+non sono ricostruiti da `recalcAggregates`, ma la guardia del server tiene l'aggregato uguale alla
+somma del dettaglio («aggregati−dettagli»): su un import col dettaglio, un movimento sul solo
+aggregato apre un divario e viene rifiutato (FACCHINETTI ZINCATURA 2026-10-06: 30.000 di
+ammortamento non registrabili). Quando `sp02`/`sp03` è la voce modificata **o** la contropartita, il
+dialogo apre un secondo menu con le sotto-voci di legge (`SOTTOVOCI_IMMOBILIZZAZIONI`: `sp02a-g`,
+`sp03a-e`, «Immobilizzazioni materiali › 2) Impianti e macchinario») e il pulsante di conferma resta
+spento finché non si sceglie (`sottovoceMancante` in `RettificheTab.tsx`). Il menu compare **solo se
+l'import ha il dettaglio** (`sottovociDaScegliere`: almeno una sotto-voce diversa da zero); senza,
+la destinazione resta l'aggregato, e il divario scende invece di salire. Nel giornale si registra la
+sotto-voce; `applicaMovimento` muove insieme sotto-voce **e** aggregato, sia quando registra sia
+quando annulla una riga. Le sotto-voci non sono righe della scheda e non stanno nel catalogo
+`ivcee-catalog.ts`: sono solo una destinazione.
+
 Il modo si sceglie nel dialogo (`ProposalMode = "rettifica" | "riclassifica" | "correggi_import"`,
 `lib/pratica-rettifiche-rules.ts`); cambiarlo azzera la contropartita già scelta.
 

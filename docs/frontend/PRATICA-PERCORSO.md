@@ -194,9 +194,10 @@ troverebbe mai nulla.
 
 ## 5. Lo stepper e la barra azioni
 
-**`components/PraticaStepper.tsx`** è reso da `components/Navigation.tsx:52` al posto della nav
+**`components/PraticaStepper.tsx`** è reso da `components/Navigation.tsx` al posto della nav
 piatta ogni volta che `pratica !== null` e il percorso non è `/` — **mai le due barre insieme**;
-la home resta la pagina di uscita, e là comanda la nav normale. Due righe:
+la home resta la pagina di uscita, e là comanda la nav normale. Su `/guida` non compare nessuna
+delle due: la guida è una lettura a sé, con il proprio indice laterale. Due righe:
 
 1. identità della pratica (azienda e periodo), i chip di fase (`PHASE_ORDER`, stato da
    `phaseStatus`, un `Tooltip` con `gateReason` quando la fase è bloccata) e «Esci dalla pratica»;

@@ -42,5 +42,14 @@ def test_contratto_richiesta_stretto(client):  # noqa: F811
 
 def test_nome_file_ascii():
     full, ascii_name = bp_service.filenames("Società Ünicode Ltd — ČR", [2027, 2029])
-    assert full == "Business plan Società Ünicode Ltd — ČR 2027-2029.pdf"
-    assert ascii_name.isascii() and ascii_name.endswith(".pdf")
+    assert full == "BP-2027-29-SOCIETÀ-ÜNICODE-LTD-ČR.pdf"
+    assert ascii_name == "BP-2027-29-SOCIETA-UNICODE-LTD-CR.pdf"
+
+
+def test_nome_file_bp_anni_e_azienda():
+    # Richiesta del proprietario, 2026-10-06: «BP-2027-31-NOME-AZIENDA.pdf».
+    assert bp_service.filenames("FACCHINETTI ZINCATURA SNC", [2027, 2028, 2029, 2030, 2031]) == (
+        "BP-2027-31-FACCHINETTI-ZINCATURA-SNC.pdf", "BP-2027-31-FACCHINETTI-ZINCATURA-SNC.pdf")
+    assert bp_service.filenames("Ambienta s.r.l.", [2027])[1] == "BP-2027-AMBIENTA-S-R-L.pdf"
+    assert bp_service.filenames("", [2027, 2029])[1] == "BP-2027-29.pdf"
+    assert bp_service.filenames("X", [2099, 2101])[1] == "BP-2099-2101-X.pdf"

@@ -44,5 +44,5 @@ def test_final_richiede_ready(client, monkeypatch):  # noqa: F811
 def test_nome_file_word():
     from app.services import business_plan_pdf_service as bp_service
     from app.services import infrannuale_pdf_service as inf_service
-    assert bp_service.filenames("X", [2027, 2029], ext="docx")[0] == "Business plan X 2027-2029.docx"
+    assert bp_service.filenames("X", [2027, 2029], ext="docx")[0] == "BP-2027-29-X.docx"
     assert inf_service.filenames("X", "6M 2026", ext="docx")[1] == "Report infrannuale X 6M 2026.docx"

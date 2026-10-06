@@ -21,11 +21,27 @@ class BusinessPlanPdf:
 
 
 def filenames(company_name: str, years: list, ext: str = "pdf") -> tuple:
-    span = f"{years[0]}-{years[-1]}" if len(years) > 1 else str(years[0])
-    full = f"Business plan {company_name} {span}.{ext}"
-    ascii_name = unicodedata.normalize("NFKD", full).encode("ascii", "ignore").decode("ascii")
-    ascii_name = re.sub(r"[^A-Za-z0-9 ._-]+", "", ascii_name)
-    ascii_name = re.sub(r"\s+", " ", ascii_name).strip() or f"Business plan.{ext}"
+    """«BP-2027-31-NOME-AZIENDA.pdf» (richiesta del proprietario, 2026-10-06).
+
+    Anni: il primo per intero, l'ultimo con le sole due cifre finali quando sta
+    nello stesso secolo. Azienda in maiuscolo, ogni sequenza di caratteri non
+    alfanumerici diventa un trattino. `full` tiene le lettere accentate (va in
+    `filename*`), `ascii_name` le traslittera (va in `filename=`, latin-1).
+    """
+    first, last = years[0], years[-1]
+    if len(years) == 1 or first == last:
+        span = str(first)
+    elif first // 100 == last // 100:
+        span = f"{first}-{last % 100:02d}"
+    else:
+        span = f"{first}-{last}"
+
+    def slug(text: str) -> str:
+        return re.sub(r"[\W_]+", "-", text.upper()).strip("-")
+
+    ascii_company = unicodedata.normalize("NFKD", company_name).encode("ascii", "ignore").decode("ascii")
+    full = "-".join(p for p in ("BP", span, slug(company_name)) if p) + f".{ext}"
+    ascii_name = "-".join(p for p in ("BP", span, slug(ascii_company)) if p) + f".{ext}"
     return full, ascii_name
 
 

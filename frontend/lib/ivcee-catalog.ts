@@ -38,6 +38,7 @@ import {
   COUNTERPART_GROUPS,
   NON_POSTABLE_FIELDS,
   fieldCategory,
+  sottovoceImmobilizzazioni,
   RETTIFICHE_BS_ATTIVO,
   RETTIFICHE_BS_PN,
   RETTIFICHE_BS_OTHER_PASSIVO,
@@ -533,6 +534,15 @@ export function depthOf(code: string): number {
  * già la propria lettera ("A.II)", "18)") e non vanno rientrate.
  * Il confronto è pinnato in ivcee-catalog-parity.test.ts.
  */
+/**
+ * «Aggregato › sotto-voce» per una sotto-voce delle immobilizzazioni, che non
+ * e' una voce del catalogo (vedi SOTTOVOCI_IMMOBILIZZAZIONI); null altrimenti.
+ */
+export function etichettaSottovoce(code: string): string | null {
+  const sv = sottovoceImmobilizzazioni(code);
+  return sv ? `${labelOf(sv.parent)} › ${sv.label}` : null;
+}
+
 export function isDettaglio(code: string): boolean {
   return BY_CODE.get(code)?.dettaglio === true;
 }

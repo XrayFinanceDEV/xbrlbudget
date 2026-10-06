@@ -55,7 +55,7 @@ import {
 } from "@/lib/pratica-quadratura";
 import { reconcileSubfields } from "@/lib/pratica-reconcile";
 import { ATTIVO_CODES, PASSIVO_CODES, DETAIL_PARENTS } from "@/lib/pratica-codes";
-import { COUNTERPART_OPTIONS, isDettaglio, labelOf } from "@/lib/ivcee-catalog";
+import { COUNTERPART_OPTIONS, etichettaSottovoce, isDettaglio, labelOf } from "@/lib/ivcee-catalog";
 import {
   type ProposalMode,
   type DoubleEntryProposal,
@@ -64,9 +64,11 @@ import {
   AUTO_ADJUSTED,
   NON_POSTABLE_FIELDS,
   allowedCounterpartCategories,
+  applicaMovimento,
   computeCpDelta,
   destinazioneModifica,
   spiegazioneRiclassifica,
+  sottovociDaScegliere,
   COUNTERPART_GROUPS,
   RETTIFICHE_BS_ATTIVO,
   RETTIFICHE_BS_PN,
@@ -392,13 +394,22 @@ export function RettificheTab({
     if (!activeProposal) return;
     const p = activeProposal;
     // Correggi Import: single-entry, no counterpart required
+    // Su sp02/sp03 col dettaglio importato il movimento va su una sotto-voce
+    // (secondo menu): sull'aggregato da solo la guardia del server lo rifiuta.
+    const valore = (k: string) => corrections[k] ?? original[k] ?? 0;
+    if (sottovociDaScegliere(p.editedField, valore).length > 0 && !p.editedSubField) {
+      toast.error("Scegli la sotto-voce della voce modificata");
+      return;
+    }
+    const editedField = p.editedSubField ?? p.editedField;
+    const editedLabel = etichettaSottovoce(editedField) ?? p.editedLabel;
     if (p.mode === "correggi_import") {
       const updated = { ...corrections };
-      updated[p.editedField] = (updated[p.editedField] ?? original[p.editedField] ?? 0) + p.delta;
+      applicaMovimento(updated, original, editedField, p.delta);
       const newEntry: RettificaEntry = {
         id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-        edited_field: p.editedField,
-        edited_label: p.editedLabel,
+        edited_field: editedField,
+        edited_label: editedLabel,
         edit_delta: p.delta,
         counterpart_field: "_correzione_import",
         counterpart_label: "Correzione importazione",
@@ -424,19 +435,24 @@ export function RettificheTab({
       toast.error("Seleziona una contropartita");
       return;
     }
+    if (sottovociDaScegliere(p.counterpartField, valore).length > 0 && !p.counterpartSubField) {
+      toast.error("Scegli la sotto-voce della contropartita");
+      return;
+    }
+    const counterpartField = p.counterpartSubField ?? p.counterpartField;
     const updated = { ...corrections };
-    updated[p.editedField] = (updated[p.editedField] ?? original[p.editedField] ?? 0) + p.delta;
+    applicaMovimento(updated, original, editedField, p.delta);
     // Counterpart: handle split if present
     const splitAmount = p.splitAlt && Math.abs(p.splitAlt.amount) > 0.01 ? p.splitAlt.amount : 0;
     const mainAmount = p.proposedDelta - splitAmount;
-    updated[p.counterpartField] = (updated[p.counterpartField] ?? original[p.counterpartField] ?? 0) + mainAmount;
+    applicaMovimento(updated, original, counterpartField, mainAmount);
     const newEntries: RettificaEntry[] = [{
       id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-      edited_field: p.editedField,
-      edited_label: p.editedLabel,
+      edited_field: editedField,
+      edited_label: editedLabel,
       edit_delta: p.delta,
-      counterpart_field: p.counterpartField,
-      counterpart_label: p.counterpartLabel,
+      counterpart_field: counterpartField,
+      counterpart_label: etichettaSottovoce(counterpartField) ?? p.counterpartLabel,
       counterpart_delta: mainAmount,
       explanation: p.explanation,
       created_at: new Date().toISOString(),
@@ -445,8 +461,8 @@ export function RettificheTab({
       updated[p.splitAlt.field] = (updated[p.splitAlt.field] ?? original[p.splitAlt.field] ?? 0) + splitAmount;
       newEntries.push({
         id: `${Date.now() + 1}-${Math.random().toString(36).slice(2, 8)}`,
-        edited_field: p.editedField,
-        edited_label: p.editedLabel,
+        edited_field: editedField,
+        edited_label: editedLabel,
         edit_delta: 0, // split row — primary edit already recorded
         counterpart_field: p.splitAlt.field,
         counterpart_label: p.splitAlt.label,
@@ -469,6 +485,16 @@ export function RettificheTab({
     setActiveProposal(null);
   };
 
+  // Il pulsante di conferma resta spento finche' manca una scelta: la
+  // contropartita, o la sotto-voce di sp02/sp03 quando l'import ha il dettaglio.
+  const sottovoceMancante = (p: DoubleEntryProposal): boolean => {
+    const valore = (k: string) => corrections[k] ?? original[k] ?? 0;
+    if (sottovociDaScegliere(p.editedField, valore).length > 0 && !p.editedSubField) return true;
+    if (p.mode === "correggi_import") return false;
+    if (!p.counterpartField) return true;
+    return sottovociDaScegliere(p.counterpartField, valore).length > 0 && !p.counterpartSubField;
+  };
+
   const cancelActiveEdit = () => {
     if (activeProposal) {
       setPendingEdits((prev) => { const u = { ...prev }; delete u[activeProposal.pendingKey ?? activeProposal.editedField]; return u; });
@@ -483,8 +509,8 @@ export function RettificheTab({
     const entry = log.find((e) => e.id === entryId);
     if (!entry) return;
     const updated = { ...corrections };
-    updated[entry.edited_field] = (updated[entry.edited_field] ?? original[entry.edited_field] ?? 0) - entry.edit_delta;
-    updated[entry.counterpart_field] = (updated[entry.counterpart_field] ?? original[entry.counterpart_field] ?? 0) - entry.counterpart_delta;
+    applicaMovimento(updated, original, entry.edited_field, -entry.edit_delta);
+    applicaMovimento(updated, original, entry.counterpart_field, -entry.counterpart_delta);
     const final = recalcAggregates(updated);
     const newLog = log.filter((e) => e.id !== entryId);
     const ok = await onSave(final, newLog);
@@ -1095,7 +1121,7 @@ export function RettificheTab({
               setActiveProposal((prev) => prev ? { ...prev, ...patch } : prev);
             const switchMode = (newMode: ProposalMode) => {
               // Reset counterpart selection when switching mode
-              update({ mode: newMode, counterpartField: "", counterpartLabel: "", splitAlt: undefined });
+              update({ mode: newMode, counterpartField: "", counterpartLabel: "", counterpartSubField: undefined, splitAlt: undefined });
             };
             const dirLabel = p.delta > 0 ? "+" : "";
             // For riclassifica, counterpart always moves opposite (one goes up, the other goes down)
@@ -1133,6 +1159,33 @@ export function RettificheTab({
                 </SelectContent>
               </Select>
             );
+            // Secondo menu: la sotto-voce di sp02/sp03 quando l'import ne ha il
+            // dettaglio (vedi SOTTOVOCI_IMMOBILIZZAZIONI).
+            const sottovocePicker = (
+              field: string,
+              value: string | undefined,
+              onSelect: (sub: string) => void,
+            ) => {
+              const voci = sottovociDaScegliere(field, val);
+              if (voci.length === 0) return null;
+              return (
+                <div className="flex items-center gap-2 mt-1.5 ml-6 flex-wrap">
+                  <span className="text-xs text-muted-foreground shrink-0">{labelOf(field)} ›</span>
+                  <Select value={value ?? ""} onValueChange={onSelect}>
+                    <SelectTrigger className="h-7 flex-1 min-w-0 text-xs">
+                      <SelectValue placeholder="Seleziona la sotto-voce..." />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {voci.map((v) => (
+                        <SelectItem key={v.field} value={v.field} className="text-xs">
+                          {v.label} ({formatEuro(val(v.field))})
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              );
+            };
             return (
               <div className="space-y-3 my-2">
                 {/* Mode toggle: Rettifica vs Riclassifica vs Correggi Import */}
@@ -1173,6 +1226,7 @@ export function RettificheTab({
                       {dirLabel}{formatEuro(p.delta)}
                     </span>
                   </div>
+                  {sottovocePicker(p.editedField, p.editedSubField, (sub) => update({ editedSubField: sub }))}
 
                   {p.mode === "correggi_import" ? (
                     /* Correggi Import: single-entry correction, no counterpart */
@@ -1192,6 +1246,7 @@ export function RettificheTab({
                       )}
                       {counterpartPicker((newField) => update({
                         counterpartField: newField,
+                        counterpartSubField: undefined,
                         counterpartLabel: labelOf(newField),
                         proposedDelta: -p.delta,
                         explanation: spiegazioneRiclassifica(p.editedLabel, labelOf(newField), p.delta),
@@ -1209,6 +1264,7 @@ export function RettificheTab({
                         <ArrowRight className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
                         {counterpartPicker((newField) => update({
                           counterpartField: newField,
+                          counterpartSubField: undefined,
                           counterpartLabel: labelOf(newField),
                           proposedDelta: computeCpDelta(p.editedField, newField, p.delta),
                           splitAlt: undefined,
@@ -1249,6 +1305,7 @@ export function RettificheTab({
                       <ArrowRight className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
                       {counterpartPicker((newField) => update({
                         counterpartField: newField,
+                        counterpartSubField: undefined,
                         counterpartLabel: labelOf(newField),
                         proposedDelta: computeCpDelta(p.editedField, newField, p.delta),
                       }))}
@@ -1263,6 +1320,9 @@ export function RettificheTab({
                       />
                     </div>
                   )}
+
+                  {p.mode !== "correggi_import" && p.counterpartField &&
+                    sottovocePicker(p.counterpartField, p.counterpartSubField, (sub) => update({ counterpartSubField: sub }))}
 
                   <p className="text-xs text-muted-foreground mt-1 italic">{p.explanation}</p>
                 </div>
@@ -1280,7 +1340,7 @@ export function RettificheTab({
             </Button>
             <Button
               onClick={confirmActiveEdit}
-              disabled={saving || (activeProposal?.mode !== "correggi_import" && !activeProposal?.counterpartField)}
+              disabled={saving || !activeProposal || sottovoceMancante(activeProposal)}
             >
               {saving ? <Loader2 className="h-4 w-4 mr-1.5 animate-spin" /> : <Check className="h-4 w-4 mr-1.5" />}
               {activeProposal?.mode === "correggi_import" ? "Applica correzione" : activeProposal?.mode === "riclassifica" ? "Registra riclassifica" : "Registra rettifica"}

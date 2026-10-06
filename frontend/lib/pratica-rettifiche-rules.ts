@@ -140,6 +140,76 @@ export function destinazioneModifica(field: string): string {
   return DESTINAZIONE_AGGREGATO[field] ?? field;
 }
 
+// Le sotto-voci di legge delle immobilizzazioni (art. 2424 B.I e B.II). Non
+// sono righe della scheda Rettifiche, e per questo non stanno nel catalogo
+// (lib/ivcee-catalog.ts), che descrive le righe rese: sono solo la DESTINAZIONE
+// di un movimento su sp02/sp03, scelta in un secondo menu del dialogo.
+// Servono perche' il server tiene l'aggregato uguale alla somma del dettaglio
+// (PUT /adjustments, «aggregati−dettagli»): con il dettaglio importato, un
+// movimento sul solo aggregato apre un divario e la guardia lo rifiuta
+// (FACCHINETTI ZINCATURA, 2026-10-06: 30.000 di ammortamento non registrabili).
+// recalcAggregates NON ricostruisce sp02/sp03 dalle sotto-voci -- un import
+// senza dettaglio continua a muovere l'aggregato -- quindi l'aggregato lo muove
+// applicaMovimento, insieme alla sotto-voce.
+export const SOTTOVOCI_IMMOBILIZZAZIONI: Record<string, ReadonlyArray<{ field: string; label: string }>> = {
+  sp02_immob_immateriali: [
+    { field: "sp02a_costi_impianto", label: "1) Costi di impianto e di ampliamento" },
+    { field: "sp02b_costi_sviluppo", label: "2) Costi di sviluppo" },
+    { field: "sp02c_brevetti", label: "3) Diritti di brevetto e di utilizzazione delle opere dell'ingegno" },
+    { field: "sp02d_concessioni", label: "4) Concessioni, licenze, marchi e diritti simili" },
+    { field: "sp02e_avviamento", label: "5) Avviamento" },
+    { field: "sp02f_immob_in_corso", label: "6) Immobilizzazioni in corso e acconti" },
+    { field: "sp02g_altre_immob_imm", label: "7) Altre" },
+  ],
+  sp03_immob_materiali: [
+    { field: "sp03a_terreni_fabbricati", label: "1) Terreni e fabbricati" },
+    { field: "sp03b_impianti_macchinari", label: "2) Impianti e macchinario" },
+    { field: "sp03c_attrezzature", label: "3) Attrezzature industriali e commerciali" },
+    { field: "sp03d_altri_beni", label: "4) Altri beni" },
+    { field: "sp03e_immob_in_corso", label: "5) Immobilizzazioni in corso e acconti" },
+  ],
+};
+
+/** Aggregato e etichetta di una sotto-voce delle immobilizzazioni, o null. */
+export function sottovoceImmobilizzazioni(field: string): { parent: string; label: string } | null {
+  for (const [parent, voci] of Object.entries(SOTTOVOCI_IMMOBILIZZAZIONI)) {
+    const v = voci.find((x) => x.field === field);
+    if (v) return { parent, label: v.label };
+  }
+  return null;
+}
+
+/**
+ * Le sotto-voci fra cui scegliere la destinazione di un movimento su ``field``.
+ * Vuoto quando ``field`` non ha sotto-voci o quando l'import non ne ha il
+ * dettaglio (tutte a zero): li' l'aggregato resta la destinazione, e il
+ * divario aggregato/dettagli scende invece di salire.
+ */
+export function sottovociDaScegliere(
+  field: string,
+  valore: (k: string) => number,
+): ReadonlyArray<{ field: string; label: string }> {
+  const voci = SOTTOVOCI_IMMOBILIZZAZIONI[field];
+  if (!voci) return [];
+  return voci.some((v) => Math.abs(valore(v.field)) > 0.01) ? voci : [];
+}
+
+/**
+ * Somma ``delta`` a ``field`` in ``values`` (valore di partenza da ``original``);
+ * su una sotto-voce delle immobilizzazioni muove anche il suo aggregato. Usata
+ * sia per registrare sia per annullare una riga del giornale.
+ */
+export function applicaMovimento(
+  values: Record<string, number>,
+  original: Record<string, number>,
+  field: string,
+  delta: number,
+): void {
+  values[field] = (values[field] ?? original[field] ?? 0) + delta;
+  const sv = sottovoceImmobilizzazioni(field);
+  if (sv) values[sv.parent] = (values[sv.parent] ?? original[sv.parent] ?? 0) + delta;
+}
+
 // Field categorization for double-entry counterpart filtering.
 export type AcctCategory = "ATTIVO" | "PASSIVO" | "CE_POS" | "CE_NEG";
 export const CE_POSITIVE_FIELDS = new Set([
@@ -336,6 +406,10 @@ export interface DoubleEntryProposal {
   delta: number;
   counterpartField: string;
   counterpartLabel: string;
+  // La sotto-voce scelta nel secondo menu quando la voce (o la contropartita) e'
+  // sp02/sp03 e l'import ne ha il dettaglio: il giornale registra lei.
+  editedSubField?: string;
+  counterpartSubField?: string;
   proposedDelta: number;
   accepted: boolean;
   explanation: string;

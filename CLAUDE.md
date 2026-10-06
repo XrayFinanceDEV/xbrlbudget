@@ -1265,7 +1265,7 @@ Business plan e il selettore «Modello» ricompare da sé con un secondo modello
 [docs/budget/BUSINESS-PLAN-PDF.md](docs/budget/BUSINESS-PLAN-PDF.md)) · `/import`
 (works, but unlinked from the nav — the pratica Import step is the normal way in) · `/guida` (la
 guida illustrata, bottone «Guida» nell'intestazione: rende `docs/GUIDA-ILLUSTRATA.md` letto al build,
-e `scripts/copia-guida.mjs` — predev/prebuild — copia `docs/images/guida/` in `public/guida/`, che è
+e `frontend/scripts/copia-guida.mjs` — predev/prebuild — copia `docs/images/guida/` in `public/guida/`, che è
 gitignorata. Si aggiorna la guida in `docs/`, mai in `public/`).
 
 ---

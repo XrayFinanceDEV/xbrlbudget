@@ -94,6 +94,17 @@ describe("budget-piano-step", () => {
     expect(rows.map((r) => r.key)).toEqual(["h-attivo", "sp06g", "sp10", "sp06e", "tot-attivo", "h-passivo", "sp16f", "sp16g", "sp14", "sp18", "tot-passivo", "cassa"]);
     expect(rows.find((r) => r.key === "cassa")?.years[0].value).toBe((28000 + 45000 + 20000 + 10000 - 103000) - (48000 + 12000 + 18000 - 78000));
   });
+  // #63 R10: col piano «Crediti commerciali» il motore incassa anche gli altri crediti a breve
+  // (sp06g riceve solo la sua quota del residuo del piano): «costante» sarebbe falso.
+  it("R10 sp06g col piano dei crediti commerciali e' incassato dal piano, non costante", () => {
+    const conPiano = regoleVociMinori(asMap({
+      2027: { pregresso: { crediti_commerciali: { opening: 1000, amounts: [500, 500] } } }, 2028: {},
+    }), [2027, 2028]);
+    expect(conPiano.sp06g_crediti_altri_breve).toBe("incassato col piano dei crediti commerciali");
+    expect(conPiano.sp14_fondi_rischi).toBe("costante");
+    const senzaPiano = regoleVociMinori(asMap({ 2027: { pregresso: { crediti_commerciali: null } }, 2028: {} }), [2027, 2028]);
+    expect(senzaPiano.sp06g_crediti_altri_breve).toBe("costante");
+  });
   // A06 (lotto 3 fix rilievi, 2026-09-26): la casella previdenza/personale e' sparita e
   // `regoleVociMinori` non la legge piu' — un flag `true` senza `sp_indexing` non fa dire
   // "segue il personale", la riga si legge come qualunque altra voce senza driver.

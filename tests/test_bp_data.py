@@ -166,7 +166,7 @@ def test_R16_fidi_valore_unico_per_tutto_il_piano():
     assert rows[0].values == (D("50000"),) * 3
 
 
-def test_R16_durata_dal_calendario_e_altro_finanziatore_senza_rimborsi():
+def test_R16_durata_solo_dichiarata_e_altro_finanziatore_senza_rimborsi():
     from app.renderers.business_plan import data as bp
     ln = _ns(name="Mutuo", amount=D("0"), opening_residual=D("90000"), interest_rate=D("4"), duration_years=None,
              repayments=[D("0"), D("30000"), D("30000"), D("30000")])
@@ -174,7 +174,8 @@ def test_R16_durata_dal_calendario_e_altro_finanziatore_senza_rimborsi():
     rep = _report([_ass("financing_loans", [None], financing_loans=[ln]),
                    _ass("other_lenders", [None], other_lenders=[ol])])
     pre, altro = bp._finanziamenti(rep)
-    assert pre.durata_anni == 3
+    # #61 S15: il calendario non e' la durata del mutuo, resta «n.d.»
+    assert pre.durata_anni is None
     assert altro.durata_anni == 0
 
 

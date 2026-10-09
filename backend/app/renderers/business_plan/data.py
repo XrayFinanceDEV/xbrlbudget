@@ -430,10 +430,9 @@ def _rate_positive(repayments) -> int:
 
 
 def _durata_prestito(ln) -> Optional[int]:
-    """Durata dichiarata; con un calendario `repayments` e senza durata, il numero di rate positive."""
-    if ln.duration_years:
-        return ln.duration_years
-    return _rate_positive(ln.repayments) or None
+    """Solo la durata dichiarata (#61 S15): il calendario `repayments` copre gli anni del piano,
+    non la vita del finanziamento, quindi non se ne deduce una durata."""
+    return ln.duration_years
 
 
 def _finanziamenti(report) -> tuple:

@@ -348,6 +348,10 @@ class TaxRunoffPlan(RunoffPlan):
 
 class Pregresso(ContractModel):
     crediti_commerciali: Optional[RunoffPlan] = None
+    crediti_tributari_breve: Optional[RunoffPlan] = None
+    crediti_tributari_lungo: Optional[RunoffPlan] = None
+    # acconti d'imposta già versati compresi in sp06e dell'anno base (#63 R16: si dichiarano in sez. 10)
+    acconti_tributari_storici: Optional[PlainDecimal] = None
     debiti_fornitori: Optional[RunoffPlan] = None
     debiti_tributari: Optional[TaxRunoffPlan] = None
     debiti_previdenziali: Optional[RunoffPlan] = None

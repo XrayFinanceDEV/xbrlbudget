@@ -1,5 +1,5 @@
 {
-  "schema_version": 1, "generated_at": "2026-09-14T10:00:00Z", "model_hash": "f8ecfca239d9d6d28d24cdb15b8099c91ee4e81b9eaf3a9e32951bb7c8514477", "source_hash": "06f1761313881d936e8bdd83904cfdb4e23d83696840ff53c6b65b6a5a632d2a",
+  "schema_version": 1, "generated_at": "2026-09-14T10:00:00Z", "model_hash": "6d00ce76dab2d03e3dc6441265994f7d919083f972efbef9d6aaefdecbac9ae8", "source_hash": "ddd3e5a46a914328f5f1f22c2d4697b82c5d02ba38b581522af42ed71c6cd58d",
   "company": {"id": 1, "name": "Officina Aurora Srl", "tax_id": "IT001"},
   "practice": {"workflow_type": "infrannuale", "budget_scenario": {"id": 30, "name": "Budget 2027-2029", "base_year": 2026}, "source_scenario": {"id": 20, "name": "Infrannuale settembre", "base_year": 2026, "period_months": 9}, "periods": {"historical_year": 2025, "closing_year": 2026, "forecast_years": [2027, 2028, 2029]}},
   "source_revisions": [{"source": "historical_financial_year", "identifier": "fy-10", "revision": "r3", "revision_at": "2026-09-01T08:00:00Z"}],

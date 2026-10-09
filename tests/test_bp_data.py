@@ -195,3 +195,47 @@ def test_R16_voci_indicizzate_e_forzate_senza_codici_ne_ripetizioni():
     assert out["Voci indicizzate"] == "Debiti verso istituti di previdenza → personale, Ratei e risconti passivi → ricavi"
     assert out["Valori forzati SP previsionale"] == "Ratei e risconti attivi: 1.000, Boh altro: 5"
     assert out["Valori forzati CE previsionale"] == "Per servizi: 2.000"
+
+
+def test_R16_pregresso_tributario_e_acconti_storici_dichiarati_con_etichette():
+    from app.renderers.business_plan import data as bp
+    from app.schemas.final_report import Pregresso, RunoffPlan
+    pre = Pregresso(crediti_tributari_breve=RunoffPlan(opening=D("20356"), amounts=[D("17356"), D("0"), D("0")]),
+                    acconti_tributari_storici=D("10000"))
+    out = dict(bp._puntuali(_report([_ass("pregresso", [None], pregresso=pre)])))
+    assert out["Piano pregresso: crediti tributari entro 12 mesi"] == "residuo 20.356 · per anno 17.356 / 0 / 0"
+    assert out["Acconti d'imposta già versati"].startswith("€ 10.000, compresi nei crediti tributari")
+    # zero = non dichiarato: nessuna riga
+    nulla = Pregresso(acconti_tributari_storici=D("0"))
+    assert bp._puntuali(_report([_ass("pregresso", [None], pregresso=nulla)])) == ()
+
+
+# ------------------------------------------------------------------ R14: investimenti lordi e disinvestimenti
+def test_R14_investimenti_lordi_e_disinvestimenti_separati():
+    from app.renderers.business_plan import data as bp
+    # materiali: −150.000 di investimento; finanziarie: +52.550 di disinvestimento; immateriali scese oltre
+    # l'ammortamento: +3.000 nella riga «investimenti», che è un disinvestimento
+    vals = {"cf_inv_materiali": D("-150000"), "cf_inv_immateriali": D("3000"), "cf_inv_finanziarie": D("0"),
+            "cf_disinv_righe": D("52550")}
+    lordi = bp._DERIVED["cf_inv_lordi"](vals.__getitem__)
+    disinv = bp._DERIVED["cf_disinvestimenti"](vals.__getitem__)
+    assert (lordi, disinv) == (D("-150000"), D("55550"))
+    assert lordi + disinv == sum(vals.values())  # il flusso B non cambia
+    assert {"cf_inv_lordi", "cf_disinvestimenti"} <= set(VALUE_KEYS)
+
+
+# ------------------------------------------------------------------ R15: il periodo residuo spiegato
+def test_R15_nota_sul_periodo_residuo_quando_il_margine_si_scosta():
+    from app.renderers.business_plan import data as bp
+    adj, clo = "adj", "clo"
+    v = {("ricavi", adj): D("2104755"), ("ricavi", clo): D("4109511"),
+         ("altri_ricavi_var", adj): D("97353"), ("altri_ricavi_var", clo): D("194706"),
+         ("costi_operativi", adj): D("2137867"), ("costi_operativi", clo): D("4062167"),
+         ("ebitda", adj): D("64241"), ("ebitda", clo): D("242050")}
+    nota = bp._nota_residuo(lambda k, p: v[(k, p)], adj, clo, 6)
+    assert nota.startswith("Il periodo residuo (6 mesi) è stimato con un EBITDA di € 177,8 mila (margine 8,87%)")
+    assert "costi operativi −€ 213,6 mila" in nota
+    # margini vicini: nessuna nota
+    v[("ebitda", clo)] = D("128482")
+    assert bp._nota_residuo(lambda k, p: v[(k, p)], adj, clo, 6) == ""
+    assert bp._nota_residuo(lambda k, p: None, adj, clo, 6) == ""

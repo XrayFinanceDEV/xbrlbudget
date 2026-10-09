@@ -6,6 +6,7 @@ viene ricalcolato (spec §4). Un valore assente resta None fino alla stampa, dov
 from __future__ import annotations
 
 import json
+import re
 from dataclasses import dataclass, field
 from decimal import Decimal
 from pathlib import Path
@@ -370,8 +371,32 @@ def _valori_ipotesi(a, plan_n: int) -> tuple:
     return tuple(out) + (None,) * (plan_n - len(out))
 
 
+#: ipotesi che il motore legge solo sulla riga del primo anno: si mostrano come valore unico per tutto il piano
+_PRIMO_ANNO = ("bank_lines_amount", "bank_lines_rate")
+#: il finanziamento «legacy» a un solo contratto: superato dalla tabella Finanziamenti
+_FINANZIAMENTO_LEGACY = ("financing_amount", "financing_duration_years", "financing_interest_rate")
+
+
+def _legacy_superato(by_field: dict) -> bool:
+    """Tasso e durata legacy non si stampano se non c'è un finanziamento legacy (importo 0/assente) o se ci sono
+    contratti in `financing_loans`: il tasso vero sta già nella tabella Finanziamenti."""
+    loans = by_field.get("financing_loans")
+    if loans is not None and loans.active and loans.financing_loans:
+        return True
+    amount = by_field.get("financing_amount")
+    if amount is None or not amount.active:
+        return True
+    return all(not x for x in amount.values if not isinstance(x, bool))
+
+
+def _unico_per_il_piano(vals: tuple) -> tuple:
+    primo = next((x for x in vals if x is not None), None)
+    return tuple(primo for _ in vals) if primo is not None else vals
+
+
 def _assumptions(report, plan_n: int) -> tuple:
     by_field = {a.field: a for s in report.assumption_sections for a in s.assumptions}
+    legacy_superato = _legacy_superato(by_field)
     growth, rows = {}, []
     for fld, label, unit in _ASSUMPTIONS:
         a = by_field.get(fld)
@@ -386,7 +411,11 @@ def _assumptions(report, plan_n: int) -> tuple:
         a = by_field.get(fld)
         if a is None or not a.active:
             continue
+        if legacy_superato and fld in _FINANZIAMENTO_LEGACY:
+            continue
         vals = _valori_ipotesi(a, plan_n)
+        if fld in _PRIMO_ANNO:
+            vals = _unico_per_il_piano(vals)
         if all(x is None for x in vals):
             continue
         if all(x == 0 for x in vals if x is not None) and a.provenance not in ("user", "override"):
@@ -394,6 +423,17 @@ def _assumptions(report, plan_n: int) -> tuple:
         growth[fld] = vals
         rows.append(AssumptionRow(_etichetta(fld), unit, vals))
     return growth, rows
+
+
+def _rate_positive(repayments) -> int:
+    return sum(1 for r in (repayments or []) if r is not None and r > 0)
+
+
+def _durata_prestito(ln) -> Optional[int]:
+    """Durata dichiarata; con un calendario `repayments` e senza durata, il numero di rate positive."""
+    if ln.duration_years:
+        return ln.duration_years
+    return _rate_positive(ln.repayments) or None
 
 
 def _finanziamenti(report) -> tuple:
@@ -409,16 +449,55 @@ def _finanziamenti(report) -> tuple:
                     continue
                 out.append(FinanziamentoRow(ln.name or "Finanziamento", "Nuovo" if nuovo else "Pregresso",
                                             ln.amount if nuovo else ln.opening_residual, ln.interest_rate,
-                                            ln.duration_years))
+                                            _durata_prestito(ln)))
             for ol in (a.other_lenders or []) if a.field == "other_lenders" else []:
                 out.append(FinanziamentoRow(ol.name or "Altro finanziatore", "Altro finanziatore",
-                                            ol.opening_residual, ol.interest_rate, len(ol.repayments) or None))
+                                            ol.opening_residual, ol.interest_rate,
+                                            _rate_positive(ol.repayments)))
     return tuple(out)
+
+
+_PREFISSO_ETICHETTA = re.compile(r"^(?:[A-Z]{1,3}|\d+|[ivx]+)\)\s*")
+_CODICE_VOCE = re.compile(r"^((?:sp|ce)\d{2}[a-z]?)(?:_(.*))?$")
+
+
+def _etichette_voci(report) -> dict:
+    """Codice breve (sp16f, ce06…) → etichetta di bilancio, dai prospetti dettagliati del report."""
+    out = {}
+    for st in report.detailed_statements:
+        for r in st.rows:
+            m = _CODICE_VOCE.match(r.code)
+            if m and m.group(1) not in out:
+                out[m.group(1)] = _PREFISSO_ETICHETTA.sub("", r.label.strip())
+    return out
+
+
+def _etichetta_voce(code: str, etichette: dict) -> str:
+    """L'etichetta di bilancio di un codice interno; senza riga nel prospetto, il nome del codice leggibile."""
+    m = _CODICE_VOCE.match(code.removesuffix("_override"))
+    if not m:
+        return code
+    if m.group(1) in etichette:
+        return etichette[m.group(1)]
+    resto = (m.group(2) or "").replace("_", " ").strip()
+    return resto.capitalize() if resto else code
+
+
+def _raggruppa(coppie, etichette: dict, rende) -> str:
+    """Una voce per codice (il contratto la ripete per ogni anno): i valori distinti restano, nell'ordine."""
+    per_voce: dict = {}
+    for code, val in coppie:
+        visti = per_voce.setdefault(code, [])
+        if val not in visti:
+            visti.append(val)
+    return ", ".join(f"{_etichetta_voce(c, etichette)}: " + " / ".join(rende(v) for v in vals)
+                     for c, vals in per_voce.items())
 
 
 def _puntuali(report) -> tuple:
     """Ipotesi nidificate che non hanno una riga per anno: piani di rientro, indicizzazioni, valori forzati."""
     out = []
+    etichette = _etichette_voci(report)
     for s in report.assumption_sections:
         for a in s.assumptions:
             if not a.active:
@@ -429,14 +508,15 @@ def _puntuali(report) -> tuple:
                     out.append((f"Piano pregresso: {nome.replace('_', ' ')}",
                                 f"residuo {fmt.eur(_numeric(piano.get('opening')))} · per anno {importi}"))
             elif a.field == "sp_indexing" and a.sp_indexing:
-                voci = ", ".join(f"{i.field} → {i.driver}" for i in a.sp_indexing)
+                voci = ", ".join(dict.fromkeys(f"{_etichetta_voce(i.field, etichette)} → {i.driver}"
+                                               for i in a.sp_indexing))
                 out.append(("Voci indicizzate", voci))
             elif a.field == "sp_overrides" and a.sp_overrides:
                 out.append(("Valori forzati SP previsionale",
-                            ", ".join(f"{o.field}: {fmt.eur(o.value)}" for o in a.sp_overrides)))
+                            _raggruppa([(o.field, o.value) for o in a.sp_overrides], etichette, fmt.eur)))
             elif a.field == "ce_overrides" and a.ce_overrides:
                 out.append(("Valori forzati CE previsionale",
-                            ", ".join(f"{o.field.removesuffix('_override')}: {fmt.eur(o.value)}" for o in a.ce_overrides)))
+                            _raggruppa([(o.field, o.value) for o in a.ce_overrides], etichette, fmt.eur)))
     return tuple(out)
 
 
@@ -571,7 +651,7 @@ def _plan_sources(periods) -> tuple:
 def rettifiche_registrate(entries) -> tuple:
     """Le rettifiche del giornale come righe di tabella, con le etichette di bilancio e mai i codici interni."""
     return tuple((e.edited_label, fmt.eur(e.edit_delta),
-                  f"{e.counterpart_label} ({fmt.eur(e.counterpart_delta)})", (e.explanation or "").strip() or "—")
+                  e.counterpart_label + (f" ({fmt.eur(e.counterpart_delta)})" if e.counterpart_delta else ""), (e.explanation or "").strip() or "—")
                  for e in entries)
 
 

@@ -113,7 +113,8 @@ def ipotesi(data: BusinessPlanData, pages: dict) -> list:
         s += layout.h2("Finanziamenti", after=6)
         s += [_tabella_testo(("Contratto", "Tipo", "Importo / residuo", "Tasso", "Durata"),
                              [(f.nome, f.tipo, fmt.eur(f.importo), fmt.pct(f.tasso),
-                               f"{f.durata_anni} anni" if f.durata_anni else fmt.ND)
+                               f"{f.durata_anni} anni" if f.durata_anni
+                               else ("nessun rimborso nel piano" if f.durata_anni == 0 else fmt.ND))
                               for f in data.finanziamenti_tabella], (150, 90, 100, 60, CW - 400)), Spacer(0, 10)]
     if data.ipotesi_puntuali:
         s += layout.h2("Altre ipotesi dichiarate", after=6)

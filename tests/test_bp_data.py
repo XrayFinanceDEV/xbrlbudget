@@ -126,3 +126,71 @@ def test_R15_rettifiche_registrate_con_etichette_non_codici():
     assert rows[0] == ("Crediti verso clienti", "−12.500", "Utile (perdita) d'esercizio (12.500)", "Fattura stornata")
     assert rows[1][3] == "—"
     assert bp.rettifiche_registrate([]) == ()
+
+
+# ------------------------------------------------------------------ R16: sezione 10, assunzioni del piano
+def _ns(**kw):
+    from types import SimpleNamespace
+    return SimpleNamespace(**kw)
+
+
+def _ass(field, values, *, active=True, provenance="user", **extra):
+    base = dict(field=field, values=list(values), active=active, provenance=provenance, financing_loans=None,
+                other_lenders=None, pregresso=None, sp_indexing=None, sp_overrides=None, ce_overrides=None)
+    base.update(extra)
+    return _ns(**base)
+
+
+def _report(assumptions, rows=()):
+    stm = _ns(rows=[_ns(code=c, label=label) for c, label in rows])
+    return _ns(assumption_sections=[_ns(assumptions=list(assumptions))], detailed_statements=[stm])
+
+
+def test_R16_tasso_e_durata_legacy_non_si_stampano_senza_finanziamento_legacy():
+    from app.renderers.business_plan import data as bp
+    base = [_ass("financing_amount", [0, 0, 0]), _ass("financing_interest_rate", [5, 5, 5]),
+            _ass("financing_duration_years", [3, 3, 3])]
+    labels = [r.label for r in bp._assumptions(_report(base), 3)[1]]
+    assert not any("asso" in label or "urata" in label for label in labels)
+    # importo legacy positivo e nessun contratto: restano
+    vivo = [_ass("financing_amount", [100000, 0, 0]), _ass("financing_interest_rate", [5, 5, 5])]
+    assert any(r.unit == "percent" for r in bp._assumptions(_report(vivo), 3)[1])
+    # con financing_loans il tasso vero sta nella tabella Finanziamenti
+    loans = vivo + [_ass("financing_loans", [None] * 3, financing_loans=[_ns()])]
+    assert bp._assumptions(_report(loans), 3)[1] == []
+
+
+def test_R16_fidi_valore_unico_per_tutto_il_piano():
+    from app.renderers.business_plan import data as bp
+    rows = bp._assumptions(_report([_ass("bank_lines_amount", [50000, None, None])]), 3)[1]
+    assert rows[0].values == (D("50000"),) * 3
+
+
+def test_R16_durata_dal_calendario_e_altro_finanziatore_senza_rimborsi():
+    from app.renderers.business_plan import data as bp
+    ln = _ns(name="Mutuo", amount=D("0"), opening_residual=D("90000"), interest_rate=D("4"), duration_years=None,
+             repayments=[D("0"), D("30000"), D("30000"), D("30000")])
+    ol = _ns(name="Socio", opening_residual=D("10000"), interest_rate=D("2"), repayments=[D("0"), D("0"), D("0")])
+    rep = _report([_ass("financing_loans", [None], financing_loans=[ln]),
+                   _ass("other_lenders", [None], other_lenders=[ol])])
+    pre, altro = bp._finanziamenti(rep)
+    assert pre.durata_anni == 3
+    assert altro.durata_anni == 0
+
+
+def test_R16_voci_indicizzate_e_forzate_senza_codici_ne_ripetizioni():
+    from app.renderers.business_plan import data as bp
+    idx = [_ns(field="sp16f", driver="personale")] * 3 + [_ns(field="sp18", driver="ricavi")] * 3
+    ovr = [_ns(field="sp10_ratei_risconti_attivi", value=D("1000")), _ns(field="sp10_ratei_risconti_attivi", value=D("1000")),
+           _ns(field="sp99_boh_altro", value=D("5"))]
+    ce = [_ns(field="ce06_override", value=D("2000"))]
+    rep = _report([_ass("sp_indexing", [None], sp_indexing=idx), _ass("sp_overrides", [None], sp_overrides=ovr),
+                   _ass("ce_overrides", [None], ce_overrides=ce)],
+                  rows=[("sp16f_debiti_previdenziali_altri", "Debiti verso istituti di previdenza"),
+                        ("sp18_ratei_risconti_passivi", "E) Ratei e risconti passivi"),
+                        ("sp10_ratei_risconti_attivi", "D) Ratei e risconti attivi"),
+                        ("ce06_servizi", "7) Per servizi")])
+    out = dict(bp._puntuali(rep))
+    assert out["Voci indicizzate"] == "Debiti verso istituti di previdenza → personale, Ratei e risconti passivi → ricavi"
+    assert out["Valori forzati SP previsionale"] == "Ratei e risconti attivi: 1.000, Boh altro: 5"
+    assert out["Valori forzati CE previsionale"] == "Per servizi: 2.000"

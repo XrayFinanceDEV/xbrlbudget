@@ -179,7 +179,8 @@ export function rowsCosti(
 ): PreviewRow[] {
   const b = {
     rev: num(baseInc.ce01_ricavi_vendite),
-    mat: num(baseInc.ce05_materie_prime), serv: num(baseInc.ce06_servizi),
+    // R07 (#63): le materie sono il CONSUMO (acquisti + variazione rimanenze), come nel motore
+    mat: num(baseInc.ce05_materie_prime) + num(baseInc.ce10_var_rimanenze_mat_prime), serv: num(baseInc.ce06_servizi),
     god: num(baseInc.ce07_godimento_beni), pers: num(baseInc.ce08_costi_personale), alt: num(baseInc.ce12_oneri_diversi),
   };
   const bFixed = b.mat * fixedShare.materials / 100 + b.serv * fixedShare.services / 100 + b.pers + b.god + b.alt;
@@ -215,10 +216,10 @@ export function rowsCosti(
   return [
     row("ricavi", "Ricavi delle vendite", "sub", { value: b.rev }, pick("rev")),
     row("variabili", "variabili · materie prime e servizi", "value", cell(bVar, b.rev), pick("variabili")),
-    row("mat-variabili", "materie prime · quota variabile", "sub", splitCell(b.mat - bMatFixed, b.rev), pick("matVar")),
+    row("mat-variabili", "consumo di materie · quota variabile", "sub", splitCell(b.mat - bMatFixed, b.rev), pick("matVar")),
     row("serv-variabili", "servizi · quota variabile", "sub", splitCell(b.serv - bServFixed, b.rev), pick("servVar")),
     row("fissi", "fissi · parti fisse, personale, godimento, oneri diversi", "value", cell(bFixed, b.rev), pick("fissi")),
-    row("mat-fissi", "materie prime · quota fissa", "sub", splitCell(bMatFixed, b.rev), pick("matFixed")),
+    row("mat-fissi", "consumo di materie · quota fissa", "sub", splitCell(bMatFixed, b.rev), pick("matFixed")),
     row("serv-fissi", "servizi · quota fissa", "sub", splitCell(bServFixed, b.rev), pick("servFixed")),
     row("personale", "di cui personale", "sub", cell(b.pers, b.rev), pick("pers")),
     row("mol", "MOL", "kpi", cell(bMol, b.rev), pick("mol")),
@@ -237,7 +238,7 @@ export function rowsCosti(
  * accantonamenti e proventi finanziari, e sullo stesso schermo mostrava un MOL diverso di
  * 150.000 € da quello di «Costi e margine» (collaudo di fine lotto, R1). Solo la
  * scomposizione variabili/fissi viene dal pareggio; «altri costi operativi» e' cio' che il
- * pareggio non scompone (ce10 + ce11 + ce11b), cosi' le righe sommano sempre al MOL.
+ * pareggio non scompone (ce11 + ce11b; ce10 sta nel consumo di materie, R07), cosi' le righe sommano sempre al MOL.
  *
  * La colonna base non ha un `details.pareggio`: la parte fissa di materie prime e servizi
  * si ripartisce con la quota dello scenario (`fixed`), la stessa di `rowsCosti`.
@@ -246,10 +247,11 @@ export function rowsCeAnteImposte(
   baseInc: IncomeStatement, fixed: { materials: number; services: number }, years: ForecastPreviewYear[],
 ): PreviewRow[] {
   const bi = baseInc as unknown as Record<string, unknown>;
+  // R07 (#63): la variazione delle materie (ce10) sta nel consumo, dentro variabili e fissi: qui solo gli accantonamenti
   const altriOperativi = (i: Record<string, unknown>) =>
-    num(i.ce10_var_rimanenze_mat_prime) + num(i.ce11_accantonamenti) + num(i.ce11b_altri_accantonamenti);
+    num(i.ce11_accantonamenti) + num(i.ce11b_altri_accantonamenti);
   const bAgg = ceAggregates(bi);
-  const mat = num(bi.ce05_materie_prime), serv = num(bi.ce06_servizi);
+  const mat = num(bi.ce05_materie_prime) + num(bi.ce10_var_rimanenze_mat_prime), serv = num(bi.ce06_servizi);
   const bFissiMs = mat * fixed.materials / 100 + serv * fixed.services / 100;
   const bVariabili = mat + serv - bFissiMs;
   const bFissi = bFissiMs + num(bi.ce07_godimento_beni) + num(bi.ce08_costi_personale) + num(bi.ce12_oneri_diversi);
@@ -278,7 +280,7 @@ export function rowsCeAnteImposte(
     row("vdp", "Valore della produzione", "value", { value: bAgg.vp }, pick("vdp")),
     row("variabili", "Costi variabili", "sub", { value: -bVariabili }, pick("variabili")),
     row("fissi", "Costi fissi", "sub", { value: -bFissi }, pick("fissi")),
-    row("altri", "Altri costi operativi · rimanenze e accantonamenti", "sub", { value: -altriOperativi(bi) }, pick("altri")),
+    row("altri", "Altri costi operativi · accantonamenti", "sub", { value: -altriOperativi(bi) }, pick("altri")),
     row("mol", "MOL", "kpi", { value: bAgg.mol }, pick("mol")),
     row("amm", "Ammortamenti", "sub", { value: -bAgg.amm }, pick("amm")),
     row("ro", "Risultato operativo", "kpi", { value: bAgg.ro }, pick("ro")),

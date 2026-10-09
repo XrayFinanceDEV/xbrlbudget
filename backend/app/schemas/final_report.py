@@ -306,6 +306,18 @@ class InfrannualClosing(ContractModel):
     period_end: ISODate
     values: list[ClosingValue] = Field(min_length=1)
     extra_accounting_alerts: ExtraAccountingAlerts
+    # #63 R09/R16: gli acconti d'imposta dell'anno dichiarati nell'infrannuale (vuoto/0 = non dichiarato).
+    # Escono sul wire solo quando valgono, come `repayments` dei finanziamenti: il v1 non cambia forma.
+    tax_advances_paid: Optional[PlainDecimal] = None
+    tax_advances_already_paid: Optional[PlainDecimal] = None
+
+    @model_serializer(mode="wrap")
+    def serialize_v1_closing_shape(self, handler):
+        serialized = handler(self)
+        for key in ("tax_advances_paid", "tax_advances_already_paid"):
+            if getattr(self, key) is None:
+                serialized.pop(key, None)
+        return serialized
 
 
 class FinancingLoan(ContractModel):
@@ -348,6 +360,10 @@ class TaxRunoffPlan(RunoffPlan):
 
 class Pregresso(ContractModel):
     crediti_commerciali: Optional[RunoffPlan] = None
+    crediti_tributari_breve: Optional[RunoffPlan] = None
+    crediti_tributari_lungo: Optional[RunoffPlan] = None
+    # acconti d'imposta già versati compresi in sp06e dell'anno base (#63 R16: si dichiarano in sez. 10)
+    acconti_tributari_storici: Optional[PlainDecimal] = None
     debiti_fornitori: Optional[RunoffPlan] = None
     debiti_tributari: Optional[TaxRunoffPlan] = None
     debiti_previdenziali: Optional[RunoffPlan] = None

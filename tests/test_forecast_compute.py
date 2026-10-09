@@ -86,17 +86,20 @@ def test_details_are_declared_and_sum_to_the_line(monkeypatch):
                 for key in ("ce05_fixed", "ce05_variable", "ce06_fixed", "ce06_variable",
                             "dso_applied", "dio_applied", "dpo_applied"):
                     assert key in d, key
+                # R07: le quote riepilogano il CONSUMO di materie (ce05 + ce10), non i soli acquisti.
                 assert (d["ce05_fixed"] + d["ce05_variable"]).quantize(Decimal("0.01")) == \
-                    y.income_statement["ce05_materie_prime"].quantize(Decimal("0.01"))
+                    (y.income_statement["ce05_materie_prime"]
+                     + y.income_statement["ce10_var_rimanenze_mat_prime"]).quantize(Decimal("0.01"))
             # anno 1: 200.000 base -> 30% fisso +2%, 70% variabile +10%
             assert comp.years[0].details["ce05_fixed"] == Decimal("61200.00")
             assert comp.years[0].details["ce05_variable"] == Decimal("154000.00")
-            assert comp.years[0].income_statement["ce05_materie_prime"] == Decimal("215200.00")
+            _consumo = lambda y: y.income_statement["ce05_materie_prime"] + y.income_statement["ce10_var_rimanenze_mat_prime"]
+            assert _consumo(comp.years[0]) == Decimal("215200.00")
             # Le quote proseguono separatamente: non si ridivide ogni anno il
             # totale aggiornato usando la percentuale del primo anno.
             assert comp.years[2].details["ce05_fixed"] == Decimal("63672.48")
             assert comp.years[2].details["ce05_variable"] == Decimal("186340.00")
-            assert comp.years[2].income_statement["ce05_materie_prime"] == Decimal("250012.48")
+            assert _consumo(comp.years[2]) == Decimal("250012.48")
     finally:
         engine.dispose()
 

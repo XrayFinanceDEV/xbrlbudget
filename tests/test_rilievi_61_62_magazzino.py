@@ -29,9 +29,16 @@ def test_gruppo_senza_materie_e_tutto_semilavorati():
     assert ca == D("0") and cb > 0
 
 
-def test_ambienta_25_giorni_avvisa():
+def test_ambienta_25_giorni_azzera_gli_acquisti_e_avvisa():
+    # R07: il consumo (128.090,89) e' coperto dalle rimanenze in apertura (287.312): acquisti a zero, avviso.
     e = generato(genera(righe(dio_days=25)))
-    assert any("287.312" in a for a in e.det[2027]["avvisi"])
+    assert any("287.312" in a and "azzerati" in a for a in e.det[2027]["avvisi"])
+    assert e.det[2027]["rimanenze_materie"]["acquisti_azzerati"] is True
+    assert e.anni[2027][1]["ce05_materie_prime"] == 0
+
+
+def test_ambienta_giorni_molto_alti_avvisano_sul_magazzino():
+    e = generato(genera(righe(dio_days=2000)))
     av = e.det[2027]["avviso_rimanenze"]
     assert av and av[0]["gruppo"] == "materie_semilavorati"
 
@@ -66,18 +73,21 @@ def test_semilavorati_seguono_il_gruppo_materie_e_passano_da_ce02():
 
 
 def test_lavori_in_corso_non_passano_dal_ce():
-    # ce03 e' ambiguo negli import (A.4 finisce spesso li'): resta quello della base, sp05c muove solo la cassa.
+    # R04: ce03 vale zero negli anni di piano (salvo override); sp05c muove solo la cassa.
     e = generato(genera(righe(revenue_growth_pct=10), bs=BS_LC))
     sp, ce = e.anni[2027]
     assert sp["sp05c_lavori_in_corso"] > D("100000")
-    assert ce["ce03_lavori_interni"] == BASE_CE["ce03_lavori_interni"]
+    assert ce["ce03_lavori_interni"] == 0
     assert e.det[2027]["rimanenze"]["lavori_in_corso"]["contropartita"] == "nessuna"
 
 
-def test_ce03_della_base_ambienta_si_riporta():
-    e = generato(genera(righe()))
+def test_ce03_della_base_ambienta_non_si_riporta_e_l_override_vince():
+    # R04 (#63, 2026-10-09): lavori in corso a zero negli anni di piano salvo override.
     assert BASE_CE["ce03_lavori_interni"] == D("93000.00")
-    assert e.anni[2027][1]["ce03_lavori_interni"] == D("93000.00")
+    e = generato(genera(righe()))
+    assert all(e.anni[y][1]["ce03_lavori_interni"] == 0 for y in (2027, 2028, 2029))
+    e = generato(genera(righe(ce03_override=5000)))
+    assert e.anni[2027][1]["ce03_lavori_interni"] == D("5000")
 
 
 def test_base_senza_dettaglio_non_perde_massa():

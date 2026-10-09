@@ -16,6 +16,7 @@ import {
   getExtraAccountingAlerts,
   putExtraAccountingAlerts,
   bulkUpsertAssumptions,
+  getBudgetAssumptions,
   getAliquotaProposta,
   getIntraYearComparison,
   getScenarioAnalysis,
@@ -361,6 +362,33 @@ export default function InfraannualePage() {
   // («Calcola e vai agli Indicatori») non torna in silenzio allo storico dopo che
   // l'utente ha chiesto il circolante infrannuale.
   const [modoCircolante, setModoCircolante] = useState<ModoCircolante>(MODO_CIRCOLANTE_PREDEFINITO);
+  // Imposte dell'anno (#63 R09): «Acconti dell'anno» (vuoto = 100% dell'imposta dell'anno di riferimento) e
+  // «Acconti già versati nell'anno», compresi nei crediti tributari del periodo. Stato locale come
+  // `modoCircolante`: il motore li legge dalle ipotesi che `calculateProjectedBS` salva.
+  const [accontiAnno, setAccontiAnno] = useState("");
+  const [accontiGiaVersati, setAccontiGiaVersati] = useState("");
+  // Idratazione dalle ipotesi salvate dello scenario infrannuale: senza, dopo un ricaricamento il primo
+  // «Calcola» rimanderebbe vuoto/0 e cancellerebbe in silenzio un valore salvato. Una volta per scenario,
+  // dipende dai soli scalari (mai dall'oggetto `scenario`).
+  const scenarioIdIdratato = scenario?.id;
+  const companyIdIdratato = importResult?.companyId;
+  useEffect(() => {
+    if (!scenarioIdIdratato || !companyIdIdratato) return;
+    let annullato = false;
+    getBudgetAssumptions(companyIdIdratato, scenarioIdIdratato)
+      .then((righe) => {
+        const riga = righe?.[0];
+        if (annullato || !riga) return;
+        const acconti = Number(riga.tax_advances_paid ?? 0);
+        const versati = Number(riga.tax_advances_already_paid ?? 0);
+        setAccontiAnno(acconti > 0 ? String(acconti) : "");
+        setAccontiGiaVersati(versati > 0 ? String(versati) : "");
+        const modo = riga.working_capital_mode;
+        if (modo && isModoCircolante(modo)) setModoCircolante(modo);
+      })
+      .catch(() => { /* nessuna ipotesi leggibile: restano i valori di partenza */ });
+    return () => { annullato = true; };
+  }, [scenarioIdIdratato, companyIdIdratato]);
   const projectedBSRef = useRef<IntraYearComparisonItem[] | null>(null);
   useEffect(() => {
     projectedBSRef.current = projectedBS;
@@ -837,6 +865,13 @@ export default function InfraannualePage() {
   // rimanenze: 'storico' dall'anno intero precedente (assestato), 'infrannuale'
   // da quelli osservati nel periodo. Sono due pulsanti, non un'opzione nascosta:
   // la differenza vale centinaia di migliaia di euro di cassa proiettata.
+  // Importo scritto a mano -> numero >= 0 (formato italiano 10.000,50 o 10000.5); vuoto o non numerico = 0.
+  const importoNonNegativo = (testo: string): number => {
+    const t = testo.trim();
+    const n = parseFloat(t.includes(",") ? t.replace(/\./g, "").replace(",", ".") : t);
+    return Number.isFinite(n) && n > 0 ? n : 0;
+  };
+
   const calculateProjectedBS = async (modoCircolante: ModoCircolante = MODO_CIRCOLANTE_PREDEFINITO) => {
     if (!comparison || !importResult || !scenario) return;
 
@@ -878,6 +913,8 @@ export default function InfraannualePage() {
           other_costs_growth_pct: calcGrowth("ce12_oneri_diversi"),
           ...buildCeOverridePayload(overrides),
           working_capital_mode: modoCircolante,
+          tax_advances_paid: importoNonNegativo(accontiAnno),
+          tax_advances_already_paid: importoNonNegativo(accontiGiaVersati),
           tax_rate: aliquota,
           fixed_materials_percentage: 40,
           fixed_services_percentage: 40,
@@ -2033,6 +2070,34 @@ export default function InfraannualePage() {
               </div>
             </CardHeader>
             <CardContent>
+              <div className="mb-4 grid gap-3 sm:grid-cols-2">
+                <div className="space-y-1">
+                  <Label htmlFor="acconti-anno">Acconti dell&apos;anno €</Label>
+                  <Input
+                    id="acconti-anno"
+                    inputMode="decimal"
+                    placeholder="100% dell'imposta dell'anno di riferimento"
+                    value={accontiAnno}
+                    onChange={(e) => setAccontiAnno(e.target.value)}
+                    disabled={calculatingBS}
+                  />
+                </div>
+                <div className="space-y-1">
+                  <Label htmlFor="acconti-gia-versati">Acconti già versati nell&apos;anno €</Label>
+                  <Input
+                    id="acconti-gia-versati"
+                    inputMode="decimal"
+                    placeholder="0"
+                    value={accontiGiaVersati}
+                    onChange={(e) => setAccontiGiaVersati(e.target.value)}
+                    disabled={calculatingBS}
+                  />
+                  <p className="text-xs text-muted-foreground">
+                    Acconti d&apos;imposta dell&apos;anno già pagati nel periodo, compresi nei crediti tributari:
+                    riducono gli acconti ancora da versare.
+                  </p>
+                </div>
+              </div>
               {calculatingBS ? (
                 <div className="py-12 text-center text-muted-foreground flex items-center justify-center gap-2">
                   <Loader2 className="h-4 w-4 animate-spin" />

@@ -565,10 +565,15 @@ class PosizioneTributariaFineAnno:
     closing_debt: Decimal
     acconti: Decimal
     cash_out: Decimal
+    # #63 R09: la parte del credito d'apertura che sono acconti dell'anno gia' versati nel periodo (consumata,
+    # non resta a credito) e gli acconti dell'anno prima del max con essa.
+    already_paid: Decimal = ZERO
+    acconti_dichiarati: Decimal = ZERO
 
 
 def posizione_tributaria_fine_anno(*, opening_credit, opening_debt, remaining_current_tax, current_tax,
-                                   reference_tax, explicit_advances) -> PosizioneTributariaFineAnno:
+                                   reference_tax, explicit_advances,
+                                   already_paid=ZERO) -> PosizioneTributariaFineAnno:
     """La posizione tributaria al 31/12 dell'infrannuale (spec lotto 3A §4.3, decisione 4 del proprietario).
 
     Al 31/12 resta solo il saldo dell'anno in corso: imposta dell'anno meno acconti versati nell'anno. Il DEBITO
@@ -582,7 +587,11 @@ def posizione_tributaria_fine_anno(*, opening_credit, opening_debt, remaining_cu
     imposte: va corretto o rimosso, non usato.
     """
     d = lambda v: Decimal(str(v or 0))
-    acconti = acconti_dovuti(explicit_advances, reference_tax)
+    # #63 R09: gli acconti gia' versati (G) stanno dentro il credito d'apertura; gli acconti effettivi dell'anno
+    # sono max(A, G). Il chiamante toglie G dal credito che resta in bilancio.
+    versati = max(ZERO, d(already_paid))
+    dichiarati = acconti_dovuti(explicit_advances, reference_tax)
+    acconti = max(dichiarati, versati)
     netto_fine = d(current_tax) - acconti
     netto_apertura = d(opening_debt) - d(opening_credit)
     return PosizioneTributariaFineAnno(
@@ -590,6 +599,8 @@ def posizione_tributaria_fine_anno(*, opening_credit, opening_debt, remaining_cu
         closing_debt=max(ZERO, netto_fine),
         acconti=acconti,
         cash_out=netto_apertura + d(remaining_current_tax) - netto_fine,
+        already_paid=versati,
+        acconti_dichiarati=dichiarati,
     )
 
 
@@ -696,6 +707,19 @@ def rimanenze_materie(apertura: Decimal, acquisti: Decimal, giorni: Decimal) -> 
     chiusura = max(ZERO, (acquisti + apertura) * giorni / (Decimal('360') + giorni))
     ce10 = apertura - chiusura
     return chiusura, ce10
+
+
+def rimanenze_gruppo_da_consumo(apertura_a, apertura_b, consumo, giorni) -> Tuple[Decimal, Decimal]:
+    """R07 (#63, 2026-10-09): il magazzino del gruppo materie+semilavorati dal CONSUMO gia' noto (la crescita
+    si applica al consumo, non agli acquisti): totale = consumo x giorni / 360, ripartito fra sp05a e sp05b
+    con la quota d'apertura (la stessa di `rimanenze_gruppo_materie`). Nessuna equazione implicita: gli
+    acquisti sono il saldo (consumo + chiusura - apertura), del chiamante. Precisione piena."""
+    a, b = Decimal(str(apertura_a or 0)), Decimal(str(apertura_b or 0))
+    cons, g = Decimal(str(consumo or 0)), Decimal(str(giorni or 0))
+    q = Decimal('1') if a + b == 0 else a / (a + b)
+    gruppo = max(ZERO, cons * g / Decimal('360'))
+    chiusura_a = q * gruppo
+    return chiusura_a, gruppo - chiusura_a
 
 
 def rimanenze_gruppo_materie(apertura_a, apertura_b, acquisti, giorni) -> Tuple[Decimal, Decimal]:

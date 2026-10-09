@@ -159,12 +159,17 @@ def key_points(data: BusinessPlanData) -> list:
                      f"{fmt.prep('al', fmt.pct(of[-1][1]))} del MOL")
         out.append((lead, text + "."))
     op = _plan_values(data, "cf_operativo")
-    inv = _plan_values(data, "cf_investimenti")
+    inv, disinv = _plan_values(data, "cf_inv_lordi"), _plan_values(data, "cf_disinvestimenti")
+    if not _all(*inv):  # dati senza la separazione (JSON di banco vecchi): il flusso B netto, come prima
+        inv, disinv = _plan_values(data, "cf_investimenti"), []
     rimb = _plan_values(data, "cf_rimborsi")
     f0, fn = _ends(data, "pfn")
     pe0, pen = _ends(data, "pfn_ebitda")
     if op and _all(*op, *inv, *rimb, f0, fn, pe0, pen):
         s_op, s_inv = sum(op, D(0)), sum(inv, D(0))
+        # R14 (#63): investimenti lordi; i disinvestimenti si citano a parte, mai compensati
+        s_dis = sum((x for x in disinv if x is not None), D(0))
+        dis_testo = f", disinvestimenti per {fmt.compact_eur(s_dis)}" if s_dis else ""
         lordo = _debito_lordo_scende(data)
         if s_op > 0 and fn < f0 and lordo:
             lead = "Generazione di cassa e deleveraging."
@@ -177,7 +182,7 @@ def key_points(data: BusinessPlanData) -> list:
         # riga separata dalle erogazioni nel rendiconto, e la sintesi segue lo stesso taglio.
         rimb_testo = _eur_per_anno(data, rimb)
         out.append((lead, f"I flussi operativi cumulati {_span(data)} sono pari a {fmt.compact_eur(s_op)}, a fronte "
-                          f"di investimenti per {fmt.compact_eur(abs(s_inv))} e rimborsi per {rimb_testo}. "
+                          f"di investimenti per {fmt.compact_eur(abs(s_inv))}{dis_testo} e rimborsi per {rimb_testo}. "
                           f"La PFN passa da € {fmt.eur(f0)} a € {fmt.eur(fn)} e il rapporto PFN/EBITDA da "
                           f"{fmt.ratio(pe0)} a {fmt.ratio(pen)}."))
     ms0, msn = _ends(data, "margine_sicurezza")

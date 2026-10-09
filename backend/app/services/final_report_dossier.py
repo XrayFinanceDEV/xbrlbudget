@@ -343,7 +343,10 @@ def build_structure_series(sources: list[DossierSource], indicators: list[Indica
             materials_pct = services_pct = DEFAULT_FIXED_SHARE * HUNDRED
         else:
             materials_pct, services_pct = source.fixed_split
-        ce05, ce06 = valori['ce05_materie_prime'], valori['ce06_servizi']
+        # R07 (#63, 2026-10-09): come nel motore, la quota fisso/variabile riguarda il CONSUMO di materie
+        # (ce05 + ce10), e ce10 non si somma una seconda volta ai costi fissi.
+        ce10_base = inc.get('ce10_var_rimanenze_mat_prime') or ZERO
+        ce05, ce06 = valori['ce05_materie_prime'] + ce10_base, valori['ce06_servizi']
         ce05_fixed = ce05 * materials_pct / HUNDRED
         ce06_fixed = ce06 * services_pct / HUNDRED
         esito = punto_di_pareggio(
@@ -353,7 +356,7 @@ def build_structure_series(sources: list[DossierSource], indicators: list[Indica
             ce05_fixed=ce05_fixed, ce05_variable=ce05 - ce05_fixed,
             ce06_fixed=ce06_fixed, ce06_variable=ce06 - ce06_fixed,
             ce07=valori['ce07_godimento_beni'], ce08=valori['ce08_costi_personale'],
-            ce10=inc.get('ce10_var_rimanenze_mat_prime'), ce11=inc.get('ce11_accantonamenti'),
+            ce10=ZERO, ce11=inc.get('ce11_accantonamenti'),
             ce11b=inc.get('ce11b_altri_accantonamenti'), ce12=valori['ce12_oneri_diversi'],
         )
         _column(pareggio, 'fixed_costs', _q2(esito['costi_fissi_operativi']), None)

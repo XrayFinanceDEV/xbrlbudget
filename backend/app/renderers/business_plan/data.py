@@ -199,6 +199,11 @@ _CF = {
     "cf_altre": ("operating.cash_adjustments.total",),
     "cf_operativo": ("operating.total_operating_cashflow",),
     "cf_investimenti": ("investing.total_investing_cashflow",),
+    "cf_inv_materiali": ("investing.tangible_assets.investments",),
+    "cf_inv_immateriali": ("investing.intangible_assets.investments",),
+    "cf_inv_finanziarie": ("investing.financial_assets.investments",),
+    "cf_disinv_righe": ("investing.tangible_assets.disinvestments", "investing.intangible_assets.disinvestments",
+                        "investing.financial_assets.disinvestments"),
     "cf_finanziamento": ("financing.total_financing_cashflow",),
     "cf_nuovo_debito": ("financing.third_party_funds.increases",),
     "cf_rimborsi": ("financing.third_party_funds.decreases",),
@@ -234,7 +239,23 @@ def _share(a: Num, b: Num) -> Num:
     return None if a is None or b is None or b == 0 else a / b * 100
 
 
+def _neg(x: Num) -> Num:
+    return None if x is None else min(x, Decimal(0))
+
+
+def _pos(x: Num) -> Num:
+    return None if x is None else max(x, Decimal(0))
+
+
 _DERIVED: dict = {
+    # R14 (#63): il flusso B separato in investimenti lordi (uscite, negativi) e disinvestimenti (entrate). Sulle
+    # materiali e immateriali il rendiconto mette nella riga «investimenti» il netto ΔImmob + ammortamenti, che
+    # è positivo quando l'attivo scende più dell'ammortamento: quella parte è un disinvestimento.
+    "cf_inv_lordi": lambda g: _add(_neg(g("cf_inv_materiali")), _neg(g("cf_inv_immateriali")),
+                                   _neg(g("cf_inv_finanziarie"))),
+    "cf_disinvestimenti": lambda g: _add(_pos(g("cf_inv_materiali")), _pos(g("cf_inv_immateriali")),
+                                         _pos(g("cf_inv_finanziarie")), g("cf_disinv_righe")),
+
     # R15: valore della produzione − ricavi delle vendite (ce02 + ce03 + ce03a + ce04), cioè la riga che fa
     # tornare Ricavi + Altri ricavi e variazioni − Costi operativi = EBITDA in ogni colonna
     "altri_ricavi_var": lambda g: _sub(g("valore_produzione"), g("ricavi")),
@@ -493,6 +514,15 @@ def _raggruppa(coppie, etichette: dict, rende) -> str:
                      for c, vals in per_voce.items())
 
 
+#: i saldi del piano pregresso con l'etichetta di bilancio (#63 R16: mai la chiave interna)
+_PREGRESSO_VOCI = {
+    "crediti_commerciali": "crediti verso clienti", "crediti_tributari_breve": "crediti tributari entro 12 mesi",
+    "crediti_tributari_lungo": "crediti tributari oltre 12 mesi", "debiti_fornitori": "debiti verso fornitori",
+    "debiti_tributari": "debiti tributari", "debiti_previdenziali": "debiti previdenziali",
+    "altri_debiti": "altri debiti",
+}
+
+
 def _puntuali(report) -> tuple:
     """Ipotesi nidificate che non hanno una riga per anno: piani di rientro, indicizzazioni, valori forzati."""
     out = []
@@ -503,8 +533,14 @@ def _puntuali(report) -> tuple:
                 continue
             if a.field == "pregresso" and a.pregresso is not None:
                 for nome, piano in a.pregresso.model_dump(exclude_none=True).items():
+                    if nome == "acconti_tributari_storici":
+                        if _numeric(piano):
+                            out.append(("Acconti d'imposta già versati",
+                                        f"€ {fmt.eur(_numeric(piano))}, compresi nei crediti tributari dell'anno "
+                                        "base: si compensano con le imposte da versare nel primo anno di piano"))
+                        continue
                     importi = " / ".join(fmt.eur(_numeric(x)) for x in piano.get("amounts", []))
-                    out.append((f"Piano pregresso: {nome.replace('_', ' ')}",
+                    out.append((f"Piano pregresso: {_PREGRESSO_VOCI.get(nome, nome.replace('_', ' '))}",
                                 f"residuo {fmt.eur(_numeric(piano.get('opening')))} · per anno {importi}"))
             elif a.field == "sp_indexing" and a.sp_indexing:
                 voci = ", ".join(dict.fromkeys(f"{_etichetta_voce(i.field, etichette)} → {i.driver}"
@@ -516,7 +552,24 @@ def _puntuali(report) -> tuple:
             elif a.field == "ce_overrides" and a.ce_overrides:
                 out.append(("Valori forzati CE previsionale",
                             _raggruppa([(o.field, o.value) for o in a.ce_overrides], etichette, fmt.eur)))
+    out.extend(_acconti_infrannuale(getattr(report, "infrannual_closing", None)))
     return tuple(out)
+
+
+def _acconti_infrannuale(closing) -> list:
+    """#63 R09/R16: gli acconti d'imposta dell'anno dichiarati nell'infrannuale che fa da base al piano."""
+    if closing is None:
+        return []
+    dovuti, versati = getattr(closing, "tax_advances_paid", None), getattr(closing, "tax_advances_already_paid", None)
+    if not dovuti and not versati:
+        return []
+    anno = closing.period_end.year if hasattr(closing.period_end, "year") else str(closing.period_end)[:4]
+    parti = [f"acconti dell'anno € {fmt.eur(dovuti)}" if dovuti
+             else "acconti dell'anno pari all'imposta dell'anno precedente"]
+    if versati:
+        parti.append(f"di cui € {fmt.eur(versati)} già versati nel periodo osservato, compresi nei crediti "
+                     "tributari: riducono gli acconti ancora da versare e non restano a credito")
+    return [(f"Acconti d'imposta {anno}", "; ".join(parti))]
 
 
 def _avvisi_motore(report) -> tuple:
@@ -654,6 +707,40 @@ def rettifiche_registrate(entries) -> tuple:
                  for e in entries)
 
 
+def _nota_residuo(g, adj, clo, m: int) -> str:
+    """R15 (#63): il periodo residuo stimato si spiega quando il suo margine EBITDA si scosta da quello del
+    progressivo rettificato (2 punti o più): si confronta con il ritmo del periodo osservato riportato agli stessi
+    mesi, voce per voce. Senza dati, o con margini vicini, nessuna nota."""
+    r = 12 - m
+    if r <= 0:
+        return ""
+    res = lambda k: _sub(g(k, clo), g(k, adj))  # noqa: E731
+    e_adj, ric_adj, e_res, ric_res = g("ebitda", adj), g("ricavi", adj), res("ebitda"), res("ricavi")
+    if None in (e_adj, ric_adj, e_res, ric_res) or not ric_adj or not ric_res:
+        return ""
+    m_adj, m_res = e_adj / ric_adj * 100, e_res / ric_res * 100
+    if abs(m_res - m_adj) < 2:
+        return ""
+    k = Decimal(r) / Decimal(m)
+    voci = []
+    for label, key, segno in (("ricavi", "ricavi", 1), ("altri ricavi e variazioni", "altri_ricavi_var", 1),
+                              ("costi operativi", "costi_operativi", -1)):
+        a, b = g(key, adj), res(key)
+        if a is None or b is None:
+            continue
+        d = b - a * k
+        if abs(d) >= 1:
+            voci.append((abs(d), f"{label} {'+' if d > 0 else '−'}{fmt.compact_eur(abs(d))}"))
+    voci.sort(key=lambda x: -x[0])
+    testo = (f"Il periodo residuo ({r} mesi) è stimato con un EBITDA di {fmt.compact_eur(e_res)} (margine "
+             f"{fmt.pct(m_res)}) contro {fmt.compact_eur(e_adj)} ({fmt.pct(m_adj)}) del progressivo rettificato di "
+             f"{m} mesi: la differenza viene dalle ipotesi di proiezione")
+    if voci:
+        testo += (f". Rispetto al ritmo del periodo osservato riportato a {r} mesi: "
+                  + ", ".join(v for _, v in voci))
+    return testo + "."
+
+
 def _starting_infrannuale(report, lk, cols, periods) -> StartingPoint:
     obs = next(p for p in periods if p.basis == "observed")
     adj = next(p for p in periods if p.basis == "adjusted")
@@ -687,7 +774,8 @@ def _starting_infrannuale(report, lk, cols, periods) -> StartingPoint:
                        f"{n_rett} rettifiche. Il progressivo di {m} mesi non è direttamente comparabile "
                        "con un esercizio completo."),
             TableBlock(f"Dal progressivo rettificato al forecast {y}",
-                       (f"{m}M rettificato", "Stimato residuo", f"Forecast {y}"), ponte),
+                       (f"{m}M rettificato", "Stimato residuo", f"Forecast {y}"), ponte,
+                       _nota_residuo(g, adj, clo, m)),
         ),
         indicator_headers=(f"{m}M {y} rettificato", f"Forecast {y}"),
         indicators=_annualizza(

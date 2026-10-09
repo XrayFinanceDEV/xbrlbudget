@@ -395,7 +395,7 @@ ipotesi) il fabbisogno diventa uno scoperto generato dal piano, dichiarato in `s
 > **Avvisi e firma (#61/#62).** Ogni anno di piano porta `details['avvisi']`, lista di frasi italiane
 > sempre presente, persistita in `ForecastYear.engine_meta['avvisi']` (con `engine_version: "3"` e
 > `imposte_versate`, i versamenti d'imposta che il rendiconto mostra come «imposte pagate»). Un avviso non
-> cambia alcun numero. `ce02` = Δ(`sp05b + sp05d`) è derivato, `ce03` no (resta base o override), e
+> cambia alcun numero. `ce02` = Δ(`sp05b + sp05d`) è derivato, `ce03` no (zero negli anni di piano salvo override, R04), e
 > l'override di `ce02` è rifiutato se porta i prodotti finiti sotto zero.
 
 > **Per Immobiliare (5) ed Edilizia (6) la soglia sul DIO dedotto non c'è** (lotto 3A, Task 10):
@@ -806,9 +806,9 @@ Dichiarato dal motore, mai ricalcolato dal client: sette chiavi, sempre presenti
 
 | Chiave | Valore |
 |---|---|
-| `costi_variabili` | la sola parte variabile di materie prime e servizi (`ce05_variable + ce06_variable`) |
+| `costi_variabili` | la sola parte variabile del consumo di materie (`ce05 + ce10`) e dei servizi (`ce05_variable + ce06_variable`, R07) |
 | `costi_fissi` | la parte fissa di materie e servizi più godimento beni, personale e oneri diversi (`ce05_fixed + ce06_fixed + ce07 + ce08 + ce12`) |
-| `costi_fissi_operativi` | `costi_fissi` + `ce10` + `ce11` + `ce11b` − `ce04` (comprensivo dell'eventuale plusvalenza da dismissione cespite) − `ce02` − `ce03` − `ce03a`: per costruzione `(ce01 − fatturato_pareggio) × margine_contribuzione` = MOL del CE |
+| `costi_fissi_operativi` | `costi_fissi` + `ce11` + `ce11b` − `ce04` (comprensivo dell'eventuale plusvalenza da dismissione cespite) − `ce02` − `ce03` − `ce03a`: per costruzione `(ce01 − fatturato_pareggio) × margine_contribuzione` = MOL del CE |
 | `margine_contribuzione_pct` | `(ce01 − costi_variabili) / ce01 × 100` |
 | `fatturato_pareggio` | `costi_fissi_operativi / margine_contribuzione` (frazione, non percentuale) |
 | `margine_sicurezza` | `ce01 − fatturato_pareggio` |

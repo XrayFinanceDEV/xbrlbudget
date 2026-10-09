@@ -508,7 +508,9 @@ def assemble_final_report(db: Session, company_id: int, scenario_id: int, *, sch
             period_month = source.period_months if source is not None and source.period_months else 12
             period_end = date(scenario.base_year, period_month, monthrange(scenario.base_year, period_month)[1])
             closing = build_infrannual_closing(period_end=period_end, rows=closing_rows,
-                                               alerts=source.extra_accounting_alerts if source is not None else None)
+                                               alerts=source.extra_accounting_alerts if source is not None else None,
+                                               tax_advances_paid=getattr(source_assumption, "tax_advances_paid", None),
+                                               tax_advances_already_paid=getattr(source_assumption, "tax_advances_already_paid", None))
             practice = InfrannualPractice(**practice_kwargs)
         elif workflow == "startup":
             closing, practice = None, StartupPractice(**practice_kwargs)

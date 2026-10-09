@@ -547,6 +547,9 @@ def _pregresso(rows: Sequence[Any], field: str) -> tuple[Optional[PregressoContr
         )
     return PregressoContract(
         crediti_commerciali=plan(parsed.crediti_commerciali),
+        crediti_tributari_breve=plan(parsed.crediti_tributari_breve),
+        crediti_tributari_lungo=plan(parsed.crediti_tributari_lungo),
+        acconti_tributari_storici=parsed.acconti_tributari_storici or None,
         debiti_fornitori=plan(parsed.debiti_fornitori),
         debiti_tributari=tributari,
         debiti_previdenziali=plan(parsed.debiti_previdenziali),

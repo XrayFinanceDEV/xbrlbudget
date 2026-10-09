@@ -134,7 +134,9 @@ def test_M1_con_piano_crediti_commerciali_il_foglio_pareggia_e_il_trade_e_dichia
 
 
 def test_M5_acconti_sotto_entrambi_i_minimi_avvisano():
-    rows = righe(tax_advances_paid=1)  # 1 € esplicito: sotto qualunque imposta positiva
+    # 1 € esplicito: sotto qualunque imposta positiva. R04: senza lavori interni dalla base l'utile di piano
+    # scende, quindi l'override ce03 riporta l'imposta positiva su cui il test misura l'avviso.
+    rows = righe(tax_advances_paid=1, ce03_override=93000)
     e = generato(genera(rows))
     av = e.det[2028]["imposte"]["avviso_acconti"]
     assert av is not None and av["acconti"] == D("1")

@@ -17,7 +17,7 @@ from calculations.projection_common import (
     tfr_accrual_quota, deferred_tax_position, ammortamento_categoria,
     new_financing_schedule, rata_anno_dopo, PREGRESSO_KEYS, PREGRESSO_LABELS,
     pregresso_opening_masses, runoff_schedule, validate_runoff,
-    tax_settlement_saldo_acconto, soglia_giorni_magazzino, rimanenze_materie, rimanenze_gruppo_materie,
+    tax_settlement_saldo_acconto, soglia_giorni_magazzino, rimanenze_materie, rimanenze_gruppo_materie, rimanenze_gruppo_da_consumo,
     e_contratto_pregresso, contratti_da_riga_finanziamento,
     quota_breve_prestiti_nuovi, separa_prestiti_nuovi,
     eur_it, scarto_it, punto_di_pareggio,
@@ -26,7 +26,7 @@ from calculations.ce_result import calculate_ce_result
 
 # Si incrementa a ogni cambiamento dei numeri che il motore produce a parità di ipotesi: un
 # ForecastYear con una versione più vecchia è un previsionale da rigenerare (lotto 2, A01-bis).
-ENGINE_VERSION = "3"
+ENGINE_VERSION = "4"
 
 
 def _erogazioni_anno(details: Dict[str, Any]) -> str:
@@ -2736,14 +2736,18 @@ class ForecastEngine:
             # I due addendi stanno alla scala del centesimo della riga che
             # riepilogano, e ci ricompongono esatti. Con un override restano
             # `None`: la scomposizione non esiste, e dichiararla direbbe il falso.
+            # ce05_fixed/variable riepilogano il CONSUMO di materie (B6 + B11, R07), non i soli acquisti.
             for line, fixed_key, variable_key in (
                 ('ce05_materie_prime', 'ce05_fixed', 'ce05_variable'),
                 ('ce06_servizi', 'ce06_fixed', 'ce06_variable'),
             ):
                 if details.get(fixed_key) is None:
                     continue
+                totale_riga = forecast_inc[line]
+                if line == 'ce05_materie_prime':
+                    totale_riga = totale_riga + forecast_inc['ce10_var_rimanenze_mat_prime']
                 details[fixed_key], details[variable_key] = _split_to_cents(
-                    details[fixed_key], forecast_inc[line]
+                    details[fixed_key], totale_riga
                 )
 
             # ── CASSA E SCOPERTO: DICHIARATI SEMPRE, ANCHE A ZERO ──
@@ -3124,14 +3128,19 @@ class ForecastEngine:
 
         # Calculate costs - split between variable and fixed components based on user-defined percentages
 
-        # Materials
+        # Materials — R07 (#63, decisione del proprietario 2026-10-09, ENGINE_VERSION 4): la crescita
+        # (variabile + fissa) si applica al CONSUMO di materie (ce05 + ce10), non agli acquisti. Gli acquisti
+        # (ce05) e le rimanenze finali si risolvono piu' sotto nel blocco delle rimanenze: ce05 = consumo + RF - RI.
+        # `ce05_fixed`/`ce05_variable` in `details` sono dunque le quote del CONSUMO (B6 + B11).
+        consumo_target = None
         if assumption.ce05_override is not None:
             ce05 = assumption.ce05_override
             # Un override sostituisce la riga intera: la scomposizione fisso/variabile
             # non esiste piu', e dichiararla a zero direbbe il falso.
             ce05_fixed_part = ce05_variable_part = None
         else:
-            base_materials = _pinc('ce05_materie_prime')
+            ce05 = None  # deriva dal consumo e dalle rimanenze, piu' sotto
+            base_materials = max(Decimal('0'), _pinc('ce05_materie_prime') + _pinc('ce10_var_rimanenze_mat_prime'))
             variable_materials, fixed_materials = _cost_component_bases(
                 base_materials, assumption.fixed_materials_percentage,
                 (previous_assumption.fixed_materials_percentage if previous_assumption else None),
@@ -3139,7 +3148,7 @@ class ForecastEngine:
             )
             ce05_variable_part = variable_materials * (Decimal('1') + assumption.variable_materials_growth_pct / Decimal('100'))
             ce05_fixed_part = fixed_materials * (Decimal('1') + assumption.fixed_materials_growth_pct / Decimal('100'))
-            ce05 = ce05_variable_part + ce05_fixed_part
+            consumo_target = ce05_variable_part + ce05_fixed_part
 
         # Services
         if assumption.ce06_override is not None:
@@ -3452,6 +3461,7 @@ class ForecastEngine:
             giorni_materie, degenere_materie = _dio_derivato(storico_g1, base_g1, soglia_dio_materie)
 
         ce10_override = assumption.ce10_override
+        acquisti_azzerati = False
         if ce10_override is not None:
             if ce10_override > apertura_materie:
                 # Un override oltre l'apertura svuoterebbe le rimanenze sotto zero: il CE
@@ -3470,6 +3480,13 @@ class ForecastEngine:
             chiusura_materie = max(Decimal('0'), apertura_materie - ce10_override).quantize(
                 Decimal('0.01'), rounding=ROUND_HALF_UP
             )
+            # R07: con l'override di ce10 il consumo resta quello dell'ipotesi (o ce05 + ce10 se ce05 e'
+            # sotto override) e gli acquisti ne seguono: ce05 = consumo - ce10.
+            if ce05 is None:
+                ce05 = consumo_target - ce10_override
+                if ce05 < 0:
+                    acquisti_azzerati = True
+                    ce05 = Decimal('0')
             # L'override vince: i giorni dedotti sopra (e un'eventuale degenerazione) non sono
             # mai stati USATI per determinare il risultato, quindi non si dichiarano.
             degenere_materie = False
@@ -3477,6 +3494,8 @@ class ForecastEngine:
             # darebbero (o l'apertura, senza giorni affidabili).
             if giorni_materie is None:
                 chiusura_semilav = ap_b
+            elif consumo_target is not None:
+                chiusura_semilav = _qc(rimanenze_gruppo_da_consumo(ap_a, ap_b, consumo_target, giorni_materie)[1])
             else:
                 chiusura_semilav = _qc(rimanenze_gruppo_materie(ap_a, ap_b, ce05, giorni_materie)[1])
         elif degenere_materie:
@@ -3485,13 +3504,29 @@ class ForecastEngine:
             chiusura_materie = apertura_materie
             chiusura_semilav = ap_b
             ce10 = Decimal('0')
-        else:
+            if ce05 is None:
+                ce05 = consumo_target
+        elif consumo_target is None:
+            # ce05 sotto override: gli acquisti sono fissati, il consumo ne segue (forma chiusa di prima).
             chiusura_raw, semilav_raw = rimanenze_gruppo_materie(ap_a, ap_b, ce05, giorni_materie)
-            # La chiusura si quantizza al centesimo PRIMA di derivarne ce10: cosi' ce10
-            # persistito e' esattamente la Δ di sp05a persistito al centesimo (la funzione
-            # pura resta a precisione piena per i suoi test).
             chiusura_materie = _qc(chiusura_raw)
             chiusura_semilav = _qc(semilav_raw)
+            ce10 = apertura_materie - chiusura_materie
+        else:
+            # R07: il consumo e' dato (crescita sul consumo), le rimanenze finali ne vengono dai giorni,
+            # gli acquisti sono il saldo: ce05 = consumo + RF - RI, mai sotto zero.
+            chiusura_raw, semilav_raw = rimanenze_gruppo_da_consumo(ap_a, ap_b, consumo_target, giorni_materie)
+            # La chiusura si quantizza al centesimo PRIMA di derivarne ce10: cosi' ce10
+            # persistito e' esattamente la Δ di sp05a persistito al centesimo.
+            chiusura_materie = _qc(chiusura_raw)
+            chiusura_semilav = _qc(semilav_raw)
+            ce05 = consumo_target + chiusura_materie - apertura_materie
+            if ce05 < 0:
+                # Il magazzino non puo' scendere piu' del consumo senza acquisti negativi: gli acquisti
+                # restano a zero e la chiusura e' quanto resta dell'apertura dopo il consumo.
+                acquisti_azzerati = True
+                chiusura_materie = _qc(max(Decimal('0'), apertura_materie - consumo_target))
+                ce05 = Decimal('0')
             ce10 = apertura_materie - chiusura_materie
 
         consumo_materie = ce05 + apertura_materie - chiusura_materie
@@ -3566,11 +3601,11 @@ class ForecastEngine:
                 chiusura_semilav = _qc(nuova_sl)
         else:
             ce02 = ce02_calc
-        # ce03 NON deriva da Δsp05c: negli import la voce A.4 «incrementi di immobilizzazioni per lavori
-        # interni» finisce spesso proprio in `ce03_lavori_interni` (ce03a resta vuota), quindi il campo e'
-        # ambiguo e derivarlo dallo SP azzererebbe un ricavo vero. Resta quello della base, o l'override.
+        # ce03 NON deriva da Δsp05c (il campo e' ambiguo negli import: la voce A.4 finisce spesso qui). R04 (#63,
+        # decisione del proprietario 2026-10-09): ripeterlo dalla base creava ricavo senza contropartita nello SP
+        # (cassa fittizia), quindi vale ZERO in ogni anno di piano salvo `ce03_override`, come ce18/ce19 (E05).
         # Il movimento di sp05c non si specchia nel CE (solo cassa), e si dichiara: contropartita 'nessuna'.
-        ce03 = assumption.ce03_override if assumption.ce03_override is not None else base_inc.ce03_lavori_interni
+        ce03 = assumption.ce03_override if assumption.ce03_override is not None else Decimal('0')
 
         # ── Avviso: giorni ESPLICITI che spostano un gruppo oltre il 50% dell'apertura o oltre il suo flusso ──
         avvisi_rimanenze: List[Dict[str, Any]] = []
@@ -3582,18 +3617,31 @@ class ForecastEngine:
             if (apertura > 0 and abs(variazione) > Decimal('0.5') * apertura) or abs(variazione) > flusso:
                 avvisi_rimanenze.append({'gruppo': gruppo, 'apertura': apertura, 'chiusura': chiusura,
                                          'variazione': variazione, 'giorni': giorni})
-                if costo:
-                    natura = 'di costo' if variazione < 0 else 'di minor costo'
+                if costo and consumo_target is not None:
+                    # R07: col consumo dato dall'ipotesi la variazione del magazzino passa dagli acquisti, non dal
+                    # margine: dire «di costo a conto economico» sarebbe il modello di prima.
+                    effetto = (f"{_importo_it(abs(variazione))} € di acquisti "
+                               f"{'in meno' if variazione < 0 else 'in più'}, a parità di consumo")
                 else:
-                    natura = 'di ricavo' if variazione > 0 else 'di minor ricavo'
+                    if costo:
+                        natura = 'di costo' if variazione < 0 else 'di minor costo'
+                    else:
+                        natura = 'di ricavo' if variazione > 0 else 'di minor ricavo'
+                    effetto = f"{_importo_it(abs(variazione))} € {natura} a conto economico"
                 details['avvisi'].append(
                     f"Nel {assumption.forecast_year} i giorni inseriti per {etichetta} "
                     f"({_importo_it(giorni)} gg {base_flusso}) portano il magazzino da "
-                    f"{_importo_it(apertura)} a {_importo_it(chiusura)}: "
-                    f"{_importo_it(abs(variazione))} € {natura} a conto economico."
+                    f"{_importo_it(apertura)} a {_importo_it(chiusura)}: {effetto}."
                 )
 
         if details is not None:
+            if acquisti_azzerati:
+                details['avvisi'].append(
+                    f"Nel {assumption.forecast_year} il consumo di materie ({_importo_it(consumo_target)} €) "
+                    f"e' coperto dalle rimanenze in apertura ({_importo_it(apertura_materie)} €): gli acquisti "
+                    "di materie sono azzerati e le rimanenze finali di materie scendono di conseguenza, "
+                    "invece di seguire i giorni inseriti."
+                )
             if dio_days_esplicito is not None and ce10_override is None:
                 _avvisa('materie_semilavorati', 'materie prime e semilavorati', 'sul consumo',
                         ap_a + ap_b, chiusura_materie + chiusura_semilav, giorni_materie,
@@ -3607,6 +3655,9 @@ class ForecastEngine:
                 'chiusura': chiusura_materie,
                 'giorni': giorni_dichiarati,
                 'consumo': consumo_materie,
+                'consumo_ipotesi': consumo_target,
+                'acquisti': ce05,
+                'acquisti_azzerati': acquisti_azzerati,
                 'derivati': derivati_materie,
                 'degenere': degenere_materie,
                 'override': ce10_override is not None,
@@ -3656,7 +3707,9 @@ class ForecastEngine:
                 ce01=ce01, ce02=ce02, ce03=ce03, ce03a=ce03a, ce04=ce04,
                 ce05_fixed=details.get('ce05_fixed'), ce05_variable=details.get('ce05_variable'),
                 ce06_fixed=details.get('ce06_fixed'), ce06_variable=details.get('ce06_variable'),
-                ce07=ce07, ce08=ce08, ce10=ce10, ce11=ce11, ce11b=ce11b, ce12=ce12,
+                # R07: ce05_fixed/variable sono le quote del consumo (B6 + B11), quindi ce10 e' gia' dentro
+                # i costi variabili/fissi e non si somma una seconda volta ai fissi operativi.
+                ce07=ce07, ce08=ce08, ce10=Decimal('0'), ce11=ce11, ce11b=ce11b, ce12=ce12,
             )
             details['pareggio'] = {k: (None if v is None else _q2(v)) for k, v in pareggio.items()}
         ce13 = assumption.ce13_override if assumption.ce13_override is not None else base_inc.ce13_proventi_partecipazioni

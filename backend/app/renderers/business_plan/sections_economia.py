@@ -163,7 +163,12 @@ def _financing_note(data: BusinessPlanData) -> str:
 def flussi(data: BusinessPlanData, pages: dict) -> list:
     from .narrative import subtitle_flussi
     s = layout.section_head("SEZIONE 5", "Flussi di cassa", subtitle_flussi(data))
-    op, inv, rimb = _sum_plan(data, "cf_operativo"), _sum_plan(data, "cf_investimenti"), _sum_plan(data, "cf_rimborsi")
+    op, rimb = _sum_plan(data, "cf_operativo"), _sum_plan(data, "cf_rimborsi")
+    # R14 (#63): investimenti lordi e disinvestimenti separati, mai il flusso B netto sotto «Investimenti»
+    inv, disinv = _sum_plan(data, "cf_inv_lordi"), _sum_plan(data, "cf_disinvestimenti")
+    if inv is None:  # dati senza la separazione (JSON di banco vecchi): il flusso B netto, come prima
+        inv, disinv = _sum_plan(data, "cf_investimenti"), None
+    con_disinv = any(data.v("cf_disinvestimenti")[i] not in (None, 0) for i in data.plan_idx)
     rimb_years = [str(data.columns[i].year) for i in data.plan_idx if data.v("cf_rimborsi")[i] not in (None, 0)]
     cassa_last = data.v("cassa_fine")[-1]
     first_plan = data.plan_idx[0]
@@ -171,7 +176,8 @@ def flussi(data: BusinessPlanData, pages: dict) -> list:
     delta = None if cassa_last is None or start is None else cassa_last - start
     s += [layout.tiles([
         (fmt.compact_eur(op), "Flussi operativi", f"cumulati {_plan_span(data)}"),
-        (fmt.compact_eur(inv), "Investimenti", f"cumulati {_plan_span(data)}"),
+        (fmt.compact_eur(inv), "Investimenti", f"cumulati {_plan_span(data)}"
+         + (f"; disinvestimenti {fmt.compact_eur(disinv)}" if disinv not in (None, 0) else "")),
         (fmt.compact_eur(None if rimb is None else -rimb), "Rimborsi di debito", _years_phrase(rimb_years)),
         (fmt.compact_eur(cassa_last), f"Cassa a fine {data.last.year}",
          f"variazione {_plan_span(data)}: {fmt.compact_eur(delta)}")]), Spacer(0, 16)]
@@ -186,6 +192,8 @@ def flussi(data: BusinessPlanData, pages: dict) -> list:
         row(data, "Interessi, imposte pagate e utilizzo fondi", "cf_altre"),
         row(data, "Flusso di cassa operativo (A)", "cf_operativo", "hl"),
         row(data, "Flusso dell'attività di investimento (B)", "cf_investimenti"),
+        *([row(data, "   di cui investimenti", "cf_inv_lordi"), row(data, "   di cui disinvestimenti", "cf_disinvestimenti")]
+          if con_disinv else []),
         row(data, "Flusso dell'attività di finanziamento (C)", "cf_finanziamento"),
         row(data, "Variazione delle disponibilità liquide (A+B+C)", "cf_variazione", "bold"),
         row(data, "Disponibilità liquide a inizio esercizio", "cassa_inizio"),

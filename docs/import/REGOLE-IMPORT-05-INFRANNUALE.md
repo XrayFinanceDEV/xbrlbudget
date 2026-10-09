@@ -140,6 +140,16 @@ gonfiava la cassa proiettata di un importo che nessuno aveva deciso — 184.140,
 18.131 € di utile). È il lato prudente dei due, e la diagnostica `posizione_tributaria_apertura`
 (`_declare_posizione_tributaria`) lo dichiara a schermo, voce per voce, quando c'è qualcosa da dichiarare.
 
+**Acconti già versati nell'anno** (#63 R09, `BudgetAssumptions.tax_advances_already_paid`, campo «Acconti già
+versati nell'anno €» della Proiezione): una parte del credito d'apertura sono spesso acconti dell'anno già pagati nel
+periodo; senza dirlo, restavano a credito **e** gli acconti uscivano di nuovo di cassa nel periodo residuo (doppio
+conteggio di timing). Con G > 0 (`0 ≤ G ≤ sp06e` del parziale, altrimenti errore italiano) gli acconti effettivi sono
+`max(A, G)`, con A = `tax_advances_paid` se > 0 altrimenti 100% dell'imposta di riferimento; al 31/12 resta
+`imposta − A_eff`, il credito d'apertura che resta in bilancio è `sp06e − G` e nel periodo residuo escono di cassa solo
+`A_eff − G`. Con G = 0 nessun numero si muove. Il `sp06e` che il promote copia è quello già ridotto; la diagnostica
+dichiara `acconti_gia_versati`, `credito_residuo_apertura`, `acconti_effettivi`. Vale solo con l'imposta automatica,
+non in via manuale (`sp06e_growth_pct`/`sp16e_growth_pct`).
+
 ```
 sp06e = credito di chiusura + credito di apertura     ← il credito aperto resta
 sp16e = debito di chiusura                            ← il debito aperto è uscito

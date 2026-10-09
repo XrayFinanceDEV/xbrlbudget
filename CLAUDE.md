@@ -906,16 +906,28 @@ with projected revenue and costs, CE overrides included.
 round.** `ce10_var_rimanenze_mat_prime` of every plan year = −(closing − opening) of raw materials
 only (`sp05a_materie_prime`, OIC B11: a stock increase *reduces* the cost), and the closing stock
 comes from a DIO measured on **materials consumption** (`ce05 + ce10`), not on revenue — the other
-stock lines keep the revenue-based DIO. An explicit `dio_days` therefore now means
+stock lines keep the revenue-based DIO. (From R07, below, the consumption itself is what grows; purchases are the balance.) An explicit `dio_days` therefore now means
 days of materials on consumption, never on sales, and materials are no longer a valid target of
 `_CAMPI_NEUTRI_RESIDUO['sp05_rimanenze']` (a CE↔SP boundary, like the financial rows).
+**R07 (#63, owner's decision 2026-10-09, `ENGINE_VERSION` "4"): materials grow on CONSUMPTION, not on purchases — this reverses the
+"stock drives the P&L" half of B01 above.** Consumption = `ce05 + ce10`; each year it grows from the previous one (variable
+and fixed share with their own percentages), closing stock = consumption × days / 360, and purchases are the balancing
+figure: `ce05 = consumo + RF − RI` (never below zero — then `ce05 = 0`, closing stock = opening − consumption, declared in
+`details['avvisi']` and `details['rimanenze_materie']['acquisti_azzerati']`), `ce10 = RI − RF`. Consumption no longer depends
+on the days. `details['ce05_fixed']`/`['ce05_variable']` are the shares of the consumption; DPO runs on the resulting
+`ce05`; the break-even takes `ce10` inside the shares, not again among the fixed costs (`punto_di_pareggio` is called with
+`ce10=0`, also in the dossier's base column). `ce05_override` still wins (purchases fixed, closed form
+`rimanenze_gruppo_materie`); `ce10_override` keeps its rule and the consumption follows the assumption.
+Semi-finished goods (`sp05b`) stay in the days group: `sp05a`/`sp05b` split the group stock (consumption × days / 360)
+with the opening mix (`rimanenze_gruppo_da_consumo`), only `sp05a` goes through `ce10`/purchases, `sp05b` through `ce02`.
 **#62 note S04 (2026-10-05): two groups, and the CE takes its stock lines from the SP.** `dio_days` =
 raw materials + semi-finished (`sp05a + sp05b`) on consumption; the new `dio_pf_days` (column on
 `BudgetAssumptions`, `migrate_db.py`) = finished goods and merchandise (`sp05d`) on revenue; `sp05c`/`sp05e`
 get days derived from revenue, no input. `ce02_variazioni_rimanenze` = Δ(`sp05b + sp05d`) is derived
 (`ce02_override` wins and `sp05d` follows; below zero it raises). **`ce03_lavori_interni` is NOT derived from
-`sp05c`**: the importers write the A.4 «incrementi per lavori interni» line there, so deriving it would zero a
-real revenue — it stays the base value or the override, and the `sp05c` movement is cash only, declared
+`sp05c`** (the importers write the A.4 line there, so the field is ambiguous): R04 (#63, owner's decision 2026-10-09)
+makes it **zero in every plan year unless `ce03_override`**, like `ce18`/`ce19` (E05) — repeating the base gave revenue with
+no balance-sheet counterpart, i.e. phantom cash (+10.000/year on AMBIENTA). The `sp05c` movement is cash only, declared
 `details['rimanenze']['lavori_in_corso']['contropartita'] = 'nessuna'`. `_CAMPI_NEUTRI_RESIDUO['sp05_rimanenze']`
 is now `sp05e` alone. Explicit days that move a group by more than 50% of its opening stock (tested only when the opening is
 positive), or more than its flow, are only flagged (`details['avvisi']`, `details['avviso_rimanenze']`): the user keeps the number. A
@@ -999,8 +1011,12 @@ Projects a partial year (say 9 months) to a full 12 months, against a reference 
   year end, so a budget born from the promote no longer inherits it; the **credit stays on the balance sheet** and
   adds to the one the year itself generates (`sp06e` = closing credit + opening credit, owner's decision
   2026-09-16 revising decision 4 of lotto 3A: collecting it within the year inflated projected cash by an amount
-  nobody had decided — 184.140,58 € on AMBIENTA 2026/6M). The `posizione_tributaria_apertura` diagnostic declares
-  both sides (`projection_common.posizione_tributaria_fine_anno`, `_declare_posizione_tributaria`).
+  nobody had decided — 184.140,58 € on AMBIENTA 2026/6M). Part of that credit is often the year's advances already
+  paid in the period: the optional `BudgetAssumptions.tax_advances_already_paid` (G, `0 <= G <= sp06e` of the partial,
+  else an Italian `ValueError`; #63 R09) makes the effective advances `max(A, G)` and leaves `sp06e − G` of the
+  opening credit on the balance sheet, so only `A_eff − G` leaves cash in the rest of the year; G = 0 moves nothing.
+  The `posizione_tributaria_apertura` diagnostic declares
+  both sides, plus G, the residual credit and the effective advances (`projection_common.posizione_tributaria_fine_anno`, `_declare_posizione_tributaria`).
   Automatic tax balances stay outside working-capital turnover: `sp06e`/`sp16e` (and governed
   deferred-tax balances) are removed from reference and partial stocks before DSO/DPO are applied,
   then receive the kernel closing balance directly. No arbitrary `sp06g`/`sp16g` capacity or tax

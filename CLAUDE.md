@@ -925,8 +925,9 @@ raw materials + semi-finished (`sp05a + sp05b`) on consumption; the new `dio_pf_
 `BudgetAssumptions`, `migrate_db.py`) = finished goods and merchandise (`sp05d`) on revenue; `sp05c`/`sp05e`
 get days derived from revenue, no input. `ce02_variazioni_rimanenze` = Δ(`sp05b + sp05d`) is derived
 (`ce02_override` wins and `sp05d` follows; below zero it raises). **`ce03_lavori_interni` is NOT derived from
-`sp05c`**: the importers write the A.4 «incrementi per lavori interni» line there, so deriving it would zero a
-real revenue — it stays the base value or the override, and the `sp05c` movement is cash only, declared
+`sp05c`** (the importers write the A.4 line there, so the field is ambiguous): R04 (#63, owner's decision 2026-10-09)
+makes it **zero in every plan year unless `ce03_override`**, like `ce18`/`ce19` (E05) — repeating the base gave revenue with
+no balance-sheet counterpart, i.e. phantom cash (+10.000/year on AMBIENTA). The `sp05c` movement is cash only, declared
 `details['rimanenze']['lavori_in_corso']['contropartita'] = 'nessuna'`. `_CAMPI_NEUTRI_RESIDUO['sp05_rimanenze']`
 is now `sp05e` alone. Explicit days that move a group by more than 50% of its opening stock (tested only when the opening is
 positive), or more than its flow, are only flagged (`details['avvisi']`, `details['avviso_rimanenze']`): the user keeps the number. A

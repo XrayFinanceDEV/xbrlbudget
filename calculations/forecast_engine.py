@@ -3601,11 +3601,11 @@ class ForecastEngine:
                 chiusura_semilav = _qc(nuova_sl)
         else:
             ce02 = ce02_calc
-        # ce03 NON deriva da Δsp05c: negli import la voce A.4 «incrementi di immobilizzazioni per lavori
-        # interni» finisce spesso proprio in `ce03_lavori_interni` (ce03a resta vuota), quindi il campo e'
-        # ambiguo e derivarlo dallo SP azzererebbe un ricavo vero. Resta quello della base, o l'override.
+        # ce03 NON deriva da Δsp05c (il campo e' ambiguo negli import: la voce A.4 finisce spesso qui). R04 (#63,
+        # decisione del proprietario 2026-10-09): ripeterlo dalla base creava ricavo senza contropartita nello SP
+        # (cassa fittizia), quindi vale ZERO in ogni anno di piano salvo `ce03_override`, come ce18/ce19 (E05).
         # Il movimento di sp05c non si specchia nel CE (solo cassa), e si dichiara: contropartita 'nessuna'.
-        ce03 = assumption.ce03_override if assumption.ce03_override is not None else base_inc.ce03_lavori_interni
+        ce03 = assumption.ce03_override if assumption.ce03_override is not None else Decimal('0')
 
         # ── Avviso: giorni ESPLICITI che spostano un gruppo oltre il 50% dell'apertura o oltre il suo flusso ──
         avvisi_rimanenze: List[Dict[str, Any]] = []

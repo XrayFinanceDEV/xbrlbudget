@@ -395,7 +395,7 @@ ipotesi) il fabbisogno diventa uno scoperto generato dal piano, dichiarato in `s
 > **Avvisi e firma (#61/#62).** Ogni anno di piano porta `details['avvisi']`, lista di frasi italiane
 > sempre presente, persistita in `ForecastYear.engine_meta['avvisi']` (con `engine_version: "3"` e
 > `imposte_versate`, i versamenti d'imposta che il rendiconto mostra come «imposte pagate»). Un avviso non
-> cambia alcun numero. `ce02` = Δ(`sp05b + sp05d`) è derivato, `ce03` no (resta base o override), e
+> cambia alcun numero. `ce02` = Δ(`sp05b + sp05d`) è derivato, `ce03` no (zero negli anni di piano salvo override, R04), e
 > l'override di `ce02` è rifiutato se porta i prodotti finiti sotto zero.
 
 > **Per Immobiliare (5) ed Edilizia (6) la soglia sul DIO dedotto non c'è** (lotto 3A, Task 10):

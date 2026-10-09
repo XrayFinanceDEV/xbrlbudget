@@ -226,7 +226,7 @@ e tutto il blocco è `null`, sull'anno interessato.
   **Il magazzino ha due gruppi di giorni**: materie e semilavorati hanno come denominatore il loro consumo
   (acquisti + variazione di rimanenze, che cresce con le ipotesi: vedi «Le materie crescono sul consumo»), i prodotti finiti e merci i ricavi; lavori in corso e acconti
   hanno giorni dedotti dai ricavi. La variazione dei prodotti finiti e dei semilavorati passa dal CE
-  (`ce02` = Δ`sp05b + sp05d`); `ce03` non si deriva dallo SP (negli import contiene i lavori interni)
+  (`ce02` = Δ`sp05b + sp05d`); `ce03` non si deriva dallo SP (negli import contiene i lavori interni) e vale zero negli anni di piano salvo override (R04, #63: ripeterlo dalla base creava cassa senza contropartita)
   e il movimento di `sp05c` è solo di cassa. Giorni scritti da te che spostano un gruppo di oltre il
   50% della giacenza d'apertura (solo se l'apertura è positiva), o oltre il suo flusso, ricevono un avviso: il numero resta tuo. Un
   `ce10_override` (la variazione di rimanenze in CE Prev.) oltre la giacenza di materie in apertura

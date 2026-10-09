@@ -26,8 +26,11 @@ const eur = (over: Partial<FieldRule> = {}): FieldRule =>
 const years = (over: Partial<FieldRule> = {}): FieldRule =>
   ({ kind: "years", nullable: true, min: 0, max: 30, ...over });
 
+// Nessun massimo (decisione del proprietario, 2026-10-09): un magazzino o un incasso oltre l'anno
+// e' un dato, e il motore applica i giorni scritti cosi' come sono. La soglia dei 365 giorni vale
+// solo per i giorni che il motore DEDUCE dall'anno base (`MAX_DERIVED_TURNOVER_DAYS`).
 const days = (over: Partial<FieldRule> = {}): FieldRule =>
-  ({ kind: "days", nullable: true, min: 0, max: 365, ...over });
+  ({ kind: "days", nullable: true, min: 0, ...over });
 
 const bool: FieldRule = { kind: "bool" };
 

@@ -297,8 +297,8 @@ CE, costi, SP, circolante, debito, crisi d'impresa, segnali, allegati A/B), gene
 
 **Che cosa c'è a schermo**
 
-- L'anteprima a schermo, i **sei commenti AI** (generati e poi editabili), e le note chiudibili:
-  una nota chiusa sparisce dal PDF ma il testo resta a schermo, e il commento si può riaprire.
+- L'anteprima a schermo di tabelle, indicatori e grafici. I commenti ai numeri non sono qui:
+  stanno nel report PDF e Word.
 - In alto a destra, **«Prosegui al Budget»**: crea lo scenario con l'anno di questa pratica e
   apre il wizard (§ 8); su un periodo parziale promuove prima la proiezione a bilancio annuale.
 - **«Scarica PDF»** — il pulsante che conta: produce lo stesso documento del server, non la
@@ -307,8 +307,6 @@ CE, costi, SP, circolante, debito, crisi d'impresa, segnali, allegati A/B), gene
 **Attenzione a**
 
 - La stampa del browser è un'anteprima: per consegnare il documento usa «Scarica PDF».
-- I commenti AI sono **sei, fissi**: corrispondono agli schermi del percorso (uno complessivo,
-  CE e SP del Confronto, CE e SP della Proiezione, indicatori).
 
 **Approfondisci** → [REPORT-INFRANNUALE-PDF.md](budget/REPORT-INFRANNUALE-PDF.md)
 
@@ -783,8 +781,8 @@ driver. Le griglie CE Prev./SP Prev. restano disponibili, con gli stessi overrid
 5. **Proiezione**: se serve, aggiusta le righe CE; **«Genera proiezione e indicatori di
    crisi»** (un fabbisogno scoperto qui esce in diagnosi di errore: lo scenario non è
    promuovibile finché non lo copri).
-6. **Indicatori**, poi **Stampa**: i sei commenti AI (editabili) e **«Scarica PDF»** — *quello*
-   è il documento.
+6. **Indicatori**, poi **Stampa**: **«Scarica PDF»** — *quello* è il documento, con i commenti
+   ai numeri.
 7. Se il semestre deve diventare base di un budget: **«Prosegui al Budget»** — promuove la
    proiezione copiandola nel bilancio annuale di quell'anno, **sostituendolo** se era già stato
    importato (è l'unico passo distruttivo del percorso: verifica prima la quadratura), e apre il

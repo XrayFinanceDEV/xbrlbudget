@@ -426,7 +426,11 @@ proiezione per non mostrare un rilievo riferito a numeri vecchi.
 > `partial_value`, `reference_value` e `prior_value`
 > (`lib/pratica-statement-rows.ts:12-28`, e `docs/frontend/LAYOUT-SP-CE.md` §4).
 
-## 12. La tab Stampa: i sei commenti AI
+## 12. I sei commenti AI dell'infrannuale (solo backend)
+
+> **Dal 2026-10-09 la tab Stampa non li mostra più**, né il pulsante «Genera commenti AI»
+> (decisione del proprietario: i commenti stanno nel report PDF e Word). Endpoint, schema e
+> persistenza restano nel codice senza chiamante; quanto segue descrive come erano usati.
 
 Sopra ogni tabella della Stampa c'è un riquadro di commento in italiano, generato da Claude
 Haiku e poi **modificabile a mano**. I commenti sono **sei**: `overall` (prima della prima
@@ -453,9 +457,8 @@ Esempio della risposta GET (le date sono UTC con `Z`, oppure `null`):
 }
 ```
 
-**Il contesto lo costruisce il client.** `buildAICtx()`
-(`components/pratica/StampaContent.tsx:211-264`) mette insieme scenario, `income_map`,
-`balance_map`, gli indicatori per colonna e i rating già calcolati, e lo manda in POST. Il
+**Il contesto lo costruiva il client.** `buildAICtx()`, tolto con la UI, metteva insieme scenario, `income_map`,
+`balance_map`, gli indicatori per colonna e i rating già calcolati, e lo mandava in POST. Il
 calcolo resta sul client; al server resta solo la chiamata al modello, che è l'unica cosa che
 non può stare lì. Il modello è quello condiviso con l'import PDF (`PDF_LLM_MODEL`,
 `config.py:213`), invocato con un **tool** costruito dallo schema Pydantic
@@ -470,20 +473,7 @@ tiene **solo le sei chiavi note** e scarta silenziosamente tutto il resto
 (`ai_comments_service.py:527-530`), restituendo comunque `{"success": true}`: un settimo
 commento aggiunto lato client si scriverebbe «con successo» e sparirebbe al ricaricamento.
 Il GET confronta la data con l'ultimo `ForecastYear`: se la proiezione è più recente, oppure
-esistono commenti legacy senza data, `comments_stale` è vero. La Stampa conserva i testi ma
-mostra un avviso anche nel PDF; una generazione o una modifica manuale realmente salvata li
-riallinea.
-
-**Resa e stampa:** ogni `CommentBlock` è una `Textarea` shadcn legata a `aiComments[k]`;
-`onChange` aggiorna lo stato locale, `onBlur` persiste con `PUT`. In stampa la `Textarea` è
-sempre nascosta e il testo esce come `<p>`; un riquadro **vuoto** sparisce del tutto
-(`print:hidden` condizionato a `!value`), così il PDF non porta cornici vuote. I due commenti
-di proiezione non sono nemmeno resi quando `periodMonths === 12`
-(`StampaContent.tsx:573, 629`): un bilancio già annuale non ha una proiezione da commentare.
-
-`StampaContent`, `buildAICtx` e `CommentBlock` vivono in
-`frontend/components/pratica/StampaContent.tsx` — non in `app/pratica/page.tsx`, dove stavano
-prima della decomposizione (§7).
+esistono commenti legacy senza data, `comments_stale` è vero.
 
 ## 13. La vista Budget: il percorso a sette passi delle ipotesi
 

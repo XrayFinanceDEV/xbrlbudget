@@ -16,7 +16,7 @@ import { formatNumber } from "@/lib/formatters";
 import type { AssumptionsMap } from "@/lib/budget-horizon";
 import { baseBankDebt } from "@/lib/base-bank-debt";
 import { ceAggregates, type PreviewCell, type PreviewRow, type PreviewRowKind } from "@/lib/budget-preview-rows";
-import { spIndexingOf } from "@/lib/budget-circolante-step";
+import { pianiPregressoOf, spIndexingOf } from "@/lib/budget-circolante-step";
 import { num } from "@/lib/budget-format";
 import type {
   BalanceSheet, FinancingLoanInput, ForecastPreviewResponse, ForecastPreviewYear, IncomeStatement, SpIndexingDriver,
@@ -325,8 +325,15 @@ export function regoleVociMinori(assumptions: AssumptionsMap, years: number[]): 
   const firstYear = years[0];
   const indexing = spIndexingOf(assumptions, years);
   const riga = assumptions[firstYear] as Record<string, unknown> | undefined;
+  // #63 R10: col piano dei crediti commerciali il motore mette nella massa d'apertura anche
+  // gli altri crediti a breve, e sp06g riceve solo la sua quota del residuo del piano.
+  const pianoCrediti = pianiPregressoOf(assumptions, years).includes("crediti_commerciali");
   const out: Record<string, string> = {};
   for (const v of VOCI_MINORI_PIANO) {
+    if (v.baseField === "sp06g_crediti_altri_breve" && pianoCrediti) {
+      out[v.baseField] = "incassato col piano dei crediti commerciali";
+      continue;
+    }
     const driver: SpIndexingDriver | null = v.code ? indexing[v.code] ?? null : null;
     const crescita = v.growthField ? num(riga?.[v.growthField]) : 0;
     const haImportoManuale = years.some((year) => assumptions[year]?.sp_overrides?.[v.baseField] != null);

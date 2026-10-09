@@ -148,7 +148,7 @@ def key_points(data: BusinessPlanData) -> list:
                 "Servizio del debito al limite." if mn_d >= SOGLIE["dscr_limite"] else
                 "Servizio del debito non coperto.")
         (c1, d1), (cl, dl) = dscr[0], dscr[-1]
-        text = f"Il DSCR è pari a {fmt.ratio(d1)} nel {c1.year} e a {fmt.ratio(dl)} nel {cl.year}"
+        text = f"Il DSCR è pari a {fmt.dscr(d1)} nel {c1.year} e a {fmt.dscr(dl)} nel {cl.year}"
         # C09 (lotto 2 fix rilievi, 2026-09-26): la frase riparte dalla colonna base, non dal
         # primo anno di piano — coerente con «gli oneri passano da X (oggi) a Y (fine piano)». Se
         # la base non ha of_mol, ripiega sul primo anno di piano come prima del fix.
@@ -232,7 +232,7 @@ def strengths_weaknesses(data: BusinessPlanData) -> tuple:
         lordo = _debito_lordo_scende(data)
         if fn < f0 and pen < pe0 and lordo is not None:
             txt = f"PFN da € {fmt.eur(f0)} a € {fmt.eur(fn)} e PFN/EBITDA da {fmt.ratio(pe0)} a {fmt.ratio(pen)}."
-            if dscr_plan:
+            if dscr_plan and min(dscr_plan) >= SOGLIE["dscr_limite"]:
                 txt += f" DSCR mai inferiore a {fmt.floor_ratio(min(dscr_plan), 1)}."
             if lordo:
                 forza.append(Finding("deleveraging", "Rapido deleveraging", txt))
@@ -242,8 +242,10 @@ def strengths_weaknesses(data: BusinessPlanData) -> tuple:
             debolezza.append(Finding("indebitamento", "Indebitamento elevato",
                                      f"PFN/EBITDA pari a {fmt.ratio(pen)} nel {data.last.year}."))
     if dscr_plan and min(dscr_plan) < SOGLIE["dscr_limite"]:
+        sotto = [f"{c.year} ({fmt.dscr(v)})" for c, v in _plan(data, "dscr")
+                 if v is not None and v < SOGLIE["dscr_limite"]]
         debolezza.append(Finding("dscr_basso", "Servizio del debito non coperto",
-                                 f"DSCR minimo pari a {fmt.ratio(min(dscr_plan))}."))
+                                 f"DSCR minimo pari a {fmt.dscr(min(dscr_plan))}; sotto 1 nel {_join(sotto)}."))
     d0, dn = _ends(data, "dso")
     k0, kn = _ends(data, "ciclo")
     if _all(d0, dn):

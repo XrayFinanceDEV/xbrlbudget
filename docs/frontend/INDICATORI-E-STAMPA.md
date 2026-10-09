@@ -133,7 +133,6 @@ non la formula.
 solo nel formattatore. Arrotondare ogni voce prima di costruire i totali può mostrare una falsa
 «DIFFERENZA (Attivo - Passivo)» di 1 € su un bilancio che quadra al centesimo.
 
-I sei commenti infrannuali hanno una data di aggiornamento separata. Se l'ultimo `ForecastYear` è
-più recente — oppure il commento è legacy e non ha una data — la Stampa mostra «Commenti non
-aggiornati» sia a schermo sia nel PDF. Il testo non viene cancellato: rigenerarlo o salvarne una
-modifica manuale lo riallinea.
+La Stampa non mostra più i sei commenti AI infrannuali né il loro avviso «Commenti non
+aggiornati» (tolti il 2026-10-09: i commenti stanno nel report PDF e Word). Gli endpoint
+restano senza chiamante: → `PRATICA-PERCORSO.md` §12.

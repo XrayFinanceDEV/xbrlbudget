@@ -697,15 +697,14 @@ esistente**, storico compreso, non solo su quelli generati dopo il lotto.
   `/analysis`, già aggregato dal backend con le sotto-voci a zero, restituisce **0** su `sp04`,
   `sp06` e `sp07`: sostituire una somma scritta a mano con `aggregate()` azzera immobilizzazioni e
   crediti nel grafico stampato, in silenzio.
-- **I commenti AI dell'infrannuale hanno un'allowlist di sei chiavi.** `save_infrannuale_comments`
+- **I commenti AI dell'infrannuale hanno un'allowlist di sei chiavi** (endpoint senza chiamante
+  dal 2026-10-09: la Stampa non li mostra più). `save_infrannuale_comments`
   tiene `overall`, `ce_confronto`, `sp_confronto`, `ce_proiezione`, `sp_proiezione`, `indicatori`
   e **scarta il resto senza dirlo**, restituendo comunque `{"success": true}`: un settimo
   commento aggiunto lato client si salva «con successo» e sparisce al ricaricamento.
   La loro data vive in `ai_comments_infrannuale_updated_at`: il GET restituisce anche
   `comments_stale`, confrontato con l'ultimo `ForecastYear`. I commenti legacy senza data sono
-  stantii per prudenza. La Stampa conserva il testo editabile e mostra l'avviso anche nel PDF,
-  ma l'avviso si chiude: chiuso sparisce anche dalla stampa e resta richiamabile, perche' una
-  modifica piccola non deve costringere a rigenerare i commenti per consegnare il documento.
+  stantii per prudenza.
 - **Gli elenchi di codici congelati in `ivcee-catalog-parity.test.ts` non si aggiornano per far
   tornare verde la suite.** Se cambiano, una vista ha perso o riordinato una riga: è quello il
   difetto. L'unica eccezione è una riga aggiunta di proposito, che si aggiorna nello stesso commit.
@@ -1164,15 +1163,16 @@ saltarne uno produce una voce che non compare da nessuna parte, senza alcun erro
 ### Tab Proiezione, tab Stampa, grafici Indicatori
 
 La Proiezione rende 22 righe di CE modificabili a mano e ne ricalcola i sottototali; da lì
-`calculateProjectedBS` costruisce lo SP proiettato e salva le ipotesi. La Stampa porta sei
-commenti generati da Haiku e poi editabili. I due grafici degli indicatori sono un componente
+`calculateProjectedBS` costruisce lo SP proiettato e salva le ipotesi. La Stampa non ha più i
+commenti AI né «Genera commenti AI» (tolti il 2026-10-09: i testi stanno nel report PDF e Word);
+gli endpoint `…/infrannuale/ai-comments` restano nel codice senza chiamante. I due grafici degli indicatori sono un componente
 solo (`components/pratica/IndicatoriCharts.tsx`), reso sia dalla tab sia dalla Stampa.
 
 **Il documento che si consegna non è la stampa del browser della tab Stampa**, che resta
 un'anteprima a schermo: «Scarica PDF» chiama `POST /scenarios/{id}/infrannuale/pdf`, il **report
 infrannuale** ReportLab (13 pagine: copertina con indice, sintesi, CE, costi, SP, circolante, debito,
 crisi d'impresa, segnali, allegati A/B), sullo stesso motore del Business plan. Numeri da
-`assemble_intermedio`, testi a regole: **non legge i commenti AI**, che restano a schermo. Il vecchio
+`assemble_intermedio`, testi a regole: **non legge i commenti AI**. Il vecchio
 **report intermedio** Typst (`POST …/infrannuale/report/pdf`, `intermedio_catalog.py`,
 `templates/intermedio/`, che legge `dossier-base` senza modificarlo) resta nel codice ma
 l'interfaccia non lo chiama più. Accanto c'è «Scarica Word» (`…/infrannuale/docx`): lo stesso report in
@@ -1183,7 +1183,7 @@ informativo). Indicatori, punteggio e classe A3→D si calcolano sul server (`ca
 `GET /scenarios/{id}/infrannuale/crisi`); il client sceglie il rating dal numero di segnali in
 pagina fra quelli che il server manda per 0..7 segnali, e non ha più una copia delle bande.
 
-**Come si comportano gli override della Proiezione, o i commenti AI della Stampa?**
+**Come si comportano gli override della Proiezione, o gli endpoint dei commenti AI?**
 → [docs/frontend/PRATICA-PERCORSO.md](docs/frontend/PRATICA-PERCORSO.md) §11-§12
 **Un grafico degli Indicatori è sbagliato, o la Stampa impagina male?**
 → [docs/frontend/INDICATORI-E-STAMPA.md](docs/frontend/INDICATORI-E-STAMPA.md)

@@ -142,9 +142,16 @@ class DetailedCashFlowCalculator:
         depreciation_intangible = D(inc_current.ce09a_ammort_immateriali)
         depreciation_tangible = D(inc_current.ce09b_ammort_materiali)
 
-        # Fallback to total if details are not available
+        # Fallback to total if details are not available. ce09 contiene anche le
+        # svalutazioni (ce09c, ce09d), che entrano piu' sotto in `write_downs`:
+        # vanno tolte, o sarebbero riaggiunte due volte.
         if depreciation_intangible == Decimal("0") and depreciation_tangible == Decimal("0"):
-            depreciation_amortization = D(inc_current.ce09_ammortamenti)
+            depreciation_amortization = max(
+                Decimal("0"),
+                D(inc_current.ce09_ammortamenti)
+                - D(inc_current.ce09c_svalutazioni)
+                - D(inc_current.ce09d_svalutazione_crediti),
+            )
         else:
             depreciation_amortization = depreciation_intangible + depreciation_tangible
 
@@ -166,7 +173,12 @@ class DetailedCashFlowCalculator:
 
         # Write-downs of receivables (ce09d) - not included in fixed asset depreciation
         # Note: ce09c is for other fixed asset write-downs (typically 0)
-        write_downs = D(inc_current.ce09d_svalutazione_crediti) if hasattr(inc_current, 'ce09d_svalutazione_crediti') else D(inc_current.ce09c_svalutazioni)
+        receivable_write_downs = D(inc_current.ce09d_svalutazione_crediti)
+        # ce09c (altre svalutazioni delle immobilizzazioni) e' un costo non monetario come
+        # gli ammortamenti: si riaggiunge qui, e il flusso B lo toglie dagli investimenti
+        # impliciti (vedi `fixed_write_downs` piu' sotto). La cassa non si muove.
+        fixed_write_downs = D(inc_current.ce09c_svalutazioni)
+        write_downs = receivable_write_downs + fixed_write_downs
 
         non_cash_total = depreciation_amortization + provisions + write_downs
 
@@ -191,7 +203,7 @@ class DetailedCashFlowCalculator:
         delta_receivables = (
             (D(bs_previous.sp06_crediti_breve) - D(bs_previous.sp06e_crediti_tributari_breve))
             - (D(bs_current.sp06_crediti_breve) - D(bs_current.sp06e_crediti_tributari_breve))
-        ) - write_downs
+        ) - receivable_write_downs
         # Lo SP espone i crediti al netto della svalutazione. Il costo ce09d è
         # già stato aggiunto all'utile fra le rettifiche non monetarie: per
         # ricostruire la variazione dei crediti lordi va sottratto qui, altrimenti
@@ -337,8 +349,34 @@ class DetailedCashFlowCalculator:
         # Use detail depreciation fields directly (already calculated above)
         # depreciation_tangible and depreciation_intangible are already set
 
+        # Ammortamenti senza dettaglio (ripiego su ce09) e ce09c sono gia' riaggiunti nel flusso
+        # operativo: la diminuzione d'attivo che li riflette non e' un disinvestimento. Si
+        # attribuiscono alle voci che sono davvero scese, nell'ordine: ce09c alle finanziarie
+        # (il motore budget la toglie da sp04), poi il resto a materiali e immateriali (#63 R03:
+        # l'anno storico con gli ammortamenti tutti in ce09c). Un avanzo di ce09c che non trova
+        # una diminuzione resta sulle finanziarie; uno di ammortamenti senza dettaglio non si
+        # sposta, come prima. Il totale delle sezioni A+B non cambia, cambia la riga.
+        delta_financial_raw = (
+            (D(bs_current.sp04_immob_finanziarie) + D(bs_current.sp08_attivita_finanziarie)) -
+            (D(bs_previous.sp04_immob_finanziarie) + D(bs_previous.sp08_attivita_finanziarie))
+        )
+        delta_intangible = D(bs_current.sp02_immob_immateriali) - D(bs_previous.sp02_immob_immateriali)
+        undetailed_depreciation = (
+            depreciation_amortization
+            if depreciation_intangible == Decimal("0") and depreciation_tangible == Decimal("0")
+            else Decimal("0")
+        )
+        write_down_to_financial = min(fixed_write_downs, max(Decimal("0"), -delta_financial_raw))
+        pool = undetailed_depreciation + fixed_write_downs - write_down_to_financial
+        write_down_to_tangible = min(pool, max(Decimal("0"), -(delta_tangible + depreciation_tangible)))
+        pool -= write_down_to_tangible
+        write_down_to_intangible = min(pool, max(Decimal("0"), -(delta_intangible + depreciation_intangible)))
+        pool -= write_down_to_intangible
+        # l'avanzo e' prima di tutto ce09c: gli ammortamenti senza dettaglio si consumano prima
+        write_down_leftover = min(pool, fixed_write_downs - write_down_to_financial)
+
         # Tangible CAPEX (negative = cash outflow)
-        tangible_investments = -(delta_tangible + depreciation_tangible)
+        tangible_investments = -(delta_tangible + depreciation_tangible + write_down_to_tangible)
         tangible_disinvestments = Decimal("0")  # Would need disposal data
         tangible_net = tangible_investments + tangible_disinvestments
 
@@ -349,11 +387,9 @@ class DetailedCashFlowCalculator:
         )
 
         # Intangible assets (immobilizzazioni immateriali)
-        delta_intangible = D(bs_current.sp02_immob_immateriali) - D(bs_previous.sp02_immob_immateriali)
-
         # Use detail depreciation for intangible (already set as depreciation_intangible above)
         # Intangible CAPEX (negative = cash outflow)
-        intangible_investments = -(delta_intangible + depreciation_intangible)
+        intangible_investments = -(delta_intangible + depreciation_intangible + write_down_to_intangible)
         intangible_disinvestments = Decimal("0")
         intangible_net = intangible_investments + intangible_disinvestments
 
@@ -363,11 +399,8 @@ class DetailedCashFlowCalculator:
             net=R(intangible_net)
         )
 
-        # Financial assets
-        delta_financial = (
-            (D(bs_current.sp04_immob_finanziarie) + D(bs_current.sp08_attivita_finanziarie)) -
-            (D(bs_previous.sp04_immob_finanziarie) + D(bs_previous.sp08_attivita_finanziarie))
-        )
+        # Financial assets: la quota di ce09c attribuita qui e l'eventuale avanzo (vedi sopra)
+        delta_financial = delta_financial_raw + write_down_to_financial + write_down_leftover
         financial_investments = -delta_financial if delta_financial > 0 else Decimal("0")
         financial_disinvestments = -delta_financial if delta_financial < 0 else Decimal("0")
         financial_net = financial_investments + financial_disinvestments

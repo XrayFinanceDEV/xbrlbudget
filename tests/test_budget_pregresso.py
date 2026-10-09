@@ -108,7 +108,9 @@ def test_details_declare_the_three_keys_without_any_plan(monkeypatch):
                                                    # #62 S14/S18: compensazione del credito storico
                                                    "credito_storico_compensato",
                                                    "credito_storico_compensato_cumulato",
-                                                   "compensazione_ignorata"}
+                                                   "compensazione_ignorata",
+                                                   # R11 / #63: quota di crediti tributari riclassificata in sp07e
+                                                   "crediti_riclassificati_lungo"}
     finally:
         engine.dispose()
 

@@ -122,3 +122,14 @@ def test_R3_nuovo_finanziamento_cita_solo_gli_anni_con_nuovo_debito():
 
 def test_R3_cassa_autosufficiente_resta_il_testo_di_oggi():
     assert "sufficiente a finanziare" in narrative.subtitle_flussi(make(AMBIENTA, GROWTH))
+
+
+def test_R13_dscr_sotto_uno_niente_punto_di_forza_e_anni_nominati():
+    vals = dict(AMBIENTA, dscr=[3, 0.9987, -0.4, 1.2])
+    forza, debolezza = narrative.strengths_weaknesses(make(vals, GROWTH))
+    assert not any("DSCR mai inferiore" in f.text for f in forza)
+    d = next(f for f in debolezza if f.id == "dscr_basso")
+    assert "2027 (0,99×)" in d.text and "2028 (−0,40×)" in d.text and "2029" not in d.text
+    ok = dict(AMBIENTA, dscr=[3, 1.04, 1.2, 1.3])
+    forza, _ = narrative.strengths_weaknesses(make(ok, GROWTH))
+    assert any("DSCR mai inferiore a 1,0×" in f.text for f in forza)

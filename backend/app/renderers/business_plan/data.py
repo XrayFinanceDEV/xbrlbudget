@@ -245,7 +245,7 @@ _DERIVED: dict = {
 
 VALUE_KEYS = tuple(_CE) + tuple(_SP) + tuple(_CF) + tuple(_IND) + tuple(_BE) + tuple(_DERIVED)
 
-UNITS = {"ebitda_margin": "percent", "dscr": "ratio", "pfn": "eur", "pfn_ebitda": "ratio", "of_mol": "percent",
+UNITS = {"ebitda_margin": "percent", "dscr": "dscr", "pfn": "eur", "pfn_ebitda": "ratio", "of_mol": "percent",
          "of_ricavi": "percent", "ccn": "eur", "margine_tesoreria": "eur", "margine_struttura": "eur",
          "liquidita_corrente": "ratio", "liquidita_immediata": "ratio", "indipendenza": "percent",
          "copertura_immob": "percent", "roi": "percent", "roe": "percent", "ros": "percent",

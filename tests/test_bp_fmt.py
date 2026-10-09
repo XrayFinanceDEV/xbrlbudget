@@ -49,3 +49,13 @@ def test_numeri_dei_grafici_usano_il_trattino_ascii():
     assert fmt.chart_num(-225.5) == "-226"
     assert fmt.chart_num(4109.51) == "4.110"
     assert fmt.chart_num(8.614, 2) == "8,61"
+
+
+def test_R13_dscr_sotto_uno_si_tronca_per_difetto():
+    assert fmt.dscr(D("0.9987")) == "0,99×"
+    assert fmt.dscr(D("0.995")) == "0,99×"
+    assert fmt.dscr(D("-0.5")) == "−0,50×"
+    assert fmt.dscr(D("1.004")) == "1,00×"
+    assert fmt.dscr(D("2.939")) == "2,94×"
+    assert fmt.dscr(None) == "n.d."
+    assert fmt.value(D("0.9987"), "dscr") == "0,99×"

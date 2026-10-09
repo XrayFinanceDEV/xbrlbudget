@@ -48,6 +48,15 @@ def floor_ratio(v: Num, dec: int = 1) -> str:
     return _signed(_dec(v).quantize(Decimal(1).scaleb(-dec), rounding=ROUND_FLOOR), dec, "×")
 
 
+def dscr(v: Num, dec: int = 2) -> str:
+    """DSCR: sotto 1 si tronca per difetto (0,9987 → «0,99×», mai «1,00×»); da 1 in su si arrotonda come `ratio`."""
+    if v is None:
+        return ND
+    if _dec(v) < 1:
+        return _signed(_dec(v).quantize(Decimal(1).scaleb(-dec), rounding=ROUND_FLOOR), dec, "×")
+    return ratio(v, dec)
+
+
 def days(v: Num, dec: int = 1) -> str:
     return _signed(v, dec, " gg")
 
@@ -60,6 +69,8 @@ def value(v: Num, unit: str) -> str:
         return pct(v)
     if unit == "days":
         return days(v)
+    if unit == "dscr":
+        return dscr(v)
     if unit == "bool":
         return ND if v is None else ("Sì" if v else "No")
     if unit == "years":

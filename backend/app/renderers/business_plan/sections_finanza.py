@@ -9,7 +9,7 @@ from .sections_economia import headers, labels, row, tile_from
 
 
 def _others(data: BusinessPlanData, key: str) -> str:
-    y = [f"{fmt.ratio(data.v(key)[i])} nel {data.columns[i].year}" for i in data.plan_idx[:-1]]
+    y = [f"{fmt.dscr(data.v(key)[i]) if key == "dscr" else fmt.ratio(data.v(key)[i])} nel {data.columns[i].year}" for i in data.plan_idx[:-1]]
     return " · ".join(y) if y else ""
 
 
@@ -18,7 +18,7 @@ def debito(data: BusinessPlanData, pages: dict) -> list:
                             "PFN = debiti finanziari meno disponibilità liquide. DSCR = (MOL − imposte) / (oneri "
                             "finanziari + quota capitale rimborsata nell'anno).")
     last = data.last.year
-    s += [layout.tiles([(fmt.ratio(data.v("dscr")[-1]), f"DSCR {last}", _others(data, "dscr")),
+    s += [layout.tiles([(fmt.dscr(data.v("dscr")[-1]), f"DSCR {last}", _others(data, "dscr")),
                         tile_from(data, "pfn_ebitda", "PFN / EBITDA", fmt.ratio),
                         tile_from(data, "pfn", "PFN", fmt.compact_eur),
                         tile_from(data, "of_mol", "Oneri finanziari / MOL", fmt.pct)]), Spacer(0, 2)]
@@ -33,7 +33,7 @@ def debito(data: BusinessPlanData, pages: dict) -> list:
             row(data, "di cui oltre 12 mesi", "banche_lungo"),
             row(data, "Debiti finanziari (convenzione PFN)", "debiti_finanziari", "bold"),
             row(data, "Disponibilità liquide", "liquidita"), row(data, "Posizione finanziaria netta (PFN)", "pfn", "hl"),
-            row(data, "PFN / EBITDA", "pfn_ebitda", unit="ratio"), row(data, "DSCR", "dscr", "hl", "ratio"),
+            row(data, "PFN / EBITDA", "pfn_ebitda", unit="ratio"), row(data, "DSCR", "dscr", "hl", "dscr"),
             row(data, "Oneri finanziari / MOL", "of_mol", unit="percent"),
             row(data, "Oneri finanziari / ricavi", "of_ricavi", unit="percent"),
             row(data, "ROD (costo del denaro)", "rod", unit="percent")]

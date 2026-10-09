@@ -1413,6 +1413,21 @@ class IntraYearEngine:
         })
         return carried
 
+    @staticmethod
+    def _acconti_gia_versati(assumption, partial_bs):
+        """#63 R09: gli acconti dell'anno gia' pagati nel periodo (`tax_advances_already_paid`), che stanno dentro
+        i crediti tributari a breve del parziale. 0 <= G <= sp06e del parziale, altrimenti errore italiano."""
+        versati = Decimal(str(getattr(assumption, 'tax_advances_already_paid', None) or 0))
+        if versati < 0:
+            raise ValueError("Gli acconti già versati nell'anno non possono essere negativi.")
+        credito = _get_field(partial_bs, 'sp06e_crediti_tributari_breve')
+        if versati > credito:
+            raise ValueError(
+                f"Gli acconti già versati nell'anno ({eur_it(versati)}) superano i crediti tributari a breve "
+                f"del periodo ({eur_it(credito)}): sono compresi in quei crediti, non possono essere di più."
+            )
+        return versati
+
     def _declare_posizione_tributaria(self, posizione, opening_credit, opening_debt):
         """Dichiara che cosa succede alla posizione tributaria aperta al mese del
         parziale.
@@ -1432,15 +1447,22 @@ class IntraYearEngine:
         opening_debt = Decimal(str(opening_debt or 0))
         if opening_credit == 0 and opening_debt == 0:
             return
+        versati = posizione.already_paid
+        credito_residuo = opening_credit - versati
         pezzi = []
         if opening_debt > 0:
             pezzi.append(
                 f"il debito tributario aperto ({eur_it(opening_debt)}) esce di cassa "
                 f"entro il 31/12"
             )
-        if opening_credit > 0:
+        if versati > 0:
             pezzi.append(
-                f"il credito ({eur_it(opening_credit)}) resta in bilancio, non si "
+                f"{eur_it(versati)} del credito sono acconti dell'anno già versati: contano come acconti "
+                f"dell'anno e non restano a credito"
+            )
+        if credito_residuo > 0:
+            pezzi.append(
+                f"il credito ({eur_it(credito_residuo)}) resta in bilancio, non si "
                 f"assume incassato"
             )
         self._diagnostics.append({
@@ -1448,7 +1470,10 @@ class IntraYearEngine:
             'severity': 'warning',
             'field': 'sp06e_crediti_tributari_breve',
             'amount': str(opening_credit),
-            'closing_credit': str(posizione.closing_credit + opening_credit),
+            'acconti_gia_versati': str(versati),
+            'credito_residuo_apertura': str(credito_residuo),
+            'acconti_effettivi': str(posizione.acconti),
+            'closing_credit': str(posizione.closing_credit + credito_residuo),
             'closing_debt': str(posizione.closing_debt),
             'acconti': str(posizione.acconti),
             'message': (
@@ -1766,6 +1791,7 @@ class IntraYearEngine:
                 current_tax=current_tax,
                 reference_tax=_get_field(ref_inc, 'ce20_imposte'),
                 explicit_advances=getattr(assumption, 'tax_advances_paid', None),
+                already_paid=self._acconti_gia_versati(assumption, partial_bs),
             )
             # Il credito tributario aperto NON si incassa entro l'anno: resta in
             # bilancio e si somma a quello che l'anno stesso genera (decisione del
@@ -1773,7 +1799,7 @@ class IntraYearEngine:
             # dei tributari a breve è meglio toglierlo, complica troppo»). Il
             # DEBITO aperto continua a pagarsi: è il lato prudente dei due.
             sp06e_governed = posizione.closing_credit + _get_field(
-                partial_bs, 'sp06e_crediti_tributari_breve')
+                partial_bs, 'sp06e_crediti_tributari_breve') - posizione.already_paid
             sp16e_governed = posizione.closing_debt
             self._declare_posizione_tributaria(
                 posizione,
@@ -2113,10 +2139,11 @@ class IntraYearEngine:
                 current_tax=current_tax,
                 reference_tax=Decimal('0'),
                 explicit_advances=getattr(assumption, 'tax_advances_paid', None),
+                already_paid=self._acconti_gia_versati(assumption, partial_bs),
             )
             # Come sopra: il credito aperto resta, il debito aperto si paga.
             sp06e = posizione.closing_credit + _get_field(
-                partial_bs, 'sp06e_crediti_tributari_breve')
+                partial_bs, 'sp06e_crediti_tributari_breve') - posizione.already_paid
             sp16e = posizione.closing_debt
             self._declare_posizione_tributaria(
                 posizione,

@@ -571,6 +571,7 @@ export interface BudgetAssumptions {
   interest_rate_payables: number;
   tax_rate: number;
   tax_advances_paid: number;
+  tax_advances_already_paid?: number;
   tax_temporary_differences: TemporaryDifferenceInput[] | null;
   fixed_materials_percentage: number;
   fixed_services_percentage: number;
@@ -681,6 +682,7 @@ export interface BudgetAssumptionsCreate {
   interest_rate_payables?: number;
   tax_rate?: number;
   tax_advances_paid?: number;
+  tax_advances_already_paid?: number;
   tax_temporary_differences?: TemporaryDifferenceInput[] | null;
   fixed_materials_percentage?: number;
   fixed_services_percentage?: number;

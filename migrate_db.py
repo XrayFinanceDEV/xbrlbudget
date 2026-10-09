@@ -107,6 +107,8 @@ MIGRATIONS = {
         ("existing_debt_repayment_years",      "NUMERIC(10,2)"),
         ("altri_finanz_repayment_years",       "NUMERIC(10,2)"),
         ("tax_advances_paid",                  "NUMERIC(15,2) DEFAULT 0 NOT NULL"),
+        # #63 R09: acconti dell'anno gia' versati nel periodo (infrannuale), dentro sp06e del parziale.
+        ("tax_advances_already_paid",          "NUMERIC(15,2) DEFAULT 0 NOT NULL"),
         ("tax_temporary_differences",          "TEXT"),
         ("asset_disposal_nbv",                 "NUMERIC(15,2)"),
         ("asset_disposal_proceeds",            "NUMERIC(15,2)"),

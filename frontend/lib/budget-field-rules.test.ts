@@ -57,16 +57,20 @@ describe("budget-field-rules", () => {
     expect(parseFieldValue("financing_interest_rate", "-5")).toBe(0);
   });
 
-  it("i campi days() clampano al massimo reale, non solo nullable -> null", () => {
-    expect(FIELD_RULES.dso_days).toEqual({ kind: "days", nullable: true, min: 0, max: 365 });
-    expect(parseFieldValue("dso_days", "400")).toBe(365);
+  // 2026-10-09, decisione del proprietario: i giorni scritti non hanno massimo (un magazzino di
+  // 804 giorni e' un dato reale); restano il minimo a zero e il vuoto -> null.
+  it("i campi days() non hanno massimo, solo il pavimento a zero", () => {
+    expect(FIELD_RULES.dso_days).toEqual({ kind: "days", nullable: true, min: 0 });
+    expect(parseFieldValue("dio_pf_days", "804")).toBe(804);
+    expect(parseFieldValue("dso_days", "-5")).toBe(0);
+    expect(parseFieldValue("dso_days", "")).toBeNull();
   });
 
   it("un campo per ogni kind distinto, con step pinnato", () => {
     expect(FIELD_RULES.revenue_growth_pct).toEqual({ kind: "pct", step: "0.1", min: -100, max: 100 });
     expect(FIELD_RULES.tangible_investments).toEqual({ kind: "eur", min: 0, step: "1000" });
     expect(FIELD_RULES.existing_debt_repayment_years).toEqual({ kind: "years", nullable: true, min: 0, max: 30 });
-    expect(FIELD_RULES.dio_days).toEqual({ kind: "days", nullable: true, min: 0, max: 365 });
+    expect(FIELD_RULES.dio_days).toEqual({ kind: "days", nullable: true, min: 0 });
     expect(FIELD_RULES.cash_sweep_enabled).toEqual({ kind: "bool" });
   });
 });

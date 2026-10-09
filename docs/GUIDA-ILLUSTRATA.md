@@ -1,7 +1,7 @@
 # Guida illustrata all'applicazione
 
-> Ultima verifica: ottobre 2026. Le schermate sono prese sull'app in sviluppo usando l'azienda
-> **AMBIENTA**: le fasi DATI e ANALISI sulla pratica del **bilancio di verifica 2026 a 6 mesi**,
+> Ultima verifica: ottobre 2026. Le schermate sono prese sull'app in sviluppo usando un'azienda
+> di prova, col nome oscurato nelle figure: le fasi DATI e ANALISI sulla pratica del **bilancio di verifica 2026 a 6 mesi**,
 > la fase PREVISIONALE e le griglie sullo scenario **«Budget 2027–2029»** (3 anni, anno base
 > 2026). I numeri citati negli esempi sono letti dall'app, non inventati; se rigeneri i dati di
 > prova, aggiornali qui insieme alle immagini in `docs/images/guida/`.
@@ -99,7 +99,7 @@ essere sull'azienda giusta e correggi quello che l'import ha letto male.
 **Come si fa.** 1) correggi nome o partita IVA se l'import le ha sbagliate; 2) imposta il
 settore giusto (se non sai quale, scegli quello del fatturato principale); 3) «Salva e prosegui».
 
-**Esempio.** AMBIENTA è classificata **industria** (settore 1): il suo rating userà le soglie
+**Esempio.** L'azienda di prova è classificata **industria** (settore 1): il suo rating userà le soglie
 FGPMI del settore 1 e il modello Altman a 5 componenti.
 
 **Approfondisci** → [PRATICA-PERCORSO.md](frontend/PRATICA-PERCORSO.md)
@@ -366,7 +366,7 @@ proiezione — la schermata lo avvisa con queste parole.
 
 ![Le caselle di variazione %](images/guida/10a-wizard-fatturato-variazioni.jpg)
 
-**Esempio (AMBIENTA, ricavi 2026 = 4.109.510 €).** Con +5% nel 2027 l'anteprima dà ricavi
+**Esempio (azienda di prova, ricavi 2026 = 4.109.510 €).** Con +5% nel 2027 l'anteprima dà ricavi
 **4.314.986 €** (+205.476 €); portando quella cella a +7,5% diventano **4.417.723 €**
 (+308.213 €) e tutto il resto del piano si riposiziona: la crescita si compone anno su anno,
 quindi il +6% del 2028 lavora sui 4,42 milioni nuovi, non sui 4,31 vecchi.
@@ -466,7 +466,7 @@ lato breve si chiude nel primo anno di piano, quello oltre 12 mesi lo scadenzi t
 
 ![Il pregresso bancario](images/guida/13b-wizard-pregresso-banche.jpg)
 
-**Esempio (AMBIENTA).** Debiti verso banche 2026 = **960.937 €**, «di cui 493.409 € a breve»:
+**Esempio (azienda di prova).** Debiti verso banche 2026 = **960.937 €**, «di cui 493.409 € a breve»:
 fidi 400.000 € (tasso 6%) + 93.409 € di rate 2027 dei due finanziamenti. Il credito oltre 12
 mesi da 45.000 € scadenziato a 5.000 €/anno chiude il piano con **30.000 € «resta aperto»** —
 quei 30.000 € restano nello stato patrimoniale a fine piano, e nessun anno di piano li vedrà
@@ -508,7 +508,7 @@ TFR, altri saldi. La cassa chiude il foglio.
 
 ![Cassa e scoperto](images/guida/14a-wizard-piano-cassa.jpg)
 
-**Esempio (AMBIENTA: «Nuova Finanza», 250.000 € erogati nel 2027, 5 anni, tasso 4,5%).** La
+**Esempio (azienda di prova: «Nuova Finanza», 250.000 € erogati nel 2027, 5 anni, tasso 4,5%).** La
 scheda stessa dice «rata 50.000 €/anno dal 2027»; nell'anteprima «Debito, cassa e PFN» il nuovo
 prestito residua **200.000 €** a fine 2027, 150.000 € nel 2028, 100.000 € nel 2029 — e la rata
 che scade l'anno dopo sta **già** dentro i debiti bancari a breve dello SP Prev. (non resta
@@ -538,7 +538,7 @@ falsa circolante e indici di liquidità).
 
 ![Il pagamento delle imposte](images/guida/15b-wizard-imposte-pagamento.jpg)
 
-**Esempio (AMBIENTA).** Nel 2027 l'uscita di cassa per imposte è **37.227 €**: saldo 2026
+**Esempio (azienda di prova).** Nel 2027 l'uscita di cassa per imposte è **37.227 €**: saldo 2026
 **4.227 €** + acconto 2027 **33.000 €**, versati in un colpo solo. Nel 2028 l'uscita è
 **−33.000 €**: il primo anno di piano chiude in perdita, quindi non c'è saldo da pagare e
 l'acconto versato l'anno prima torna indietro come credito compensato; non a caso l'«acconto

@@ -572,6 +572,7 @@ export interface BudgetAssumptions {
   tax_rate: number;
   tax_advances_paid: number;
   tax_advances_already_paid?: number;
+  working_capital_mode?: string | null;
   tax_temporary_differences: TemporaryDifferenceInput[] | null;
   fixed_materials_percentage: number;
   fixed_services_percentage: number;

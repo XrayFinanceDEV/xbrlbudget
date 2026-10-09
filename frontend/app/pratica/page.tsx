@@ -16,6 +16,7 @@ import {
   getExtraAccountingAlerts,
   putExtraAccountingAlerts,
   bulkUpsertAssumptions,
+  getBudgetAssumptions,
   getAliquotaProposta,
   getIntraYearComparison,
   getScenarioAnalysis,
@@ -366,6 +367,28 @@ export default function InfraannualePage() {
   // `modoCircolante`: il motore li legge dalle ipotesi che `calculateProjectedBS` salva.
   const [accontiAnno, setAccontiAnno] = useState("");
   const [accontiGiaVersati, setAccontiGiaVersati] = useState("");
+  // Idratazione dalle ipotesi salvate dello scenario infrannuale: senza, dopo un ricaricamento il primo
+  // «Calcola» rimanderebbe vuoto/0 e cancellerebbe in silenzio un valore salvato. Una volta per scenario,
+  // dipende dai soli scalari (mai dall'oggetto `scenario`).
+  const scenarioIdIdratato = scenario?.id;
+  const companyIdIdratato = importResult?.companyId;
+  useEffect(() => {
+    if (!scenarioIdIdratato || !companyIdIdratato) return;
+    let annullato = false;
+    getBudgetAssumptions(companyIdIdratato, scenarioIdIdratato)
+      .then((righe) => {
+        const riga = righe?.[0];
+        if (annullato || !riga) return;
+        const acconti = Number(riga.tax_advances_paid ?? 0);
+        const versati = Number(riga.tax_advances_already_paid ?? 0);
+        setAccontiAnno(acconti > 0 ? String(acconti) : "");
+        setAccontiGiaVersati(versati > 0 ? String(versati) : "");
+        const modo = riga.working_capital_mode;
+        if (modo && isModoCircolante(modo)) setModoCircolante(modo);
+      })
+      .catch(() => { /* nessuna ipotesi leggibile: restano i valori di partenza */ });
+    return () => { annullato = true; };
+  }, [scenarioIdIdratato, companyIdIdratato]);
   const projectedBSRef = useRef<IntraYearComparisonItem[] | null>(null);
   useEffect(() => {
     projectedBSRef.current = projectedBS;

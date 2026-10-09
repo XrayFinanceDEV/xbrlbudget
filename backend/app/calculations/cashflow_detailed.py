@@ -142,9 +142,16 @@ class DetailedCashFlowCalculator:
         depreciation_intangible = D(inc_current.ce09a_ammort_immateriali)
         depreciation_tangible = D(inc_current.ce09b_ammort_materiali)
 
-        # Fallback to total if details are not available
+        # Fallback to total if details are not available. ce09 contiene anche le
+        # svalutazioni (ce09c, ce09d), che entrano piu' sotto in `write_downs`:
+        # vanno tolte, o sarebbero riaggiunte due volte.
         if depreciation_intangible == Decimal("0") and depreciation_tangible == Decimal("0"):
-            depreciation_amortization = D(inc_current.ce09_ammortamenti)
+            depreciation_amortization = max(
+                Decimal("0"),
+                D(inc_current.ce09_ammortamenti)
+                - D(inc_current.ce09c_svalutazioni)
+                - D(inc_current.ce09d_svalutazione_crediti),
+            )
         else:
             depreciation_amortization = depreciation_intangible + depreciation_tangible
 
@@ -166,7 +173,12 @@ class DetailedCashFlowCalculator:
 
         # Write-downs of receivables (ce09d) - not included in fixed asset depreciation
         # Note: ce09c is for other fixed asset write-downs (typically 0)
-        write_downs = D(inc_current.ce09d_svalutazione_crediti) if hasattr(inc_current, 'ce09d_svalutazione_crediti') else D(inc_current.ce09c_svalutazioni)
+        receivable_write_downs = D(inc_current.ce09d_svalutazione_crediti)
+        # ce09c (altre svalutazioni delle immobilizzazioni) e' un costo non monetario come
+        # gli ammortamenti: si riaggiunge qui, e il flusso B lo toglie dagli investimenti
+        # impliciti (vedi `fixed_write_downs` piu' sotto). La cassa non si muove.
+        fixed_write_downs = D(inc_current.ce09c_svalutazioni)
+        write_downs = receivable_write_downs + fixed_write_downs
 
         non_cash_total = depreciation_amortization + provisions + write_downs
 
@@ -191,7 +203,7 @@ class DetailedCashFlowCalculator:
         delta_receivables = (
             (D(bs_previous.sp06_crediti_breve) - D(bs_previous.sp06e_crediti_tributari_breve))
             - (D(bs_current.sp06_crediti_breve) - D(bs_current.sp06e_crediti_tributari_breve))
-        ) - write_downs
+        ) - receivable_write_downs
         # Lo SP espone i crediti al netto della svalutazione. Il costo ce09d è
         # già stato aggiunto all'utile fra le rettifiche non monetarie: per
         # ricostruire la variazione dei crediti lordi va sottratto qui, altrimenti
@@ -364,10 +376,14 @@ class DetailedCashFlowCalculator:
         )
 
         # Financial assets
+        # Il motore budget toglie ce09c da sp04: quella diminuzione e' una svalutazione (gia'
+        # riaggiunta nel flusso operativo), non un disinvestimento. Si riconta quindi al lordo:
+        # investimento implicito = -(Δ + ce09c). Stessa regola su storico e infrannuale, dove
+        # ce09c non ha una contropartita certa: il totale resta comunque invariato.
         delta_financial = (
             (D(bs_current.sp04_immob_finanziarie) + D(bs_current.sp08_attivita_finanziarie)) -
             (D(bs_previous.sp04_immob_finanziarie) + D(bs_previous.sp08_attivita_finanziarie))
-        )
+        ) + fixed_write_downs
         financial_investments = -delta_financial if delta_financial > 0 else Decimal("0")
         financial_disinvestments = -delta_financial if delta_financial < 0 else Decimal("0")
         financial_net = financial_investments + financial_disinvestments

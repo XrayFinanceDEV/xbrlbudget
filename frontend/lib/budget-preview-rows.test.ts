@@ -178,6 +178,25 @@ describe("rowsCeAnteImposte", () => {
     expect(v("ebt")).toBe(1160 - 240 - 385 - 7 - 50 + 4 - 15);
   });
 
+  it("R07: la variazione delle materie sta nel consumo, non negli altri costi; la colonna base usa il consumo", () => {
+    // pareggio del motore: consumo 330 (acquisti 300 + ce10 30) di cui 40% fisso; servizi 100 di cui 40% fisso
+    const y = year(2027, {
+      ce01_ricavi_vendite: 1000, ce04_altri_ricavi: 0, ce05_materie_prime: 300, ce10_var_rimanenze_mat_prime: 30,
+      ce06_servizi: 100, ce07_godimento_beni: 20, ce08_costi_personale: 200, ce11_accantonamenti: 7, ce12_oneri_diversi: 5,
+    });
+    y.details.pareggio = {
+      costi_variabili: 258, costi_fissi: 397, costi_fissi_operativi: 225,
+      margine_contribuzione_pct: null, fatturato_pareggio: null, margine_sicurezza: null, margine_sicurezza_pct: null,
+    };
+    const base = { ...baseInc, ce10_var_rimanenze_mat_prime: "-100" } as unknown as IncomeStatement;
+    const rows = rowsCeAnteImposte(base, quote, [y]);
+    const v = (k: string) => rows.find((r) => r.key === k)!.years[0].value as number;
+    expect(v("altri")).toBe(-7);
+    expect(v("vdp") + v("variabili") + v("fissi") + v("altri")).toBe(v("mol"));
+    const b = (k: string) => rows.find((r) => r.key === k)!.base.value as number;
+    expect(b("vdp") + b("variabili") + b("fissi") + b("altri")).toBe(b("mol"));
+  });
+
   it("senza pareggio definito solo variabili e fissi portano la nota; MOL ed ebt restano", () => {
     const y = year(2027);
     y.details.pareggio = {

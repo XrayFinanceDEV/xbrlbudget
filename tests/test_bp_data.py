@@ -100,3 +100,29 @@ def test_json_del_banco_andata_e_ritorno(tmp_path, db):
     assert back.columns == data.columns
     assert back.v("ebitda") == data.v("ebitda")
     assert back.growth == data.growth
+
+
+def test_R15_altri_ricavi_chiude_ricavi_costi_ebitda():
+    from app.renderers.business_plan import data as bp
+    vals = {"valore_produzione": D("2112108"), "ricavi": D("2104755"), "costi_operativi": D("2037866")}
+    altri = bp._DERIVED["altri_ricavi_var"](vals.__getitem__)
+    assert altri == D("7353")
+    assert vals["ricavi"] + altri - vals["costi_operativi"] == D("74242")
+    assert "altri_ricavi_var" in VALUE_KEYS
+    labels = [label for label, _, _ in bp._CE_LINES]
+    assert labels[:3] == ["Ricavi", "Altri ricavi e variazioni", "Costi operativi"]
+    assert bp._DERIVED["altri_ricavi_var"](lambda k: None) is None
+
+
+def test_R15_rettifiche_registrate_con_etichette_non_codici():
+    from types import SimpleNamespace as NS
+    from app.renderers.business_plan import data as bp
+    e = NS(edited_label="Crediti verso clienti", edit_delta=D("-12500.4"),
+           counterpart_label="Utile (perdita) d'esercizio", counterpart_delta=D("12500.4"),
+           explanation=" Fattura stornata ")
+    n = NS(edited_label="Ratei e risconti attivi", edit_delta=D("300"), counterpart_label="Cassa",
+           counterpart_delta=D("-300"), explanation=None)
+    rows = bp.rettifiche_registrate([e, n])
+    assert rows[0] == ("Crediti verso clienti", "−12.500", "Utile (perdita) d'esercizio (12.500)", "Fattura stornata")
+    assert rows[1][3] == "—"
+    assert bp.rettifiche_registrate([]) == ()

@@ -35,6 +35,11 @@ def partenza(data: BusinessPlanData, pages: dict) -> list:
                                    [(r.label, [fmt.value(v, r.unit) for v in r.values], "") for r in sp.indicators],
                                    first="Indicatore")]
         s += [KeepTogether(block), Spacer(0, 10)]
+    if sp.rettifiche:
+        block = layout.h2("Rettifiche registrate", after=4)
+        block += [_grid(("Voce", "Importo", "Contropartita", "Motivazione"), sp.rettifiche,
+                        (120, 60, 140, CW - 320), bold_first=False)]
+        s += block + [Spacer(0, 10)]
     block = layout.h2("Fonti e controlli di quadratura" if sp.sources else "Controlli di quadratura", after=4)
     if sp.sources:
         block += [_grid(("Fonte", "Periodo", "Stato"), sp.sources, (180, 150, CW - 330), bold_first=False),

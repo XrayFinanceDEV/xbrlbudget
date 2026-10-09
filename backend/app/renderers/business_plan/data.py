@@ -92,6 +92,7 @@ class StartingPoint:
     checks: tuple
     note: str
     sources: tuple = ()  # (fonte, periodo, stato): la tabella «Fonti» della sezione 9
+    rettifiche: tuple = ()  # (voce, importo, contropartita, motivazione): le rettifiche registrate (sezione 9)
 
 
 @dataclass(frozen=True)
@@ -233,6 +234,9 @@ def _share(a: Num, b: Num) -> Num:
 
 
 _DERIVED: dict = {
+    # R15: valore della produzione − ricavi delle vendite (ce02 + ce03 + ce03a + ce04), cioè la riga che fa
+    # tornare Ricavi + Altri ricavi e variazioni − Costi operativi = EBITDA in ogni colonna
+    "altri_ricavi_var": lambda g: _sub(g("valore_produzione"), g("ricavi")),
     "costi_operativi": lambda g: _sub(g("costi_produzione"), g("ammortamenti")),
     "debiti_finanziari": lambda g: _add(g("pfn"), g("liquidita")),
     "cc_comm": lambda g: _sub(_add(g("crediti_comm"), g("rimanenze")), g("debiti_comm")),
@@ -509,7 +513,8 @@ def _indicators(report, ids, pids: list) -> tuple:
 
 
 # ------------------------------------------------------------------ punto di partenza
-_CE_LINES = (("Ricavi", "ricavi", ""), ("Costi operativi", "costi_operativi", ""), ("EBITDA", "ebitda", "bold"),
+_CE_LINES = (("Ricavi", "ricavi", ""), ("Altri ricavi e variazioni", "altri_ricavi_var", ""),
+             ("Costi operativi", "costi_operativi", ""), ("EBITDA", "ebitda", "bold"),
              ("Ammortamenti", "ammortamenti", ""), ("EBIT", "ebit", "bold"), ("Oneri finanziari", "oneri_fin", ""),
              ("Risultato ante imposte", "ante_imposte", ""), ("Imposte", "imposte", ""),
              ("Risultato netto", "utile", "hl"))
@@ -563,6 +568,13 @@ def _plan_sources(periods) -> tuple:
     return (("Assunzioni del piano", span, "disponibile"),)
 
 
+def rettifiche_registrate(entries) -> tuple:
+    """Le rettifiche del giornale come righe di tabella, con le etichette di bilancio e mai i codici interni."""
+    return tuple((e.edited_label, fmt.eur(e.edit_delta),
+                  f"{e.counterpart_label} ({fmt.eur(e.counterpart_delta)})", (e.explanation or "").strip() or "—")
+                 for e in entries)
+
+
 def _starting_infrannuale(report, lk, cols, periods) -> StartingPoint:
     obs = next(p for p in periods if p.basis == "observed")
     adj = next(p for p in periods if p.basis == "adjusted")
@@ -602,7 +614,7 @@ def _starting_infrannuale(report, lk, cols, periods) -> StartingPoint:
         indicators=_annualizza(
             tuple(IndicatorRow(label, UNITS.get(k, "eur"), (g(k, adj), g(k, clo))) for label, k in _START_IND),
             tuple(k for _, k in _START_IND), m, 0),
-        checks=_checks(lk, cols, report),
+        checks=_checks(lk, cols, report), rettifiche=rettifiche_registrate(report.adjustments.entries),
         note=f"Periodi di durata diversa ({m} mesi e 12 mesi): gli indicatori reddituali vanno letti tenendo conto "
              f"di questa differenza. Per il periodo di {m} mesi ROI e PFN / EBITDA compaiono sia sul periodo sia "
              f"annualizzati (ROI × 12/{m}, PFN / EBITDA × {m}/12).",

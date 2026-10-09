@@ -117,7 +117,7 @@ export function PregressoAltriFinanziatoriCard(p: StepProps): JSX.Element {
               <thead>
                 <tr className="border-b border-border">
                   <th className="px-1 py-1 text-left font-medium text-muted-foreground">Finanziatore</th>
-                  <th className="px-1 py-1 text-right font-medium text-muted-foreground">Residuo al 31/12</th>
+                  <th className="px-1 py-1 text-right font-medium text-muted-foreground">Residuo al 31/12/{p.baseYear}</th>
                   <th className="px-1 py-1 text-right font-medium text-muted-foreground">Tasso %</th>
                   {p.forecastYears.map((y) => (
                     <th key={y} className="px-1 py-1 text-right font-medium text-muted-foreground">{y}</th>
@@ -139,7 +139,7 @@ export function PregressoAltriFinanziatoriCard(p: StepProps): JSX.Element {
                     </td>
                     <td className="px-1 py-1">
                       <Input
-                        type="number" min={0} step={1000} className="h-8 w-28 text-right"
+                        type="number" min={0} step={1000} className="ml-auto h-8 w-32 text-right"
                         aria-label={`Residuo finanziatore ${row.index + 1}`}
                         value={row.residuo}
                         onChange={(e) => onCampo(row.index, "opening_residual", e.target.value === "" ? 0 : Number(e.target.value))}
@@ -147,7 +147,7 @@ export function PregressoAltriFinanziatoriCard(p: StepProps): JSX.Element {
                     </td>
                     <td className="px-1 py-1">
                       <Input
-                        type="number" min={0} max={100} step={0.1} className="h-8 w-20 text-right"
+                        type="number" min={0} max={100} step={0.1} className="ml-auto h-8 w-20 text-right"
                         aria-label={`Tasso finanziatore ${row.index + 1}`}
                         value={row.tasso}
                         onChange={(e) => onCampo(row.index, "interest_rate", e.target.value === "" ? 0 : Number(e.target.value))}
@@ -156,7 +156,7 @@ export function PregressoAltriFinanziatoriCard(p: StepProps): JSX.Element {
                     {row.rimborsi.map((r, i) => (
                       <td key={i} className="px-1 py-1">
                         <Input
-                          type="number" min={0} step={100} className="h-8 w-24 text-right"
+                          type="number" min={0} step={100} className="ml-auto h-8 w-24 text-right"
                           aria-label={`Rimborso ${p.forecastYears[i]} finanziatore ${row.index + 1}`}
                           value={r}
                           onChange={(e) => onRimborso(row.index, i, e.target.value === "" ? 0 : Number(e.target.value))}

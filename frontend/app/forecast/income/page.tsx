@@ -634,7 +634,6 @@ function IncomeStatementTable({
               className="px-4 py-3 text-center text-xs font-bold text-foreground uppercase border-r border-border"
             >
               {yd.year}
-              <div className="text-muted-foreground font-normal">(Storico)</div>
             </TableHead>
           ))}
           {forecastYears.map((yd) => (

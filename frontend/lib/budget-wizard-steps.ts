@@ -71,6 +71,8 @@ export const DEAD_FIELDS = [
   // Scelta dell'INFRANNUALE (quali giorni di circolante proiettare), non del
   // percorso budget: nessun passo del wizard la scrive.
   "working_capital_mode",
+  // #63 R09: gli acconti gia' versati nel periodo li dichiara l'INFRANNUALE (pratica), non il wizard budget.
+  "tax_advances_already_paid",
   // A06 (lotto 3 fix rilievi, 2026-09-26): la casella e' sparita dal passo 6 e il motore
   // non legge piu' il flag — sp16f/sp17f si agganciano al personale solo da `sp_indexing`.
   "previdenza_scales_with_personnel",

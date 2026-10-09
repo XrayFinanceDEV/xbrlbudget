@@ -31,7 +31,7 @@ _FIXED_TIMESTAMP: Final = "2032-02-03T04:05:06Z"
 # senza il compilatore Typst installato l'intero file si salta.
 CANONICAL_FIXTURE_SHA256: Final = {
     "bilancio": "d202fbbc5e07ca2f4654a024806e522223f8dc64c3d728f1fbef330bf57fb60c",
-    "infrannuale": "42f0c3554bf23b0fd378cac1e9492e8e3243ccf2317548fa7d2d6f488ec816e6",
+    "infrannuale": "b49ba0bb5384cb1c143de938057cfce742126a1177f756c0f3c8e662de37ab6b",
     "startup": "3061389be8708c0a8bbb08bdd8f63ef50e5fb9a62ef4d42654cce1735c67843a",
 }
 

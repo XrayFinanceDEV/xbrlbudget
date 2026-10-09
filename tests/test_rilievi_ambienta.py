@@ -26,14 +26,17 @@ def _q(x) -> D:
 
 def test_A01_scostamento_materie_applicato_dal_motore():
     """A01 · Passo 3 Costi: scostamento −5 punti sulle materie dalla crescita ricavi (5/6/7 → 0/1/2).
-    Il consulente: materie 2027 = 129.308 (base × 1,00), il report dava 135.773."""
+    Il consulente: materie 2027 = 129.308 (base × 1,00), il report dava 135.773.
+    R07 (#63, 2026-10-09): la crescita si applica al CONSUMO (ce05 + ce10), non agli acquisti."""
     rows = per_anno(righe(fixed_materials_percentage=0, variable_materials_growth_auto=False),
                     "revenue_growth_pct", (5, 6, 7))
     per_anno(rows, "variable_materials_growth_pct", (0, 1, 2))
     e = generato(genera(rows))
-    base = BASE_CE["ce05_materie_prime"]
+    base = BASE_CE["ce05_materie_prime"] + BASE_CE["ce10_var_rimanenze_mat_prime"]
     attese = [_q(base), _q(base * D("1.01")), _q(base * D("1.01") * D("1.02"))]
-    assert [e.anni[y][1]["ce05_materie_prime"] for y in (2027, 2028, 2029)] == attese
+    for y, atteso in zip((2027, 2028, 2029), attese):
+        ce = e.anni[y][1]
+        assert abs(ce["ce05_materie_prime"] + ce["ce10_var_rimanenze_mat_prime"] - atteso) <= Q  # un centesimo di arrotondamento
 
 
 def test_A03_acconto_manuale_maggiore_di_zero_vince_sulla_percentuale():

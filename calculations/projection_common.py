@@ -709,6 +709,19 @@ def rimanenze_materie(apertura: Decimal, acquisti: Decimal, giorni: Decimal) -> 
     return chiusura, ce10
 
 
+def rimanenze_gruppo_da_consumo(apertura_a, apertura_b, consumo, giorni) -> Tuple[Decimal, Decimal]:
+    """R07 (#63, 2026-10-09): il magazzino del gruppo materie+semilavorati dal CONSUMO gia' noto (la crescita
+    si applica al consumo, non agli acquisti): totale = consumo x giorni / 360, ripartito fra sp05a e sp05b
+    con la quota d'apertura (la stessa di `rimanenze_gruppo_materie`). Nessuna equazione implicita: gli
+    acquisti sono il saldo (consumo + chiusura - apertura), del chiamante. Precisione piena."""
+    a, b = Decimal(str(apertura_a or 0)), Decimal(str(apertura_b or 0))
+    cons, g = Decimal(str(consumo or 0)), Decimal(str(giorni or 0))
+    q = Decimal('1') if a + b == 0 else a / (a + b)
+    gruppo = max(ZERO, cons * g / Decimal('360'))
+    chiusura_a = q * gruppo
+    return chiusura_a, gruppo - chiusura_a
+
+
 def rimanenze_gruppo_materie(apertura_a, apertura_b, acquisti, giorni) -> Tuple[Decimal, Decimal]:
     """Materie prime (sp05a) e semilavorati (sp05b) come un solo magazzino di produzione, giorni sul consumo di
     materie (#62 nota S04, decisione del proprietario 2026-10-05). La quota materie del gruppo resta quella

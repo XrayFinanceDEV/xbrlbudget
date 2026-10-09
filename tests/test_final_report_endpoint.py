@@ -46,7 +46,7 @@ def client(monkeypatch):
         historical.income_statement = IncomeStatement(ce01_ricavi_vendite=Decimal("100"))
         scenario = BudgetScenario(company_id=mine.id, name="Budget", base_year=2026, workflow_type="bilancio")
         scenario.assumptions = [BudgetAssumptions(forecast_year=2027, explicitly_supplied_fields=[])]
-        forecast = ForecastYear(year=2027, engine_meta={"engine_version": "3"})
+        forecast = ForecastYear(year=2027, engine_meta={"engine_version": "4"})
         forecast.balance_sheet = ForecastBalanceSheet(sp09_disponibilita_liquide=Decimal("210"), sp11_capitale=Decimal("100"), sp13_utile_perdita=Decimal("110"))
         forecast.income_statement = ForecastIncomeStatement(ce01_ricavi_vendite=Decimal("110"))
         scenario.forecast_years = [forecast]
@@ -260,7 +260,7 @@ def test_forecast_order_parity_and_material_mutation_change_hashes(client):
         original = scenario.forecast_years[0]
         original.year = 2028
         scenario.assumptions[0].forecast_year = 2028
-        earlier = ForecastYear(year=2027, engine_meta={"engine_version": "3"})
+        earlier = ForecastYear(year=2027, engine_meta={"engine_version": "4"})
         earlier.balance_sheet = ForecastBalanceSheet(sp09_disponibilita_liquide=Decimal("210"), sp11_capitale=Decimal("100"), sp13_utile_perdita=Decimal("110"))
         earlier.income_statement = ForecastIncomeStatement(ce01_ricavi_vendite=Decimal("110"))
         scenario.forecast_years.append(earlier)

@@ -35,22 +35,23 @@ def test_pareggio_dichiarato():
 def test_pareggio_porta_dentro_lavori_interni_rimanenze_e_accantonamenti():
     """Collaudo di fine lotto, R1: il pareggio si calcola sul MOL del CE, non su ricavi + altri ricavi.
 
-    Kit di sopra piu' lavori interni 50.000 (ce03) e variazione rimanenze materie 10.000 (ce10):
-    fissi operativi = 275.000 + 10.000 - 50.000 = 235.000; pareggio = 235.000 / 0,65 = 361.538,46;
-    MOL del CE = 600.000 + 50.000 - 210.000 - 275.000 - 10.000 = 155.000 = (600.000 - 361.538,46) x 0,65.
+    Kit di sopra piu' lavori interni 50.000 (ce03) e variazione rimanenze materie 10.000 (ce10).
+    R07 (#63): il consumo di materie (ce05 + ce10) resta quello dell'ipotesi, 210.000 (B11 dentro costi
+    variabili e fissi con le loro quote, mai sommato di nuovo): fissi operativi = 275.000 - 50.000 = 225.000;
+    pareggio = 225.000 / 0,65 = 346.153,85; MOL del CE = 600.000 + 50.000 - 210.000 - 275.000 = 165.000.
     """
     out = _preview("bep-ce03", [{"forecast_year": 2027, "tax_rate": 27.9,
                                  "ce03_override": 50000, "ce10_override": 10000}])
     anno = out["forecast_years"][0]
     p = anno["details"]["pareggio"]
-    assert D(str(p["costi_fissi_operativi"])) == D("235000.00")
-    assert D(str(p["fatturato_pareggio"])) == D("361538.46")
+    assert D(str(p["costi_fissi_operativi"])) == D("225000.00")
+    assert D(str(p["fatturato_pareggio"])) == D("346153.85")
     ce = anno["income_statement"]
     mol = (D(str(ce["ce01_ricavi_vendite"])) + D(str(ce["ce03_lavori_interni"])) + D(str(ce["ce04_altri_ricavi"]))
            - D(str(ce["ce05_materie_prime"])) - D(str(ce["ce06_servizi"])) - D(str(ce["ce07_godimento_beni"]))
            - D(str(ce["ce08_costi_personale"])) - D(str(ce["ce10_var_rimanenze_mat_prime"]))
            - D(str(ce["ce12_oneri_diversi"])))
-    assert mol == D("155000")
+    assert mol == D("165000")
     assert abs((D("600000") - D(str(p["fatturato_pareggio"]))) * D(str(p["margine_contribuzione_pct"])) / 100 - mol) < D("0.01")
 
 

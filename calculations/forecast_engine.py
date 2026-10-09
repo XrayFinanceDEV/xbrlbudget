@@ -3617,15 +3617,21 @@ class ForecastEngine:
             if (apertura > 0 and abs(variazione) > Decimal('0.5') * apertura) or abs(variazione) > flusso:
                 avvisi_rimanenze.append({'gruppo': gruppo, 'apertura': apertura, 'chiusura': chiusura,
                                          'variazione': variazione, 'giorni': giorni})
-                if costo:
-                    natura = 'di costo' if variazione < 0 else 'di minor costo'
+                if costo and consumo_target is not None:
+                    # R07: col consumo dato dall'ipotesi la variazione del magazzino passa dagli acquisti, non dal
+                    # margine: dire «di costo a conto economico» sarebbe il modello di prima.
+                    effetto = (f"{_importo_it(abs(variazione))} € di acquisti "
+                               f"{'in meno' if variazione < 0 else 'in più'}, a parità di consumo")
                 else:
-                    natura = 'di ricavo' if variazione > 0 else 'di minor ricavo'
+                    if costo:
+                        natura = 'di costo' if variazione < 0 else 'di minor costo'
+                    else:
+                        natura = 'di ricavo' if variazione > 0 else 'di minor ricavo'
+                    effetto = f"{_importo_it(abs(variazione))} € {natura} a conto economico"
                 details['avvisi'].append(
                     f"Nel {assumption.forecast_year} i giorni inseriti per {etichetta} "
                     f"({_importo_it(giorni)} gg {base_flusso}) portano il magazzino da "
-                    f"{_importo_it(apertura)} a {_importo_it(chiusura)}: "
-                    f"{_importo_it(abs(variazione))} € {natura} a conto economico."
+                    f"{_importo_it(apertura)} a {_importo_it(chiusura)}: {effetto}."
                 )
 
         if details is not None:

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import { useApp } from "@/contexts/AppContext";
 import { useAuth } from "@/contexts/AuthContext";
@@ -17,18 +17,12 @@ import {
   getBalanceSheet,
   getBudgetAssumptions,
   promoteProjection,
-  getInfrannualeAIComments,
-  generateInfrannualeAIComments,
-  saveInfrannualeAIComments,
-  type InfrannualeAIComments,
 } from "@/lib/api";
-import type { CrisiInfrannuale, IntraYearComparison, IntraYearComparisonItem, RatingCrisi } from "@/types/api";
+import type { CrisiInfrannuale, IntraYearComparison, IntraYearComparisonItem } from "@/types/api";
 import { toast } from "sonner";
-import { AlertTriangle, FileText, Loader2, Printer, Sparkles, X } from "lucide-react";
+import { FileText, Loader2, Printer } from "lucide-react";
 import { cn, getErrorMessage } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
-import { Textarea } from "@/components/ui/textarea";
-import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import {
   Table,
   TableBody,
@@ -43,7 +37,6 @@ import { ceDerivatiDaForecast, valoreCeProiettato } from "@/lib/pratica-ce-proie
 import {
   INDICATOR_DEFS,
   scoreDotColor,
-  type IndicatorSet,
   type SerieIndicatori,
 } from "@/lib/pratica-indicators";
 import { RATING_COLOR, vistaColonna } from "@/lib/pratica-crisi";
@@ -89,49 +82,13 @@ export function StampaContent({
   const { logoUrl, userName } = useAuth();
   const { updatePratica } = usePratica();
   const [promoting, setPromoting] = useState(false);
-  const [aiComments, setAiComments] = useState<InfrannualeAIComments>({});
-  const [aiCommentsStale, setAiCommentsStale] = useState(false);
-  const [aiCommentsDirty, setAiCommentsDirty] = useState(false);
-  // L'avviso sui commenti stantii si chiude: chi ha fatto una modifica
-  // piccola può decidere che i commenti vanno ancora bene e stampare senza
-  // portarsi dietro il riquadro giallo (decisione del proprietario,
-  // 2026-09-16). Chiuso sparisce anche dalla stampa del browser, ed è richiamabile;
-  // il PDF consegnato (report infrannuale) non riporta i commenti.
-  const [avvisoCommentiChiuso, setAvvisoCommentiChiuso] = useState(false);
-  const [aiCommentsLoading, setAiCommentsLoading] = useState(false);
   const refYear = comparison.reference_year;
   const partialYear = comparison.partial_year;
 
-  // Load stored AI comments on mount / scenario change
-  useEffect(() => {
-    if (!companyId || !scenarioId) return;
-    let cancelled = false;
-    getInfrannualeAIComments(companyId, scenarioId)
-      .then((data) => {
-        if (!cancelled) {
-          setAiComments(data.comments);
-          setAiCommentsStale(data.comments_stale);
-          setAiCommentsDirty(false);
-          setAvvisoCommentiChiuso(false);
-        }
-      })
-      .catch(() => {
-        if (!cancelled) {
-          setAiComments({});
-          setAiCommentsStale(false);
-        }
-      });
-    return () => { cancelled = true; };
-  }, [companyId, scenarioId]);
-
-  const handleCommentChange = (key: keyof InfrannualeAIComments, value: string) => {
-    setAiComments((prev) => ({ ...prev, [key]: value }));
-    setAiCommentsDirty(true);
-  };
   // Il documento che si consegna e' il report infrannuale generato dal server
   // (`POST .../infrannuale/pdf`, ReportLab), non la stampa del browser di
   // questa pagina, che resta come anteprima a schermo. Il PDF ha testi a
-  // regole e non legge i commenti AI: quelli restano qui, modificabili.
+  // regole e porta i commenti nel testo.
   const { download: downloadPdf, downloading: downloadingPdf } = useInfrannualeDownload();
   const handleDownloadPdf = async () => {
     if (!companyId || !scenarioId) return;
@@ -143,17 +100,6 @@ export function StampaContent({
     if (!companyId || !scenarioId) return;
     await downloadFile(() => downloadReportDocx(companyId, scenarioId, "infrannuale"),
       "Impossibile scaricare il Word del report");
-  };
-
-  const handleCommentBlur = async () => {
-    if (!companyId || !scenarioId || !aiCommentsDirty) return;
-    try {
-      await saveInfrannualeAIComments(companyId, scenarioId, aiComments);
-      setAiCommentsStale(false);
-      setAiCommentsDirty(false);
-    } catch {
-      toast.error("Errore nel salvataggio del commento");
-    }
   };
 
   // --- P&L data ---
@@ -241,106 +187,6 @@ export function StampaContent({
   const visibleIncome = incomeItems.filter(item => ALWAYS_SHOW_CODES.has(item.code) || item.partial_value !== 0 || item.reference_value !== 0);
   const visibleBalance = balanceItems.filter(item => ALWAYS_SHOW_CODES.has(item.code) || item.partial_value !== 0 || item.reference_value !== 0);
 
-  // Build context payload for the AI generator
-  const buildAICtx = (): Record<string, unknown> => {
-    const income_map: Record<string, { reference_value: number; partial_value: number; annualized_value: number; projected_value: number }> = {};
-    for (const it of incomeItems) {
-      income_map[it.code] = {
-        reference_value: it.reference_value ?? 0,
-        partial_value: it.partial_value ?? 0,
-        annualized_value: it.annualized_value ?? 0,
-        projected_value: getProjectedCE(it),
-      };
-    }
-    const balance_map: Record<string, { reference_value: number; partial_value: number; projected_value: number }> = {};
-    for (const it of balanceItems) {
-      balance_map[it.code] = {
-        reference_value: it.reference_value ?? 0,
-        partial_value: it.partial_value ?? 0,
-        projected_value: projBSMap.get(it.code) ?? 0,
-      };
-    }
-    const indicatorsRow = (ind: IndicatorSet) => ({
-      DSCR: ind.dscr.toFixed(2),
-      EBITDA_margin_pct: ind.ebitda_margin.toFixed(1),
-      current_ratio: ind.current_ratio.toFixed(2),
-      ROI_pct: ind.roi.toFixed(1),
-      ROE_pct: ind.roe.toFixed(1),
-      ROS_pct: ind.ros.toFixed(1),
-      indipendenza_fin_pct: ind.indipendenza.toFixed(1),
-      PFN_EBITDA: ind.pfn_ebitda.toFixed(2),
-      OF_MOL_pct: ind.of_mol.toFixed(1),
-    });
-    const ratingRow = (rating: RatingCrisi) => ({
-      code: rating.codice,
-      label: rating.etichetta,
-      oltre_count: rating.oltre,
-      alerts: rating.segnali,
-    });
-    // Una colonna che non c'e' (periodo di 12 mesi, proiezione non generata,
-    // indicatori non ancora letti) resta fuori dal contesto, non va a zero.
-    const colonne = [
-      ["Storico", storicoVista],
-      ["Infrannuale", infraVista],
-      ["Proiezione", proiezioneVista],
-    ] as const;
-    return {
-      scenario: { name: "Infrannuale", company_name: companyName },
-      reference_year: refYear,
-      partial_year: partialYear,
-      period_months: periodMonths,
-      income_map,
-      balance_map,
-      indicators: Object.fromEntries(
-        colonne.flatMap(([nome, vista]) => (vista ? [[nome, indicatorsRow(vista.indicatori)]] : [])),
-      ),
-      ratings: Object.fromEntries(
-        colonne.flatMap(([nome, vista]) => (vista ? [[nome, ratingRow(vista.rating)]] : [])),
-      ),
-    };
-  };
-
-  const handleGenerateAIComments = async () => {
-    if (!companyId || !scenarioId) return;
-    setAiCommentsLoading(true);
-    try {
-      const data = await generateInfrannualeAIComments(companyId, scenarioId, buildAICtx());
-      if (Object.keys(data).length === 0) {
-        toast.info("Nessun commento generato (chiave API mancante?)");
-      } else {
-        setAiComments(data);
-        setAiCommentsStale(false);
-        setAiCommentsDirty(false);
-        toast.success("Commenti AI generati");
-      }
-    } catch {
-      toast.error("Errore nella generazione dei commenti AI");
-    } finally {
-      setAiCommentsLoading(false);
-    }
-  };
-
-  const CommentBlock = ({ k, placeholder }: { k: keyof InfrannualeAIComments; placeholder: string }) => {
-    const value = aiComments[k] ?? "";
-    // Hide empty blocks when printing to keep the PDF clean
-    return (
-      <div className={cn("rounded-md border border-border/60 bg-muted/20 p-3 my-2 print:my-1 print:p-2 stampa-commento", !value && "print:hidden")}>
-        {/* Screen: editable textarea */}
-        <Textarea
-          value={value}
-          onChange={(e) => handleCommentChange(k, e.target.value)}
-          onBlur={handleCommentBlur}
-          placeholder={placeholder}
-          className="min-h-[60px] resize-y text-sm bg-transparent border-0 focus-visible:ring-1 print:hidden"
-        />
-        {/* Print: plain text (no textarea chrome, no resize handle) */}
-        {value && (
-          <p className="hidden print:block text-xs leading-relaxed whitespace-pre-wrap m-0">{value}</p>
-        )}
-      </div>
-    );
-  };
-
   const handlePromote = useCallback(async () => {
     if (!companyId || !scenarioId) return;
     setPromoting(true);
@@ -420,16 +266,6 @@ export function StampaContent({
       {/* Action buttons */}
       <div className="flex justify-end gap-2 print:hidden">
         {companyId && scenarioId && (
-          <Button variant="outline" onClick={handleGenerateAIComments} disabled={aiCommentsLoading}>
-            {aiCommentsLoading ? (
-              <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-            ) : (
-              <Sparkles className="h-4 w-4 mr-2" />
-            )}
-            Genera commenti AI
-          </Button>
-        )}
-        {companyId && scenarioId && (
           <Button onClick={() => void handleDownloadPdf()} variant="outline" disabled={downloadingPdf || downloadingWord}>
             {downloadingPdf ? (
               <Loader2 className="h-4 w-4 mr-2 animate-spin" />
@@ -450,40 +286,6 @@ export function StampaContent({
           </Button>
         )}
       </div>
-
-      {aiCommentsStale && !avvisoCommentiChiuso && (
-        <Alert className="relative border-amber-500/50 bg-amber-50 text-amber-900 [&>svg]:text-amber-600 dark:border-amber-500 dark:bg-amber-950/40 dark:text-amber-100 dark:[&>svg]:text-amber-400">
-          <AlertTriangle className="h-4 w-4" />
-          <AlertTitle className="pr-8">Commenti non aggiornati</AlertTitle>
-          <Button
-            variant="ghost"
-            size="icon"
-            className="absolute right-2 top-2 h-7 w-7 print:hidden"
-            aria-label="Chiudi l'avviso sui commenti"
-            onClick={() => setAvvisoCommentiChiuso(true)}
-          >
-            <X className="h-4 w-4" />
-          </Button>
-          <AlertDescription>
-            Questi commenti precedono l&apos;ultima proiezione e potrebbero non
-            descrivere i numeri attuali. Rigenera i commenti AI oppure
-            aggiornali manualmente.
-          </AlertDescription>
-        </Alert>
-      )}
-      {aiCommentsStale && avvisoCommentiChiuso && (
-        <div className="print:hidden">
-          <Button
-            variant="ghost"
-            size="sm"
-            className="text-muted-foreground"
-            onClick={() => setAvvisoCommentiChiuso(false)}
-          >
-            <AlertTriangle className="h-4 w-4 mr-1.5" />
-            Commenti non aggiornati
-          </Button>
-        </div>
-      )}
 
       {/* Header */}
       <div className="relative print:mb-4 stampa-blocco">
@@ -516,12 +318,6 @@ export function StampaContent({
           </p>
         </div>
       </div>
-
-      {/* Overall AI commentary — rendered before the first table, editable */}
-      <CommentBlock
-        k="overall"
-        placeholder="Commento complessivo sull'analisi infrannuale (clicca 'Genera commenti AI' o scrivi manualmente)..."
-      />
 
       {/* 1. CE CONFRONTO: Storico | Infrannuale | Infrann./Storico */}
       <div>
@@ -566,7 +362,6 @@ export function StampaContent({
         </Table>
       </div>
 
-      <CommentBlock k="ce_confronto" placeholder="Commento su Conto Economico — Confronto..." />
 
       {/* 2. SP CONFRONTO: Storico | Infrannuale | Infrann./Storico */}
       <div>
@@ -611,7 +406,6 @@ export function StampaContent({
         </Table>
       </div>
 
-      <CommentBlock k="sp_confronto" placeholder="Commento su Stato Patrimoniale — Confronto..." />
 
       {/* 3. CE PROIEZIONE: Storico | Infrannuale | Proiezione | Proiez./Storico (hidden when 12M) */}
       {periodMonths !== 12 && (
@@ -663,7 +457,6 @@ export function StampaContent({
       </div>
       )}
 
-      {periodMonths !== 12 && <CommentBlock k="ce_proiezione" placeholder="Commento su Conto Economico — Proiezione..." />}
 
       {/* 4. SP PROIEZIONE: Storico | Infrannuale | Proiezione | Proiez./Storico (hidden when 12M) */}
       {periodMonths !== 12 && (
@@ -719,7 +512,6 @@ export function StampaContent({
       </div>
       )}
 
-      {periodMonths !== 12 && <CommentBlock k="sp_proiezione" placeholder="Commento su Stato Patrimoniale — Proiezione..." />}
 
       {/* 5. INDICATORI DELLA CRISI D'IMPRESA */}
       {/* Il blocco NON e' indivisibile, e non deve esserlo: cartellini +
@@ -825,7 +617,6 @@ export function StampaContent({
         </>)}
       </div>
 
-      <CommentBlock k="indicatori" placeholder="Commento sugli indicatori della crisi d'impresa..." />
 
       {/* 6. SEGNALI EXTRACONTABILI */}
       <div>

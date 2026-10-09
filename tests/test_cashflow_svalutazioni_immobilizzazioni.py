@@ -58,3 +58,27 @@ def test_ripiego_ammortamenti_non_conta_ce09d_due_volte():
     assert nc.depreciation_amortization == D("25000.00")
     assert nc.write_downs == D("5000.00")
     assert nc.total == D("30000.00")
+
+
+def test_ce09c_su_materiali_e_immateriali_non_diventa_investimento_finanziario():
+    # #63 R03: anno storico senza riparto degli ammortamenti, tutto in ce09c; scendono
+    # materiali (20.000) e immateriali (10.000), le finanziarie restano ferme
+    prev = _zeroed(BalanceSheet, sp02_immob_immateriali=50000, sp03_immob_materiali=80000,
+                   sp04_immob_finanziarie=52550)
+    cur = _zeroed(BalanceSheet, sp02_immob_immateriali=40000, sp03_immob_materiali=60000,
+                  sp04_immob_finanziarie=52550)
+    cf = _calc(prev, cur, _ce(ce09_ammortamenti=30000, ce09c_svalutazioni=30000))
+    inv = cf.investing_activities
+    assert inv.tangible_assets.net == D("0.00")
+    assert inv.intangible_assets.net == D("0.00")
+    assert inv.financial_assets.net == D("0.00")
+    assert cf.operating_activities.non_cash_adjustments.total == D("30000.00")
+
+
+def test_ammortamenti_senza_dettaglio_attribuiti_alle_voci_scese():
+    # ripiego su ce09: i 25.000 riaggiunti non sono un disinvestimento di materiali
+    prev = _zeroed(BalanceSheet, sp03_immob_materiali=100000)
+    cur = _zeroed(BalanceSheet, sp03_immob_materiali=75000)
+    cf = _calc(prev, cur, _ce(ce09_ammortamenti=25000))
+    assert cf.investing_activities.tangible_assets.net == D("0.00")
+    assert cf.investing_activities.financial_assets.net == D("0.00")

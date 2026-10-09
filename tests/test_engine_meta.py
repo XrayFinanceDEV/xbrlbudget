@@ -75,7 +75,7 @@ def test_ogni_anno_generato_porta_firma_e_pareggio_del_motore():
     e = generato(genera(righe()))
     assert set(e.meta) == {2027, 2028, 2029}
     for anno, meta in e.meta.items():
-        assert meta["engine_version"] == ENGINE_VERSION == "3"
+        assert meta["engine_version"] == ENGINE_VERSION == "4"
         atteso = {k: (None if v is None else str(D(str(v)).quantize(D("0.01"))))
                   for k, v in e.det[anno]["pareggio"].items()}
         assert meta["pareggio"] == atteso, anno
@@ -83,7 +83,7 @@ def test_ogni_anno_generato_porta_firma_e_pareggio_del_motore():
 
 def test_engine_meta_porta_gli_avvisi_e_la_versione_3():
     from calculations.forecast_engine import ENGINE_VERSION, engine_meta
-    assert ENGINE_VERSION == "3"
+    assert ENGINE_VERSION == "4"
     meta = engine_meta({'avvisi': ['uno', 'due']})
     assert meta['avvisi'] == ['uno', 'due']
     assert engine_meta({})['avvisi'] == []

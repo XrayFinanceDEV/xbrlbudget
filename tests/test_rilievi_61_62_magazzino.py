@@ -29,9 +29,16 @@ def test_gruppo_senza_materie_e_tutto_semilavorati():
     assert ca == D("0") and cb > 0
 
 
-def test_ambienta_25_giorni_avvisa():
+def test_ambienta_25_giorni_azzera_gli_acquisti_e_avvisa():
+    # R07: il consumo (128.090,89) e' coperto dalle rimanenze in apertura (287.312): acquisti a zero, avviso.
     e = generato(genera(righe(dio_days=25)))
-    assert any("287.312" in a for a in e.det[2027]["avvisi"])
+    assert any("287.312" in a and "azzerati" in a for a in e.det[2027]["avvisi"])
+    assert e.det[2027]["rimanenze_materie"]["acquisti_azzerati"] is True
+    assert e.anni[2027][1]["ce05_materie_prime"] == 0
+
+
+def test_ambienta_giorni_molto_alti_avvisano_sul_magazzino():
+    e = generato(genera(righe(dio_days=2000)))
     av = e.det[2027]["avviso_rimanenze"]
     assert av and av[0]["gruppo"] == "materie_semilavorati"
 

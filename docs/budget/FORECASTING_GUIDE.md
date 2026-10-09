@@ -149,6 +149,17 @@ voce è stata forzata in CE Prev. con un importo assoluto: su un importo forzato
 non è definita, e l'anteprima marca la cella invece di mostrare un numero che il motore non ha
 usato.
 
+**Le materie crescono sul consumo, non sugli acquisti** (R07, #63, decisione del proprietario
+2026-10-09). Consumo = `ce05` + `ce10`. Ogni anno il consumo cresce dall'anno prima (quota variabile e
+quota fissa con le loro percentuali); le rimanenze finali di materie vengono dai giorni sul consumo;
+gli acquisti sono il saldo: `ce05` = consumo + rimanenze finali − rimanenze iniziali, e `ce10` =
+iniziali − finali. Il consumo non dipende dai giorni di magazzino: scendere da 809 a 360 giorni
+significa comprare meno, non consumare di più. Gli acquisti non vanno sotto zero: se lo farebbero,
+restano a zero, le rimanenze finali scendono di quanto serve e il motore lo dichiara
+(`details['avvisi']`, `details['rimanenze_materie']['acquisti_azzerati']`). `ce05_fixed` e
+`ce05_variable` riepilogano il consumo, non i soli acquisti. Il DPO si applica agli acquisti così
+ottenuti. Con `ce05_override` gli acquisti sono fissati e il consumo ne segue.
+
 **Il TFR** (`ce08a`) è sempre retribuzioni / 13,5. Se questo più salari e oneri sociali supera il
 costo del personale che avresti (perché forzato in CE Prev. o troppo basso), il motore **ricompone
 il totale come somma** delle tre voci e azzera «altri costi del personale», dichiarando l'eccedenza;
@@ -160,8 +171,8 @@ straordinari** valgono zero in ogni anno di piano — non sono ricorrenti per de
 importo forzato in CE Prev.
 
 **Il pareggio lo dichiara il motore**, `details['pareggio']` per ogni anno: `costi_variabili` =
-parte variabile di materie e servizi; `costi_fissi` = parte fissa di materie e servizi + personale
-+ godimento + oneri diversi; `costi_fissi_operativi` = costi fissi − altri ricavi, lavori interni e variazioni di rimanenze di prodotti + variazioni di rimanenze di materie e accantonamenti (cosi' il pareggio si calcola sul MOL del CE);
+parte variabile del consumo di materie (acquisti + variazione di rimanenze) e di servizi; `costi_fissi` = parte fissa di consumo di materie e servizi + personale
++ godimento + oneri diversi; `costi_fissi_operativi` = costi fissi − altri ricavi, lavori interni e variazioni di rimanenze di prodotti + accantonamenti (la variazione di rimanenze di materie sta già dentro il consumo; cosi' il pareggio si calcola sul MOL del CE);
 `margine_contribuzione_pct` = (ricavi − costi variabili) / ricavi × 100; `fatturato_pareggio` =
 costi fissi operativi / margine di contribuzione; `margine_sicurezza` = ricavi − fatturato di
 pareggio; `margine_sicurezza_pct`. Con ricavi o margine non positivi i tre ultimi valori sono
@@ -213,7 +224,7 @@ e tutto il blocco è `null`, sull'anno interessato.
   le altre voci commerciali restano quelle dell'anno prima, e con 90 giorni in input il report legge 90
   (con un piano sui crediti commerciali no: il generato va su `sp06a`, e il report misura anche il pregresso).
   **Il magazzino ha due gruppi di giorni**: materie e semilavorati hanno come denominatore il loro consumo
-  (acquisti + variazione di rimanenze), i prodotti finiti e merci i ricavi; lavori in corso e acconti
+  (acquisti + variazione di rimanenze, che cresce con le ipotesi: vedi «Le materie crescono sul consumo»), i prodotti finiti e merci i ricavi; lavori in corso e acconti
   hanno giorni dedotti dai ricavi. La variazione dei prodotti finiti e dei semilavorati passa dal CE
   (`ce02` = Δ`sp05b + sp05d`); `ce03` non si deriva dallo SP (negli import contiene i lavori interni)
   e il movimento di `sp05c` è solo di cassa. Giorni scritti da te che spostano un gruppo di oltre il

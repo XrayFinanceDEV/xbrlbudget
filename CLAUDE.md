@@ -906,9 +906,20 @@ with projected revenue and costs, CE overrides included.
 round.** `ce10_var_rimanenze_mat_prime` of every plan year = −(closing − opening) of raw materials
 only (`sp05a_materie_prime`, OIC B11: a stock increase *reduces* the cost), and the closing stock
 comes from a DIO measured on **materials consumption** (`ce05 + ce10`), not on revenue — the other
-stock lines keep the revenue-based DIO. An explicit `dio_days` therefore now means
+stock lines keep the revenue-based DIO. (From R07, below, the consumption itself is what grows; purchases are the balance.) An explicit `dio_days` therefore now means
 days of materials on consumption, never on sales, and materials are no longer a valid target of
 `_CAMPI_NEUTRI_RESIDUO['sp05_rimanenze']` (a CE↔SP boundary, like the financial rows).
+**R07 (#63, owner's decision 2026-10-09, `ENGINE_VERSION` "4"): materials grow on CONSUMPTION, not on purchases — this reverses the
+"stock drives the P&L" half of B01 above.** Consumption = `ce05 + ce10`; each year it grows from the previous one (variable
+and fixed share with their own percentages), closing stock = consumption × days / 360, and purchases are the balancing
+figure: `ce05 = consumo + RF − RI` (never below zero — then `ce05 = 0`, closing stock = opening − consumption, declared in
+`details['avvisi']` and `details['rimanenze_materie']['acquisti_azzerati']`), `ce10 = RI − RF`. Consumption no longer depends
+on the days. `details['ce05_fixed']`/`['ce05_variable']` are the shares of the consumption; DPO runs on the resulting
+`ce05`; the break-even takes `ce10` inside the shares, not again among the fixed costs (`punto_di_pareggio` is called with
+`ce10=0`, also in the dossier's base column). `ce05_override` still wins (purchases fixed, closed form
+`rimanenze_gruppo_materie`); `ce10_override` keeps its rule and the consumption follows the assumption.
+Semi-finished goods (`sp05b`) stay in the days group: `sp05a`/`sp05b` split the group stock (consumption × days / 360)
+with the opening mix (`rimanenze_gruppo_da_consumo`), only `sp05a` goes through `ce10`/purchases, `sp05b` through `ce02`.
 **#62 note S04 (2026-10-05): two groups, and the CE takes its stock lines from the SP.** `dio_days` =
 raw materials + semi-finished (`sp05a + sp05b`) on consumption; the new `dio_pf_days` (column on
 `BudgetAssumptions`, `migrate_db.py`) = finished goods and merchandise (`sp05d`) on revenue; `sp05c`/`sp05e`

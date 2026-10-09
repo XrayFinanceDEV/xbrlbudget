@@ -368,6 +368,7 @@ class BudgetAssumptionsBase(BaseModel):
     # Tax and other parameters
     tax_rate: Decimal = Field(default=Decimal("24"))
     tax_advances_paid: Decimal = Field(default=Decimal("0"), ge=0)
+    tax_advances_already_paid: Decimal = Field(default=Decimal("0"), ge=0)
     tax_temporary_differences: Optional[List[TemporaryDifferenceInput]] = None
     fixed_materials_percentage: Decimal = Field(default=Decimal("40"))
     fixed_services_percentage: Decimal = Field(default=Decimal("40"))
@@ -509,6 +510,7 @@ class BudgetAssumptionsUpdate(BaseModel):
     interest_rate_payables: Optional[Decimal] = None
     tax_rate: Optional[Decimal] = None
     tax_advances_paid: Optional[Decimal] = Field(None, ge=0)
+    tax_advances_already_paid: Optional[Decimal] = Field(None, ge=0)
     tax_temporary_differences: Optional[List[TemporaryDifferenceInput]] = None
     fixed_materials_percentage: Optional[Decimal] = None
     fixed_services_percentage: Optional[Decimal] = None

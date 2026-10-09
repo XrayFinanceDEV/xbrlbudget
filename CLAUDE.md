@@ -999,8 +999,12 @@ Projects a partial year (say 9 months) to a full 12 months, against a reference 
   year end, so a budget born from the promote no longer inherits it; the **credit stays on the balance sheet** and
   adds to the one the year itself generates (`sp06e` = closing credit + opening credit, owner's decision
   2026-09-16 revising decision 4 of lotto 3A: collecting it within the year inflated projected cash by an amount
-  nobody had decided — 184.140,58 € on AMBIENTA 2026/6M). The `posizione_tributaria_apertura` diagnostic declares
-  both sides (`projection_common.posizione_tributaria_fine_anno`, `_declare_posizione_tributaria`).
+  nobody had decided — 184.140,58 € on AMBIENTA 2026/6M). Part of that credit is often the year's advances already
+  paid in the period: the optional `BudgetAssumptions.tax_advances_already_paid` (G, `0 <= G <= sp06e` of the partial,
+  else an Italian `ValueError`; #63 R09) makes the effective advances `max(A, G)` and leaves `sp06e − G` of the
+  opening credit on the balance sheet, so only `A_eff − G` leaves cash in the rest of the year; G = 0 moves nothing.
+  The `posizione_tributaria_apertura` diagnostic declares
+  both sides, plus G, the residual credit and the effective advances (`projection_common.posizione_tributaria_fine_anno`, `_declare_posizione_tributaria`).
   Automatic tax balances stay outside working-capital turnover: `sp06e`/`sp16e` (and governed
   deferred-tax balances) are removed from reference and partial stocks before DSO/DPO are applied,
   then receive the kernel closing balance directly. No arbitrary `sp06g`/`sp16g` capacity or tax

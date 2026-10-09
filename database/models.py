@@ -703,6 +703,8 @@ class BudgetAssumptions(Base):
     # Tax and other parameters
     tax_rate = Column(Numeric(10, 6), default=24, nullable=False)  # IRES/IRAP tax rate %
     tax_advances_paid = Column(Numeric(15, 2), default=0, nullable=False)  # Acconti d'imposta versati nell'anno
+    # Infrannuale (#63 R09): acconti dell'anno GIA' versati nel periodo, compresi in sp06e del parziale
+    tax_advances_already_paid = Column(Numeric(15, 2), default=0, nullable=False)
     tax_temporary_differences = Column(JSON, nullable=True)  # Deferred-tax roll-forward lines
     fixed_materials_percentage = Column(Numeric(10, 6), default=40, nullable=False)  # % of materials that are fixed costs
     fixed_services_percentage = Column(Numeric(10, 6), default=40, nullable=False)  # % of services that are fixed costs

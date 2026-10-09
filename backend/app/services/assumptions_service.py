@@ -263,6 +263,7 @@ def build_assumption_row(
         interest_rate_payables=data.get("interest_rate_payables", 0.0),
         tax_rate=data.get("tax_rate", 27.9),
         tax_advances_paid=data.get("tax_advances_paid", 0.0) or 0.0,
+        tax_advances_already_paid=data.get("tax_advances_already_paid", 0.0) or 0.0,
         tax_temporary_differences=jsonable_encoder(
             data.get("tax_temporary_differences", None)
         ),

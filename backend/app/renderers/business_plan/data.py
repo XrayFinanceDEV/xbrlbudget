@@ -552,7 +552,24 @@ def _puntuali(report) -> tuple:
             elif a.field == "ce_overrides" and a.ce_overrides:
                 out.append(("Valori forzati CE previsionale",
                             _raggruppa([(o.field, o.value) for o in a.ce_overrides], etichette, fmt.eur)))
+    out.extend(_acconti_infrannuale(getattr(report, "infrannual_closing", None)))
     return tuple(out)
+
+
+def _acconti_infrannuale(closing) -> list:
+    """#63 R09/R16: gli acconti d'imposta dell'anno dichiarati nell'infrannuale che fa da base al piano."""
+    if closing is None:
+        return []
+    dovuti, versati = getattr(closing, "tax_advances_paid", None), getattr(closing, "tax_advances_already_paid", None)
+    if not dovuti and not versati:
+        return []
+    anno = closing.period_end.year if hasattr(closing.period_end, "year") else str(closing.period_end)[:4]
+    parti = [f"acconti dell'anno € {fmt.eur(dovuti)}" if dovuti
+             else "acconti dell'anno pari all'imposta dell'anno precedente"]
+    if versati:
+        parti.append(f"di cui € {fmt.eur(versati)} già versati nel periodo osservato, compresi nei crediti "
+                     "tributari: riducono gli acconti ancora da versare e non restano a credito")
+    return [(f"Acconti d'imposta {anno}", "; ".join(parti))]
 
 
 def _avvisi_motore(report) -> tuple:

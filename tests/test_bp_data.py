@@ -239,3 +239,16 @@ def test_R15_nota_sul_periodo_residuo_quando_il_margine_si_scosta():
     v[("ebitda", clo)] = D("128482")
     assert bp._nota_residuo(lambda k, p: v[(k, p)], adj, clo, 6) == ""
     assert bp._nota_residuo(lambda k, p: None, adj, clo, 6) == ""
+
+
+def test_R09_acconti_dell_infrannuale_dichiarati_in_sez_10():
+    from datetime import date
+    from app.renderers.business_plan import data as bp
+    closing = _ns(period_end=date(2026, 6, 30), tax_advances_paid=None, tax_advances_already_paid=D("10000"))
+    rep = _report([])
+    rep.infrannual_closing = closing
+    out = dict(bp._puntuali(rep))
+    assert out["Acconti d'imposta 2026"].startswith("acconti dell'anno pari all'imposta dell'anno precedente; "
+                                                    "di cui € 10.000 già versati")
+    closing.tax_advances_already_paid = None
+    assert bp._puntuali(rep) == ()

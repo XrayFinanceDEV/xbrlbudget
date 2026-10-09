@@ -689,13 +689,21 @@ def build_infrannual_closing(
     period_end: date | str,
     rows: Iterable[Mapping[str, Any]],
     alerts: Any = None,
+    tax_advances_paid: Any = None,
+    tax_advances_already_paid: Any = None,
 ) -> InfrannualClosing:
     """The whole ``infrannual_closing`` block of the contract."""
     values = build_closing_values(rows)
     if not values:
         raise ValueError("La chiusura infrannuale richiede almeno una voce")
+
+    def _dichiarato(v):  # 0 = non dichiarato (default di colonna)
+        return Decimal(str(v)) if v is not None and Decimal(str(v)) > 0 else None
+
     return InfrannualClosing(
         period_end=period_end if isinstance(period_end, date) else str(period_end),
         values=values,
         extra_accounting_alerts=final_report_alerts(alerts),
+        tax_advances_paid=_dichiarato(tax_advances_paid),
+        tax_advances_already_paid=_dichiarato(tax_advances_already_paid),
     )

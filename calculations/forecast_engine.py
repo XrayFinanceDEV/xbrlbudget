@@ -1599,11 +1599,13 @@ class ForecastEngine:
                 # Un override si ripartisce riempiendo prima la quota del
                 # consuntivo; l'eccedenza e' credito da compensare l'anno dopo.
                 sp06e = Decimal(str(sp06e))
-                consuntivo = Decimal(str(imposte.get('crediti_tributari_consuntivo') or 0))
+                # R11: la quota riclassificata oltre 12 mesi sta in `sp07e`, non in `sp06e`.
+                riclass = Decimal(str(imposte.get('crediti_riclassificati_lungo') or 0))
+                consuntivo = Decimal(str(imposte.get('crediti_tributari_consuntivo') or 0)) - riclass
                 declared = consuntivo + Decimal(str(imposte.get('generated_credit') or 0))
                 if sp06e != cls._q(declared):
                     quota = cls._q(min(consuntivo, sp06e))
-                    imposte['crediti_tributari_consuntivo'] = quota
+                    imposte['crediti_tributari_consuntivo'] = quota + riclass
                     imposte['generated_credit'] = sp06e - quota
         # 3) `indicizzazione`: il `valore` dichiarato segue la riga persistita.
         for code, voce in (details.get('indicizzazione') or {}).items():
@@ -4099,15 +4101,24 @@ class ForecastEngine:
 
         # Long-term receivables, other current assets
         long_growth = D('1') + assumption.receivables_long_growth_pct / D('100')
+        # Quota dei crediti tributari del piano `crediti_tributari_breve` che l'anno prima il calendario ha
+        # riclassificato oltre 12 mesi dentro `sp07e` (`residual_long`, R11 / #63). E' stato d'apertura gia'
+        # contato in `sp07e`: non e' la crescita propria del lungo e non deve rientrarci, altrimenti si
+        # somma di nuovo ogni anno. Limitata a `sp07e` dell'anno prima (un override puo' averla ridotta).
+        riclass_prev = min(
+            D(str(((prev_details or {}).get('imposte') or {}).get('crediti_riclassificati_lungo') or 0)),
+            _prev('sp07e_crediti_tributari_lungo'),
+        )
+        sp07e_prev_proprio = _prev('sp07e_crediti_tributari_lungo') - riclass_prev
         if tax_difference_lines:
             sp07_non_deferred = max(
                 ZERO,
-                _prev('sp07_crediti_lungo') - _prev('sp07f_imposte_anticipate_lungo'),
+                _prev('sp07_crediti_lungo') - _prev('sp07f_imposte_anticipate_lungo') - riclass_prev,
             ) * long_growth
             sp07f = deferred['long_asset']
             sp07 = sp07_non_deferred + sp07f
         else:
-            sp07 = _prev('sp07_crediti_lungo') * long_growth
+            sp07 = (_prev('sp07_crediti_lungo') - riclass_prev) * long_growth
             sp07_non_deferred = sp07 - _prev('sp07f_imposte_anticipate_lungo') * long_growth
 
         # ── PREGRESSO: il circolante e' generato + residuo (spec lotto 2 §3.1) ──
@@ -4125,7 +4136,7 @@ class ForecastEngine:
                 else runoff_schedule(
                     piano_crediti_tributari_breve['opening'],
                     piano_crediti_tributari_breve['amounts'], [], year_index - 1, horizon,
-                ).residual
+                ).residual_short
             )
             r = runoff_schedule(
                 piano_crediti_tributari_breve['opening'],
@@ -4141,10 +4152,10 @@ class ForecastEngine:
             pregresso_runoff['crediti_tributari_lungo'] = r
             # Il piano governa la sola componente tributaria del lungo; le
             # altre componenti conservano la loro regola di crescita.
-            sp07_non_deferred += r.residual - _prev('sp07e_crediti_tributari_lungo') * long_growth
+            sp07_non_deferred += r.residual - sp07e_prev_proprio * long_growth
             sp07 = (
                 sp07_non_deferred + sp07f if tax_difference_lines
-                else sp07 + r.residual - _prev('sp07e_crediti_tributari_lungo') * long_growth
+                else sp07 + r.residual - sp07e_prev_proprio * long_growth
             )
         # ── DSO → i soli crediti verso CLIENTI (#61 S03/S27, decisione del proprietario 2026-10-05) ──
         # sp06a + sp07a = DSO x ricavi / 360. Le altre voci commerciali (controllate, collegate,
@@ -4256,7 +4267,7 @@ class ForecastEngine:
             sp06 = sp06_trade + sp06e + sp06f
             sp07e_long = (
                 pregresso_runoff['crediti_tributari_lungo'].residual
-                if piano_crediti_tributari_lungo else _prev('sp07e_crediti_tributari_lungo') * long_growth
+                if piano_crediti_tributari_lungo else sp07e_prev_proprio * long_growth
             )
             if tax_difference_lines:
                 sp07_non_deferred = runoff_crediti.residual_long + sp07e_long
@@ -4514,12 +4525,17 @@ class ForecastEngine:
         tax_year = None
         avviso_acconti = None
         tax_generated_short = None
+        # R11 / #63: quota di `sp06e` che il piano `crediti_tributari_breve` dichiara oltre 12 mesi
+        # (`residual_long`) e che quindi sta in `sp07e`, non in `sp06e`. Riclassifica breve -> lungo: totale
+        # attivo e cassa non si muovono.
+        riclass_crediti_lungo = ZERO
         if manual_tax_position:
             sp16e = _prev('sp16e_debiti_tributari_breve') * (D('1') + _sp_growth('sp16e_growth_pct'))
             sp17e = _prev('sp17e_debiti_tributari_lungo') * (D('1') + _sp_growth('sp17e_growth_pct'))
             if piano_crediti_tributari_breve:
                 credito_da_imposte = max(ZERO, _prev('sp06e_crediti_tributari_breve') - credito_tributario_altro_precedente)
-                sp06e = pregresso_runoff['crediti_tributari_breve'].residual + credito_da_imposte
+                riclass_crediti_lungo = pregresso_runoff['crediti_tributari_breve'].residual_long
+                sp06e = pregresso_runoff['crediti_tributari_breve'].residual_short + credito_da_imposte
                 sp06 = sp06_trade + sp06e + sp06f
             if plan_tax and details is not None:
                 details.setdefault('pregresso_ignored', []).append('debiti_tributari')
@@ -4672,6 +4688,11 @@ class ForecastEngine:
             # sale dello stesso importo. L'anno dopo riparte da `crediti_tributari_consuntivo`, gia' al netto.
             crediti_consuntivo -= tax_year.credito_storico_compensato
             compensato_cumulato += tax_year.credito_storico_compensato
+            # R11 / #63: la compensazione ha scalato il credito sul totale (la cassa non cambia); di quel che
+            # resta, la parte che il calendario dichiara oltre 12 mesi passa da `sp06e` a `sp07e`.
+            if piano_crediti_tributari_breve:
+                riclass_crediti_lungo = min(
+                    pregresso_runoff['crediti_tributari_breve'].residual_long, max(ZERO, crediti_consuntivo))
             # #62 S28: l'importo inserito vince (puo' essere voluto), ma sotto sia al metodo storico sia al
             # previsionale espone a sanzioni: si dichiara, non si corregge.
             esplicito = Decimal(str(getattr(assumption, 'tax_advances_paid', None) or 0))
@@ -4686,8 +4707,12 @@ class ForecastEngine:
             tax_generated_short = tax_year.generated_debt
             sp16e = tax_year.generated_debt + r.residual_short
             sp17e = r.residual_long
-            sp06e = crediti_consuntivo + tax_year.generated_credit + tax_year.opening_credit_left
+            sp06e = (crediti_consuntivo - riclass_crediti_lungo
+                     + tax_year.generated_credit + tax_year.opening_credit_left)
             sp06 = sp06_trade + sp06e + sp06f
+        if riclass_crediti_lungo:
+            sp07_non_deferred += riclass_crediti_lungo
+            sp07 += riclass_crediti_lungo
         # Con un piano l'indicizzazione e' gia' stata scartata (Ruling 17),
         # quindi l'ancora torna a essere `_prev` e lo scorporo resta quello di
         # sempre; senza piano `_net_of_pregresso` e' un passa-avanti.
@@ -5173,7 +5198,7 @@ class ForecastEngine:
         # chiamata, invariata, e solo il residuo commerciale passa da `_consuma_in_ordine`.
         campi_commerciali_lunghi = sp07_non_deferred_fields[:4] + sp07_non_deferred_fields[5:]
         if piano_crediti_tributari_lungo:
-            sp07e = pregresso_runoff['crediti_tributari_lungo'].residual
+            sp07e = pregresso_runoff['crediti_tributari_lungo'].residual + riclass_crediti_lungo
             residuo_commerciale = sp07_non_deferred - sp07e
             if crediti_plan:
                 sp07a, sp07b, sp07c, sp07d, sp07g = _consuma_in_ordine(
@@ -5186,26 +5211,32 @@ class ForecastEngine:
             if not tax_difference_lines:
                 sp07f = sp07 - sp07_non_deferred
         elif tax_difference_lines:
+            # La quota riclassificata dal piano dei crediti tributari (R11) e' solo `sp07e`: il resto si
+            # ripartisce come sempre sulle proporzioni dell'anno base.
             if crediti_plan:
-                _, _, _, _, sp07e, _ = _alloc(sp07_non_deferred, sp07_non_deferred_fields)
+                _, _, _, _, sp07e, _ = _alloc(
+                    sp07_non_deferred - riclass_crediti_lungo, sp07_non_deferred_fields)
                 sp07a, sp07b, sp07c, sp07d, sp07g = _consuma_in_ordine(
-                    sp07_non_deferred - sp07e, [_base(f) for f in campi_commerciali_lunghi]
+                    sp07_non_deferred - riclass_crediti_lungo - sp07e,
+                    [_base(f) for f in campi_commerciali_lunghi]
                 )
             else:
                 sp07a, sp07b, sp07c, sp07d, sp07e, sp07g = _alloc(
-                    sp07_non_deferred, sp07_non_deferred_fields
+                    sp07_non_deferred - riclass_crediti_lungo, sp07_non_deferred_fields
                 )
+            sp07e += riclass_crediti_lungo
         else:
             sp07_fields = sp07_non_deferred_fields[:5] + [
                 'sp07f_imposte_anticipate_lungo', 'sp07g_crediti_altri_lungo'
             ]
             if crediti_plan:
-                _, _, _, _, sp07e, sp07f, _ = _alloc(sp07, sp07_fields)
+                _, _, _, _, sp07e, sp07f, _ = _alloc(sp07 - riclass_crediti_lungo, sp07_fields)
                 sp07a, sp07b, sp07c, sp07d, sp07g = _consuma_in_ordine(
-                    sp07 - sp07e - sp07f, [_base(f) for f in campi_commerciali_lunghi]
+                    sp07 - riclass_crediti_lungo - sp07e - sp07f, [_base(f) for f in campi_commerciali_lunghi]
                 )
             else:
-                sp07a, sp07b, sp07c, sp07d, sp07e, sp07f, sp07g = _alloc(sp07, sp07_fields)
+                sp07a, sp07b, sp07c, sp07d, sp07e, sp07f, sp07g = _alloc(sp07 - riclass_crediti_lungo, sp07_fields)
+            sp07e += riclass_crediti_lungo
 
         # Le cinque voci di sp05 vengono dal CE (spec B01 e nota S04): nessuna quota proporzionale
         # dell'aggregato, ciascuna e' esattamente la chiusura gia' quantizzata al centesimo.
@@ -5281,6 +5312,7 @@ class ForecastEngine:
                     'opening_credit_left': tax_year.opening_credit_left,
                     'credito_compensato': tax_year.credito_compensato,
                     'crediti_tributari_consuntivo': crediti_consuntivo,
+                    'crediti_riclassificati_lungo': riclass_crediti_lungo,
                     'credito_storico_compensato': tax_year.credito_storico_compensato,
                     'credito_storico_compensato_cumulato': compensato_cumulato,
                     'compensazione_ignorata': False,
@@ -5293,6 +5325,7 @@ class ForecastEngine:
                     'rate_paid': ZERO, 'generated_debt': ZERO, 'generated_credit': ZERO,
                     'opening_credit_left': ZERO, 'credito_compensato': ZERO,
                     'crediti_tributari_consuntivo': ZERO, 'mode': 'manual', 'avviso_acconti': None,
+                    'crediti_riclassificati_lungo': riclass_crediti_lungo,
                     # Via manuale: la compensazione non si applica, e se l'utente la voleva lo si dichiara.
                     'credito_storico_compensato': ZERO, 'credito_storico_compensato_cumulato': ZERO,
                     'compensazione_ignorata': bool(compensa_crediti_tributari),

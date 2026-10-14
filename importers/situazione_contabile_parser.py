@@ -294,7 +294,10 @@ _SP_ATTIVO_RULES = [
     (['IMMOBILIZZAZIONI', 'ACCONT'], 'gross_sp03'),
     # Credits explicitly labelled as immobilised belong to B.III even when the
     # account number is gestionale-specific (AGO: "Crediti v/altri (EE-immob.)").
-    (['CREDITI', 'IMMOB'], 'gross_sp04'),
+    # non 'IMMOB' da solo: "Crediti vs. Ad Immobiliare" e' un credito (M.C.T. 30/06/2026)
+    (['CREDITI', 'IMMOBILIZZ'], 'gross_sp04'),
+    (['CREDITI', 'IMMOB.'], 'gross_sp04'),
+    (['CREDITI', 'IMMOBILE'], 'gross_sp04'),          # "Crediti per acquisto immobile" (AITEC)
     # An advance on a CANONE / lease ("ANTICIPO X CANONI MACCHINARI") is a credit,
     # not the machine — must precede the MACCHINAR category rule. Narrow to CANON on
     # purpose: a blanket ANTICIP rule would (a) demote a genuine acconto to PURCHASE
@@ -429,6 +432,7 @@ _SP_PASSIVO_RULES = [
     (['TFR'], 'sp15'),
     (['T.F.R'], 'sp15'),
     (['TRATTAMENTO', 'FINE', 'RAPPORTO'], 'sp15'),
+    (['TRATT', 'FINE', 'RAPPORTO'], 'sp15'),
     # Debiti v/banche (need entro/oltre split — from details OR from "(EE)"/"(OE)" suffix)
     (['DEBITI', 'BANCH'], 'debt_bank'),
     (['DEBITI', 'FINANZIAT'], 'debt_bank'),
@@ -459,6 +463,8 @@ _SP_PASSIVO_RULES = [
 # CE keyword rules for COSTI section
 _CE_COSTI_RULES = [
     (['RIM.INIZ'], 'ce10'),
+    (['ESISTENZE', 'INIZIAL'], 'ce10'),
+    (['RIMANENZE', 'INIZIAL'], 'ce10'),
     (['RICAVI'], 'ce01_return'),  # Returns/discounts in cost section
     # Variazioni rimanenze MUST be before materie prime (descriptions often contain "MERCI")
     (['VARIAZ', 'RIMANENZ'], 'ce10'),
@@ -515,6 +521,7 @@ _CE_COSTI_RULES = [
 # CE keyword rules for RICAVI section
 _CE_RICAVI_RULES = [
     (['RIM.FIN'], 'ce10_close'),
+    (['RIMANENZE', 'FINAL'], 'ce10_close'),
     (['PROV.FIN'], 'ce14'),
     # More specific rules first
     (['VARIAZ', 'RIMANENZ'], 'ce10_close'),
@@ -2830,9 +2837,29 @@ class ReconstructedRow:
         return self.code, self.description, self.amount
 
 
+_ZERO_PADDED_CODE = re.compile(r'^\d+(?:\.\d+){2,}$')
+
+
+def _be_trim_zero_segments(code: str) -> str:
+    """Un piano dei conti a segmenti di larghezza fissa scrive il mastro e il conto
+    riempiendo di zeri i segmenti che non hanno ("102.00.00000" mastro, "102.01.00000"
+    conto, "102.01.00004" sottoconto: M.C.T. 30/06/2026). Ridotti alle sole cifre i tre
+    livelli non sono uno il prefisso dell'altro e si sommano tutti: tolti i segmenti di
+    zeri in coda lo diventano ("102", "10201", "1020100004"), e il riclassificatore
+    sceglie un livello solo. Solo codici di almeno tre segmenti con l'ultimo di almeno
+    quattro cifre: i "NN.NN.NN" dei quattro sezioni restano come sono."""
+    code = code.strip()
+    if not _ZERO_PADDED_CODE.match(code) or len(code.rsplit('.', 1)[1]) < 4:
+        return code
+    parts = code.split('.')
+    while len(parts) > 1 and not parts[-1].strip('0'):
+        parts.pop()
+    return '.'.join(parts)
+
+
 def _be_norm(code: str) -> str:
     """Normalise a (possibly multi-token) account code to a digit string."""
-    return re.sub(r'\D', '', code)
+    return re.sub(r'\D', '', _be_trim_zero_segments(code))
 
 
 def _be_split(words) -> Optional[float]:
@@ -3013,6 +3040,7 @@ def _be_code_prefix(tokens: List[str]) -> Tuple[List[str], int]:
 
 
 def _be_normalize_code(raw_code: str) -> str:
+    raw_code = _be_trim_zero_segments(raw_code)
     mapped = raw_code.upper().translate(str.maketrans({
         'D': '0', 'O': '0', 'Q': '0', 'L': '1', 'A': '0',
     }))
@@ -3119,6 +3147,7 @@ def _be_collect_side_facts(words, lo: float, hi: float, codeless: bool = False,
                                           'SEGUE', 'IMPORTI', 'PROGRESSIV')):
             continue
         is_control = ('TOTALE' in description or 'PAREGGIO' in description
+                      or re.match(r'^TOTALI\b', description) is not None
                       or ('ESERCIZ' in description
                           and any(k in description for k in ('UTILE', 'PERDIT', 'RISULTAT'))))
         if is_control and not include_controls:
@@ -4640,8 +4669,31 @@ def section_pages(file_path: str) -> Dict[str, List[int]]:
 # Erano closure dentro extract_contrapposte_best_effort: promosse a funzioni di
 # modulo perche' il riscatto vision (vision_rescue.py) classifica le stesse
 # descrizioni senza ri-eseguire l'estrazione. Nessun cambiamento di regola.
+# Il percorso di legge che alcuni gestionali stampano davanti alla descrizione del
+# conto ("B) I) IMMOBILIZZAZ.IMMATERIALI", "A) 2) ESISTENZE INIZIALI", "4-TER) CRED.
+# IMPOSTE ANTICIPATE": M.C.T. 30/06/2026). Non decide la voce — lo stesso gestionale
+# scrive "B) F.DI AMMORTAM." al passivo, dove B) sarebbero i fondi rischi — ma copre le
+# regole ancorate a inizio descrizione: si toglie, e decide la descrizione.
+_PREFISSO_LEGALE = re.compile(
+    r'^\s*(?:[A-E]\)\s*)?(?:[IVX]{1,4}\)\s*)?(?:\d{1,2}(?:\s*-\s*(?:BIS|TER|QUATER))?\)\s*)?')
+_ABBREVIAZIONI = (
+    (re.compile(r'\bIMMOBIL[A-Z]*\.\s*'), 'IMMOBILIZZAZIONI '),   # IMMOBILIZZAZ. / IMMOBILZZ.
+    (re.compile(r'^F/A\s*-\s*'), 'F.DO AMM. '),                   # "F/A - Fabbricati industr."
+    (re.compile(r'\bF\.DI\s+(?=(?:DI\s+|PER\s+)?(?:ALTRI\s+)?RISCHI)'), 'FONDI '),
+    (re.compile(r'^F\.DI\s+(?=AMM)'), 'FONDI '),                    # "F.DI AMMORTAM. ORDINARIO"
+    (re.compile(r'\bRAPPOR\.'), 'RAPPORTO'),
+)
+
+
+def _descrizione_di_conto(desc_upper: str) -> str:
+    d = _PREFISSO_LEGALE.sub('', desc_upper, count=1).strip() or desc_upper
+    for pattern, repl in _ABBREVIAZIONI:
+        d = pattern.sub(repl, d)
+    return d.strip()
+
+
 def classify_attivo(desc_upper: str) -> Tuple[str, bool]:
-    d = desc_upper
+    d = _descrizione_di_conto(desc_upper)
     # Some TeamSystem/ERP exports append the legal IV-CEE code after a run of
     # underscores (e.g. ``IMMOBILIZZAZIONI IMMATERIALI______BI``).  It is still
     # the explicit parent category, not an unknown generic caption: normalize
@@ -4656,6 +4708,12 @@ def classify_attivo(desc_upper: str) -> Tuple[str, bool]:
     if legal_parent:
         return legal_parent, True
     d = normalized
+    # C.III "Attivita' finanziarie che non costituiscono immobilizzazioni" ("ATTIV.FIN.
+    # NON IMMOBIL.", M.C.T. 30/06/2026: polizze e fondi assicurativi): contiene
+    # IMMOBILIZZAZIONI e finiva fra le immobilizzazioni materiali, oltre il confine
+    # dell'attivo circolante.
+    if 'NON IMMOBILIZZ' in d or 'NON COSTIT' in d:
+        return 'sp08', True
     # A malformed generic "IMMOBILIZZAZIONI ..." caption can accidentally
     # match MOBILI inside IMMOBILIZZAZIONI.  Descend to its specific children
     # (software/oneri pluriennali/etc.) unless the printed category is exact.
@@ -4672,11 +4730,15 @@ def classify_attivo(desc_upper: str) -> Tuple[str, bool]:
         return 'sp05', True
     f = _classify_sp_attivo(d)
     f = {'gross_sp02': 'sp02', 'gross_sp03': 'sp03', 'gross_sp04': 'sp04'}.get(f, f)
+    # Un credito non e' mai un cespite: "Crediti vs. Ad Immobiliare" prendeva la regola
+    # MOBILI (mobili e arredi) dentro IMMOBILIARE (M.C.T. 30/06/2026).
+    if f in ('sp02', 'sp03') and d.startswith('CRED'):
+        return 'sp06', False
     return f, f != 'sp06'
 
 
 def classify_passivo(desc_upper: str) -> Tuple[str, bool]:
-    d = desc_upper
+    d = _descrizione_di_conto(desc_upper)
     if _is_fondo_amm(d):
         field = 'depr_sp02' if _fondo_is_immat(d) else 'depr_sp03'
         # A category-blind aggregate must descend into children; any uncovered
@@ -4685,6 +4747,11 @@ def classify_passivo(desc_upper: str) -> Tuple[str, bool]:
         return field, specific
     tag = _classify_sp_passivo(d)
     if tag == 'equity_total':
+        # "CAPITALE E RISERVE" e' una testa di due voci diverse: si scende nei figli
+        # (capitale sociale -> sp11, riserve -> sp12), e cio' che non coprono resta riserva.
+        # Fermarsi li' metteva la riserva legale nel capitale (budget_590, Unicarton).
+        if re.search(r'CAPITALE(?:\s+SOCIALE)?\s+E\s+RISERV', d):
+            return 'sp12', False
         if _kw_match(d, ['CAPITALE']):
             return 'sp11', True
         return 'sp12', True
@@ -4696,18 +4763,24 @@ def classify_passivo(desc_upper: str) -> Tuple[str, bool]:
         # type stops the descent; an unknown ('g') keeps descending to find a typed child.
         letter = ('a' if tag in ('debt_bank', 'bank_avere') or 'BANC' in d
                   else _debt_type(d.upper()))
+        # Una testa generica di finanziamenti senza "banca" ("FINANZIAMENTI DI TERZI",
+        # "MUTUI E FINANZIAMENTI", budget_590) contiene anche il finanziamento soci: si
+        # scende nei figli, e cio' che non coprono resta banca come prima.
+        if (letter == 'a' and 'BANC' not in d
+                and _kw_any(d, ['FINANZIAMENTI DI TERZI', 'MUTUI E FINANZIAMENTI'])):
+            return 'sp16a', False
         return 'sp16' + letter, letter != 'g'
     return tag, tag != 'sp16'
 
 
 def classify_costi(desc_upper: str) -> Tuple[str, bool]:
-    d = desc_upper
+    d = _descrizione_di_conto(desc_upper)
     f = _classify_ce_costi(d)
     return (f, True) if f else ('ce12', False)
 
 
 def classify_ricavi(desc_upper: str) -> Tuple[str, bool]:
-    d = desc_upper
+    d = _descrizione_di_conto(desc_upper)
     f = _classify_ce_ricavi(d)
     return (f, True) if f else ('ce04', False)
 
@@ -4726,6 +4799,9 @@ def extract_contrapposte_best_effort(file_path: str) -> Tuple[Dict[str, Decimal]
     # be re-run in a code-less second pass without re-opening the PDF.
     pages_data: List[tuple] = []
 
+    previous = None
+    closed = False       # la sezione della pagina prima ha gia' stampato i suoi totali
+    totals_seen = 0
     for page in doc:
         ptext = page.get_text()
         full += ptext + "\n"
@@ -4733,6 +4809,24 @@ def extract_contrapposte_best_effort(file_path: str) -> Tuple[Dict[str, Decimal]
         verdict = classify_page_section(ptext)
         if verdict is None:
             continue
+        # Pagina di continuazione senza intestazione di sezione (M.C.T. 30/06/2026: la
+        # pagina 2 riprende l'attivo e il passivo della 1 con il solo titolo del
+        # documento): e' della sezione della pagina prima, se quella era una sola e non
+        # aveva ancora chiuso coi totali di entrambi i lati o col pareggio. Dopo la
+        # chiusura una pagina senza sezione e' un allegato ("Dettaglio ratei, risconti e
+        # competenze", budget_210), e resta fuori.
+        if verdict == (False, False) and previous in ((True, False), (False, True)) \
+                and not closed:
+            verdict = previous
+        if verdict != previous:
+            closed, totals_seen = False, 0
+        previous = verdict
+        flat_up = re.sub(r'\s+', '', up)
+        totals_seen += len(re.findall(r'(?m)^\s*TOTALI\b', up))
+        closed = closed or ('PAREGGIO' in flat_up or 'QUADRATURA' in flat_up
+                            or ('TOTALEATTIV' in flat_up and 'TOTALEPASSIV' in flat_up)
+                            or ('TOTALECOST' in flat_up and 'TOTALERICAV' in flat_up)
+                            or totals_seen >= 2)
         is_sp, is_ce = verdict
         words = page.get_text('words')
         if not words:
@@ -4903,6 +4997,9 @@ def extract_contrapposte_best_effort(file_path: str) -> Tuple[Dict[str, Decimal]
     # side, perdita on the attivo side). Strip it from both columns so it is not
     # double-counted as a credit/asset; its signed value becomes sp13.
     result = [Z]
+    # Ogni conto di risultato tolto, col segno: se poi non coincide col risultato del
+    # periodo e' l'utile (o la perdita) dell'anno prima non ancora destinato.
+    booked_results: List[Decimal] = []
 
     def _strip_result(side):
         keep = []
@@ -4910,6 +5007,7 @@ def extract_contrapposte_best_effort(file_path: str) -> Tuple[Dict[str, Decimal]
             if ('ESERCIZ' in d and ('UTILE' in d or 'PERDITA' in d or 'RISULTAT' in d)
                     and not _kw_any(d, ['PORTAT', 'PORTATE', 'NUOVO', 'PRECEDENT'])):
                 result[0] += (-a if 'PERDITA' in d else a)
+                booked_results.append(-a if 'PERDITA' in d else a)
                 continue
             keep.append((c, d, a))
         return keep
@@ -4996,12 +5094,23 @@ def extract_contrapposte_best_effort(file_path: str) -> Tuple[Dict[str, Decimal]
 
     # Coordinate facts first; legacy linear-text lookup remains as a fallback for
     # layouts whose footer is not physically aligned with either data column.
-    tot_att = ((_control_amount('sp', 'left', 'TOTALE', 'ATTIV')
-                if use_garbled_reconstruction else None)
+    # Un totale stampato con l'importo PRIMA della didascalia ("1.406.600,60 Totale
+    # Attivita': *** 1.352.014,11 Totale Passivita':", STB 30/06/2026) inganna il testo
+    # lineare, che dopo "TOTALE ATTIV" trova l'importo della passivita': differenza zero,
+    # utile zero. Quando entrambi i totali sono letti per coordinate, ciascuno sulla
+    # propria riga e dal proprio lato, valgono quelli.
+    ctl_att = _control_amount('sp', 'left', 'TOTALE', 'ATTIV')
+    ctl_pas = _control_amount('sp', 'right', 'TOTALE', 'PASSIV')
+    by_coordinates = use_garbled_reconstruction or (
+        ctl_att is not None and ctl_pas is not None)
+    tot_att = ((ctl_att if by_coordinates else None)
                or _find_total('TOTALE ATTIV', 'TOTALEATTIV'))
-    tot_pas = ((_control_amount('sp', 'right', 'TOTALE', 'PASSIV')
-                if use_garbled_reconstruction else None)
+    tot_pas = ((ctl_pas if by_coordinates else None)
                or _find_total('TOTALE PASSIV', 'TOTALEPASSIV'))
+    # "Totali" senza dire di che lato (M.C.T. 30/06/2026): lo dice la colonna.
+    if tot_att is None and tot_pas is None:
+        tot_att = _control_amount('sp', 'left', 'TOTALI')
+        tot_pas = _control_amount('sp', 'right', 'TOTALI')
     pareggio = ((_control_amount('sp', None, 'TOTALE', 'PAREGGIO')
                  if use_garbled_reconstruction else None)
                 or _find_total('TOTALE A PAREGGIO', 'TOTALEAPAREGGIO'))
@@ -5064,6 +5173,26 @@ def extract_contrapposte_best_effort(file_path: str) -> Tuple[Dict[str, Decimal]
         utile = result[0]                                  # booked account fallback
     bs['sp13'] = utile
 
+    # Conti "Utile (perdita) d'esercizio" letti fra i conti dello stato patrimoniale:
+    # quelli tolti come risultato e quelli col codice che il raccoglitore scarta come
+    # righe di totale (AITEC 30/06/2026: mastro 309 e sottoconto 309.00001, 269.255,83
+    # ciascuno). Diversi dal risultato del periodo sono il risultato dell'anno prima non
+    # ancora destinato; se stiano dentro il totale passivita' lo decide il totale
+    # stampato, sotto, e solo al centesimo (STB 30/06/2026 ne ha uno nei conti d'ordine,
+    # fuori dai totali).
+    prior_candidates = list(booked_results)
+    for sec, side, fact in controls:
+        d = fact.description
+        if (sec == 'sp' and fact.code and 'ESERCIZ' in d
+                and any(k in d for k in ('UTILE', 'PERDIT', 'RISULTAT'))
+                and not _kw_any(d, ['PORTAT', 'NUOVO', 'PRECEDENT', 'TOTALE'])):
+            perdita = side == 'left' or ('PERDITA' in d and 'UTILE' not in d)
+            prior_candidates.append(-fact.amount if perdita else fact.amount)
+    prior_candidates = sorted({b for b in prior_candidates
+                               if abs(b - utile) > Decimal('0.05')
+                               and (ce_control_result is None
+                                    or abs(b - ce_control_result) > Decimal('0.05'))})
+
     # A fondo ammortamento can never exceed its own gross asset, so a negative net
     # immobilizzazione is always a misclassification (fondo netted off the wrong /
     # a missing gross asset — budget_365/435). Clamp at 0: a negative asset is never
@@ -5089,6 +5218,17 @@ def extract_contrapposte_best_effort(file_path: str) -> Tuple[Dict[str, Decimal]
         res_a = iv_total - att_sum
         pas_sum = sum((bs.get(k, Z) for k in _PASSIVO_KEYS), Z)
         res_p = iv_total - pas_sum
+        if abs(res_p) > Decimal('0.05'):
+            chiude = [b for b in prior_candidates if abs(res_p - b) <= Decimal('0.05')]
+            if chiude:
+                b = chiude[0]
+                add(bs, 'sp12', b)
+                add(bs, 'sp12g_utili_perdite_portati', b)
+                bs['_prior_result_booked'] = b
+                pas_sum += b
+                res_p = iv_total - pas_sum
+                logger.info(f"contrapposte: conto di risultato {b} diverso dal risultato "
+                            f"del periodo {utile} e dentro il totale passivita' -> sp12g")
         # Keep the statement exactly as classified.  ``iv_total`` is independent
         # evidence from the source, not permission to manufacture the missing side.
         bs['totale_attivo'] = att_sum

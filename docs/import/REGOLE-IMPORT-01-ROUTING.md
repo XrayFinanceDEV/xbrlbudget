@@ -156,7 +156,12 @@ vero. Vanno considerati diagnostica storica, non discriminanti.
 Sono tre stati distinti e vanno tenuti separati, perché il rimedio è diverso.
 
 **Scansione — il testo non c'è.** Meno di 50 caratteri sulle prime 14 pagine
-(`pdf_importer.py:334`). Il router non vedrebbe nulla e rifiuterebbe per la regola 7, quindi a
+(`pdf_importer.py:334`). Per MinerU (passo 0) è scansione anche un PDF in cui **ogni pagina è
+un'immagine a pagina intera con sopra il testo di un OCR** (copertura ≥ 90%, al più due font:
+NAPS2, Unicarton 31/08/2026): quel testo esiste ma è sbagliato («18.978,72» per 18.378,72, «50 +
+874 # 40») e sul percorso di testo lasciava 240 mila di sbilancio; da MinerU lo stesso file esce
+verificato. Un PDF nativo con uno sfondo grafico ha i font del gestionale e resta testo
+(`_e_una_scansione`, `backend/app/api/v1/imports.py`). Il router non vedrebbe nulla e rifiuterebbe per la regola 7, quindi a
 monte si tenta un recupero, in quest'ordine:
 
 0. **MinerU** (dal 2026-10-14, decisione del proprietario), quando `MINERU_OCR_ENABLED`: lo chiama

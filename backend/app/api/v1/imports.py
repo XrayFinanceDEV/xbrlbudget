@@ -27,17 +27,37 @@ router = APIRouter()
 MAX_PDF_SIZE = 50 * 1024 * 1024  # 50MB
 
 
+def _pagina_scansionata(page) -> bool:
+    """Un'immagine che copre la pagina (almeno il 90%) e un testo, se c'e', con al piu'
+    due font: il livello OCR che uno scanner aggiunge sopra la scansione (NAPS2,
+    Unicarton 31/08/2026). Un PDF nativo con uno sfondo grafico ha i font del
+    gestionale, e resta un PDF di testo."""
+    area = page.rect.width * page.rect.height
+    if area <= 0:
+        return False
+    copertura = 0.0
+    for img in page.get_images(full=True):
+        for r in page.get_image_rects(img[0]):
+            copertura = max(copertura, (r.width * r.height) / area)
+    return copertura >= 0.9 and len({f[3] for f in page.get_fonts()}) <= 2
+
+
 def _e_una_scansione(content: bytes) -> bool:
-    """Stessa soglia dell'importatore (``is_scanned``): meno di 50 caratteri di testo
-    nelle prime 14 pagine. Un testo cifrato ma decodificabile non e' una scansione:
-    lo ripara ``importers.testo_cifrato``."""
+    """Una scansione: meno di 50 caratteri di testo nelle prime 14 pagine (la soglia
+    dell'importatore, ``is_scanned``), oppure ogni pagina e' un'immagine intera con
+    sopra il testo di un OCR. Quel testo e' spesso sbagliato ("18.978,72" per
+    18.378,72): MinerU legge l'immagine meglio. Un testo cifrato ma decodificabile e'
+    un'altra cosa: lo ripara ``importers.testo_cifrato``."""
     import fitz
     try:
         with fitz.open(stream=content, filetype="pdf") as doc:
-            testo = "".join(page.get_text() for page in doc[:14])
+            pagine = list(doc)[:14]
+            testo = "".join(page.get_text() for page in pagine)
+            if len(testo.strip()) < 50:
+                return True
+            return bool(pagine) and all(_pagina_scansionata(p) for p in pagine)
     except Exception:
         return False
-    return len(testo.strip()) < 50
 
 
 async def _contesto_mineru_per_scansione(content: bytes, filename: str):

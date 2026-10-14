@@ -77,3 +77,36 @@ def test_mineru_che_non_risponde_ripiega_e_lo_dichiara(chiamate):
     assert r.status_code == 200
     assert viste[0]["extraction_context"] is None
     assert r.json()["warnings"][0].startswith("OCR MINERU NON DISPONIBILE")
+
+
+def _scansione_con_ocr(fonts: int) -> bytes:
+    """Un'immagine a pagina intera con sopra un testo: il livello OCR di uno scanner
+    (NAPS2, Unicarton 31/08/2026) ha un font solo; un PDF nativo con sfondo ne ha di
+    piu'."""
+    pix = fitz.Pixmap(fitz.csRGB, fitz.IRect(0, 0, 60, 80), False)
+    pix.clear_with(200)
+    doc = fitz.open()
+    page = doc.new_page()
+    page.insert_image(page.rect, pixmap=pix)
+    nomi = ["helv", "tiro", "cour"][:fonts]
+    for i, nome in enumerate(nomi):
+        page.insert_text((40, 60 + 20 * i), "Stato patrimoniale Totale attivita' 5.888.998,46 Erario c/IVA",
+                         fontname=nome)
+    data = doc.tobytes()
+    doc.close()
+    return data
+
+
+def test_una_scansione_con_testo_ocr_passa_da_mineru(chiamate):
+    client, settings, mc, mp, viste = chiamate
+    mp.setattr(mc, "MinerUClient", _fake_client_cls(md="Stato Patrimoniale Totale attivo 100"))
+    r = _carica(client, _scansione_con_ocr(fonts=1))
+    assert r.status_code == 200, r.text
+    assert viste[0]["extraction_context"] is not None
+
+
+def test_uno_sfondo_con_i_font_del_gestionale_resta_un_pdf_di_testo():
+    from app.api.v1.imports import _e_una_scansione
+    assert _e_una_scansione(_scansione_con_ocr(fonts=1))
+    assert not _e_una_scansione(_scansione_con_ocr(fonts=3))
+    assert not _e_una_scansione(_pdf(con_testo=True))

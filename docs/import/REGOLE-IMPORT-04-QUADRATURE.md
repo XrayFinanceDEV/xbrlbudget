@@ -164,6 +164,23 @@ difetto reale, corretto in un'ondata successiva al lotto 3A
 (`.superpowers/sdd/2026-09-11-indagine-difetti-collaudo-3a/indagine-2-promote.md`, 2026-09-11 —
 spazio di lavoro **fuori dal repo**, non è mai stato in git).
 
+## 5-bis. Lo sbilancio chiuso dal risultato stampato
+
+Prima del gate, su ogni rotta (`importers/risultato_stampato.py`, chiamato da `pdf_importer`):
+si misura `attivo − passivo` e lo si cerca **al centesimo** nel testo del documento, su una riga
+che porta una didascalia di risultato (utile, perdita, risultato, eccedenza, avanzo, disavanzo),
+dal lato in cui il gestionale la stampa. Due esiti soli:
+
+- lo sbilancio è la differenza fra l'utile del CE e `sp13`, e quell'utile è stampato → `sp13`
+  diventa l'utile del CE (`risultato_del_periodo`);
+- lo sbilancio stesso è stampato come risultato → è l'anno prima non destinato, va in `sp12` e
+  `sp12g` (`risultato_anno_prima`).
+
+Non è un plug: etichetta un importo stampato, solo al centesimo, e se l'importo non c'è non
+succede nulla. Si dichiara sempre (avviso e `validation_report["risultato_stampato"]`). Uno
+sbilancio pari all'utile del periodo che `sp13` porta già non si tocca: è un risultato contato
+due volte o una massa mancante altrove, non un anno prima.
+
 ## 6. Dopo il gate strutturale: la quadratura
 
 Se `check_quadratura` dice che non quadra → **"Importazione non salvata: il bilancio estratto non

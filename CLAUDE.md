@@ -79,7 +79,8 @@ knowing:
   taxonomies; CSV = TEBE format; PDF = PyMuPDF + LLM (Anthropic by default, or gx10 for the
   configured CoGe, IV-CEE and detail passes; **not** Docling — that path has no caller);
   `pdf-ocr` = MinerU (quello di gx10 sui VPS, acceso da `budget-env-staging`); `/import/pdf` manda
-  **in automatico** a MinerU una scansione (meno di 50 caratteri di testo), e se MinerU non risponde
+  **in automatico** a MinerU una scansione (meno di 50 caratteri di testo, oppure pagine che sono
+  immagini intere con sopra un OCR), e se MinerU non risponde
   prosegue con l'OCR di prima e lo dichiara. All but `csv` take `period_months`
   (1-11 = partial year). `GET /import/capabilities` exists and is deliberately not wired to the UI.
   Admin side: `GET /admin/uploads[/{id}[/download]]`, `X-Admin-Key` header, never called by the iframe.

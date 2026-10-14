@@ -467,6 +467,41 @@ risultato firmato. Vince il candidato più vicino. Un risultato CE pari a zero �
 CE, e il gap fra i due lati dello SP. Il valore esatto della fonte viene rimesso nel suo campo
 legale; qualunque residuo estraneo resta bloccante.
 
+### Situazioni contrapposte: le forme che il lettore deterministico riconosce (ottobre 2026)
+
+Dai bilanci caricati a ottobre 2026, tutti importati «squadrati» senza un motivo nel documento:
+
+- **Utile dell'anno prima ancora fra i conti del patrimonio netto** (AITEC 30/06/2026: mastro
+  «309 UTILE (PERDITA) DELL'ESERCIZIO» 269.255,83 dentro il totale passività). Un conto di
+  risultato diverso dal risultato del periodo va in `sp12g` **solo se chiude al centesimo** il
+  divario misurato contro il totale passività stampato: STB 30/06/2026 ne ha uno nei conti
+  d'ordine, fuori dai totali, e lì resta fuori (`_prior_result_booked`).
+- **Totali con l'importo prima della didascalia** nel flusso di testo («1.406.600,60 Totale
+  Attività: *** 1.352.014,11 Totale Passività:», STB): la ricerca lineare prendeva lo stesso
+  importo per i due totali, utile zero. Quando entrambi i totali sono letti per coordinate
+  valgono quelli; «Totali» senza lato (M.C.T.) li assegna la colonna.
+- **Codici a segmenti azzerati** («102.00.00000» mastro, «102.01.00000» conto, «102.01.00004»
+  sottoconto, M.C.T.): ridotti a cifre i tre livelli non erano uno il prefisso dell'altro e si
+  sommavano tutti. Tolti i segmenti di zeri in coda (solo codici di almeno tre segmenti con
+  l'ultimo di almeno quattro cifre) il riclassificatore sceglie un livello solo.
+- **Percorso di legge davanti alla descrizione** («B) I) IMMOBILIZZAZ.IMMATERIALI», «A) 2)
+  ESISTENZE INIZIALI»): si toglie e decide la descrizione — lo stesso gestionale scrive «B) F.DI
+  AMMORTAM.» al passivo, dove B) sarebbero i fondi rischi. Con le abbreviazioni «F/A -», «F.DI
+  AMMORT», «RAPPOR.», «IMMOBIL.» (`_descrizione_di_conto`).
+- **Pagina di continuazione senza intestazione di sezione**: è della sezione della pagina prima.
+- **C.III** («attività finanziarie che non costituiscono immobilizzazioni») ha ora una voce,
+  `sp08`: prima finiva fra le immobilizzazioni materiali (contiene IMMOBILIZZAZIONI). Un credito
+  non è mai un cespite («Crediti vs. Ad Immobiliare» prendeva la regola MOBILI).
+- Esistenze iniziali e rimanenze finali scritte per esteso vanno in `ce10`, come «RIM.INIZ» e
+  «RIM.FIN»: prima finivano in oneri diversi e altri ricavi. Il risultato non cambia.
+- Una pagina senza sezione eredita quella della pagina prima **solo finché la sezione non ha
+  chiuso** (totali di entrambi i lati, «Totali» due volte, pareggio o quadratura): dopo è un
+  allegato («Dettaglio ratei, risconti e competenze», budget_210) e resta fuori.
+- Nel percorso snello un parser standard che non ha letto nulla (`esito: "vuoto"`, colonne
+  comparative viste in un bilancio di verifica: STB) non chiude più la ricerca dei lettori
+  deterministici: prova la situazione contabile. Uno standard che legge e non quadra la chiude
+  come prima.
+
 ## 7. L'anno precedente ha uno standard più severo
 
 L'anno corrente viene salvato anche se solo strutturalmente valido. Il **precedente no**: deve

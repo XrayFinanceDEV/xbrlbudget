@@ -1874,6 +1874,22 @@ def import_pdf_balance_sheet(
                 prior_bs_data, prior_ce_data)
         sc_quadratura_warnings.extend(_residual_report['warnings'])
 
+        # Uno sbilancio che vale esattamente un risultato stampato (utile del periodo
+        # mancante, o utile dell'anno prima non destinato fra i conti del patrimonio
+        # netto) si chiude con quell'importo, cercato nel documento al centesimo.
+        _risultato_report = None
+        try:
+            from importers import risultato_stampato as _rs
+            _righe = _rs.righe_del_pdf(_pdf_mineru or file_path)
+            if ocr_text:
+                _righe += ocr_text.splitlines()
+            balance_sheet_data, _risultato_report = _rs.chiudi_col_risultato_stampato(
+                balance_sheet_data, income_data, _righe)
+            if _risultato_report:
+                logger.info(f"risultato stampato: {_risultato_report}")
+        except Exception as _rs_err:
+            logger.warning(f"Controllo del risultato stampato saltato: {_rs_err}")
+
         # Step 2: Validate balance sheet (both paths)
         logger.info("Validating balance sheet...")
         # Un documento che contraddice i propri totali stampati (gate sopra, prima della
@@ -1972,6 +1988,8 @@ def import_pdf_balance_sheet(
         warnings = mapper.validate_hierarchy(balance_sheet_data)
         if _testo_cifrato is not None:
             warnings.insert(0, _tc.avviso(_testo_cifrato))
+        if _risultato_report:
+            warnings.append(_rs.avviso(_risultato_report))
         _maturity_audit = _detail_report.get('periods', {}).get('current', {}).get('maturity', {}).get('families', {})
         if any(e.get('basis', '').startswith('management_')
                for family in _maturity_audit.values() for e in family.get('evidence', [])) or any(
@@ -2089,6 +2107,8 @@ def import_pdf_balance_sheet(
             _validation_payload["import_snello"] = _snello_report
         if _mineru_tabelle:
             _validation_payload["mineru_contrapposte"] = True
+        if _risultato_report:
+            _validation_payload["risultato_stampato"] = _risultato_report
         if _testo_cifrato is not None:
             _validation_payload["testo_cifrato"] = {
                 "spostamento": _testo_cifrato.spostamento,

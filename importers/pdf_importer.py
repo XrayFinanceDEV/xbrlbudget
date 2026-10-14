@@ -889,6 +889,10 @@ def import_pdf_balance_sheet(
     # resta quella del file caricato.
     _file_originale = file_path
     _testo_cifrato = None
+    # Il PDF sintetico stampato dalle tabelle MinerU (route C): per i controlli
+    # dichiarativi a valle E' il documento (stessi totali e stessi fondi, letti dal
+    # testo); quello caricato e' una scansione senza testo. Cancellato nel finally.
+    _pdf_mineru = None
     try:
         from importers import testo_cifrato as _tc
         _riparato = _tc.ripara(file_path)
@@ -1428,6 +1432,7 @@ def import_pdf_balance_sheet(
         except Exception:
             pass
         _coge_ok = False
+        _mineru_tabelle = False   # route C letta dalle tabelle MinerU (mineru_contrapposte)
         # Sezioni riscattate in vision (route C). Inizializzata QUI, fuori da ogni
         # ramo: il blocco del parser_version la legge su OGNI route, mentre
         # l'assegnazione vive dentro `if candidates:` — una route A/B solleverebbe
@@ -1485,11 +1490,25 @@ def import_pdf_balance_sheet(
 
             candidates = []  # (residual, bs, ce, source)
 
+            # Scansione letta da MinerU (decisione del proprietario, 2026-10-14): se le sue
+            # tabelle hanno la forma di una situazione a sezioni contrapposte, il lettore
+            # deterministico legge un PDF sintetico stampato da quelle celle e il pass CoGe
+            # su Qwen non si chiama (Unicarton 31/08/2026: al centesimo in pochi secondi,
+            # contro 8,5 minuti e 315 mila di sbilancio). Qwen resta solo quando le tabelle
+            # non hanno quella forma.
+            if extraction_context is not None:
+                try:
+                    from importers.mineru_contrapposte import pdf_da_tabelle
+                    _pdf_mineru = pdf_da_tabelle(extraction_context)
+                except Exception as _mc_err:
+                    logger.warning(f"Route C: tabelle MinerU non lette ({_mc_err})")
+                    _pdf_mineru = None
+
             # A locally recognised verifica-segno has already been parsed from
             # source coordinates and self-validates against independent SP/CE
             # controls.  Do not let the presence of an API key add a stochastic
             # plain-text OCR candidate that has lost the two-column geometry.
-            if _coge_attivo(api_key) and not local_coordinate_ocr:
+            if _coge_attivo(api_key) and not local_coordinate_ocr and _pdf_mineru is None:
                 try:
                     from importers.pdf_extractor_llm import extract_trial_balance_with_llm
                     # On a scanned PDF, pass the OCR text so the extractor uses the
@@ -1518,16 +1537,21 @@ def import_pdf_balance_sheet(
                     if extraction_context is not None
                     else None
                 )
-                sc_bs, sc_ce, sc_prior_bs, sc_prior_ce = extract_situazione_contabile(
-                    file_path,
-                    return_prior=True,
-                    text_override=_mineru_deterministic_text,
-                )
+                if _pdf_mineru is not None:
+                    sc_bs, sc_ce, sc_prior_bs, sc_prior_ce = extract_situazione_contabile(
+                        _pdf_mineru, return_prior=True)
+                else:
+                    sc_bs, sc_ce, sc_prior_bs, sc_prior_ce = extract_situazione_contabile(
+                        file_path,
+                        return_prior=True,
+                        text_override=_mineru_deterministic_text,
+                    )
                 sc_bs_mapped = _map_sc_keys(sc_bs)   # short keys (sp03) -> full DB names
                 sc_ce_mapped = _map_sc_keys(sc_ce)
                 r = _residual_of(sc_bs_mapped, sc_ce_mapped)
                 if r is not None:
                     candidates.append((r, sc_bs_mapped, sc_ce_mapped, "deterministico"))
+                    _mineru_tabelle = _pdf_mineru is not None
             except Exception as sc_err:
                 logger.warning(
                     f"Route C: deterministic SC parser failed "
@@ -1553,7 +1577,8 @@ def import_pdf_balance_sheet(
                 try:
                     from importers.pdf_extractor_llm import _declared_control_totals
                     if not _text_garbled:   # garbled text -> declared is garbage
-                        _dc0 = _declared_control_totals(file_path, text=ocr_text)
+                        _dc0 = (_declared_control_totals(_pdf_mineru) if _pdf_mineru
+                                else _declared_control_totals(file_path, text=ocr_text))
                     _decl_tot = (_dc0.get('pareggio') or _dc0.get('passivo')
                                  or _dc0.get('attivo'))
                 except Exception:
@@ -1585,7 +1610,8 @@ def import_pdf_balance_sheet(
                     try:
                         from importers.situazione_contabile_parser import contra_scan_mass
                         _fondi, _iva = contra_scan_mass(
-                            file_path, text=ocr_text, declared=_dc0)
+                            _pdf_mineru or file_path,
+                            text=None if _pdf_mineru else ocr_text, declared=_dc0)
                         if _fondi > _decl_tot * Decimal('0.01'):
                             _perdita = _dc0.get('perdita') or Decimal('0')
                             _decl_tot = _decl_tot - _fondi - _iva - _perdita
@@ -1625,7 +1651,8 @@ def import_pdf_balance_sheet(
                 try:
                     from importers.situazione_contabile_parser import net_contra_accounts
                     balance_sheet_data, _contra = net_contra_accounts(
-                        balance_sheet_data, file_path, text=ocr_text, declared=_dc0)
+                        balance_sheet_data, _pdf_mineru or file_path,
+                        text=None if _pdf_mineru else ocr_text, declared=_dc0)
                     if _contra > 0:
                         logger.info(f"Route C: contra-netting applicato "
                                     f"({_contra:,.0f} fondi ammortamento/IVA)")
@@ -1679,8 +1706,9 @@ def import_pdf_balance_sheet(
                 # netting il riscatto scatterebbe su un attivo ancora lordo.
                 # Senza chiave non si parte nemmeno: render_section_images gira PRIMA di
                 # istanziare il client dentro read_section, quindi un'installazione senza
-                # chiave renderizzerebbe le pagine a 200 DPI per poi buttarle.
-                if api_key:
+                # chiave renderizzerebbe le pagine a 200 DPI per poi buttarle. Sulle tabelle
+                # MinerU niente modello: gli importi sono gia' quelli delle celle.
+                if api_key and _pdf_mineru is None:
                     try:
                         _donor = next(
                             (c[1] for c in candidates if c[3] == "deterministico"), None)
@@ -1796,6 +1824,12 @@ def import_pdf_balance_sheet(
             # snello): nessun secondo passaggio, e di sicuro nessuna lettura del modello.
             _detail_report = {"status": "skipped", "reason": "dettagli_letti_dal_prospetto_xbrl",
                               "warnings": []}
+        elif _mineru_tabelle:
+            # Situazione contabile letta dalle tabelle MinerU: ogni sottoconto e' gia' una
+            # cella letta. Sulla scansione il passaggio dei dettagli non ha testo e finiva
+            # su Qwen (6 minuti su Unicarton, per nessuna proposta): niente modello.
+            _detail_report = {"status": "skipped", "reason": "dettagli_letti_dalle_tabelle_mineru",
+                              "warnings": []}
         else:
             balance_sheet_data, prior_bs_data, _detail_report = enrich_pdf_details(
                 file_path, balance_sheet_data, prior_bs_data, fiscal_year=fiscal_year,
@@ -1816,6 +1850,7 @@ def import_pdf_balance_sheet(
             # Garbled text layer -> the declared Utile/Perdita is unreliable: do not
             # let it arbitrate (a misread CE-section total flips the result sign).
             _decl_ce = (None if _text_garbled
+                        else _declared_control_totals(_pdf_mineru) if _pdf_mineru
                         else _declared_control_totals(file_path, text=ocr_text))
             if not _source_review and not _source_current.get('income_verified'):
                 income_data = enforce_ce_sp_identity(
@@ -2052,6 +2087,8 @@ def import_pdf_balance_sheet(
         _validation_payload = _validation_report_payload(_qd, reliability=_reliability)
         if _snello_report is not None:
             _validation_payload["import_snello"] = _snello_report
+        if _mineru_tabelle:
+            _validation_payload["mineru_contrapposte"] = True
         if _testo_cifrato is not None:
             _validation_payload["testo_cifrato"] = {
                 "spostamento": _testo_cifrato.spostamento,
@@ -2109,7 +2146,8 @@ def import_pdf_balance_sheet(
                 _detail_level = "summary"
             if is_trial_balance:
                 _ocr_accounting_method = (
-                    "situazione_contabile_llm" if _coge_ok else "situazione_contabile"
+                    ("situazione_contabile_mineru" if _mineru_tabelle
+                else "situazione_contabile_llm" if _coge_ok else "situazione_contabile")
                 )
             elif balance_sheet_data.get("_source_mineru_ivcee"):
                 _ocr_accounting_method = "ivcee_deterministic"
@@ -2350,7 +2388,8 @@ def import_pdf_balance_sheet(
             extraction_method = "import_snello"
         elif is_trial_balance:
             # Route C: distinguish the CoGe LLM pass from the deterministic parser fallback.
-            extraction_method = "situazione_contabile_llm" if _coge_ok else "situazione_contabile"
+            extraction_method = ("situazione_contabile_mineru" if _mineru_tabelle
+                else "situazione_contabile_llm" if _coge_ok else "situazione_contabile")
         elif balance_sheet_data.get("_source_mineru_ivcee"):
             extraction_method = "ivcee_deterministic"
         elif balance_sheet_data.get("_source_standard_ivcee"):
@@ -2422,6 +2461,11 @@ def import_pdf_balance_sheet(
 
     finally:
         db.close()
+        if _pdf_mineru is not None:
+            try:
+                os.remove(_pdf_mineru)
+            except OSError:
+                pass
         if file_path != _file_originale:
             try:
                 os.remove(file_path)

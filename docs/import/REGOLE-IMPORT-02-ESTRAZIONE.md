@@ -391,6 +391,20 @@ MINERU_API_KEY=<chiave>
 MINERU_EXPECTED_VERSION=3.4.5
 ```
 
+**Sulle situazioni contabili a sezioni contrapposte niente modello** (decisione del proprietario,
+2026-10-14). Se le tabelle di MinerU hanno quella forma — didascalia stato patrimoniale / conto
+economico, righe a sei celle conto-descrizione-importo per lato — `importers/mineru_contrapposte.py`
+le stampa su un PDF sintetico con la forma di un bilancio di verifica, e la route C lo fa leggere al
+lettore deterministico di sempre (netting dei fondi, gerarchie, totali, eccedenza dell'anno prima).
+Il pass CoGe su Qwen, il riscatto vision e la ricerca dei dettagli non girano; i controlli
+dichiarativi a valle (totali, fondi da nettare, utile) leggono il PDF sintetico, che porta le stesse
+righe di piede del documento. `extraction_method` = `situazione_contabile_mineru`,
+`validation_report.mineru_contrapposte = true`. Unicarton 31/08/2026 reso a sole immagini: al
+centesimo in 1,5 secondi, contro 8,5 minuti e 315 mila di sbilancio della lettura CoGe sul testo
+OCR. Qwen resta solo per tabelle che non hanno quella forma. Il limite è l'OCR: se MinerU perde
+una colonna (la copia ripassata da PDF24 di Unicarton perde i ricavi), l'import la dichiara come
+`Utile CE != sp13`, non la inventa.
+
 Il compose **non** dichiara alcuna `MINERU_*` in `environment:`: una voce lì scavalca `.env.docker`,
 e fino al 2026-10-14 inchiodava `MINERU_BASE_URL` a `http://mineru:8000`. Senza variabili l'OCR è
 spento (`MINERU_OCR_ENABLED` vale `False` di default in `config.py`).

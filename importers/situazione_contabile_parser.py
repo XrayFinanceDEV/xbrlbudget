@@ -400,6 +400,8 @@ _SP_PASSIVO_RULES = [
     (['F.DO', 'AMM', 'MANUT'], 'depr_sp02'),               # "spese di manut.beni di ter(zi)" B.I.7
     (['F.DO', 'AMM', 'BENI DI TERZ'], 'depr_sp02'),        # idem, grafia "lav. str. su beni di terzi"
     (['F.DO', 'AMM', 'LICENZE'], 'depr_sp02'),
+    (['F.DO', 'AMM', 'OPERE INGE'], 'depr_sp02'),          # "F.do amm.dir.brev.e utilizz.opere inge"
+    (['F.DO', 'AMM', 'DIR.BREV'], 'depr_sp02'),
     (['FOND', 'AMM', 'IMMOBILIZZAZ. IMM'], 'depr_sp02'),   # mastro "FONDI AMMORT. IMMOBILIZZAZ. IMM"
     (['F.DO', 'AMM', 'MACCHINE'], 'depr_sp03'),
     (['F.DO', 'AMM', 'MACCHINAR'], 'depr_sp03'),
@@ -491,6 +493,7 @@ _CE_COSTI_RULES = [
     (['COSTI', 'MAT'], 'ce05'),  # "COSTI P/MAT.PRI,SUSS.,CON.E MER."
     (['MERCI'], 'ce05'),
     (['MAT.PRI'], 'ce05'),
+    (['ACQUISTI', 'DI BENI'], 'ce05'),           # B.6 (mastro "55 ACQUISTI DI BENI", Nicole)
     (['SERVIZI'], 'ce06'),
     # compensi e contributi degli amministratori: B.7 servizi, non personale
     (['AMMINISTRATOR'], 'ce06'),
@@ -535,6 +538,13 @@ _CE_COSTI_RULES = [
     # Proventi/oneri straordinari in costs
     (['ONERI STRAORD'], 'ce19'),
     (['PROVENTI', 'PARTECIP'], 'ce13_cost'),
+    # Ultime, solo se nient'altro riconosce la voce: mastri B.7 di quel gestionale
+    # ("PRESTAZIONI DI LAVORO NON DIPEN(DENTE)", "GESTIONE VEICOLI AZIENDALI", "SPESE
+    # AMMIN.,COMM. E DI RAPPRES.", Nicole). Prima di ONERI DIVERSI avrebbero preso il
+    # mastro AGO "Oneri diversi di gestione" che porta "spese amministrative varie".
+    (['LAVORO', 'NON DIPEN'], 'ce06'),
+    (['GESTIONE', 'VEICOLI'], 'ce06'),
+    (['SPESE', 'AMMIN'], 'ce06'),
 ]
 
 # CE keyword rules for RICAVI section
@@ -4641,18 +4651,32 @@ def _hier_reconstruct(pages_data, full: str):
         otherwise fall back to the mastro's own classification. Unattributed
         mass keeps netting sp03 (the historical behaviour)."""
         nonlocal netted
-        im = Z
-        if code:
+
+        def _immateriale(c0, a0, profondita=0):
+            # La quota immateriale di un nodo: tutta se la didascalia lo dice; altrimenti
+            # quella dei figli diretti, se lo ricostruiscono, scendendo di un livello
+            # quando un figlio non lo dice da solo (Nicole: "FONDI AMMORT. IMMOBILIZZAZ.
+            # IM", troncata, con sotto avviamento e software).
             desc_rows = [(c, d2, a2) for c, d2, a2 in side_rows
-                         if c != code and c.startswith(code)]
+                         if c != c0 and c.startswith(c0)]
             direct = [(c, d2, a2) for c, d2, a2 in desc_rows
                       if not any(o != c and c.startswith(o)
                                  for o, _d3, _a3 in desc_rows)]
             covered = sum(a2 for _c2, _d2, a2 in direct)
-            tol = max(Decimal('2'), abs(amount) * Decimal('0.01'))
-            if direct and abs(covered - amount) <= tol:
-                im = sum(a2 for _c2, d2, a2 in direct
-                         if _classify_sp_passivo(d2) == 'depr_sp02')
+            tol = max(Decimal('2'), abs(a0) * Decimal('0.01'))
+            if not (c0 and direct and abs(covered - a0) <= tol):
+                return None
+            im0 = Z
+            for c2, d2, a2 in direct:
+                if _classify_sp_passivo(d2) == 'depr_sp02':
+                    im0 += a2
+                elif profondita < 3:
+                    im0 += _immateriale(c2, a2, profondita + 1) or Z
+            return im0
+
+        im = Z
+        if code:
+            im = _immateriale(code, amount) or Z
         if im == Z and _classify_sp_passivo(desc) == 'depr_sp02':
             im = amount
         addb('sp02', -im)

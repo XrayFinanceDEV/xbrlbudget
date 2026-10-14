@@ -912,6 +912,9 @@ def ledger_details(rows: list[SourceRow], current: dict, *, _maturity_neutral: b
     return proposals
 
 
+_FINANCING_SHORT = ('sp16a_debiti_banche_breve', 'sp16b_debiti_altri_finanz_breve')
+
+
 def reclassify_ledger_maturities(bs: dict, rows: list[SourceRow]) -> tuple[dict, dict]:
     """Change only maturity within credits/debts, never their combined total.
 
@@ -949,6 +952,29 @@ def reclassify_ledger_maturities(bs: dict, rows: list[SourceRow]) -> tuple[dict,
         ps = [p for p in ledger_details(rows, neutral, _maturity_neutral=True) if p.aggregate == short]
         recovered, audit = apply_details(neutral, ps, rows, _maturity_neutral=True)
         evidence = audit['families'].get(short, {}).get('evidence', [])
+        if side == 'R' and any(neutral[f] for f in _FINANCING_SHORT):
+            # Debiti finanziari gia' tipizzati dal lettore (budget_590 letto dalle
+            # contrapposte): quella massa non ha nulla da spiegare e la sua scadenza non si
+            # muove, mutui a lungo compresi. Dalla lettura senza tipi si prendono SOLO i
+            # conti di finanziamento che il documento dice a lungo, sui tipi del lettore:
+            # gli altri tipi non si toccano (rileggerli tutti azzerava fornitori e tributari).
+            flat = {short: total, long: ZERO, **{f: ZERO for f in short_fields}}
+            flat[residual_bucket(short, ZERO)] = total
+            ps_flat = [p for p in ledger_details(rows, flat, _maturity_neutral=True)
+                       if p.aggregate == short]
+            _rec, audit_flat = apply_details(flat, ps_flat, rows, _maturity_neutral=True)
+            gia = {e['row'] for e in evidence}
+            residuo = {f: recovered[f] - sum((Decimal(e['amount']) for e in evidence
+                                              if e['field'] == f), ZERO)
+                       for f in _FINANCING_SHORT}
+            for e in audit_flat['families'].get(short, {}).get('evidence', []):
+                if e['field'] not in _FINANCING_SHORT or e['row'] in gia:
+                    continue
+                maturity, _basis = _ledger_maturity(source[e['row']], rows, debt=True)
+                value = Decimal(e['amount'])
+                if maturity == 'long' and ZERO < value <= residuo[e['field']]:
+                    evidence = evidence + [e]
+                    residuo[e['field']] -= value
         if not evidence:
             continue  # No identified source family: don't guess across totals.
         values = {f: recovered[f] for f in short_fields}

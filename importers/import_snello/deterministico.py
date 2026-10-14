@@ -265,7 +265,10 @@ def _tentativo_classico(file_path: str, ocr_text: str | None = None) -> dict:
         con_dettaglio = None
     if con_dettaglio is not None and con_dettaglio["adottato"]:
         return con_dettaglio
-    if standard is not None:
+    # Un parser standard che non ha letto nulla ("vuoto": colonne comparative viste in un
+    # bilancio di verifica, STB 30/06/2026) non si e' applicato: la ricerca prosegue verso
+    # la situazione contabile, che quel documento lo legge e lo quadra.
+    if standard is not None and standard.get("esito") != "vuoto":
         return standard
     try:
         esito = _prova_situazione_contabile(file_path, ocr_text)
@@ -273,6 +276,8 @@ def _tentativo_classico(file_path: str, ocr_text: str | None = None) -> dict:
         return {"adottato": False, "parser": "situazione_contabile_parser", "esito": "errore"}
     if esito is not None:
         return esito
+    if standard is not None:
+        return standard
     return {"adottato": False, "parser": None, "esito": "non_applicabile"}
 
 

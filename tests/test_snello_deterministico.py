@@ -667,3 +667,20 @@ def test_parse_compact_balance_rifiuta_un_estrazione_tutta_a_zero(tmp_path):
     current, _prior = extract_standard_ivcee_balances(pdf)
 
     assert current is None
+
+
+def test_un_parser_standard_vuoto_non_chiude_la_ricerca(monkeypatch):
+    """STB 30/06/2026: il parser standard vede colonne comparative in un bilancio di
+    verifica e non legge nulla ("vuoto"). Non si e' applicato: decide la situazione
+    contabile. Uno standard che legge ma non quadra invece chiude la ricerca."""
+    situazione = {"adottato": True, "parser": "situazione_contabile_parser", "esito": "ok"}
+    monkeypatch.setattr(DET, "_prova_schema_con_dettaglio", lambda f: None)
+    monkeypatch.setattr(DET, "_prova_situazione_contabile", lambda f, t: situazione)
+
+    monkeypatch.setattr(DET, "_prova_standard_ivcee", lambda f: {
+        "adottato": False, "parser": "standard_ivcee_parser", "esito": "vuoto"})
+    assert DET._tentativo_classico("x.pdf") is situazione
+
+    oltre = {"adottato": False, "parser": "standard_ivcee_parser", "esito": "oltre_soglia"}
+    monkeypatch.setattr(DET, "_prova_standard_ivcee", lambda f: oltre)
+    assert DET._tentativo_classico("x.pdf") is oltre

@@ -50,15 +50,18 @@ class Settings(BaseSettings):
     # Anthropic API (for PDF LLM extraction)
     ANTHROPIC_API_KEY: Optional[str] = None
 
-    # MinerU OCR import (POST /import/pdf-ocr). Enabled in the integrated Docker
-    # deployment so standard PDF and OCR PDF remain two explicit user choices.
-    # Setting this to false is still the emergency kill switch for the OCR endpoint.
-    # lang_list uses "latin" (MinerU has no standalone "it").
-    MINERU_OCR_ENABLED: bool = True
+    # MinerU OCR import (POST /import/pdf-ocr). Spento di default: si accende con
+    # MINERU_OCR_ENABLED=true insieme a MINERU_BASE_URL (sui VPS: il MinerU di gx10,
+    # dalla credenziale Jenkins budget-env-staging). lang_list uses "latin" (MinerU
+    # has no standalone "it").
+    MINERU_OCR_ENABLED: bool = False
     # Local development reaches the already-running MinerU container through a
     # loopback-only bridge. Docker Compose overrides this with
     # http://mineru:8000, where service-name DNS is available.
     MINERU_BASE_URL: str = "http://127.0.0.1:8002"
+    # Header X-Api-Key del proxy di gx10 (kpsfinanciallab:89); vuoto sul canale LAN
+    # e sul container locale, che non hanno autenticazione.
+    MINERU_API_KEY: Optional[str] = None
     MINERU_EXPECTED_VERSION: str = "3.2.0"
     MINERU_BACKEND: str = "pipeline"
     MINERU_PARSE_METHOD: str = "ocr"

@@ -42,6 +42,7 @@ def _row(y, *cells):
         "UTILI PORTATI A NUOVO",
         "UTILI (PERDITE) PORTATI A NUOVO",
         "PERDITE PORTATE A NUOVO",
+        "ECCEDENZA ESERCIZIO PRECEDENTE",
     ],
 )
 def test_prior_result_captions_are_recognised(caption):
@@ -57,6 +58,8 @@ def test_prior_result_captions_are_recognised(caption):
         "UTILE D'ESERCIZIO",
         "UTILE DELL'ESERCIZIO",
         "RISULTATO DEL PERIODO",
+        "ECCEDENZA (UTILE)",
+        "ECCEDENZA (PERDITA)",
         # control rows
         "TOTALE A PAREGGIO",
         "TOTALE PASSIVITA'",
@@ -79,6 +82,18 @@ def test_codeless_prior_loss_in_passivo_column_decreases_pn():
     words = _row(480.0, (400.0, "Perdita"), (418.0, "esercizio"), (452.0, "precedente")) \
         + _row(482.1, (541.0, "12.500,00"))
     assert _hier_prior_result(words, 308.7, 1e9) == D("-12500.00")
+
+
+def test_eccedenza_esercizio_precedente_della_scansione_entra_nel_pn():
+    """Unicarton 31/08/2026: l'utile dell'anno prima non ancora destinato, stampato sotto
+    i totali come "Eccedenza esercizio precedente"; lo strato OCR legge la linea di
+    sottolineatura davanti all'importo."""
+    words = _row(293.9, (364.0, "Eccedenza"), (405.0, "esercizio"), (440.0, "precedente"),
+                 (530.0, "___173.463,79"))
+    assert _hier_prior_result(words, 308.7, 1e9) == D("173463.79")
+    # la riga sotto e' il risultato del periodo: mai patrimonio netto
+    assert _hier_prior_result(_row(305.0, (364.0, "Eccedenza"), (405.0, "(Utile)")),
+                              308.7, 1e9) == D("0")
 
 
 def test_coded_prior_result_row_is_not_double_counted():

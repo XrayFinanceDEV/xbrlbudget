@@ -156,9 +156,20 @@ vero. Vanno considerati diagnostica storica, non discriminanti.
 Sono tre stati distinti e vanno tenuti separati, perché il rimedio è diverso.
 
 **Scansione — il testo non c'è.** Meno di 50 caratteri sulle prime 14 pagine
-(`pdf_importer.py:334`). Il router non vedrebbe nulla e rifiuterebbe per la regola 7, quindi a
+(`pdf_importer.py:334`). Per MinerU (passo 0) è scansione anche un PDF in cui **ogni pagina è
+un'immagine a pagina intera con sopra il testo di un OCR** (copertura ≥ 90%, al più due font:
+NAPS2, Unicarton 31/08/2026): quel testo esiste ma è sbagliato («18.978,72» per 18.378,72, «50 +
+874 # 40») e sul percorso di testo lasciava 240 mila di sbilancio; da MinerU lo stesso file esce
+verificato. Un PDF nativo con uno sfondo grafico ha i font del gestionale e resta testo
+(`_e_una_scansione`, `backend/app/api/v1/imports.py`). Il router non vedrebbe nulla e rifiuterebbe per la regola 7, quindi a
 monte si tenta un recupero, in quest'ordine:
 
+0. **MinerU** (dal 2026-10-14, decisione del proprietario), quando `MINERU_OCR_ENABLED`: lo chiama
+   l'endpoint `/import/pdf` prima dell'importatore (`_contesto_mineru_per_scansione` in
+   `backend/app/api/v1/imports.py`), con la stessa soglia dei 50 caratteri, e passa il contesto
+   come fa `/import/pdf-ocr`. Il testo di MinerU diventa campione e `ocr_text`, e i passi sotto non
+   girano. Un MinerU che non risponde o non restituisce testo **non blocca**: si prosegue dal passo
+   1 e la risposta porta l'avviso `OCR MINERU NON DISPONIBILE` / `OCR MINERU SENZA TESTO`.
 1. **OCR locale deterministico** a coordinate (RapidOCR), gratuito. Se riesce, il file prosegue
    e — nota importante — non viene aggiunto alcun candidato LLM, perché le coordinate sono già
    state lette in modo affidabile.
@@ -184,6 +195,14 @@ Conseguenza: il testo corrotto **non cambia la route** (il router ha già deciso
 storpiato, e i marcatori grossi sopravvivono). Disattiva invece l'uso dei **totali dichiarati**,
 che letti da lì sarebbero spazzatura. Il caso che ha originato la regola: una "perdita 372.733"
 mal letta ribaltava una società in utile.
+
+**Testo cifrato — il testo c'è ma ogni lettera è spostata di una costante.** Un PDF ripassato
+da PDF24/Ghostscript può perdere la `ToUnicode` del font Type0/Identity-H: «Unicarton Srl» esce
+«8QLFDUWRQ 6UO» (spostamento 29). Non è una scansione (il testo supera i 50 caratteri) e non è
+garbled nel senso sopra: nessuna parola di bilancio si riconosce, e il router rifiuta. Prima di
+tutto il resto `importers/testo_cifrato.py` misura lo spostamento che fa comparire le parole di
+un bilancio, scrive una copia del PDF col testo decodificato e l'import legge quella, dichiarandolo
+(avviso + `validation_report.testo_cifrato`).
 
 **Testo buono** — tutto il resto.
 

@@ -47,15 +47,51 @@ def test_estrazione_vuota_resta_errore_duro():
     assert "nessun dato" in verdict.hard_error.lower()
 
 
-def test_ocr_resta_errore_duro():
+def test_ocr_molto_sbilanciato_resta_errore_duro():
+    # oltre il 5% del totale (decisione del proprietario, 2026-10-14): sotto, avviso
     verdict = _classify_balance_failure(
-        _sheet(totale_passivo=Decimal("960")),
+        _sheet(totale_passivo=Decimal("600")),
         is_scanned=True, ocr_source=False,
         is_trial_balance=False, sample_text="B) II 1) Terreni 100",
         file_path="x.pdf", ocr_text=None,
     )
     assert verdict.hard_error is not None
     assert "OCR" in verdict.hard_error
+
+
+def test_scansione_ocr_poco_sbilanciata_si_importa_con_avviso():
+    """Entro il 5% del totale la scansione letta dall'OCR si importa con l'avviso;
+    oltre resta il rifiuto (l'OCR ha perso colonne o totali)."""
+    piccolo = _classify_balance_failure(
+        {**_sheet(totale_passivo=Decimal("990")), "sp09_disponibilita_liquide": Decimal("1000"),
+         "sp16_debiti_breve": Decimal("990")},
+        is_scanned=True, ocr_source=True,
+        is_trial_balance=True, sample_text="", file_path="x.pdf", ocr_text=None,
+    )
+    assert piccolo.hard_error is None and "OCR" in piccolo.warning
+    grande = _classify_balance_failure(
+        {**_sheet(totale_passivo=Decimal("500")), "sp09_disponibilita_liquide": Decimal("1000"),
+         "sp16_debiti_breve": Decimal("500")},
+        is_scanned=True, ocr_source=True,
+        is_trial_balance=True, sample_text="", file_path="x.pdf", ocr_text=None,
+    )
+    assert grande.hard_error is not None
+
+
+def test_scansione_letta_dalla_vision_si_importa_con_avviso():
+    """ERREGI 30/09/2026: schema di legge scansionato, cifre lette dalla vision sulle
+    immagini; una volta su tre l'attivo usciva 1.000 sotto. Errore di lettura
+    correggibile in Rettifiche, non un OCR che ha perso colonne e totali."""
+    for ocr_source in (False, True):          # con e senza il testo di MinerU
+        verdict = _classify_balance_failure(
+            _sheet(totale_passivo=Decimal("960")),
+            is_scanned=True, ocr_source=ocr_source,
+            is_trial_balance=False, sample_text="B) II 1) Terreni 100",
+            file_path="x.pdf", ocr_text=None, cifre_da_vision=True,
+        )
+        assert verdict.hard_error is None
+        assert verdict.warning.startswith("BILANCIO SBILANCIATO")
+        assert "immagini" in verdict.warning
 
 
 def test_sbilancio_e_importabile_con_avviso():

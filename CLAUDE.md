@@ -78,7 +78,10 @@ knowing:
 - **Import endpoints are four, not three:** `POST /api/v1/import/{xbrl|csv|pdf|pdf-ocr}`. XBRL = 6
   taxonomies; CSV = TEBE format; PDF = PyMuPDF + LLM (Anthropic by default, or gx10 for the
   configured CoGe, IV-CEE and detail passes; **not** Docling — that path has no caller);
-  `pdf-ocr` = MinerU, off on the VPS. All but `csv` take `period_months`
+  `pdf-ocr` = MinerU (quello di gx10 sui VPS, acceso da `budget-env-staging`); `/import/pdf` manda
+  **in automatico** a MinerU una scansione (meno di 50 caratteri di testo, oppure pagine che sono
+  immagini intere con sopra un OCR), e se MinerU non risponde
+  prosegue con l'OCR di prima e lo dichiara. All but `csv` take `period_months`
   (1-11 = partial year). `GET /import/capabilities` exists and is deliberately not wired to the UI.
   Admin side: `GET /admin/uploads[/{id}[/download]]`, `X-Admin-Key` header, never called by the iframe.
 - **Prefer extending `/analysis` to adding an endpoint — but that intent is not a description of the
@@ -746,10 +749,13 @@ esistente**, storico compreso, non solo su quelli generati dopo il lotto.
 - **MinerU non va mai sul VPS.** La sua immagine è `FROM vllm/vllm-openai` (gigabyte, orientata
   GPU) e sta dietro il compose profile `mineru`, che la esclude da **ogni** comando compose —
   `build` compreso — perché il `Jenkinsfile` esegue `docker compose build --no-cache --parallel`
-  sullo staging. Per la stessa ragione `MINERU_OCR_ENABLED` è `false` di default **nel compose**
-  (`${MINERU_OCR_ENABLED:-false}`); il default dello schema Python è invece `True`, quindi un
-  `uvicorn` avviato a mano ha l'OCR **acceso**. Togliere il servizio dal profile trascina vLLM sul
-  server. → `docs/import/REGOLE-IMPORT-02-ESTRAZIONE.md` §5-bis
+  sullo staging. Togliere il servizio dal profile trascina vLLM sul server. Il MinerU dei VPS è
+  quello di **gx10** (proxy `kpsfinanciallab:89`, header `X-Api-Key`, allowlist degli IP di staging e
+  produzione), acceso dalla credenziale Jenkins `budget-env-staging` (`MINERU_OCR_ENABLED`,
+  `MINERU_BASE_URL`, `MINERU_API_KEY`, `MINERU_EXPECTED_VERSION`). **Il compose non dichiara più
+  alcuna `MINERU_*` in `environment:`**: lì scavalcherebbe `.env.docker`, ed era così che
+  `MINERU_BASE_URL` restava inchiodato a `http://mineru:8000`. Senza variabili l'OCR è spento
+  (default `False` in `config.py`, anche per un `uvicorn` avviato a mano). → `docs/import/REGOLE-IMPORT-02-ESTRAZIONE.md` §5-bis
 
 ## Critical Implementation Notes
 

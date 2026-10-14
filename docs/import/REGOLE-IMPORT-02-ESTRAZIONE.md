@@ -362,7 +362,7 @@ Una singola coppia di chiamate estrae entrambe le colonne. Due guardie simmetric
 - **colonna corrente azzerata** e precedente valorizzato → si **promuove il precedente a
   corrente**.
 
-## 5-bis. MinerU: l'OCR opzionale, e perché non è in produzione
+## 5-bis. MinerU: l'OCR opzionale, su gx10 e non sul VPS
 
 > Motori: `importers/mineru_adapter.py`, `backend/app/services/mineru_client.py`, configurazione
 > in `backend/app/core/config.py`. Endpoint dedicato: `POST /import/pdf-ocr`.
@@ -371,21 +371,51 @@ Backend OCR alternativo per i PDF scansionati che il text layer non riesce a leg
 **percorso separato** da quello descritto a pagina 01 §5 (OCR locale a coordinate → OCR vision),
 con un endpoint proprio.
 
-> ⚠️ **Solo macchina di sviluppo. MinerU non va MAI sul VPS.** La sua immagine è
+> ⚠️ **Il container MinerU non va MAI sul VPS.** La sua immagine è
 > `FROM vllm/vllm-openai`: gigabyte di layer orientati alla GPU. Il servizio sta dietro il
 > **compose profile** `mineru`, che lo esclude da *ogni* comando compose — **`build` compreso** —
 > se il profile non viene richiesto. È ciò che conta, perché il `Jenkinsfile` esegue
 > `docker compose build --no-cache --parallel` e poi `up -d` sul VPS di staging: senza il profile
-> quel build si tirava dietro vLLM. Per la stessa ragione `MINERU_OCR_ENABLED` è **false** di
-> default nell'env del backend in compose.
+> quel build si tirava dietro vLLM.
 
-In locale:
+**Sui VPS MinerU è quello di gx10** (2026-10-14): `https://kpsfinanciallab.w3pro.it:89`, un proxy
+nginx con allowlist dei soli IP di staging e produzione e header obbligatorio `X-Api-Key`
+(`MINERU_API_KEY`); al massimo 3 richieste concorrenti, le altre in coda. Dalla LAN dell'ufficio lo
+stesso servizio risponde senza chiave su `http://192.168.1.137:18400`. Si accende dalla credenziale
+Jenkins `budget-env-staging`:
+
+```
+MINERU_OCR_ENABLED=true
+MINERU_BASE_URL=https://kpsfinanciallab.w3pro.it:89
+MINERU_API_KEY=<chiave>
+MINERU_EXPECTED_VERSION=3.4.5
+```
+
+**Sulle situazioni contabili a sezioni contrapposte niente modello** (decisione del proprietario,
+2026-10-14). Se le tabelle di MinerU hanno quella forma — didascalia stato patrimoniale / conto
+economico, righe a sei celle conto-descrizione-importo per lato — `importers/mineru_contrapposte.py`
+le stampa su un PDF sintetico con la forma di un bilancio di verifica, e la route C lo fa leggere al
+lettore deterministico di sempre (netting dei fondi, gerarchie, totali, eccedenza dell'anno prima).
+Il pass CoGe su Qwen, il riscatto vision e la ricerca dei dettagli non girano; i controlli
+dichiarativi a valle (totali, fondi da nettare, utile) leggono il PDF sintetico, che porta le stesse
+righe di piede del documento. `extraction_method` = `situazione_contabile_mineru`,
+`validation_report.mineru_contrapposte = true`. Unicarton 31/08/2026 reso a sole immagini: al
+centesimo in 1,5 secondi, contro 8,5 minuti e 315 mila di sbilancio della lettura CoGe sul testo
+OCR. Qwen resta solo per tabelle che non hanno quella forma. Il limite è l'OCR: se MinerU perde
+una colonna (la copia ripassata da PDF24 di Unicarton perde i ricavi), l'import la dichiara come
+`Utile CE != sp13`, non la inventa.
+
+Il compose **non** dichiara alcuna `MINERU_*` in `environment:`: una voce lì scavalca `.env.docker`,
+e fino al 2026-10-14 inchiodava `MINERU_BASE_URL` a `http://mineru:8000`. Senza variabili l'OCR è
+spento (`MINERU_OCR_ENABLED` vale `False` di default in `config.py`).
+
+In locale, col container: `.env.docker` con `MINERU_OCR_ENABLED=true` e
+`MINERU_BASE_URL=http://mineru:8000`, poi
 
 ```bash
-MINERU_OCR_ENABLED=true docker compose --profile mineru up -d
+docker compose --profile mineru up -d
 # con NVIDIA:
-MINERU_OCR_ENABLED=true docker compose --profile mineru \
-  -f docker-compose.yml -f docker-compose.gpu.yml up -d
+docker compose --profile mineru -f docker-compose.yml -f docker-compose.gpu.yml up -d
 ```
 
 Con l'OCR spento il backend è indifferente: `mineru_client` e `mineru_adapter` sono importati
@@ -436,6 +466,41 @@ risultato firmato. Vince il candidato più vicino. Un risultato CE pari a zero �
 **tre fatti indipendenti concordano entro €2** — la riga stampata, il risultato ricalcolato dal
 CE, e il gap fra i due lati dello SP. Il valore esatto della fonte viene rimesso nel suo campo
 legale; qualunque residuo estraneo resta bloccante.
+
+### Situazioni contrapposte: le forme che il lettore deterministico riconosce (ottobre 2026)
+
+Dai bilanci caricati a ottobre 2026, tutti importati «squadrati» senza un motivo nel documento:
+
+- **Utile dell'anno prima ancora fra i conti del patrimonio netto** (AITEC 30/06/2026: mastro
+  «309 UTILE (PERDITA) DELL'ESERCIZIO» 269.255,83 dentro il totale passività). Un conto di
+  risultato diverso dal risultato del periodo va in `sp12g` **solo se chiude al centesimo** il
+  divario misurato contro il totale passività stampato: STB 30/06/2026 ne ha uno nei conti
+  d'ordine, fuori dai totali, e lì resta fuori (`_prior_result_booked`).
+- **Totali con l'importo prima della didascalia** nel flusso di testo («1.406.600,60 Totale
+  Attività: *** 1.352.014,11 Totale Passività:», STB): la ricerca lineare prendeva lo stesso
+  importo per i due totali, utile zero. Quando entrambi i totali sono letti per coordinate
+  valgono quelli; «Totali» senza lato (M.C.T.) li assegna la colonna.
+- **Codici a segmenti azzerati** («102.00.00000» mastro, «102.01.00000» conto, «102.01.00004»
+  sottoconto, M.C.T.): ridotti a cifre i tre livelli non erano uno il prefisso dell'altro e si
+  sommavano tutti. Tolti i segmenti di zeri in coda (solo codici di almeno tre segmenti con
+  l'ultimo di almeno quattro cifre) il riclassificatore sceglie un livello solo.
+- **Percorso di legge davanti alla descrizione** («B) I) IMMOBILIZZAZ.IMMATERIALI», «A) 2)
+  ESISTENZE INIZIALI»): si toglie e decide la descrizione — lo stesso gestionale scrive «B) F.DI
+  AMMORTAM.» al passivo, dove B) sarebbero i fondi rischi. Con le abbreviazioni «F/A -», «F.DI
+  AMMORT», «RAPPOR.», «IMMOBIL.» (`_descrizione_di_conto`).
+- **Pagina di continuazione senza intestazione di sezione**: è della sezione della pagina prima.
+- **C.III** («attività finanziarie che non costituiscono immobilizzazioni») ha ora una voce,
+  `sp08`: prima finiva fra le immobilizzazioni materiali (contiene IMMOBILIZZAZIONI). Un credito
+  non è mai un cespite («Crediti vs. Ad Immobiliare» prendeva la regola MOBILI).
+- Esistenze iniziali e rimanenze finali scritte per esteso vanno in `ce10`, come «RIM.INIZ» e
+  «RIM.FIN»: prima finivano in oneri diversi e altri ricavi. Il risultato non cambia.
+- Una pagina senza sezione eredita quella della pagina prima **solo finché la sezione non ha
+  chiuso** (totali di entrambi i lati, «Totali» due volte, pareggio o quadratura): dopo è un
+  allegato («Dettaglio ratei, risconti e competenze», budget_210) e resta fuori.
+- Nel percorso snello un parser standard che non ha letto nulla (`esito: "vuoto"`, colonne
+  comparative viste in un bilancio di verifica: STB) non chiude più la ricerca dei lettori
+  deterministici: prova la situazione contabile. Uno standard che legge e non quadra la chiude
+  come prima.
 
 ## 7. L'anno precedente ha uno standard più severo
 

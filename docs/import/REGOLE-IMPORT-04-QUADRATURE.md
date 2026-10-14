@@ -114,7 +114,7 @@ in Rettifiche su un file che non ha uno stato patrimoniale leggibile.
 
 | # | Condizione | Messaggio | Duro o avviso |
 |---|---|---|---|
-| 1 | il documento è una scansione | "*Il documento è una scansione contabile, ma l'OCR non ha ricostruito in modo affidabile colonne, gerarchie e totali…*" — il file **non** viene dichiarato sbilanciato | duro |
+| 1 | il documento è una scansione | "*Il documento è una scansione contabile, ma l'OCR non ha ricostruito in modo affidabile colonne, gerarchie e totali…*" — il file **non** viene dichiarato sbilanciato. **Eccezione** (2026-10-14): uno schema di legge le cui cifre ha letto la vision sulle immagini, non un testo OCR, si importa con l'avviso "*BILANCIO SBILANCIATO: le cifre sono lette dalle immagini della scansione…*" — è un errore di lettura correggibile in Rettifiche (ERREGI 30/09/2026: la stessa scansione una volta su tre usciva con 1.000 in meno sull'attivo) ; e qualunque scansione letta dall'OCR (MinerU o locale) con uno scarto entro il **5%** del totale (`_SCANSIONE_SBILANCIO_AMMESSO`, lo scarto peggiore fra aggregati e totali dichiarati) si importa con l'avviso "*…scansione letta dall'OCR, lo Stato Patrimoniale non quadra di…*" (decisione del proprietario, 2026-10-14: si blocca il previsionale, mai il salvataggio) | duro oltre il 5% (avviso se cifre da vision o scarto entro il 5%) |
 | 2 | i due totali **stampati** differiscono oltre €2 | "***BILANCIO SBILANCIATO: il bilancio sorgente non quadra prima dell'importazione**: Totale Attivo … != Totale Passivo … (scarto …). Il bilancio è stato importato così com'è: correggilo in Rettifiche prima di calcolare la proiezione.*" | avviso — rilevato **prima** di scegliere un estrattore (`_declared_totals_contradiction` in `pdf_importer.py`, chiamato prima ancora del ramo IV-CEE/route C), ma l'estrazione prosegue comunque e l'avviso resta in testa a `warnings` qualunque cosa dica poi `mapper.validate_balance` sul foglio ricostruito |
 | 3 | riepilogo aggregato **che contraddice se stesso** | "***BILANCIO SBILANCIATO: il documento sorgente è internamente incoerente**: le componenti del Conto Economico non ricostruiscono il risultato netto dichiarato (scarto …) e le componenti dell'Attivo non coincidono con il totale stampato (scarto …). Il bilancio è stato importato così com'è: correggilo in Rettifiche prima di calcolare la proiezione.*" | avviso — da `_classify_balance_failure`, dopo che `mapper.validate_balance` è già fallito |
 | 4 | riepilogo aggregato la cui stampa è coerente (`_is_aggregated_summary`: nessun sotto-item in numero romano, nessun "esigibili entro/oltre", nessun codice conto) | "***Formato non supportato**: il documento è un riepilogo aggregato per macro-voci, non uno schema di bilancio IV-CEE (art. 2424/2425) importabile…*" | duro |
@@ -163,6 +163,23 @@ americana: un messaggio in italiano con "1,470,357.32" invece di "1.470.357,32" 
 difetto reale, corretto in un'ondata successiva al lotto 3A
 (`.superpowers/sdd/2026-09-11-indagine-difetti-collaudo-3a/indagine-2-promote.md`, 2026-09-11 —
 spazio di lavoro **fuori dal repo**, non è mai stato in git).
+
+## 5-bis. Lo sbilancio chiuso dal risultato stampato
+
+Prima del gate, su ogni rotta (`importers/risultato_stampato.py`, chiamato da `pdf_importer`):
+si misura `attivo − passivo` e lo si cerca **al centesimo** nel testo del documento, su una riga
+che porta una didascalia di risultato (utile, perdita, risultato, eccedenza, avanzo, disavanzo),
+dal lato in cui il gestionale la stampa. Due esiti soli:
+
+- lo sbilancio è la differenza fra l'utile del CE e `sp13`, e quell'utile è stampato → `sp13`
+  diventa l'utile del CE (`risultato_del_periodo`);
+- lo sbilancio stesso è stampato come risultato → è l'anno prima non destinato, va in `sp12` e
+  `sp12g` (`risultato_anno_prima`).
+
+Non è un plug: etichetta un importo stampato, solo al centesimo, e se l'importo non c'è non
+succede nulla. Si dichiara sempre (avviso e `validation_report["risultato_stampato"]`). Uno
+sbilancio pari all'utile del periodo che `sp13` porta già non si tocca: è un risultato contato
+due volte o una massa mancante altrove, non un anno prima.
 
 ## 6. Dopo il gate strutturale: la quadratura
 

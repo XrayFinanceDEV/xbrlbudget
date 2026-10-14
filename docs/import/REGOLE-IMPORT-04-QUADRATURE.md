@@ -181,6 +181,27 @@ succede nulla. Si dichiara sempre (avviso e `validation_report["risultato_stampa
 sbilancio pari all'utile del periodo che `sp13` porta già non si tocca: è un risultato contato
 due volte o una massa mancante altrove, non un anno prima.
 
+**Costi disegnati come grafica** (situazioni AGO a sezioni contrapposte 8-digit, budget_618/619,
+decisione del proprietario 2026-10-14). Alcuni importi del PDF sono tracciati, non testo: un
+mastro di costi manca alla lettura e l'utile del CE esce più alto. `_c8_risultato_stampato`
+(`situazione_contabile_parser.py`) mette in `sp13` l'«UTILE/PERDITA D'ESERCIZIO» stampato solo
+se chiude lo SP al centesimo **e** la differenza col CE è esattamente TOTALE COSTI stampato meno
+costi letti (ricavi letti = TOTALE RICAVI stampato). Il CE non si tocca: la massa mancante si
+dichiara (`_ce_massa_non_letta`), il bilancio resta sbilanciato CE/SP con un avviso che cita i
+due totali, e l'utente inserisce i costi in Rettifiche. Nel percorso snello quella lettura resta
+in gara col modello (Task 28) anche oltre la soglia. Sullo stesso formato la firma 8-digit
+(sottoconti `NNNNNN NNN`) vince su quella AGO a blocchi quando «BILANCIO DI VERIFICA» è testo.
+
+**Verifica che non pareggia da sola** (verifica a colonna unica IE/E, budget_680, decisione del
+proprietario 2026-10-06). `parse_entries_verifica_ie` legge il saldo finale di ogni conto (il segno
+D/A decide il lato dello SP) e si verifica sui quattro totali di sezione e sull'utile stampati:
+se una sezione non torna, la lettura è vuota. Quando il dare stampato (attività + costi) differisce
+dall'avere (passività + ricavi), di solito per un risultato dell'anno prima non destinato, il
+parser lo dichiara (`_verifica_dare`/`_verifica_avere`) e il percorso snello adotta la lettura
+**squadrata** (`causa: documento_sbilanciato`, tipo `verifica`) senza chiamare il modello, se il suo
+scarto Attivo/Passivo è esattamente quella differenza e il CE torna. Nessuna deduzione del
+risultato non destinato: l'utente lo sistema in Rettifiche.
+
 ## 6. Dopo il gate strutturale: la quadratura
 
 Se `check_quadratura` dice che non quadra → **"Importazione non salvata: il bilancio estratto non

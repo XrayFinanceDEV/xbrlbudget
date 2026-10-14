@@ -170,6 +170,12 @@ monte si tenta un recupero, in quest'ordine:
    come fa `/import/pdf-ocr`. Il testo di MinerU diventa campione e `ocr_text`, e i passi sotto non
    girano. Un MinerU che non risponde o non restituisce testo **non blocca**: si prosegue dal passo
    1 e la risposta porta l'avviso `OCR MINERU NON DISPONIBILE` / `OCR MINERU SENZA TESTO`.
+   Quando le tabelle di MinerU hanno la forma di una situazione a sezioni contrapposte,
+   `mineru_contrapposte.pdf_da_tabelle` ne stampa un PDF sintetico (un PDF di testo con la
+   geometria pulita, righe spezzate da MinerU ricomposte) e il **percorso snello legge quello**
+   come ogni altro PDF di testo (`validation_report.import_snello.fonte_testo = "tabelle_mineru"`,
+   metodo `mineru+import_snello`); se lo snello non adotta, la route C riusa lo stesso PDF.
+   Senza quella forma (schemi di legge scansionati, es. ERREGI) lo snello resta escluso.
 1. **OCR locale deterministico** a coordinate (RapidOCR), gratuito. Se riesce, il file prosegue
    e — nota importante — non viene aggiunto alcun candidato LLM, perché le coordinate sono già
    state lette in modo affidabile.

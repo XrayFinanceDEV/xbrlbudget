@@ -225,8 +225,25 @@ def test_budget_342_ammortamenti_are_not_swallowed_by_oneri_diversi():
     # GESTIONE (7.036,26) that belongs there.
     #
     # Measured (not asserted verbatim from the brief): the four unmapped
-    # level-1 cost mastri sum to 58.604,70 + 8.773,07 + 23.172,80 + 6.831,68 =
-    # 97.382,25, matching `_unclassified_mass` exactly.
+    # level-1 cost mastri summed to 58.604,70 + 8.773,07 + 23.172,80 + 6.831,68 =
+    # 97.382,25, matching `_unclassified_mass` exactly. Since 2026-10-14 (Nicole,
+    # same gestionale) they have rules: ACQUISTI DI BENI is B.6 (ce05), the other
+    # three B.7 (ce06), so the declared mass is now zero - still declared, which
+    # is what a revert of the wiring would break.
     assert isinstance(bs.get("_unclassified_mass"), Decimal)
-    assert abs(bs["_unclassified_mass"] - D("97382.25")) <= D("1")
+    assert bs["_unclassified_mass"] == D("0")
+    assert abs(Decimal(ce.get("ce05_materie_prime", 0)) - D("58604.70")) <= D("1")
     assert abs(Decimal(ce.get("ce12_oneri_diversi", 0)) - D("7036.26")) <= D("1")
+
+
+def test_mastri_del_gestionale_a_quattro_sezioni():
+    """Nicole 31/07/2026, budget_342/343: i mastri di costo di quel gestionale hanno una
+    voce, e le regole B.7 stanno in fondo, dopo ONERI DIVERSI (un mastro AGO "Oneri
+    diversi di gestione" porta con se' "spese amministrative varie")."""
+    from importers.situazione_contabile_parser import _classify_ce_costi, _classify_sp_passivo
+    assert _classify_ce_costi("ACQUISTI DI BENI") == "ce05"
+    assert _classify_ce_costi("PRESTAZIONI DI LAVORO NON DIPEN") == "ce06"
+    assert _classify_ce_costi("GESTIONE VEICOLI AZIENDALI") == "ce06"
+    assert _classify_ce_costi("SPESE AMMIN.,COMM. E DI RAPPRES") == "ce06"
+    assert _classify_ce_costi("ONERI DIVERSI DI GESTIONE SPESE AMMINISTRATIVE VARIE") == "ce12"
+    assert _classify_sp_passivo("F.DO AMM.DIR.BREV.E UTILIZZ.OPERE INGE") == "depr_sp02"

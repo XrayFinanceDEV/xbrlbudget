@@ -222,6 +222,8 @@ def _risultato_deterministico(_det: dict, struttura, modo: str, t0: float) -> "R
         **({"dettagli": {"fonte": "prospetto_e_nota_xbrl", **_det["dettagli"]}}
            if _det.get("dettagli") is not None else {}),
         **({"ignoti": _det["ignoti"]} if _det.get("ignoti") else {}),
+        **({"causa": _det["causa"], "contraddizioni": _det["contraddizioni"]}
+           if _det.get("causa") else {}),
         "anomalie": _anomalie(_bs_det, _diag_det) + _negativi_stampati(_bs_det, _det["parser"])
         + _negativi_stampati(_det.get("prior_bs"), _det["parser"], _det.get("anno_precedente")),
         "secondi": round(time.monotonic() - t0, 1),
@@ -301,6 +303,15 @@ def _salva_deterministico_squadrato(_det: dict, struttura, t0: float, *, letture
         r.report["letture"] = letture
     if _causa_stampati(m, soglia(m["attivo"])):
         r.report["causa"] = "stampati"
+    if lettura["bs"].get("_ce_massa_non_letta") is not None:
+        # importi del CE disegnati come grafica: lo SP chiude col risultato stampato, il CE
+        # manca della massa che i suoi totali stampati dichiarano (budget_618/619)
+        _b = lettura["bs"]
+        r.report["causa"] = "ce_non_letto"
+        r.report["ce_non_letto"] = {
+            "massa": str(_b["_ce_massa_non_letta"]), "risultato": str(m["sp13"]),
+            "totale_costi": str(_b.get("_totale_costi_stampato")),
+            "costi_letti": str(_b.get("_costi_letti"))}
     r.report.update(extra)
     return r
 

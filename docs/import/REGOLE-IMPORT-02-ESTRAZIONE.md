@@ -329,7 +329,8 @@ dei due file è in `docs/FIXING-IMPORT.md` §6.
 
 ## 5. L'LLM: cosa, quanto, quando
 
-Modello **Claude Haiku 4.5** (`claude-haiku-4-5-20251001`), 8192 token di output, chiamato con
+Modello **Claude Haiku 5.5** (`claude-haiku-5-5`, `PDF_LLM_MODEL`, sovrascrivibile da ambiente;
+dal 2026-10-14, prima Haiku 4.5), senza `temperature` (il modello la rifiuta con un 400), 8192 token di output, chiamato con
 **tool-use forzato** e schema derivato dal modello dati: il modello non produce prosa da
 parsare, riempie campi tipizzati. Retry con backoff esponenziale, massimo 2, sugli errori 500.
 
@@ -717,7 +718,7 @@ un livello sopra quelli di `tappa()`:
 | Esito | Quando | Chiavi proprie |
 |---|---|---|
 | *(chiave assente)* | `IMPORT_MOTORE` spento o su un valore diverso da `"snello"` | — |
-| `"non_applicabile"` | il documento è una scansione o viene da OCR (RapidOCR locale o MinerU): il percorso snello **non si tenta nemmeno**, un testo OCR non è mai un text layer nativo | `motivo`: `"scansione"` \| `"ocr"` (mai `fase`/`errore`) |
+| `"non_applicabile"` | il documento è una scansione o viene da OCR (RapidOCR locale, o MinerU senza tabelle a sezioni contrapposte): il percorso snello **non si tenta nemmeno**, un testo OCR non è mai un text layer nativo. Con le tabelle MinerU a sezioni contrapposte invece lo snello legge il loro PDF sintetico (pagina 01 §5) | `motivo`: `"scansione"` \| `"ocr"` (mai `fase`/`errore`) |
 | `"ok"` / `"tappo"` | successo dell'orchestratore | `modo`, `struttura`, `misura`, `tappo`, `letture`, `diag`, `anomalie`, `secondi`, più `precedente` (`"incluso"` \| `"escluso_oltre_soglia"` \| `"non_letto_dalla_lettura_deterministica"`) quando in modo `"legge"` c'è un anno precedente |
 | `"squadrato"` | scarto oltre il limite del tappo dopo l'unica rilettura (modo `"legge"`), direttamente (modo `"conti"`), o lettura deterministica vicina salvata al posto di quella del modello o del ripiego (Task 28, nessuna rilettura): si adotta comunque, `tappo.corrente` resta `None` e `misura` dichiara lo scarto | stesse chiavi di `"ok"`/`"tappo"`, più `confronto_letture` o `ripiego_evitato` nel caso Task 28 |
 | `"ripiego"` | fallimento — dichiarato dall'orchestratore (solo su `"vuoto"`, o su una struttura non riuscita) o un'eccezione imprevista | `fase` (`"struttura"` \| `"lettura"` \| `"conti"` \| `"verifica"` \| `"eccezione"`), `errore` (il tipo di eccezione, o `"vuoto"` quando la causa è la verifica) |

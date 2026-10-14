@@ -884,6 +884,20 @@ def import_pdf_balance_sheet(
     if period_months is not None and period_months >= 12:
         period_months = None
 
+    # Un PDF ripassato da PDF24/Ghostscript può avere il testo cifrato (font senza
+    # mappa Unicode): l'import legge una copia decodificata e lo dichiara. L'impronta
+    # resta quella del file caricato.
+    _file_originale = file_path
+    _testo_cifrato = None
+    try:
+        from importers import testo_cifrato as _tc
+        _riparato = _tc.ripara(file_path)
+    except Exception as _tc_err:
+        logger.warning(f"Controllo del testo cifrato non riuscito: {_tc_err}")
+        _riparato = None
+    if _riparato is not None:
+        file_path, _testo_cifrato = _riparato
+
     db = SessionLocal()
     extraction_start = datetime.utcnow()
 
@@ -1921,6 +1935,8 @@ def import_pdf_balance_sheet(
             ) from _qd_err
 
         warnings = mapper.validate_hierarchy(balance_sheet_data)
+        if _testo_cifrato is not None:
+            warnings.insert(0, _tc.avviso(_testo_cifrato))
         _maturity_audit = _detail_report.get('periods', {}).get('current', {}).get('maturity', {}).get('families', {})
         if any(e.get('basis', '').startswith('management_')
                for family in _maturity_audit.values() for e in family.get('evidence', [])) or any(
@@ -2020,7 +2036,7 @@ def import_pdf_balance_sheet(
 
         # Step 5: Create current-year financial year
         current_year_val = fiscal_year or datetime.now().year
-        with open(file_path, "rb") as _source_file:
+        with open(_file_originale, "rb") as _source_file:
             _source_sha256 = hashlib.sha256(_source_file.read()).hexdigest()
         # Reliability of the accounts that decide every KPI. Never allowed to
         # turn a working import into a failure: any error means "unknown".
@@ -2036,6 +2052,13 @@ def import_pdf_balance_sheet(
         _validation_payload = _validation_report_payload(_qd, reliability=_reliability)
         if _snello_report is not None:
             _validation_payload["import_snello"] = _snello_report
+        if _testo_cifrato is not None:
+            _validation_payload["testo_cifrato"] = {
+                "spostamento": _testo_cifrato.spostamento,
+                "parole_prima": _testo_cifrato.parole_prima,
+                "parole_dopo": _testo_cifrato.parole_dopo,
+            }
+            _validation_payload.setdefault("warnings", []).append(_tc.avviso(_testo_cifrato))
         if is_trial_balance:
             # Fornitore configurato per il pass CoGe di route C, dichiarato su OGNI import
             # di route C (non solo quando il pass CoGe ha vinto il confronto col candidato
@@ -2399,3 +2422,8 @@ def import_pdf_balance_sheet(
 
     finally:
         db.close()
+        if file_path != _file_originale:
+            try:
+                os.remove(file_path)
+            except OSError:
+                pass

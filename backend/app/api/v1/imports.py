@@ -27,6 +27,50 @@ router = APIRouter()
 MAX_PDF_SIZE = 50 * 1024 * 1024  # 50MB
 
 
+def _e_una_scansione(content: bytes) -> bool:
+    """Stessa soglia dell'importatore (``is_scanned``): meno di 50 caratteri di testo
+    nelle prime 14 pagine. Un testo cifrato ma decodificabile non e' una scansione:
+    lo ripara ``importers.testo_cifrato``."""
+    import fitz
+    try:
+        with fitz.open(stream=content, filetype="pdf") as doc:
+            testo = "".join(page.get_text() for page in doc[:14])
+    except Exception:
+        return False
+    return len(testo.strip()) < 50
+
+
+async def _contesto_mineru_per_scansione(content: bytes, filename: str):
+    """MinerU in automatico sulle scansioni (decisione del proprietario, 2026-10-14).
+
+    Restituisce ``(contesto, avviso)``: il contesto di estrazione per l'importatore,
+    come in /import/pdf-ocr, oppure ``None`` con l'avviso del perche' (MinerU spento non
+    lo dice: e' la configurazione, non un guasto). Un MinerU che non risponde non blocca
+    l'import: si prosegue per la strada di prima (OCR locale, poi vision) e si dichiara.
+    """
+    if not settings.MINERU_OCR_ENABLED or not _e_una_scansione(content):
+        return None, None
+    from app.services.mineru_client import MinerUClient
+    from importers.mineru_adapter import build_extraction_context
+    try:
+        client = MinerUClient.from_settings(settings)
+        await client.health()
+        raw = await client.parse_pdf(content=content, filename=filename)
+        context = await run_in_threadpool(build_extraction_context, raw)
+    except Exception as exc:  # noqa: BLE001 - ogni guasto ripiega
+        logger.warning("MinerU non disponibile sulla scansione %s: %s", filename, exc)
+        return None, (
+            "OCR MINERU NON DISPONIBILE: la scansione e' stata letta con l'OCR di riserva. "
+            "Controlla gli importi in Rettifiche."
+        )
+    if not (context.full_text or "").strip():
+        return None, (
+            "OCR MINERU SENZA TESTO: la scansione e' stata letta con l'OCR di riserva. "
+            "Controlla gli importi in Rettifiche."
+        )
+    return context, None
+
+
 async def _read_and_validate_pdf(
     file: UploadFile,
     company_id: Optional[int],
@@ -444,6 +488,9 @@ async def upload_pdf(
         elif create_company:
             check_company_limit(db, user_id)
 
+        # Una scansione passa da MinerU in automatico, quando e' acceso.
+        contesto_ocr, avviso_ocr = await _contesto_mineru_per_scansione(content, file.filename)
+
         # Import PDF file (importer handles period_months + prior year internally)
         result = import_pdf_balance_sheet(
             file_path=tmp_file,
@@ -454,7 +501,10 @@ async def upload_pdf(
             sector=sector,
             period_months=period_months,
             user_id=user_id,
+            extraction_context=contesto_ocr,
         )
+        if avviso_ocr and isinstance(result, dict):
+            result.setdefault("warnings", []).insert(0, avviso_ocr)
 
         mark_success(db, upload_record, company_id=result.get("company_id") if isinstance(result, dict) else None)
         return result

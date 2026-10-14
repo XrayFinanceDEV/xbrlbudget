@@ -3501,7 +3501,10 @@ def _is_prior_result_caption(desc_upper: str) -> bool:
     d = desc_upper
     if 'TOTALE' in d or 'PAREGGIO' in d:
         return False
-    if not any(k in d for k in ('UTILE', 'UTILI', 'PERDITA', 'PERDITE', 'RISULTATO')):
+    # "Eccedenza esercizio precedente" (Unicarton 31/08/2026): la stessa riga col nome
+    # che il gestionale da' al saldo, accanto a "Eccedenza (Utile)" del periodo.
+    if not any(k in d for k in ('UTILE', 'UTILI', 'PERDITA', 'PERDITE', 'RISULTATO',
+                                'ECCEDENZA')):
         return False
     return 'PRECEDENT' in d or 'PORTAT' in d
 
@@ -3516,7 +3519,10 @@ def _hier_prior_result(words, lo: float, hi: float) -> Decimal:
     """
     total = Decimal('0')
     for row_words in _be_cluster_physical_rows(words, lo, hi):
-        toks = [w[4].strip() for w in sorted(row_words, key=lambda w: w[0]) if w[4].strip()]
+        # Lo strato OCR di una scansione legge come caratteri le linee di sottolineatura
+        # davanti all'importo ("___173.463,79", Unicarton 31/08/2026).
+        toks = [w[4].strip().lstrip('_—|') for w in sorted(row_words, key=lambda w: w[0])]
+        toks = [t for t in toks if t]
         # a leading account code means the row is already part of a mastro
         if toks and re.match(r'^[\d./*]+$', toks[0]) and not _BE_AMT_RE.match(toks[0]):
             continue
@@ -5000,16 +5006,44 @@ def extract_contrapposte_best_effort(file_path: str) -> Tuple[Dict[str, Decimal]
                  if use_garbled_reconstruction else None)
                 or _find_total('TOTALE A PAREGGIO', 'TOTALEAPAREGGIO'))
 
+    # Risultato degli esercizi precedenti non ancora destinato, stampato SENZA codice
+    # SOTTO "Totale passivita'" ("Eccedenza esercizio precedente", "Utile esercizio
+    # precedente": Unicarton 31/08/2026). E' patrimonio netto, e sta fuori dai totali
+    # stampati: la differenza Totale attivita' - Totale passivita' lo contiene, e senza
+    # toglierlo diventerebbe utile del periodo (sp13 241.711,59 invece di 68.247,80).
+    # Solo sotto il totale: una riga sopra e' gia' dentro il totale passivita'.
+    prior_footer = Z
+    for page_number, (words, is_sp, is_ce, _up, width) in enumerate(pages_data, 1):
+        if not (is_sp and not is_ce):
+            continue
+        tot_y = [fact.y for sec, _sd, fact in controls
+                 if sec == 'sp' and fact.page == page_number
+                 and 'TOTALE' in fact.description and 'PASSIV' in fact.description]
+        if not tot_y:
+            continue
+        below = [w for w in words if w[1] > max(tot_y)]
+        split = _be_split(words) or width / 2
+        prior_footer += _hier_prior_result(below, split, 1e9)
+        prior_footer -= _hier_prior_result(below, -1e9, split)
+    if prior_footer:
+        add(bs, 'sp12', prior_footer)
+        add(bs, 'sp12g_utili_perdite_portati', prior_footer)
+        bs['_prior_result_footer'] = prior_footer
+        logger.info(f"contrapposte: risultato esercizi precedenti {prior_footer} "
+                    "sotto i totali -> sp12g, tolto dalla differenza dei totali")
+
     explicit_results = []
     for sec, _side, fact in controls:
         if sec != 'sp' or 'ESERCIZ' not in fact.description:
+            continue
+        if _is_prior_result_caption(fact.description):
             continue
         if 'UTILE' in fact.description:
             explicit_results.append(fact.amount)
         elif 'PERDIT' in fact.description:
             explicit_results.append(-fact.amount)
     explicit_result = explicit_results[-1] if explicit_results else None
-    total_gap = (tot_att - tot_pas
+    total_gap = (tot_att - tot_pas - prior_footer
                  if tot_att is not None and tot_pas is not None else None)
     ce_cost_total = _control_amount('ce', 'left', 'TOTALE', 'COST')
     ce_revenue_total = _control_amount('ce', 'right', 'TOTALE', 'RICAV')

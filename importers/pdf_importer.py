@@ -55,6 +55,9 @@ class PDFImportError(Exception):
 
 
 _UNBALANCED_WARNING_PREFIX = "BILANCIO SBILANCIATO"
+# Sbilancio che una scansione letta dall'OCR puo' avere ed essere importata con avviso:
+# oltre, l'OCR ha perso colonne o totali (decisione del proprietario, 2026-10-14).
+_SCANSIONE_SBILANCIO_AMMESSO = Decimal("0.05")
 _UNBALANCED_WARNING_SUFFIX = (
     "Il bilancio è stato importato così com'è: correggilo in Rettifiche "
     "prima di calcolare la proiezione."
@@ -202,6 +205,29 @@ def _classify_balance_failure(
             f"scansione e lo Stato Patrimoniale non quadra (attivo {eur_it(_q.totale_attivo)}, "
             f"passivo {eur_it(_q.totale_passivo)}). {_UNBALANCED_WARNING_SUFFIX}",
         )
+    if (is_scanned or ocr_source) and \
+            balance_sheet_data.get('totale_attivo', Decimal('0')) != Decimal('0'):
+        # Uno sbilancio piccolo su una scansione letta dall'OCR (MinerU o locale) si
+        # importa con l'avviso: si blocca il previsionale, mai il salvataggio (decisione
+        # del proprietario, 2026-10-14). Oltre la soglia l'OCR ha perso colonne o totali
+        # e il file non si dichiara sbilanciato.
+        from importers.iv_cee_hierarchy import check_quadratura, eur_it
+        _q = check_quadratura(balance_sheet_data)
+        _ta = Decimal(str(balance_sheet_data.get('totale_attivo') or 0))
+        _tp = Decimal(str(balance_sheet_data.get('totale_passivo') or 0))
+        # lo scarto peggiore fra aggregati e totali dichiarati
+        _scarto = max(abs(_q.sbilancio), abs(_ta - _tp),
+                      abs(_q.totale_attivo - _ta), abs(_q.totale_passivo - _tp))
+        _base = max(abs(_q.totale_attivo), abs(_q.totale_passivo), abs(_ta), abs(_tp))
+        if _base > 0 and _scarto <= _base * _SCANSIONE_SBILANCIO_AMMESSO:
+            return BalanceFailureVerdict(
+                None,
+                f"{_UNBALANCED_WARNING_PREFIX}: scansione letta dall'OCR, lo Stato "
+                f"Patrimoniale non quadra di {eur_it(_scarto)} (attivo "
+                f"{eur_it(_ta or _q.totale_attivo)}, passivo {eur_it(_tp or _q.totale_passivo)}): "
+                "verificare le righe lette. "
+                f"{_UNBALANCED_WARNING_SUFFIX}",
+            )
     if is_scanned or ocr_source:
         return BalanceFailureVerdict(
             "Il documento è una scansione contabile, ma l'OCR non ha "

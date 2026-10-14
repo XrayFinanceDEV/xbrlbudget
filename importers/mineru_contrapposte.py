@@ -46,19 +46,53 @@ def _testo(cella) -> str:
     return (cella.text or "").strip()
 
 
-def _riga_conti(celle: list[str]):
-    """(sinistra, destra) di una riga a sei celle; ciascun lato (codice, descrizione,
-    importo) o None. Le righe d'intestazione non hanno importi e tornano (None, None)."""
-    celle = celle + [""] * (6 - len(celle))
+class _Ricucitore:
+    """Ricompone i conti di una sezione dalle celle in ordine di lettura, anche quando
+    MinerU spezza una riga della tabella su piu' righe fisiche (Unicarton 31/08/2026,
+    scansione da 6,5 MB: il codice di sinistra su una riga, l'importo di destra su quella
+    dopo, descrizione e importo di sinistra con codice e descrizione di destra su una
+    terza). Su ciascun lato un conto e' codice, descrizione, importo, in quest'ordine:
+    l'importo va al lato che ha gia' la descrizione e aspetta l'importo, un codice a
+    inizio riga apre un conto a sinistra, piu' avanti nella riga a destra. Su una riga
+    intera il risultato e' quello del taglio fisso a tre celle per lato."""
 
-    def lato(c, d, a):
-        if not _IMPORTO.fullmatch(a.replace(" ", "")):
-            return None
-        if c and not _CODICE.match(c):
-            return None
-        return c, d, a.replace(" ", "")
+    def __init__(self):
+        self.attesa = {"L": None, "R": None}       # [codice, descrizione, importo|None]
 
-    return lato(*celle[0:3]), lato(*celle[3:6])
+    def in_attesa(self) -> bool:
+        return any(a is not None and not a[1] for a in self.attesa.values())
+
+    def riga(self, celle: list[str]) -> list:
+        """I conti completati da questa riga, come (lato, (codice, descrizione, importo))."""
+        usciti, lato, sinistra_toccata = [], "L", False
+        for i, c in enumerate(celle):
+            if not c:
+                continue
+            importo = c.replace(" ", "")
+            if _IMPORTO.fullmatch(importo):
+                for s in (lato, "R" if lato == "L" else "L"):
+                    a = self.attesa[s]
+                    if a is not None and a[1] and a[2] is None:
+                        usciti.append((s, (a[0], a[1], importo)))
+                        self.attesa[s] = None
+                        if s == "L":
+                            lato = "R"
+                        break
+                continue
+            if _CODICE.match(c):
+                lato = "R" if (sinistra_toccata or i >= 3) else "L"
+                self.attesa[lato] = [c, "", None]
+                if lato == "L":
+                    sinistra_toccata = True
+                continue
+            a = self.attesa[lato]
+            if a is None:
+                self.attesa[lato] = ["", c, None]
+            elif not a[1]:
+                a[1] = c
+            if lato == "L":
+                sinistra_toccata = True
+        return usciti
 
 
 def _coppie_di_piede(celle: list[str]) -> list[tuple[str, str]]:
@@ -97,6 +131,7 @@ def _righe(tables) -> dict[str, list]:
     """Per sezione, la lista ordinata di righe da stampare: ("conto", L, R) oppure
     ("piede", lato, didascalia, importo)."""
     out: dict[str, list] = {"sp": [], "ce": []}
+    ricuci = {"sp": _Ricucitore(), "ce": _Ricucitore()}
     for table in tables:
         sezione = _sezione(table)
         if sezione is None:
@@ -106,16 +141,17 @@ def _righe(tables) -> dict[str, list]:
             if not any(celle):
                 continue
             unite = " ".join(celle)
-            sinistra, destra = _riga_conti(celle) if len(celle) >= 6 else (None, None)
-            if sinistra or destra:
-                out[sezione].append(("conto", sinistra, destra))
+            codici = any(_CODICE.match(c) for c in celle if c)
+            if (_PAROLA_TOTALE.search(unite) and not codici
+                    and not ricuci[sezione].in_attesa()):
+                coppie = _coppie_di_piede(celle)
+                for i, (didascalia, importo) in enumerate(coppie):
+                    lato = _lato_del_piede(sezione, didascalia, i, len(coppie))
+                    out[sezione].append(("piede", lato, didascalia, importo))
                 continue
-            if not _PAROLA_TOTALE.search(unite):
-                continue
-            coppie = _coppie_di_piede(celle)
-            for i, (didascalia, importo) in enumerate(coppie):
-                lato = _lato_del_piede(sezione, didascalia, i, len(coppie))
-                out[sezione].append(("piede", lato, didascalia, importo))
+            for lato, conto in ricuci[sezione].riga(celle):
+                out[sezione].append(("conto", conto, None) if lato == "L"
+                                    else ("conto", None, conto))
     return out
 
 

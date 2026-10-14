@@ -1101,8 +1101,22 @@ def import_pdf_balance_sheet(
         # Un'istanza XBRL nativa non arriva qui: la rotta ROUTE_XBRL solleva sopra.
         _snello = None
         _snello_report = None
+        # Scansione letta da MinerU (decisione del proprietario, 2026-10-14): se le sue tabelle
+        # hanno la forma di una situazione a sezioni contrapposte se ne stampa un PDF sintetico,
+        # un PDF di testo con la geometria pulita. Lo legge il percorso snello come qualunque
+        # altro PDF di testo (stessi lettori deterministici, stesso tappo, stessa rilettura);
+        # la route C sotto lo riusa se lo snello non adotta. Il divieto per le scansioni era
+        # nato con l'OCR di prima, che dava solo testo libero.
+        if _ocr_source and extraction_context is not None:
+            try:
+                from importers.mineru_contrapposte import pdf_da_tabelle
+                _pdf_mineru = pdf_da_tabelle(extraction_context)
+            except Exception as _mc_err:
+                logger.warning(f"Tabelle MinerU non lette ({_mc_err})")
+                _pdf_mineru = None
+        _file_snello = _pdf_mineru or file_path
         if os.environ.get("IMPORT_MOTORE") == "snello":
-            if is_scanned or _ocr_source:
+            if is_scanned or (_ocr_source and _pdf_mineru is None):
                 _snello_report = {
                     "esito": "non_applicabile",
                     "motivo": "scansione" if is_scanned else "ocr",
@@ -1114,7 +1128,7 @@ def import_pdf_balance_sheet(
                 # oggi. Riconosciuto dal testo, PRIMA della struttura (nessuna chiamata modello);
                 # stessa uscita degli altri documenti rifiutati (PDFImportError, nulla salvato).
                 from importers.import_snello import riepilogo as _riepilogo
-                if _riepilogo.riconosci_riepilogo(file_path):
+                if _riepilogo.riconosci_riepilogo(_file_snello):
                     raise PDFImportError(_riepilogo.MESSAGGIO)
                 try:
                     # Tutto in locali fino in fondo: un'eccezione IN QUALUNQUE punto di
@@ -1131,7 +1145,8 @@ def import_pdf_balance_sheet(
                     # alla parita' fra schema conti e schema legge (Task lotto-b, fix 9, diagnosi
                     # budget_313: senza l'indizio un pareggio cadeva sul lato sbagliato).
                     _risultato_snello = import_snello.importa(
-                        file_path, ocr_text=ocr_text, route_hint=classification.route)
+                        _file_snello, ocr_text=None if _pdf_mineru else ocr_text,
+                        route_hint=classification.route)
                     _bs_snello, _ce_snello = _risultato_snello.bs, _risultato_snello.ce
                     _prior_bs_snello = _risultato_snello.prior_bs
                     _prior_ce_snello = _risultato_snello.prior_ce
@@ -1152,6 +1167,8 @@ def import_pdf_balance_sheet(
                     # Il blocco e' riuscito per intero: solo ora si adotta il risultato.
                     _snello = _risultato_snello
                     _snello_report = _snello.report
+                    if _pdf_mineru is not None:
+                        _snello_report["fonte_testo"] = "tabelle_mineru"
                     balance_sheet_data, income_data = _bs_snello, _ce_snello
                     prior_bs_data, prior_ce_data = _prior_bs_snello, _prior_ce_snello
                 except import_snello.SnelloNonRiuscito as exc:
@@ -1496,7 +1513,9 @@ def import_pdf_balance_sheet(
         except Exception:
             pass
         _coge_ok = False
-        _mineru_tabelle = False   # route C letta dalle tabelle MinerU (mineru_contrapposte)
+        # letta dalle tabelle MinerU (mineru_contrapposte): dalla route C, o dallo snello sul
+        # PDF sintetico (allora i dettagli sono gia' celle lette, nessun passaggio dei dettagli)
+        _mineru_tabelle = _snello is not None and _pdf_mineru is not None
         # Sezioni riscattate in vision (route C). Inizializzata QUI, fuori da ogni
         # ramo: il blocco del parser_version la legge su OGNI route, mentre
         # l'assegnazione vive dentro `if candidates:` — una route A/B solleverebbe
@@ -1560,13 +1579,7 @@ def import_pdf_balance_sheet(
             # su Qwen non si chiama (Unicarton 31/08/2026: al centesimo in pochi secondi,
             # contro 8,5 minuti e 315 mila di sbilancio). Qwen resta solo quando le tabelle
             # non hanno quella forma.
-            if extraction_context is not None:
-                try:
-                    from importers.mineru_contrapposte import pdf_da_tabelle
-                    _pdf_mineru = pdf_da_tabelle(extraction_context)
-                except Exception as _mc_err:
-                    logger.warning(f"Route C: tabelle MinerU non lette ({_mc_err})")
-                    _pdf_mineru = None
+            # (il PDF sintetico, se c'e', l'ha gia' stampato il blocco prima dello snello)
 
             # A locally recognised verifica-segno has already been parsed from
             # source coordinates and self-validates against independent SP/CE

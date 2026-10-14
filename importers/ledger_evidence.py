@@ -217,7 +217,7 @@ def read_accounts(frontier):
                 raw = dati.get('accounts', []) if isinstance(dati, dict) else []
             else:
                 messages = [{'role':'user','content':testo_utente}]
-                response = client.messages.create(model=PDF_LLM_MODEL, max_tokens=14000, temperature=0, system=_PROMPT,
+                response = client.messages.create(model=PDF_LLM_MODEL, max_tokens=14000, system=_PROMPT,
                     messages=messages, tools=[{'name':'classifica_conti','description':'One classification per source account',
                     'input_schema':schema}], tool_choice={'type':'tool','name':'classifica_conti'})
                 if response.stop_reason == 'max_tokens':

@@ -211,7 +211,9 @@ PDF_MARGIN = {
 }
 
 # PDF LLM Extraction Settings
-PDF_LLM_MODEL = "claude-haiku-4-5-20251001"
+# Modello Anthropic dell'import PDF (vision, OCR di riserva, riscatto, passaggi non su gx10)
+# e dei commenti AI e delle note dei report. Sovrascrivibile da ambiente come gli altri.
+PDF_LLM_MODEL = _os.environ.get("PDF_LLM_MODEL", "claude-haiku-5-5")
 PDF_LLM_MAX_TOKENS = 8192
 # gx10: Qwen locale (vLLM, OpenAI-compatibile), raggiunto via Tailscale. La chiave NON sta
 # qui: GX10_API_KEY si legge al momento della chiamata (importers/llm_provider.py).

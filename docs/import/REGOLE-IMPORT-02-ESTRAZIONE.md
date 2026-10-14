@@ -329,7 +329,8 @@ dei due file è in `docs/FIXING-IMPORT.md` §6.
 
 ## 5. L'LLM: cosa, quanto, quando
 
-Modello **Claude Haiku 4.5** (`claude-haiku-4-5-20251001`), 8192 token di output, chiamato con
+Modello **Claude Haiku 5.5** (`claude-haiku-5-5`, `PDF_LLM_MODEL`, sovrascrivibile da ambiente;
+dal 2026-10-14, prima Haiku 4.5), senza `temperature` (il modello la rifiuta con un 400), 8192 token di output, chiamato con
 **tool-use forzato** e schema derivato dal modello dati: il modello non produce prosa da
 parsare, riempie campi tipizzati. Retry con backoff esponenziale, massimo 2, sugli errori 500.
 

@@ -134,6 +134,19 @@ def _snello_squadrato_reason(report: Dict[str, Any]) -> str:
         except Exception:
             return str(valore)
 
+    if report.get("causa") == "ce_non_letto":
+        c = report.get("ce_non_letto") or {}
+        try:
+            massa, ris, tot, letti = (f"€{_euro_it(Decimal(str(c[k])))}" for k in
+                                      ("massa", "risultato", "totale_costi", "costi_letti"))
+        except Exception:
+            massa = ris = tot = letti = "n/d"
+        return (
+            f"{_UNBALANCED_WARNING_PREFIX}: nel conto economico mancano {massa} di costi che il "
+            f"PDF disegna come grafica e non come testo (TOTALE COSTI stampato {tot}, conti "
+            f"letti {letti}). Lo Stato Patrimoniale quadra con il risultato stampato dal "
+            f"documento ({ris}). Inserisci i costi mancanti in Rettifiche prima di calcolare "
+            f"la proiezione.")
     if report.get("causa") == "documento_sbilanciato":
         # Nessuna rilettura e' avvenuta: il documento si contraddice da solo e le voci lette lo
         # riproducono (Task 25 round 2: i totali; Task 27: il risultato SP/CE). Una frase per

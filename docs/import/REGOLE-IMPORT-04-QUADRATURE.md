@@ -181,6 +181,17 @@ succede nulla. Si dichiara sempre (avviso e `validation_report["risultato_stampa
 sbilancio pari all'utile del periodo che `sp13` porta già non si tocca: è un risultato contato
 due volte o una massa mancante altrove, non un anno prima.
 
+**Costi disegnati come grafica** (situazioni AGO a sezioni contrapposte 8-digit, budget_618/619,
+decisione del proprietario 2026-10-14). Alcuni importi del PDF sono tracciati, non testo: un
+mastro di costi manca alla lettura e l'utile del CE esce più alto. `_c8_risultato_stampato`
+(`situazione_contabile_parser.py`) mette in `sp13` l'«UTILE/PERDITA D'ESERCIZIO» stampato solo
+se chiude lo SP al centesimo **e** la differenza col CE è esattamente TOTALE COSTI stampato meno
+costi letti (ricavi letti = TOTALE RICAVI stampato). Il CE non si tocca: la massa mancante si
+dichiara (`_ce_massa_non_letta`), il bilancio resta sbilanciato CE/SP con un avviso che cita i
+due totali, e l'utente inserisce i costi in Rettifiche. Nel percorso snello quella lettura resta
+in gara col modello (Task 28) anche oltre la soglia. Sullo stesso formato la firma 8-digit
+(sottoconti `NNNNNN NNN`) vince su quella AGO a blocchi quando «BILANCIO DI VERIFICA» è testo.
+
 ## 6. Dopo il gate strutturale: la quadratura
 
 Se `check_quadratura` dice che non quadra → **"Importazione non salvata: il bilancio estratto non

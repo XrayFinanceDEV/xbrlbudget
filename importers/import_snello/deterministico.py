@@ -57,6 +57,20 @@ def _verifica_bilancio(bs: dict, ce: dict, stampati: dict | None):
     return bs, ce, tappo, esito, m
 
 
+def _ce_non_letto_dichiarato(bs: dict, m: dict, s: Decimal) -> bool:
+    """Lo SP chiude al centesimo col risultato stampato e lo scarto CE/SP e' esattamente la
+    massa che i totali stampati del conto economico dichiarano non letta
+    (``_c8_risultato_stampato``: importi disegnati come grafica, budget_618/619). Una lettura
+    cosi' e' vicina quanto puo' esserlo un testo che non contiene quegli importi: resta in
+    gara col modello (Task 28) anche oltre la soglia, con l'avviso che la dichiara."""
+    massa = bs.get("_ce_massa_non_letta")
+    if massa is None:
+        return False
+    tol = Decimal("0.05")
+    return (abs(m["scarto_sp"]) <= tol and abs(m["scarto_stampati"]) <= s
+            and abs(m["scarto_ce"] - Decimal(massa)) <= tol)
+
+
 def _esito(nome: str, bs_raw: dict, ce_raw: dict, stampati_raw: dict | None) -> dict:
     bs, ce = _adatta(bs_raw), _adatta(ce_raw)
     if not bs or not ce:
@@ -80,7 +94,7 @@ def _esito(nome: str, bs_raw: dict, ce_raw: dict, stampati_raw: dict | None) -> 
         # soglia relativa (il vecchio limite del tappo, max(100 euro, 0,1% dell'attivo)). Una
         # lettura lontana non prende il posto del ripiego sull'importatore vecchio.
         peggiore = max(abs(m["scarto_sp"]), abs(m["scarto_ce"]), abs(m["scarto_stampati"]))
-        if peggiore <= s:
+        if peggiore <= s or _ce_non_letto_dichiarato(bs, m, s):
             # SENZA tappo (tappa() non l'ha toccata); vuoto/errore/reso falliti non portano nulla.
             out["lettura"] = {"bs": bs, "ce": ce, "misura": m}
         return out

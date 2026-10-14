@@ -2619,6 +2619,66 @@ def _c8_recover_orphan_passivo(file_path: str, bs: Dict[str, Decimal]) -> Dict[s
     return bs
 
 
+_C8_IMPORTO = r'(-?\d{1,3}(?:\.\d{3})*,\d{2}-?)'
+
+
+def _c8_stampato(full_text: str, didascalia: str) -> Optional[Decimal]:
+    """L'unico importo stampato subito dopo ``didascalia`` (regex), o None se manca o
+    se il documento ne stampa piu' d'uno diverso."""
+    trovati = {_parse_amount(m.group(1).rstrip('-'))
+               for m in re.finditer(didascalia + r'\s*\n?\s*' + _C8_IMPORTO, full_text,
+                                    re.IGNORECASE)}
+    return trovati.pop() if len(trovati) == 1 else None
+
+
+def _c8_risultato_stampato(full_text: str, entries: List[Entry],
+                           bs: Dict[str, Decimal]) -> Dict[str, Decimal]:
+    """Un mastro di conto economico il cui importo il PDF disegna come grafica e non come
+    testo (budget_618/619, AGO: "Interessi e altri on.fin.v/terzi") manca alla lettura: il
+    CE esce con un utile piu' alto, e sp13 = utile CE lascia lo SP sbilanciato della stessa
+    massa. Se il risultato stampato ("UTILE/PERDITA D'ESERCIZIO") chiude lo SP al centesimo
+    E la differenza fra utile CE e risultato stampato e' esattamente il TOTALE COSTI
+    stampato meno i costi letti (coi ricavi letti pari al TOTALE RICAVI stampato), sp13
+    diventa il risultato stampato
+    (decisione del proprietario, 2026-10-14). Il CE non si tocca: la massa non letta si
+    dichiara (``_ce_massa_non_letta``) e l'utente la inserisce in Rettifiche. Due controlli
+    stampati indipendenti, nessun importo inventato; altrimenti ``bs`` resta com'e'."""
+    tol = Decimal('0.05')
+    ta = bs.get('totale_attivo') or Decimal('0')
+    tp = bs.get('totale_passivo') or Decimal('0')
+    sp13 = bs.get('sp13') or Decimal('0')
+    if abs(ta - tp) <= tol:
+        return bs
+    utile = _c8_stampato(full_text, r"UTILE\s+D[' ]\s*ESERCIZIO")
+    perdita = _c8_stampato(full_text, r"PERDITA\s+D[' ]\s*ESERCIZIO")
+    if (utile is None) == (perdita is None):
+        return bs
+    stampato = utile if utile is not None else -perdita
+    if abs(ta - (tp - sp13 + stampato)) > tol or abs(sp13 - stampato) <= tol:
+        return bs
+    tot_costi = _c8_stampato(full_text, r'TOTALE\s+COSTI')
+    tot_ricavi = _c8_stampato(full_text, r'TOTALE\s+RICAVI')
+    if tot_costi is None or tot_ricavi is None:
+        return bs
+    costi = sum((e.amount for e in entries if e.section == 'costi'), Decimal('0'))
+    ricavi = sum((e.amount for e in entries if e.section == 'ricavi'), Decimal('0'))
+    non_letti = tot_costi - costi
+    if (abs(tot_ricavi - ricavi) > tol or non_letti <= tol
+            or abs((sp13 - stampato) - non_letti) > tol):
+        return bs
+    new_bs = dict(bs)
+    new_bs['sp13'] = stampato
+    new_bs['totale_passivo'] = tp - sp13 + stampato
+    new_bs['_ce_massa_non_letta'] = sp13 - stampato
+    new_bs['_totale_costi_stampato'] = tot_costi
+    new_bs['_costi_letti'] = costi
+    logger.warning(
+        f"Route C: risultato stampato {stampato:,.2f} chiude lo SP; il CE manca di "
+        f"{sp13 - stampato:,.2f} di massa non letta (totali stampati costi {tot_costi:,.2f} / "
+        f"ricavi {tot_ricavi:,.2f}) — da inserire in Rettifiche")
+    return new_bs
+
+
 # ---------------------------------------------------------------------------
 # TeamSystem "Stato patrimoniale / Conto economico" parser
 # Codes: XX/YYYY/YYYY (e.g. 04/0005/0010). Accounts are grouped under
@@ -6185,7 +6245,12 @@ def extract_situazione_contabile(
 
     default_ce = False
     used_c8 = False
-    if is_ago_format(full_text):
+    # La firma a sezioni contrapposte 8-digit (sottoconti "NNNNNN NNN", TOTALE A
+    # PAREGGIO, ATTIVITA'/PASSIVITA') e' piu' specifica di quella AGO: quando
+    # l'intestazione "BILANCIO DI VERIFICA" e' testo e non un tracciato (budget_618,
+    # 619, 620, 610/621, 613) il parser a blocchi AGO leggeva uno o pochi mastri e
+    # sbilanciava di milioni, il parser per coordinate li legge tutti.
+    if is_ago_format(full_text) and not is_contrapposte_8digit(full_text):
         logger.info("AGO/ERP format detected, using block-based parser")
         entries, totali = parse_entries_ago(file_path)
         logger.info(f"AGO parser: {len(entries)} parent entries, totali={totali}")
@@ -6228,6 +6293,7 @@ def extract_situazione_contabile(
     # side and a clean orphan subset closes the gap.
     if used_c8:
         bs = _c8_recover_orphan_passivo(file_path, bs)
+        bs = _c8_risultato_stampato(full_text, entries, bs)
 
     # Safety net (general, not per-file): a structured/DEPI parser that comes up
     # EMPTY on a file that is physically a 2-column contrapposte (is_contrapposte_file)

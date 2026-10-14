@@ -287,6 +287,9 @@ _SP_ATTIVO_RULES = [
     (['IMMOBILIZZAZIONI IMMATERIALI'], 'gross_sp02'),
     (['IMMOBILIZZAZIONI MATERIALI'], 'gross_sp03'),
     (['IMMOBILIZZAZIONI FINANZIARIE'], 'gross_sp04'),
+    # "IMMOBILIZZI FINANZIARI" (budget_680): senza questa regola vinceva MOBILI, che e'
+    # sottostringa di IMMOBILIZZI, e i depositi cauzionali diventavano arredi
+    (['IMMOBILIZZI', 'FINANZ'], 'gross_sp04'),
     # Immobilizzazioni in corso e acconti (B.II.5 / B.I.6) — a LEGITIMATE fixed
     # asset. Must precede the ANTICIP rule below so a real immob. acconto is not
     # demoted to a credit.
@@ -348,6 +351,7 @@ _SP_ATTIVO_RULES = [
     (['MAGAZZIN'], 'sp05'),
     # Common trial-balance abbreviation: "Rim. mat. prime, sussid. e consumo".
     (['RIM', 'MAT', 'PRIM'], 'sp05'),
+    (['GIACENZ'], 'sp05'),                       # "COLORANTI/GIACENZE" (budget_680)
     (['RATEI', 'RISCONTI', 'ATTIV'], 'sp10'),
     (['RATEI', 'ATTIV'], 'sp10'),
     (['RISCONTI', 'ATTIV'], 'sp10'),
@@ -356,6 +360,15 @@ _SP_ATTIVO_RULES = [
     (['DEPOSIT', 'POSTAL'], 'sp09'),
     (['DENARO'], 'sp09'),
     (['CASSA'], 'sp09'),
+    # conto corrente bancario a saldo dare (budget_680: "BANCA DI ASTI C/C...", mastro
+    # "BANCHE"); a saldo avere sta nel passivo e lo leggono le regole di debito. Prima i
+    # crediti che nominano una banca ("CREDITI V/BANCHE PER RIMBORSO CARTA", AIC) e
+    # l'erario ("ritenute su C/C bancari", MBS): restano crediti, come prima.
+    (['CREDIT'], 'sp06'),
+    (['ERARIO'], 'sp06'),
+    (['DEBIT'], 'sp06'),        # "DEBITI V/BANCHE" stampato all'attivo (AIC): come prima
+    (['BANCA ', 'C/C'], 'sp09'),
+    (['BANCHE'], 'sp09'),
     # Everything else in attivo = crediti (sp06)
 ]
 
@@ -366,6 +379,9 @@ _SP_PASSIVO_RULES = [
     # made a fondo fine-mandato look like a tangible depreciation fund.
     (['QUIESCENZA'], 'sp14'),
     (['INDENNIT', 'MANDATO'], 'sp14'),
+    (['FINE', 'MANDATO'], 'sp14'),               # "F.DO TRATT.FINE MANDATO(TFM)"
+    # "F.DO INDENNITA' ANZIANITA' DIPEND." e' il TFR col nome di prima del 1982
+    (['INDENNIT', 'ANZIANIT'], 'sp15'),
     # Depreciation funds (will be netted against gross assets)
     # Specific rules first (pluriennali/macchine disambiguate immat vs mat)
     (['F.DO', 'AMM', 'PLURIENN'], 'depr_sp02'),
@@ -476,6 +492,8 @@ _CE_COSTI_RULES = [
     (['MERCI'], 'ce05'),
     (['MAT.PRI'], 'ce05'),
     (['SERVIZI'], 'ce06'),
+    # compensi e contributi degli amministratori: B.7 servizi, non personale
+    (['AMMINISTRATOR'], 'ce06'),
     (['GODIMENTO', 'BENI'], 'ce07'),
     # Personale sub-fields (more specific than the generic 'PERSONALE' bucket)
     (['QUOTE', 'FINE', 'RAPPORTO'], 'ce08a_tfr'),
@@ -507,6 +525,7 @@ _CE_COSTI_RULES = [
     (['ONERI', 'FINANZ'], 'ce15'),
     (['ON.FIN'], 'ce15'),
     (['INT. PASS'], 'ce15'),
+    (['INT.PASS'], 'ce15'),                      # "INT.PASS.FINANZ.CREDEM" (budget_680)
     (['IMPOSTE', 'REDDITO'], 'ce20'),
     (['IMPOSTE', 'ESERC'], 'ce20'),
     (['IMPOSTE', 'ANTICIP'], 'ce20'),
@@ -2677,6 +2696,178 @@ def _c8_risultato_stampato(full_text: str, entries: List[Entry],
         f"{sp13 - stampato:,.2f} di massa non letta (totali stampati costi {tot_costi:,.2f} / "
         f"ricavi {tot_ricavi:,.2f}) — da inserire in Rettifiche")
     return new_bs
+
+
+# ---------------------------------------------------------------------------
+# Bilancio di verifica a colonna unica con marcatori IE/E (budget_680, FTC Srl).
+# Una riga per conto: codice (sezione a 2 cifre, mastro a 4-5 cifre a sinistra,
+# conto a 5 cifre rientrato), descrizione, poi cinque colonne numeriche - saldo
+# d'apertura, dare, avere, saldo del periodo, saldo finale - ciascun saldo col
+# suo segno D/A. Il marcatore "IE"/"E" sta all'estrema destra.
+# ---------------------------------------------------------------------------
+
+_IE_AMT_RE = re.compile(r'^\d{1,3}(?:\.\d{3})*,\d{2}$')
+_IE_SEZIONI = {'01': 'attivo', '02': 'passivo', '03': 'costi', '04': 'ricavi'}
+# Le sole voci di CE che un mastro puo' prestare a un conto che nessuna regola riconosce:
+# restano sopra l'EBITDA. "ONERI FINANZIARI" con dentro assicurazioni e canoni non deve
+# trascinarli in ce15 (confine di KPI): il conto va nel ripiego neutro.
+_IE_CE_OPERATIVE = ('ce05', 'ce06', 'ce07', 'ce08', 'ce12', 'ce01', 'ce04')
+
+
+def is_verifica_ie(text: str) -> bool:
+    """Verifica a colonna unica con marcatori di riga "IE" (mastro) / "E" (conto) e le
+    colonne "Saldo Periodo" / "Saldo al"."""
+    if not re.search(r'BILANCIO\s+DI\s+VERIFICA', text, re.IGNORECASE):
+        return False
+    if 'Saldo Periodo' not in text or 'Saldo al' not in text:
+        return False
+    return (len(re.findall(r'(?m)^IE\s*$', text)) >= 3
+            and len(re.findall(r'(?m)^E\s*$', text)) >= 5)
+
+
+def _regola_sp(desc_upper: str, lato: str) -> Optional[str]:
+    """La voce di SP che una descrizione riconosce davvero, o None se nessuna regola la
+    nomina (i classificatori ripiegano allora su crediti/debiti generici)."""
+    if lato == 'attivo':
+        d = re.sub(r'\bRIM\.(?=\s|$)', 'RIMANENZE', desc_upper)
+        regole = _SP_ATTIVO_RULES
+    else:
+        d = _canon_fondo_amm(desc_upper)
+        regole = _SP_PASSIVO_RULES
+    for keywords, field in regole:
+        if _kw_match(d, keywords):
+            return field
+    return None
+
+
+def parse_entries_verifica_ie(file_path: str) -> List[Entry]:
+    """Le foglie (conti) della verifica, una ``Entry`` di livello 0 ciascuna, col saldo
+    FINALE. Nello SP il lato lo decide il segno D/A del saldo (la colonna e' la verita'
+    sul lato): un conto bancario a saldo avere e' un debito, un rateo passivo a saldo
+    dare sta all'attivo. Nel CE la sezione resta quella stampata e l'importo e' firmato.
+    La voce la decide la descrizione del conto; nello SP, quando il conto porta un nome
+    (clienti, fornitori) e nessuna regola lo riconosce, quella del suo mastro. Nel CE
+    mai quella del mastro: i mastri raggruppano per abitudine del gestionale ("ONERI
+    FINANZIARI" con assicurazioni e canoni) e attraverserebbero il confine dell'EBIT.
+
+    Si verifica sui totali stampati di sezione e sul risultato: se le foglie lette non
+    li ricostruiscono al centesimo la lettura e' vuota (mai una lettura non verificata).
+    """
+    doc = fitz.open(file_path)
+    righe = []                                   # (livello, codice, descrizione, saldo firmato)
+    utili = set()
+    try:
+        for page in doc:
+            per_y: Dict[int, list] = {}
+            for w in page.get_text('words'):
+                per_y.setdefault(round((w[1] + w[3]) / 2), []).append(w)
+            for y in sorted(per_y):
+                ws = sorted(per_y[y], key=lambda w: w[0])
+                testo = ' '.join(w[4] for w in ws)
+                m = re.search(r'(UTILE|PERDITA)\s+(?:D\'\s*)?ESERCIZIO\s*:\s*(' + _IE_AMT_RE.pattern[1:-1] + ')', testo)
+                if m:
+                    v = _parse_amount(m.group(2))
+                    utili.add(v if m.group(1) == 'UTILE' else -v)
+                    continue
+                codici = [w for w in ws if re.fullmatch(r'\d{2,5}', w[4]) and w[0] < 80]
+                if not codici:
+                    continue
+                c = codici[0]
+                livello = 'sezione' if len(c[4]) == 2 else ('mastro' if c[0] < 30 else 'conto')
+                finali = [w for w in ws if _IE_AMT_RE.match(w[4]) and 720 < w[2] <= 780]
+                segni = [w[4] for w in ws if w[4] in ('D', 'A') and 776 < w[0] < 790]
+                if len(finali) > 1 or len(segni) > 1:
+                    raise ValueError(f"riga ambigua a pagina {page.number + 1}: {testo[:80]}")
+                saldo = None
+                if finali:
+                    if not segni:
+                        raise ValueError(f"saldo senza segno a pagina {page.number + 1}: {testo[:80]}")
+                    saldo = _parse_amount(finali[0][4]) * (1 if segni[0] == 'D' else -1)
+                desc = ' '.join(w[4] for w in ws if 75 < w[0] < 400)
+                righe.append((livello, c[4], desc, saldo))
+    finally:
+        doc.close()
+
+    sezione = None
+    mastro_desc = ''
+    totali: Dict[str, Decimal] = {}
+    foglie: Dict[str, Decimal] = defaultdict(Decimal)
+    mastri: Dict[Tuple[str, str], Optional[Decimal]] = {}
+    con_foglie: set = set()
+    entries: List[Entry] = []
+    mastro = None
+    for livello, codice, desc, saldo in righe:
+        if livello == 'sezione':
+            sezione = _IE_SEZIONI.get(codice)
+            if sezione and saldo is not None:
+                totali[sezione] = saldo
+            continue
+        if sezione is None:
+            continue
+        if livello == 'mastro':
+            mastro, mastro_desc = codice, desc
+            if saldo is not None:
+                mastri[(sezione, codice)] = saldo
+            else:
+                mastri.setdefault((sezione, codice), None)
+            continue
+        if saldo is None or saldo == 0:
+            continue
+        con_foglie.add((sezione, mastro))
+        foglie[sezione] += saldo
+        du = desc.upper()
+        if sezione in ('attivo', 'passivo'):
+            lato = 'attivo' if saldo > 0 else 'passivo'
+            saldo_mastro = mastri.get((sezione, mastro))
+            # il mastro presta la descrizione solo a un conto che sta dal suo lato: un
+            # rateo passivo a saldo dare sotto "IMMOBILIZZI PASSIVI" non e' un cespite
+            if (_regola_sp(du, lato) is None and saldo_mastro
+                    and (saldo_mastro > 0) == (saldo > 0)
+                    and _regola_sp(mastro_desc.upper(), lato) is not None):
+                du = mastro_desc.upper()
+            entries.append(Entry(code=codice, description=du, amount=abs(saldo),
+                                 level=0, section=lato))
+        else:
+            importo = saldo if sezione == 'costi' else -saldo
+            classifica = _classify_ce_costi if sezione == 'costi' else _classify_ce_ricavi
+            dal_mastro = classifica(mastro_desc.upper())
+            if (classifica(du) is None and dal_mastro
+                    and dal_mastro.startswith(_IE_CE_OPERATIVE)):
+                du = mastro_desc.upper()
+            entries.append(Entry(code=codice, description=du, amount=importo,
+                                 level=0, section=sezione))
+    # un mastro senza conti sotto vale da se'
+    for (sez, cod), saldo in mastri.items():
+        if (sez, cod) in con_foglie or not saldo:
+            continue
+        foglie[sez] += saldo
+        if sez in ('attivo', 'passivo'):
+            entries.append(Entry(code=cod, description='', amount=abs(saldo), level=0,
+                                 section='attivo' if saldo > 0 else 'passivo'))
+        else:
+            entries.append(Entry(code=cod, description='', amount=saldo if sez == 'costi' else -saldo,
+                                 level=0, section=sez))
+
+    tol = Decimal('0.05')
+    for sez in ('attivo', 'passivo', 'costi', 'ricavi'):
+        if sez not in totali or abs(foglie[sez] - totali[sez]) > tol:
+            logger.warning(f"Verifica IE/E: la sezione {sez} non ricostruisce il totale stampato "
+                           f"({foglie[sez]} contro {totali.get(sez)}): lettura scartata")
+            return []
+    risultato = -(totali['costi'] + totali['ricavi'])       # ricavi in avere, firmati negativi
+    if len(utili) != 1 or abs(utili.pop() - risultato) > tol:
+        logger.warning("Verifica IE/E: il risultato stampato non torna con costi e ricavi: lettura scartata")
+        return []
+    entries.append(Entry(code='', description="UTILE D'ESERCIZIO", amount=risultato,
+                         level=4, section='ricavi'))
+    # i totali di sezione stampati (livello 3: build_iv_cee li ignora), per dichiarare un
+    # documento che non pareggia da solo
+    for sez in ('attivo', 'passivo', 'costi', 'ricavi'):
+        entries.append(Entry(code='', description=f'TOTALE {sez.upper()}',
+                             amount=abs(totali[sez]), level=3, section=sez))
+    logger.info(f"Verifica IE/E: {len(entries) - 1} conti, totali di sezione e risultato "
+                f"ricostruiti al centesimo")
+    return entries
 
 
 # ---------------------------------------------------------------------------
@@ -6245,12 +6436,19 @@ def extract_situazione_contabile(
 
     default_ce = False
     used_c8 = False
+    used_ie = False
     # La firma a sezioni contrapposte 8-digit (sottoconti "NNNNNN NNN", TOTALE A
     # PAREGGIO, ATTIVITA'/PASSIVITA') e' piu' specifica di quella AGO: quando
     # l'intestazione "BILANCIO DI VERIFICA" e' testo e non un tracciato (budget_618,
     # 619, 620, 610/621, 613) il parser a blocchi AGO leggeva uno o pochi mastri e
     # sbilanciava di milioni, il parser per coordinate li legge tutti.
-    if is_ago_format(full_text) and not is_contrapposte_8digit(full_text):
+    if is_verifica_ie(full_text):
+        used_ie = True
+        logger.info("Bilancio di verifica a colonna unica IE/E detected")
+        entries = parse_entries_verifica_ie(file_path)
+        default_ce = True
+        logger.info(f"Verifica IE/E parser: {len(entries)} entries")
+    elif is_ago_format(full_text) and not is_contrapposte_8digit(full_text):
         logger.info("AGO/ERP format detected, using block-based parser")
         entries, totali = parse_entries_ago(file_path)
         logger.info(f"AGO parser: {len(entries)} parent entries, totali={totali}")
@@ -6291,6 +6489,13 @@ def extract_situazione_contabile(
     # the contrapposte-8digit path exposes this) from their clean dettagli, gated
     # on the SP balancing exactly. No-op unless the sheet is short on the passivo
     # side and a clean orphan subset closes the gap.
+    if used_ie:
+        tot = {e.section: e.amount for e in entries if e.level == 3}
+        if tot:
+            dare, avere = tot['attivo'] + tot['costi'], tot['passivo'] + tot['ricavi']
+            # dare != avere nei totali stampati: la verifica non pareggia da sola (budget_680,
+            # perdita 2025 non girata). Si dichiara: il foglio lo riprodurra' tale e quale.
+            bs['_verifica_dare'], bs['_verifica_avere'] = dare, avere
     if used_c8:
         bs = _c8_recover_orphan_passivo(file_path, bs)
         bs = _c8_risultato_stampato(full_text, entries, bs)
@@ -6304,7 +6509,7 @@ def extract_situazione_contabile(
     # parser DOES read these layouts, so retry it and keep its result only when it is
     # genuinely non-empty. Purely additive: triggers only on an otherwise-empty result,
     # so it cannot regress files the structured parsers already extract.
-    if (bs.get('totale_attivo') or Decimal('0')) == 0:
+    if (bs.get('totale_attivo') or Decimal('0')) == 0 and not used_ie:
         try:
             if is_contrapposte_file(file_path):
                 logger.info("Structured parser empty on contrapposte file — retrying best-effort")

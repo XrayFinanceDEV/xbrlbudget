@@ -192,6 +192,16 @@ due totali, e l'utente inserisce i costi in Rettifiche. Nel percorso snello quel
 in gara col modello (Task 28) anche oltre la soglia. Sullo stesso formato la firma 8-digit
 (sottoconti `NNNNNN NNN`) vince su quella AGO a blocchi quando «BILANCIO DI VERIFICA» è testo.
 
+**Verifica che non pareggia da sola** (verifica a colonna unica IE/E, budget_680, decisione del
+proprietario 2026-10-06). `parse_entries_verifica_ie` legge il saldo finale di ogni conto (il segno
+D/A decide il lato dello SP) e si verifica sui quattro totali di sezione e sull'utile stampati:
+se una sezione non torna, la lettura è vuota. Quando il dare stampato (attività + costi) differisce
+dall'avere (passività + ricavi), di solito per un risultato dell'anno prima non destinato, il
+parser lo dichiara (`_verifica_dare`/`_verifica_avere`) e il percorso snello adotta la lettura
+**squadrata** (`causa: documento_sbilanciato`, tipo `verifica`) senza chiamare il modello, se il suo
+scarto Attivo/Passivo è esattamente quella differenza e il CE torna. Nessuna deduzione del
+risultato non destinato: l'utente lo sistema in Rettifiche.
+
 ## 6. Dopo il gate strutturale: la quadratura
 
 Se `check_quadratura` dice che non quadra → **"Importazione non salvata: il bilancio estratto non

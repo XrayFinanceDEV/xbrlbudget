@@ -222,6 +222,8 @@ def _risultato_deterministico(_det: dict, struttura, modo: str, t0: float) -> "R
         **({"dettagli": {"fonte": "prospetto_e_nota_xbrl", **_det["dettagli"]}}
            if _det.get("dettagli") is not None else {}),
         **({"ignoti": _det["ignoti"]} if _det.get("ignoti") else {}),
+        **({"causa": _det["causa"], "contraddizioni": _det["contraddizioni"]}
+           if _det.get("causa") else {}),
         "anomalie": _anomalie(_bs_det, _diag_det) + _negativi_stampati(_bs_det, _det["parser"])
         + _negativi_stampati(_det.get("prior_bs"), _det["parser"], _det.get("anno_precedente")),
         "secondi": round(time.monotonic() - t0, 1),

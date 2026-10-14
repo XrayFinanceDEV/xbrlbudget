@@ -71,6 +71,23 @@ def _ce_non_letto_dichiarato(bs: dict, m: dict, s: Decimal) -> bool:
             and abs(m["scarto_ce"] - Decimal(massa)) <= tol)
 
 
+def _verifica_che_non_pareggia(bs: dict, m: dict) -> dict | None:
+    """Il bilancio di verifica stampa totali di sezione il cui dare (attivita' + costi) non
+    pareggia l'avere (passivita' + ricavi), e lo scarto Attivo/Passivo della lettura e'
+    esattamente quella differenza, col CE che torna: la contraddizione e' del documento."""
+    dare, avere = bs.get("_verifica_dare"), bs.get("_verifica_avere")
+    if dare is None or avere is None:
+        return None
+    tol = Decimal("0.05")
+    differenza = Decimal(dare) - Decimal(avere)
+    if abs(differenza) <= tol or abs(m["scarto_ce"]) > tol or abs(m["scarto_stampati"]) > tol:
+        return None
+    if abs(m["scarto_sp"] - differenza) > tol:
+        return None
+    return {"tipo": "verifica", "dare": str(Decimal(dare)), "avere": str(Decimal(avere)),
+            "differenza": str(differenza)}
+
+
 def _esito(nome: str, bs_raw: dict, ce_raw: dict, stampati_raw: dict | None) -> dict:
     bs, ce = _adatta(bs_raw), _adatta(ce_raw)
     if not bs or not ce:
@@ -84,6 +101,14 @@ def _esito(nome: str, bs_raw: dict, ce_raw: dict, stampati_raw: dict | None) -> 
     if esito not in ("ok", "tappo"):
         if esito == "vuoto":
             return {"adottato": False, "parser": nome, "esito": "vuoto"}
+        contraddizione = _verifica_che_non_pareggia(bs, m)
+        if contraddizione and massa <= s:
+            # il documento si contraddice da solo e la lettura lo riproduce al centesimo:
+            # ne' una rilettura ne' un tappo possono aiutare (decisione del proprietario,
+            # 2026-10-02/06): si importa com'e', squadrato, con l'avviso che cita i totali
+            return {"adottato": True, "parser": nome, "esito": "squadrato", "bs": bs, "ce": ce,
+                    "tappo": None, "misura": m, "causa": "documento_sbilanciato",
+                    "contraddizioni": [contraddizione]}
         if massa > s:
             # Task 28 fix 1: la massa non classificata si controlla PRIMA - una lettura di cui
             # non ci si fida non e' mai un ripiego, sbilanciata o no.

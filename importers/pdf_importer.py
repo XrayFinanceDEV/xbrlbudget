@@ -154,6 +154,18 @@ def _snello_squadrato_reason(report: Dict[str, Any]) -> str:
         tipi = report.get("contraddizioni") or [{"tipo": "totali"}]
         frasi = []
         for c in tipi:
+            if c.get("tipo") == "verifica":
+                try:
+                    dare, avere, diff = (f"€{_euro_it(abs(Decimal(str(c[k]))))}"
+                                         for k in ("dare", "avere", "differenza"))
+                except Exception:
+                    dare = avere = diff = "n/d"
+                frasi.append(
+                    f"i totali stampati dal bilancio di verifica non pareggiano: dare {dare} "
+                    f"(attività e costi), avere {avere} (passività e ricavi), differenza {diff}, "
+                    f"e le voci lette li riproducono (spesso è il risultato dell'anno prima non "
+                    f"ancora destinato).")
+                continue
             if c.get("tipo") == "risultato":
                 try:
                     sp, ce, diff = (f"€{_euro_it(Decimal(str(c[k])))}" for k in ("sp", "ce", "differenza"))

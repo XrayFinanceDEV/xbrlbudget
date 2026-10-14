@@ -181,6 +181,7 @@ def _classify_balance_failure(
     sample_text: str,
     file_path: str,
     ocr_text: Optional[str],
+    cifre_da_vision: bool = False,
 ) -> BalanceFailureVerdict:
     """Decide se un fallimento di ``validate_balance`` blocca o solo avvisa.
 
@@ -188,7 +189,19 @@ def _classify_balance_failure(
     documento che non e' importabile non viene salvato come "sbilanciato".
     """
     # 1. Testo OCR: i totali stessi possono essere letti male, quindi non si puo'
-    #    dichiarare sbilanciato il documento sorgente.
+    #    dichiarare sbilanciato il documento sorgente. Non quando le cifre le ha lette la
+    #    vision dalle immagini: allora e' uno sbilancio di lettura come su un PDF di
+    #    testo, si importa con l'avviso e l'utente lo corregge in Rettifiche (ERREGI).
+    if (is_scanned or ocr_source) and cifre_da_vision and \
+            balance_sheet_data.get('totale_attivo', Decimal('0')) != Decimal('0'):
+        from importers.iv_cee_hierarchy import check_quadratura, eur_it
+        _q = check_quadratura(balance_sheet_data)
+        return BalanceFailureVerdict(
+            None,
+            f"{_UNBALANCED_WARNING_PREFIX}: le cifre sono lette dalle immagini della "
+            f"scansione e lo Stato Patrimoniale non quadra (attivo {eur_it(_q.totale_attivo)}, "
+            f"passivo {eur_it(_q.totale_passivo)}). {_UNBALANCED_WARNING_SUFFIX}",
+        )
     if is_scanned or ocr_source:
         return BalanceFailureVerdict(
             "Il documento è una scansione contabile, ma l'OCR non ha "
@@ -1907,6 +1920,19 @@ def import_pdf_balance_sheet(
             unbalanced_reason = _snello_squadrato_reason(_snello.report)
             logger.warning(unbalanced_reason)
         if not mapper.validate_balance(balance_sheet_data):
+            # Cifre lette dalla vision del modello sulle immagini (schema di legge
+            # scansionato), non dal testo OCR: ERREGI 30/09/2026 una volta su tre usciva con
+            # 1.000 in meno sull'attivo. E' un errore di lettura correggibile, non un OCR
+            # che ha perso colonne e totali.
+            try:
+                from importers.pdf_extractor_llm import _is_image_pdf
+                _cifre_da_vision = (
+                    not is_trial_balance and _snello is None
+                    and not balance_sheet_data.get("_source_mineru_ivcee")
+                    and not balance_sheet_data.get("_source_standard_ivcee")
+                    and _is_image_pdf(file_path))
+            except Exception:
+                _cifre_da_vision = False
             _verdict = _classify_balance_failure(
                 balance_sheet_data,
                 is_scanned=is_scanned,
@@ -1915,6 +1941,7 @@ def import_pdf_balance_sheet(
                 sample_text=sample_text,
                 file_path=file_path,
                 ocr_text=ocr_text,
+                cifre_da_vision=_cifre_da_vision,
             )
             if _verdict.hard_error:
                 raise PDFImportError(_verdict.hard_error)

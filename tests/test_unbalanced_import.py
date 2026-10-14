@@ -58,6 +58,22 @@ def test_ocr_resta_errore_duro():
     assert "OCR" in verdict.hard_error
 
 
+def test_scansione_letta_dalla_vision_si_importa_con_avviso():
+    """ERREGI 30/09/2026: schema di legge scansionato, cifre lette dalla vision sulle
+    immagini; una volta su tre l'attivo usciva 1.000 sotto. Errore di lettura
+    correggibile in Rettifiche, non un OCR che ha perso colonne e totali."""
+    for ocr_source in (False, True):          # con e senza il testo di MinerU
+        verdict = _classify_balance_failure(
+            _sheet(totale_passivo=Decimal("960")),
+            is_scanned=True, ocr_source=ocr_source,
+            is_trial_balance=False, sample_text="B) II 1) Terreni 100",
+            file_path="x.pdf", ocr_text=None, cifre_da_vision=True,
+        )
+        assert verdict.hard_error is None
+        assert verdict.warning.startswith("BILANCIO SBILANCIATO")
+        assert "immagini" in verdict.warning
+
+
 def test_sbilancio_e_importabile_con_avviso():
     # _is_aggregated_summary richiede >= 3 righe con numero romano di voce legale
     # (una sola riga, come nei due test precedenti, e' sempre < 3 e farebbe

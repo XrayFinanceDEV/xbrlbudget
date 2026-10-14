@@ -362,7 +362,7 @@ Una singola coppia di chiamate estrae entrambe le colonne. Due guardie simmetric
 - **colonna corrente azzerata** e precedente valorizzato → si **promuove il precedente a
   corrente**.
 
-## 5-bis. MinerU: l'OCR opzionale, e perché non è in produzione
+## 5-bis. MinerU: l'OCR opzionale, su gx10 e non sul VPS
 
 > Motori: `importers/mineru_adapter.py`, `backend/app/services/mineru_client.py`, configurazione
 > in `backend/app/core/config.py`. Endpoint dedicato: `POST /import/pdf-ocr`.
@@ -371,21 +371,37 @@ Backend OCR alternativo per i PDF scansionati che il text layer non riesce a leg
 **percorso separato** da quello descritto a pagina 01 §5 (OCR locale a coordinate → OCR vision),
 con un endpoint proprio.
 
-> ⚠️ **Solo macchina di sviluppo. MinerU non va MAI sul VPS.** La sua immagine è
+> ⚠️ **Il container MinerU non va MAI sul VPS.** La sua immagine è
 > `FROM vllm/vllm-openai`: gigabyte di layer orientati alla GPU. Il servizio sta dietro il
 > **compose profile** `mineru`, che lo esclude da *ogni* comando compose — **`build` compreso** —
 > se il profile non viene richiesto. È ciò che conta, perché il `Jenkinsfile` esegue
 > `docker compose build --no-cache --parallel` e poi `up -d` sul VPS di staging: senza il profile
-> quel build si tirava dietro vLLM. Per la stessa ragione `MINERU_OCR_ENABLED` è **false** di
-> default nell'env del backend in compose.
+> quel build si tirava dietro vLLM.
 
-In locale:
+**Sui VPS MinerU è quello di gx10** (2026-10-14): `https://kpsfinanciallab.w3pro.it:89`, un proxy
+nginx con allowlist dei soli IP di staging e produzione e header obbligatorio `X-Api-Key`
+(`MINERU_API_KEY`); al massimo 3 richieste concorrenti, le altre in coda. Dalla LAN dell'ufficio lo
+stesso servizio risponde senza chiave su `http://192.168.1.137:18400`. Si accende dalla credenziale
+Jenkins `budget-env-staging`:
+
+```
+MINERU_OCR_ENABLED=true
+MINERU_BASE_URL=https://kpsfinanciallab.w3pro.it:89
+MINERU_API_KEY=<chiave>
+MINERU_EXPECTED_VERSION=3.4.5
+```
+
+Il compose **non** dichiara alcuna `MINERU_*` in `environment:`: una voce lì scavalca `.env.docker`,
+e fino al 2026-10-14 inchiodava `MINERU_BASE_URL` a `http://mineru:8000`. Senza variabili l'OCR è
+spento (`MINERU_OCR_ENABLED` vale `False` di default in `config.py`).
+
+In locale, col container: `.env.docker` con `MINERU_OCR_ENABLED=true` e
+`MINERU_BASE_URL=http://mineru:8000`, poi
 
 ```bash
-MINERU_OCR_ENABLED=true docker compose --profile mineru up -d
+docker compose --profile mineru up -d
 # con NVIDIA:
-MINERU_OCR_ENABLED=true docker compose --profile mineru \
-  -f docker-compose.yml -f docker-compose.gpu.yml up -d
+docker compose --profile mineru -f docker-compose.yml -f docker-compose.gpu.yml up -d
 ```
 
 Con l'OCR spento il backend è indifferente: `mineru_client` e `mineru_adapter` sono importati

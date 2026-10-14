@@ -110,6 +110,7 @@ class MinerUClient:
         backend: str = "pipeline",
         parse_method: str = "ocr",
         expected_version: Optional[str] = None,
+        api_key: Optional[str] = None,
         transport: Optional[httpx.AsyncBaseTransport] = None,
     ) -> None:
         self.base_url = base_url.rstrip("/")
@@ -120,6 +121,7 @@ class MinerUClient:
         self.backend = backend
         self.parse_method = parse_method
         self.expected_version = expected_version
+        self.api_key = api_key or None
         self._transport = transport
 
     @classmethod
@@ -133,12 +135,15 @@ class MinerUClient:
             backend=getattr(settings, "MINERU_BACKEND", "pipeline"),
             parse_method=getattr(settings, "MINERU_PARSE_METHOD", "ocr"),
             expected_version=getattr(settings, "MINERU_EXPECTED_VERSION", None),
+            api_key=getattr(settings, "MINERU_API_KEY", None),
             transport=transport,
         )
 
     def _client(self) -> httpx.AsyncClient:
         timeout = httpx.Timeout(self.timeout_seconds, connect=self.connect_timeout_seconds)
         kwargs: dict = {"base_url": self.base_url, "timeout": timeout}
+        if self.api_key:
+            kwargs["headers"] = {"X-Api-Key": self.api_key}
         if self._transport is not None:
             kwargs["transport"] = self._transport
         return httpx.AsyncClient(**kwargs)

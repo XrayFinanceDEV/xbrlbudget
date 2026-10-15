@@ -385,6 +385,29 @@ Stessa classe anti-masking del reconciler PN (sopra), estesa ai formati gestiona
 - **Scoping crediti (anti doppio-conteggio):** sp06/sp07 ristretti a **C.II** circolante, esclusi i
   **B.III.2** crediti immobilizzati (sp04) — contarli due volte sbilanciava (budget_315).
 
+## 6-bis. Formati di situazione contabile aggiunti il 14-15 ottobre 2026
+
+Tutti dentro la route C e tutti nel lettore deterministico (`importers/situazione_contabile_parser.py`),
+che il percorso snello prova **prima** del modello (`import_snello/deterministico.py`,
+`_prova_situazione_contabile`). Un lettore di questa famiglia adotta il documento solo se i totali
+stampati tornano: altrimenti la lettura è vuota o, sui bilanci di verifica che si contraddicono da soli,
+si importa squadrata con l'avviso. L'ordine di prova dentro `extract_situazione_contabile` è quello della
+tabella: il primo riconoscitore che risponde vince.
+
+| Formato | Riconoscitore | Come si legge | Corpus |
+|---|---|---|---|
+| **Verifica a colonna unica IE/E** | `is_verifica_ie`: «BILANCIO DI VERIFICA», colonne «Saldo Periodo» / «Saldo al», almeno 3 righe `IE` (mastro) e 5 `E` (conto) | `parse_entries_verifica_ie`: saldo finale per conto, il segno D/A decide il lato dello SP, la voce viene dalla descrizione. Quattro totali di sezione e l'utile stampato devono tornare. Una verifica il cui dare non pareggia l'avere si adotta squadrata (`documento_sbilanciato`) se la lettura riproduce esattamente la differenza. Se il saldo d'apertura sbilancia della stessa cifra del finale, è il risultato dell'anno prima non riaperto e va negli utili portati (`_ie_risultato_in_apertura`) | 680 |
+| **Verifica «Totale Sub / Totale Mastro»** | `is_verifica_sub_mastro`: «Totale Sub» e «Totale Mastro», «TOTALE A PAREGGIO», «DIFFERENZA D'ESERCIZIO», almeno 20 conti `NN NNNNNNN` | `parse_entries_verifica_sub_mastro`: importo del conto nella colonna Totale Sub, riga del mastro con l'importo in Totale Mastro (segno meno in coda). Ogni mastro torna con i suoi conti, ogni sezione col suo totale, la differenza pareggia sia SP sia CE | 1343 |
+| **Verifica «Mastri»** | `is_verifica_mastri`: «Bilancio di verifica», «Descrizione conto», «RIEPILOGO», «TOTALE ATTIVITÀ:», almeno 20 conti a 8 cifre e 5 righe «Totale …:» | `parse_entries_verifica_mastri`: mastro a 4 cifre, conti a 8 con importo firmato nel verso della sezione. Ogni «Totale MASTRO:» torna, e la differenza del riepilogo deve valere sia attività − passività sia ricavi − costi, altrimenti lettura vuota | Santini 1325, 1330 |
+| **Contrapposte a 8 cifre con importi disegnati** | `is_contrapposte_8digit` vince su `is_ago_format` quando «BILANCIO DI VERIFICA» è testo e non un tracciato | `parse_entries_contrapposte_8digit`, per coordinate. Un mastro di costi disegnato come grafica manca alla lettura: `sp13` diventa l'utile stampato **solo** se chiude lo SP al centesimo **e** la differenza col CE è esattamente TOTALE COSTI stampato meno i costi letti (`_c8_risultato_stampato`, vedi [REGOLE-IMPORT-04](REGOLE-IMPORT-04-QUADRATURE.md), «Prima del gate»). Il CE non si tocca, la massa mancante si dichiara | 610, 613, 618-621 |
+| **Contrapposte di soli conti** | nessun riconoscitore proprio: il best-effort (`extract_contrapposte_best_effort`) quando non ci sono codici né mastri | `_be_split_codeless` cerca prima il varco fra le colonne sulle righe con importo (anche largo un solo punto), poi ripiega sulla griglia; cespite e fondo si accoppiano per descrizione (`fondi_di`); «C/C n. …» all'attivo è liquidità; il pareggio si cerca solo nelle pagine dello SP; a totali stampati uguali, l'utile è il risultato del CE | 435 |
+| **Contrapposte per somma dei conti** | stesso lettore a coordinate, con la separazione fra colonne rimessa sull'inizio della colonna dei codici di destra | mastri a 2 cifre e conti a 3 che non ne portano il prefisso e si ripetono sotto mastri diversi: il mastro si riconosce dalla **somma** dei conti sotto di lui, mai dal prefisso (regola «Invarianti e trappole › Estrazione e classificazione» di `CLAUDE.md`) | 703 |
+| **Scansione contrapposte letta da MinerU** | `mineru_contrapposte`: tabelle con didascalia stato patrimoniale / conto economico e righe a sei celle (conto, descrizione, importo per lato) | `pdf_da_tabelle` stampa le celle su un PDF sintetico che il lettore di sempre rilegge: nessun importo nasce lì. `_Ricucitore` ricompone le righe spezzate; `_importo_ocr` normalizza le grafie OCR («94.086.46», «11 396,02»); un codice che segue subito un altro codice dello stesso lato è il partitario («4» + «41» → «4.41»). Niente Qwen, niente vision | Unicarton, 689 |
+
+**Un formato nuovo si aggiunge qui**, nello stesso commit del riconoscitore. Senza una riga in questa
+tabella il prossimo import che non quadra riparte da zero: i riconoscitori sono funzioni `is_*` sparse in
+un file di 7.000 righe, e nessun'altra pagina li elenca.
+
 ## 7. Riproducibilità
 
 - `Test/_classify_dump.py` — dedup per hash, estrae il testo di ogni PDF/XBRL unico in `Test/_analysis/dumps/`, calcola i segnali strutturali e i verdetti dei parser esistenti → `Test/_analysis/index.json`.

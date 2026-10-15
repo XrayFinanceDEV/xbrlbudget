@@ -172,6 +172,30 @@ def _prova_xbrl_reso(file_path: str) -> dict | None:
     return esito
 
 
+def _prova_schema_codici(file_path: str) -> dict | None:
+    """Schema di legge con il percorso come codice di riga ("1.B.2", "3.B.9.a", budget_1331):
+    None se il documento non e' di questa famiglia; altrimenti le stesse regole di adozione
+    degli altri lettori, sui totali di attivo e passivo stampati."""
+    from importers.schema_codici_parser import estrai
+
+    letto = estrai(file_path)
+    if letto is None:
+        return None
+    esito = _esito("schema_codici", letto["bs"], letto["ce"], letto.get("stampati"))
+    if esito["adottato"]:
+        prior_bs, prior_ce = letto.get("prior_bs"), letto.get("prior_ce")
+        if prior_bs and prior_ce:
+            precedente = _esito("schema_codici", prior_bs, prior_ce, letto.get("prior_stampati"))
+            if precedente["adottato"] and precedente["esito"] == "ok":
+                esito["prior_bs"], esito["prior_ce"] = precedente["bs"], precedente["ce"]
+                esito["prior_stato"] = "letto"
+            else:
+                esito["prior_stato"] = "scartato"
+        else:
+            esito["prior_stato"] = "assente"
+    return esito
+
+
 def _prova_standard_ivcee(file_path: str) -> dict | None:
     """Schema di legge a colonne comparative, o compatto a colonna unica (Task 23):
     ``has_comparative_ivcee_columns`` falso non significa piu' "non provarci" - vuol
@@ -292,6 +316,12 @@ def _tentativo_classico(file_path: str, ocr_text: str | None = None) -> dict:
     # parser standard non ha adottato, e se anch'esso non adotta la ricerca prosegue esattamente
     # come prima verso la situazione contabile: un bilancio di verifica vero non ha didascalie
     # di legge con importo e non lo vede mai.
+    try:
+        codici = _prova_schema_codici(file_path)
+    except Exception:
+        codici = None
+    if codici is not None and codici["adottato"]:
+        return codici
     try:
         standard = _prova_standard_ivcee(file_path)
     except Exception:

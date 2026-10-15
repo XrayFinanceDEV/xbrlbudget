@@ -340,6 +340,9 @@ _SP_ATTIVO_RULES = [
     (['AUTOMEZZ'], 'gross_sp03'),
     (['AUTOVEICOL'], 'gross_sp03'),
     (['AUTOVETTUR'], 'gross_sp03'),
+    (['AUTOCARR'], 'gross_sp03'),                 # budget_238: finiva nei crediti
+    # beni strumentali sotto 516,46 euro ("BENI DI VALORE UNITARIO INFERIORE")
+    (['BENI', 'VALORE', 'INFERIOR'], 'gross_sp03'),
     (['MEZZI', 'TRASP'], 'gross_sp03'),
     (['AUTO', 'MOTO'], 'gross_sp03'),
     (['ARREDAMENT'], 'gross_sp03'),
@@ -658,7 +661,8 @@ def _sp03_detail_field(desc_upper: str) -> Optional[str]:
         return 'sp03c_attrezzature'
     if _kw_any(desc_upper, [
         "MACCHINE D'UFFICIO", 'MACCHINE UFFICIO', 'MOBIL', 'ARRED',
-        'AUTOMEZZ', 'AUTOVEICOL', 'AUTOVETTUR', 'AUTO.', 'AUTO,',
+        'AUTOMEZZ', 'AUTOVEICOL', 'AUTOVETTUR', 'AUTO.', 'AUTO,', 'AUTOCARR',
+        'BENI VALORE', 'BENI DI VALORE',
         'MEZZI TRASP', 'ALTRI BENI MATERIAL',
     ]):
         return 'sp03d_altri_beni'

@@ -132,3 +132,15 @@ def test_sezione_che_non_torna_col_suo_totale_non_si_legge(tmp_path):
     doc.save(str(path2))
     bs, _ce = extract_situazione_contabile(str(path2))
     assert not bs.get("totale_attivo")           # mai una lettura non verificata
+
+
+def test_sigle_dei_cespiti_e_conti_sotto_un_mastro_di_controparti():
+    """budget_680: sigle che nessuna regola riconosceva, e un cliente con LICENZE nel nome."""
+    from importers.situazione_contabile_parser import _classify_sp_attivo, _sp03_detail_field
+    assert _sp03_detail_field("F.DO AMM.MACC.AMBIENTE CORROS.") == "sp03b_impianti_macchinari"
+    assert _sp03_detail_field("F.DO AMM.IMP.DEPURAZIONE ACQUE") == "sp03b_impianti_macchinari"
+    assert _sp03_detail_field("F.DO AMM.ATTREZ./REPARTO OFFIC") == "sp03c_attrezzature"
+    assert _sp03_detail_field("F.DO AMM.MACCHINE UFF.ELETTRON. PC") == "sp03d_altri_beni"
+    assert _sp03_detail_field("IMMOBILIZZI TECNICI") is None     # MOBIL non dentro IMMOBIL
+    assert _classify_sp_attivo("MATERIALE HARDWARE") == "gross_sp03"
+    assert _classify_sp_attivo("CERTIFICAZIONI_IMM") == "gross_sp02"

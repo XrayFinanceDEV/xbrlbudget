@@ -341,6 +341,14 @@ _SP_ATTIVO_RULES = [
     (['AUTOVEICOL'], 'gross_sp03'),
     (['AUTOVETTUR'], 'gross_sp03'),
     (['AUTOCARR'], 'gross_sp03'),                 # budget_238: finiva nei crediti
+    # budget_680: sigle e categorie che nessuna regola riconosceva
+    (['MACCHIN/'], 'gross_sp03'),
+    (['MACC.', 'IMP'], 'gross_sp03'),
+    (['HARDWARE'], 'gross_sp03'),
+    (['CELLULAR'], 'gross_sp03'),
+    (['CENTRALINO'], 'gross_sp03'),
+    (['COSTRUZIONI', 'LEGGER'], 'gross_sp03'),
+    (['CERTIFICAZION'], 'gross_sp02'),
     # beni strumentali sotto 516,46 euro ("BENI DI VALORE UNITARIO INFERIORE")
     (['BENI', 'VALORE', 'INFERIOR'], 'gross_sp03'),
     (['MEZZI', 'TRASP'], 'gross_sp03'),
@@ -403,7 +411,8 @@ _SP_PASSIVO_RULES = [
     (['F.DO', 'AMM', 'MANUT'], 'depr_sp02'),               # "spese di manut.beni di ter(zi)" B.I.7
     (['F.DO', 'AMM', 'BENI DI TERZ'], 'depr_sp02'),        # idem, grafia "lav. str. su beni di terzi"
     (['F.DO', 'AMM', 'LICENZE'], 'depr_sp02'),
-    (['F.DO', 'AMM', 'OPERE INGE'], 'depr_sp02'),          # "F.do amm.dir.brev.e utilizz.opere inge"
+    (['F.DO', 'AMM', 'OPERE INGE'], 'depr_sp02'),
+    (['F.DO', 'AMM', 'CERTIFICAZ'], 'depr_sp02'),           # budget_680, B.I immateriale          # "F.do amm.dir.brev.e utilizz.opere inge"
     (['F.DO', 'AMM', 'DIR.BREV'], 'depr_sp02'),
     (['FOND', 'AMM', 'IMMOBILIZZAZ. IMM'], 'depr_sp02'),   # mastro "FONDI AMMORT. IMMOBILIZZAZ. IMM"
     (['F.DO', 'AMM', 'MACCHINE'], 'depr_sp03'),
@@ -655,18 +664,20 @@ def _sp03_detail_field(desc_upper: str) -> Optional[str]:
     """Return the B.II detail from semantics, independently of account codes."""
     if _kw_any(desc_upper, ['IN CORSO', 'ACCONT']):
         return 'sp03e_immob_in_corso'
-    if _kw_any(desc_upper, ['TERREN', 'FABBRICAT']):
+    if _kw_any(desc_upper, ['TERREN', 'FABBRICAT', 'COSTRUZIONI LEGGER']):
         return 'sp03a_terreni_fabbricati'
-    if 'ATTREZZ' in desc_upper:
+    if 'ATTREZ' in desc_upper:                 # anche "ATTREZ./REPARTO OFFIC" (budget_680)
         return 'sp03c_attrezzature'
-    if _kw_any(desc_upper, [
-        "MACCHINE D'UFFICIO", 'MACCHINE UFFICIO', 'MOBIL', 'ARRED',
+    # "MOBIL" ma non dentro IMMOBIL...: "IMMOBILIZZI TECNICI" non e' un mobile
+    if re.search(r'(?<!IM)MOBIL', desc_upper) or _kw_any(desc_upper, [
+        "MACCHINE D'UFFICIO", 'MACCHINE UFFICIO', 'MACCHINE UFF', 'ARRED',
         'AUTOMEZZ', 'AUTOVEICOL', 'AUTOVETTUR', 'AUTO.', 'AUTO,', 'AUTOCARR',
-        'BENI VALORE', 'BENI DI VALORE',
-        'MEZZI TRASP', 'ALTRI BENI MATERIAL',
+        'BENI VALORE', 'BENI DI VALORE', 'HARDWARE', 'CELLULAR', 'CENTRALINO',
+        'TELEFON', 'MEZZI TRASP', 'ALTRI BENI MATERIAL',
     ]):
         return 'sp03d_altri_beni'
-    if _kw_any(desc_upper, ['IMPIANT', 'MACCHINAR']):
+    # "MACCHIN/IMP", "MACC./IMP.", "IMP.DEPURAZIONE" (budget_680)
+    if _kw_any(desc_upper, ['IMPIANT', 'MACCHINAR', 'MACCHIN/', 'MACCHIN.', 'MACC.', 'IMP.', 'IMP/']):
         return 'sp03b_impianti_macchinari'
     return None
 
@@ -2838,6 +2849,10 @@ def parse_entries_verifica_ie(file_path: str) -> List[Entry]:
             if (_regola_sp(du, lato) is None and saldo_mastro
                     and (saldo_mastro > 0) == (saldo > 0)
                     and _regola_sp(mastro_desc.upper(), lato) is not None):
+                du = mastro_desc.upper()
+            # sotto un mastro di controparti il conto porta un nome di azienda, non una
+            # voce: "MANTERO SETA SPA DIV.LICENZE" sotto CLIENTI non e' una licenza
+            elif re.search(r'\b(CLIENTI|FORNITORI|DEBITORI|CREDITORI)\b', mastro_desc.upper()):
                 du = mastro_desc.upper()
             entries.append(Entry(code=codice, description=du, amount=abs(saldo),
                                  level=0, section=lato))

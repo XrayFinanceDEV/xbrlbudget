@@ -2765,6 +2765,37 @@ def _regola_sp(desc_upper: str, lato: str) -> Optional[str]:
     return None
 
 
+def _ie_risultato_in_apertura(bs: Dict[str, Decimal], entries: List[Entry],
+                              differenza: Decimal) -> Dict[str, Decimal]:
+    """Verifica progressiva (saldo al 31/12 dell'anno prima + dare - avere = saldo finale):
+    se la colonna d'apertura ha solo stato patrimoniale e non pareggia, e lo sbilancio della
+    colonna finale e' esattamente la stessa cifra, i movimenti dell'anno pareggiano e lo
+    sbilancio e' il risultato dell'anno prima che le scritture d'apertura non hanno riaperto
+    (budget_680: perdita 2025 di 348.287,23, conto "PERDITA D'ESERCIZIO" vuoto in ogni
+    colonna). Va negli utili (perdite) portati a nuovo e si dichiara (decisione del
+    proprietario, 2026-10-15). Due controlli stampati che coincidono al centesimo, nessun
+    importo inventato; altrimenti il foglio resta sbilanciato e lo dichiara."""
+    ap = {e.section: e.amount for e in entries if e.level == 6}
+    tol = Decimal('0.05')
+    if abs(differenza) <= tol or 'attivo' not in ap or 'passivo' not in ap:
+        return bs
+    if ap.get('costi') or ap.get('ricavi'):
+        return bs                      # un'apertura con il conto economico non e' questo caso
+    apertura = ap['attivo'] + ap['passivo']          # D+ / A-: zero se pareggia
+    if abs(apertura - differenza) > tol:
+        return bs
+    new_bs = dict(bs)
+    for k in ('sp12', 'sp12g_utili_perdite_portati'):
+        new_bs[k] = (new_bs.get(k) or Decimal('0')) + differenza
+    new_bs['totale_passivo'] = (new_bs.get('totale_passivo') or Decimal('0')) + differenza
+    new_bs['_risultato_anno_prima_apertura'] = differenza
+    new_bs['_apertura_attivo'] = ap['attivo']
+    new_bs['_apertura_passivo'] = -ap['passivo']
+    logger.warning(f"Verifica IE/E: risultato dell'anno prima non riaperto {differenza:,.2f} "
+                   f"(colonna d'apertura e saldo finale sbilanciati della stessa cifra)")
+    return new_bs
+
+
 def parse_entries_verifica_ie(file_path: str) -> List[Entry]:
     """Le foglie (conti) della verifica, una ``Entry`` di livello 0 ciascuna, col saldo
     FINALE. Nello SP il lato lo decide il segno D/A del saldo (la colonna e' la verita'
@@ -2809,23 +2840,33 @@ def parse_entries_verifica_ie(file_path: str) -> List[Entry]:
                         raise ValueError(f"saldo senza segno a pagina {page.number + 1}: {testo[:80]}")
                     saldo = _parse_amount(finali[0][4]) * (1 if segni[0] == 'D' else -1)
                 desc = ' '.join(w[4] for w in ws if 75 < w[0] < 400)
-                righe.append((livello, c[4], desc, saldo))
+                apertura = None
+                if livello == 'sezione':
+                    # colonna "Saldo al 31/12 dell'anno prima" (importo fino a x 460, segno dopo)
+                    ap = [w for w in ws if _IE_AMT_RE.match(w[4]) and 400 < w[2] <= 460]
+                    sg = [w[4] for w in ws if w[4] in ('D', 'A') and 460 < w[0] < 472]
+                    if len(ap) == 1 and len(sg) == 1:
+                        apertura = _parse_amount(ap[0][4]) * (1 if sg[0] == 'D' else -1)
+                righe.append((livello, c[4], desc, saldo, apertura))
     finally:
         doc.close()
 
     sezione = None
     mastro_desc = ''
     totali: Dict[str, Decimal] = {}
+    aperture: Dict[str, Decimal] = {}
     foglie: Dict[str, Decimal] = defaultdict(Decimal)
     mastri: Dict[Tuple[str, str], Optional[Decimal]] = {}
     con_foglie: set = set()
     entries: List[Entry] = []
     mastro = None
-    for livello, codice, desc, saldo in righe:
+    for livello, codice, desc, saldo, apertura in righe:
         if livello == 'sezione':
             sezione = _IE_SEZIONI.get(codice)
             if sezione and saldo is not None:
                 totali[sezione] = saldo
+            if sezione and apertura is not None:
+                aperture[sezione] = apertura
             continue
         if sezione is None:
             continue
@@ -2894,6 +2935,10 @@ def parse_entries_verifica_ie(file_path: str) -> List[Entry]:
     for sez in ('attivo', 'passivo', 'costi', 'ricavi'):
         entries.append(Entry(code='', description=f'TOTALE {sez.upper()}',
                              amount=abs(totali[sez]), level=3, section=sez))
+    # i totali d'apertura stampati (livello 6: build_iv_cee li ignora), firmati D+ / A-
+    for sez, v in aperture.items():
+        entries.append(Entry(code='', description=f'APERTURA {sez.upper()}',
+                             amount=v, level=6, section=sez))
     logger.info(f"Verifica IE/E: {len(entries) - 1} conti, totali di sezione e risultato "
                 f"ricostruiti al centesimo")
     return entries
@@ -6609,6 +6654,7 @@ def extract_situazione_contabile(
             # dare != avere nei totali stampati: la verifica non pareggia da sola (budget_680,
             # perdita 2025 non girata). Si dichiara: il foglio lo riprodurra' tale e quale.
             bs['_verifica_dare'], bs['_verifica_avere'] = dare, avere
+            bs = _ie_risultato_in_apertura(bs, entries, dare - avere)
     if used_c8:
         bs = _c8_recover_orphan_passivo(file_path, bs)
         bs = _c8_risultato_stampato(full_text, entries, bs)

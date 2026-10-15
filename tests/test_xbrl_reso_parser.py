@@ -877,3 +877,16 @@ def test_negativi_dell_anno_precedente_dichiarati_con_l_anno(tmp_path, monkeypat
     assert ris.prior_bs["sp08_attivita_finanziarie"] == D("-55000")
     assert ["sp08_attivita_finanziarie", "-55000.00", "2024"] in ris.report["anomalie"]
     assert not [a for a in ris.report["anomalie"] if len(a) == 2]       # il corrente e' pulito
+
+
+def test_provento_da_consolidato_fiscale_riduce_le_imposte(tmp_path):
+    """budget_1337: "proventi (oneri) da adesione al regime di consolidato fiscale" stampato
+    positivo si sottrae dalle imposte correnti (70.403 - 73.459 = totale (3.056))."""
+    ce = _sostituisci(CE_ABBREVIATO, "imposte correnti\n7.486\n3.851", "imposte correnti\n80.000\n3.851")
+    ce = _sostituisci(ce, "imposte relative a esercizi precedenti\n4\n230",
+                      "proventi (oneri) da adesione al regime di consolidato fiscale / trasparenza "
+                      "fiscale\n72.510\n(230)")
+    r = X.estrai(_abbreviato(tmp_path, ce=ce))
+    assert r["adottabile"] is True and r["rifiuto"] is None
+    assert r["ce"]["ce20_imposte"] == D("7490")
+    assert r["prior_ce"]["ce20_imposte"] == D("4081")

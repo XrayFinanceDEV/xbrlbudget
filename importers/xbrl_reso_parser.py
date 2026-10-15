@@ -666,7 +666,12 @@ def _costruisci(righe: list[_Riga], colonne: int, vuote_zero: bool = False):
             continue
         aperto = any(padre.percorso == p or padre.percorso.startswith(p + ".")
                      for p in _PADRI_APERTI)
-        nodo = _Nodo(r.didascalia, padre.livello + 1, padre.percorso, padre, valori=r.valori,
+        valori = r.valori
+        if padre.percorso == "CE.20" and valori and _norm(r.didascalia).startswith("proventi (oneri)"):
+            # "proventi (oneri) da adesione al regime di consolidato fiscale": un provento stampato
+            # positivo riduce le imposte (budget_1337: 70.403 - 73.459 = totale (3.056))
+            valori = [-v for v in valori]
+        nodo = _Nodo(r.didascalia, padre.livello + 1, padre.percorso, padre, valori=valori,
                      ereditato=aperto, ignoto=not aperto, sezione=sezione)
         padre.figli.append(nodo)
     return radici, calcolati, totali, errori

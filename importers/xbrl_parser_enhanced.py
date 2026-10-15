@@ -120,6 +120,11 @@ class EnhancedXBRLParser:
         'DebitiDebitiVersoIstitutiPrevidenzaSicurezzaSocialeTotaleDebitiVersoIstitutiPrevidenzaSicurezzaSociale': 'previdenza',
         'DebitiAltriDebitiTotaleAltriDebiti': 'altri',
         'DebitiAccontiTotaleAcconti': 'altri',
+        # debiti infragruppo: nessun sotto-campo proprio, stanno fra gli altri debiti
+        'DebitiDebitiVersoImpreseControllateTotaleDebitiVersoImpreseControllate': 'altri',
+        'DebitiDebitiVersoImpreseCollegateTotaleDebitiVersoImpreseCollegate': 'altri',
+        'DebitiDebitiVersoControllantiTotaleDebitiVersoControllanti': 'altri',
+        'DebitiDebitiVersoImpreseSottoposteControlloControllantiTotaleDebitiVersoImpreseSottoposteControlloControllanti': 'altri',
     }
 
     # Mapping of creditor bucket -> (sp16x field, sp17x field).
@@ -147,6 +152,8 @@ class EnhancedXBRLParser:
         'CreditiCreditiTributariTotaleCreditiTributari': 'tributari',
         'CreditiImposteAnticipateTotaleImposteAnticipate': 'imposte_anticipate',
         'CreditiVersoAltriTotaleCreditiVersoAltri': 'altri',
+        # C.II.5) verso imprese sottoposte al controllo delle controllanti: fra gli altri crediti
+        'CreditiVersoImpreseSottoposteControlloControllantiTotaleCreditiVersoImpreseSottoposteControlloControllanti': 'altri',
     }
 
     # Mapping of debtor bucket -> (sp06x field, sp07x field).
@@ -825,8 +832,15 @@ class EnhancedXBRLParser:
                 expected_local = xbrl_tag.split(':')[-1]
 
                 if local_name == expected_local:
-                    # Skip if this field was already successfully mapped by v2
-                    if field in v2_mapped_fields_bs:
+                    # Skip if this field was already successfully mapped by v2 -- except a
+                    # typed entro/oltre row of ANOTHER counterparty sharing the bucket (debiti
+                    # verso controllate/controllanti, acconti -> sp16g): the v2 tag itself is
+                    # already skipped above, so this one is never an alias of it (budget_1324).
+                    if field in v2_mapped_fields_bs and not (
+                        field.startswith(('sp16g', 'sp17g'))
+                        and local_name.endswith(('EsigibiliEntroEsercizioSuccessivo',
+                                                 'EsigibiliOltreEsercizioSuccessivo'))
+                    ):
                         matched = True  # Mark as matched to avoid "unmapped" warning
                         break
 

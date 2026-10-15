@@ -999,7 +999,7 @@ ENGINE_VERSION, "pareggio": details['pareggio']}` on every generation. The local
 migration run once (`python migrate_db.py financial_analysis.db`) — without it the column does not
 exist and every forecast read answers 500, not just a missing signature. `ENGINE_VERSION`
 (`calculations/forecast_engine.py`) is a string constant bumped whenever a lotto changes the
-engine's numbers — it is now `"3"` (#61/#62). Existing budget `ForecastYear` rows have `engine_meta =
+engine's numbers — it is now `"4"` (#63 R07). Existing budget `ForecastYear` rows have `engine_meta =
 NULL`: that means **«da rigenerare»** (owner's decision 2026-10-05, old data do not count);
 infrannuale never raises the warning.
 

@@ -765,6 +765,54 @@ def _sp14_detail_field(desc_upper: str) -> Optional[str]:
 
 _CE_AMMORTAMENTO_RE = re.compile(r'^AMM(?:ORTAMENT[OI]|\.?\s?TO\b|\.)\s*')
 
+# Conti foglia di un piano dei conti senza mastri (budget_435, sezioni contrapposte di
+# soli conti): ultima risorsa, solo dove oggi scatta il ripiego (ce12 fra i costi). Mai
+# dentro _classify_ce_costi: un conto sotto un mastro che lo dice prende il mastro
+# ("MATERIALE RIPAR/MANUTENZ." sotto i materiali di consumo resta materia, budget_680).
+_CE_COSTI_FOGLIE = [
+    (['TFR'], 'ce08a_tfr'),                       # "ACCAN.TFR FORMAZIONE LAVORO" (AITEC)
+    (['T.F.R'], 'ce08a_tfr'),
+    (['PREMI', 'PRODUZION'], 'ce08b'),            # retribuzione, non un premio assicurativo
+    (['CONTRIBUTI', 'SANITAR'], 'ce08c'),         # assistenza sanitaria integrativa
+    (['PREMI', 'ELEMENTI'], 'ce08b'),             # "PREMI E ALTRI ELEMENTI SIMILI"
+    (['ASSISTENZA'], 'ce06'),                     # "CANONI DI ASSISTENZA TECNICA": servizio
+    (['TELEMATIC'], 'ce06'),
+    (['CARBURANT'], 'ce05'),
+    (['LUBRIFICANT'], 'ce05'),
+    (['CANCELLERIA'], 'ce05'),
+    (['IMBALLAGG'], 'ce05'),
+    (['INDUMENTI'], 'ce05'),
+    (['MATERIALI', 'DI '], 'ce05'),               # "MATERIALI DI PULIZIA/OFFICINA"
+    (['CANONI'], 'ce07'),                         # locazione, leasing, noleggio
+    (['NOLEGG'], 'ce07'),
+    (['LOCAZION'], 'ce07'),
+    (['AFFITT'], 'ce07'),
+    (['LEASING'], 'ce07'),
+    (['CONTRIBUTI', 'PREVIDENZ'], 'ce08c'),
+    (['INFORTUNI'], 'ce08c'),
+    (['INAIL'], 'ce08c'),
+    (['MANUTENZ'], 'ce06'),
+    (['RIPARAZ'], 'ce06'),
+    (['TRASPORT'], 'ce06'),
+    (['CONSULENZ'], 'ce06'),
+    (['ENERGIA'], 'ce06'),
+    (['TELEFON'], 'ce06'),
+    (['ASSICURAZ'], 'ce06'),
+    (['PREMI'], 'ce06'),                          # "PREMI RCA", "PREMI RCT"
+    (['PROVVIGION'], 'ce06'),
+    (['PEDAGG'], 'ce06'),
+    (['PARCHEGG'], 'ce06'),
+    (['COLLAUD'], 'ce06'),
+    (['SOCCORSO'], 'ce06'),
+    (['FORMAZIONE'], 'ce06'),
+    (['VISITE', 'MEDICHE'], 'ce06'),
+    (['INDENNIT', 'CHILOMETR'], 'ce06'),
+    (['ONERI', 'BANCARI'], 'ce06'),
+    (['SPESE', 'BANCARIE'], 'ce06'),
+    (['SOFTWARE'], 'ce06'),
+    (['SPESE', 'DI '], 'ce06'),                   # "SPESE DI TRASPORTO/INCASSO/VENDITA"
+]
+
 
 def _classify_ce_costi(desc_upper: str) -> Optional[str]:
     """Classify a CE cost entry by description keywords."""
@@ -776,8 +824,29 @@ def _classify_ce_costi(desc_upper: str) -> Optional[str]:
     # (ce09a/ce09b stanno entrambi dentro ce09, l'errore resta dentro l'aggregato).
     m = _CE_AMMORTAMENTO_RE.match(desc_upper)
     if m and desc_upper[m.end():].strip():
-        cespite = _classify_sp_attivo(desc_upper[m.end():])
-        return 'ce09a' if cespite == 'gross_sp02' else 'ce09b'
+        resto = desc_upper[m.end():]
+        cespite = _classify_sp_attivo(resto)
+        # i segni d'immateriale dei fondi: manutenzioni da ammortizzare, spese
+        # pluriennali, disaggi (budget_435)
+        immat = cespite == 'gross_sp02' or _fondo_is_immat(resto)
+        return 'ce09a' if immat else 'ce09b'
+    return None
+
+
+def _classify_ce_costi_foglia(desc_upper: str) -> Optional[str]:
+    """Ultima risorsa per un conto di costo che nessuna regola ne' il suo mastro
+    riconoscono: la parola del conto foglia, prima del ripiego."""
+    for keywords, field in _CE_COSTI_FOGLIE:
+        if _kw_match(desc_upper, keywords):
+            return field
+    return None
+
+
+def _classify_ce_ricavi_foglia(desc_upper: str) -> Optional[str]:
+    """Conti foglia di ricavo senza la parola RICAVI ("CORRISPETTIVI DA TRASPORTO DI
+    MERCI SU STRADA", budget_435): il fatturato, non altri ricavi."""
+    if _kw_any(desc_upper, ['CORRISPETTIV', 'PRESTAZIONI DI SERVIZ', 'FATTURATO']):
+        return 'ce01'
     return None
 
 
@@ -1328,8 +1397,20 @@ def build_iv_cee(entries: List[Entry], default_ce: bool = False) -> Tuple[Dict[s
             elif field:
                 ce[field] = ce.get(field, Decimal('0')) + entry.amount
             elif default_ce:
-                # Detail-level cost line with no keyword match → oneri diversi.
-                ce['ce12'] = ce.get('ce12', Decimal('0')) + entry.amount
+                # Detail-level cost line with no keyword match → la parola del conto
+                # foglia, altrimenti oneri diversi.
+                foglia = _classify_ce_costi_foglia(desc_upper)
+                if foglia == 'ce08a_tfr':
+                    ce_tfr_accrual += entry.amount
+                    ce['ce08'] = ce.get('ce08', Decimal('0')) + entry.amount
+                elif foglia == 'ce08b':
+                    ce['ce08'] = ce.get('ce08', Decimal('0')) + entry.amount
+                    ce['ce08b_salari_stipendi'] = ce.get('ce08b_salari_stipendi', Decimal('0')) + entry.amount
+                elif foglia == 'ce08c':
+                    ce['ce08'] = ce.get('ce08', Decimal('0')) + entry.amount
+                    ce['ce08c_oneri_sociali'] = ce.get('ce08c_oneri_sociali', Decimal('0')) + entry.amount
+                else:
+                    ce[foglia or 'ce12'] = ce.get(foglia or 'ce12', Decimal('0')) + entry.amount
             return
 
         # =================================================================
@@ -3900,6 +3981,43 @@ def _be_split_codeless(words) -> Optional[float]:
     span = hi_x - lo_x
     if span <= 0:
         return None
+
+    def _score(x):
+        left = _be_collect_side(words, -1e9, x, codeless=True)
+        right = _be_collect_side(words, x, 1e9, codeless=True)
+        ld = sum(1 for _c, d, _a in left if d.strip())
+        rd = sum(1 for _c, d, _a in right if d.strip())
+        return (min(ld, rd), -abs(x - centre)) if ld >= 2 and rd >= 2 else None
+
+    # Prima i varchi veri: un taglio che non attraversa nessuna parola delle righe con un
+    # importo (i titoli centrati, "Dal 01/01/2025 al 31/12/2025", non contano). Fra le
+    # colonne di budget_435 il varco e' largo un punto (importo fino a 296, descrizione da
+    # 297) e la griglia qui sotto non ci cade mai: con 50 costi contro 3 ricavi vinceva un
+    # taglio in mezzo agli importi dei costi, o in mezzo a "Totale" della colonna di destra.
+    # Non su una pagina con gli importi a frammenti ("2.280" "," "30"): li' fra un
+    # frammento e l'altro c'e' un varco che non e' fra le colonne.
+    per_riga: Dict[int, list] = {}
+    for w in words:
+        if w[4].strip():
+            per_riga.setdefault(round(w[3]), []).append(w)
+    dati = [w for ws in per_riga.values()
+            if any(re.fullmatch(r'\d{1,3}(?:\.\d{3})*,\d{2}-?|\d+,\d{2}-?', x[4]) for x in ws)
+            for w in ws]
+    lo_g, hi_g = lo_x + 0.25 * span, lo_x + 0.75 * span
+    coperti = sorted((w[0], w[2]) for w in dati if w[2] > lo_g and w[0] < hi_g)
+    varchi, cursore = [], lo_g
+    for a, b in coperti:
+        if a > cursore + 0.5:
+            varchi.append((cursore + a) / 2)
+        cursore = max(cursore, b)
+    if hi_g > cursore + 0.5:
+        varchi.append((cursore + hi_g) / 2)
+    if _be_page_needs_coordinate_repair(words):
+        varchi = []
+    migliori = [(sc, x) for x in varchi if (sc := _score(x)) is not None]
+    if migliori:
+        return max(migliori)[1]
+
     best = None
     step = max(2.0, span / 80.0)
     x = lo_x + 0.25 * span
@@ -4335,6 +4453,7 @@ _FONDO_IMMAT_KW = (
     'AVVIAMENT', 'LICENZ', 'CONCESSION', 'RICERCA', 'SVILUPPO', 'PUBBLICIT',
     'WEB', 'PROGETTAZ', 'CONSULENZ', 'DIRITTI', 'INGEGNO', 'KNOW', 'MANUT',
     'AMPLIAMENT', "COSTI D'IMPIANTO", 'COSTI DI IMPIANTO',
+    'DISAGG',                       # disaggi su prestiti (budget_435)
 )
 
 
@@ -5176,7 +5295,8 @@ def _hier_reconstruct(pages_data, full: str):
         ce[k] = ce.get(k, Z) + v
 
     for _c, d, a in mc:
-        f = _classify_ce_costi(d) or _resolve_ce_field(d, 'costi')
+        f = (_classify_ce_costi(d) or _resolve_ce_field(d, 'costi')
+             or _classify_ce_costi_foglia(d))
         if f is None:
             f = fallback_field('ce')
             unclassified.append((d, a, 'ce'))
@@ -5191,7 +5311,8 @@ def _hier_reconstruct(pages_data, full: str):
         else:
             adde(f, a)
     for _c, d, a in mr:
-        f = _classify_ce_ricavi(d) or _resolve_ce_field(d, 'ricavi')
+        f = (_classify_ce_ricavi(d) or _resolve_ce_field(d, 'ricavi')
+             or _classify_ce_ricavi_foglia(d))
         if f is None:
             f = 'ce04'
             unclassified.append((d, a, 'ce'))
@@ -5433,6 +5554,10 @@ def classify_attivo(desc_upper: str) -> Tuple[str, bool]:
     # not the generic-credit fallback used by the single-column classifier.
     if 'BANC' in d:
         return 'sp09', True
+    # un conto corrente col suo numero e il solo nome della banca ("INTESA SANPAOLO C/C
+    # 1000/2800", budget_435), stampato all'attivo: e' liquidita'
+    if re.search(r'\bC/C\s*(?:N\.?\s*)?\d', d) and not _kw_any(d, ['CRED', 'ERARIO', 'DEBIT']):
+        return 'sp09', True
     if ('SCORTE' in d or 'MATERIE PRIME' in d or d == 'IMBALLAGGI'):
         return 'sp05', True
     f = _classify_sp_attivo(d)
@@ -5483,13 +5608,13 @@ def classify_passivo(desc_upper: str) -> Tuple[str, bool]:
 def classify_costi(desc_upper: str) -> Tuple[str, bool]:
     d = _descrizione_di_conto(desc_upper)
     f = _classify_ce_costi(d)
-    return (f, True) if f else ('ce12', False)
+    return (f, True) if f else (_classify_ce_costi_foglia(d) or 'ce12', False)
 
 
 def classify_ricavi(desc_upper: str) -> Tuple[str, bool]:
     d = _descrizione_di_conto(desc_upper)
     f = _classify_ce_ricavi(d)
-    return (f, True) if f else ('ce04', False)
+    return (f, True) if f else (_classify_ce_ricavi_foglia(d) or 'ce04', False)
 
 
 def extract_contrapposte_best_effort(file_path: str) -> Tuple[Dict[str, Decimal], Dict[str, Decimal]]:
@@ -5697,7 +5822,7 @@ def extract_contrapposte_best_effort(file_path: str) -> Tuple[Dict[str, Decimal]
     def add(d, k, v):
         d[k] = d.get(k, Z) + v
 
-    cl_att, cl_pas = classify_attivo, classify_passivo
+    cl_pas = classify_passivo
     cl_cos, cl_ric = classify_costi, classify_ricavi
 
     # The current-year result is a pareggio item (utile booked on the passivo
@@ -5721,6 +5846,30 @@ def extract_contrapposte_best_effort(file_path: str) -> Tuple[Dict[str, Decimal]
 
     attivo = _strip_result(attivo)
     passivo = _strip_result(passivo)
+
+    # Cespite e fondo stampati in coppia, il fondo dall'altra parte con la stessa
+    # descrizione ("CONTENITORI" / "F.DO AMM.TO CONTENITORI", budget_435): la riga
+    # d'attivo e' l'immobilizzazione del fondo, anche quando la descrizione da sola non
+    # dice cespite (contenitori, disaggi, manutenzioni da ammortizzare finivano nei
+    # crediti, e il fondo nettava un'immobilizzazione che non c'era).
+    fondi_di: Dict[str, str] = {}
+    for _c, d, _a in passivo:
+        tag, _spec = cl_pas(d)
+        if tag in ('depr_sp02', 'depr_sp03'):
+            resto = re.sub(r'^(?:F\.?\s?DO|FONDO)\s+AMM\S*\s+(?:(?:DI|DEL|DELLE|DEGLI|SU)\s+)?',
+                           '', _descrizione_di_conto(d)).strip()
+            if resto and resto != _descrizione_di_conto(d):
+                fondi_di[resto] = tag.replace('depr_', '')
+
+    def cl_att(d, _cl=classify_attivo):
+        field, specific = _cl(d)
+        if field in ('sp02', 'sp03', 'sp04') or not fondi_di:
+            return field, specific
+        nd = _descrizione_di_conto(d)
+        for resto, campo in fondi_di.items():
+            if nd == resto or nd.startswith(resto + ' '):
+                return campo, True
+        return field, specific
 
     # --- Attivo (gross assets; fondi netted from passivo side) ---
     for field, amt in _be_reclassify(attivo, cl_att):
@@ -5818,9 +5967,17 @@ def extract_contrapposte_best_effort(file_path: str) -> Tuple[Dict[str, Decimal]
     if tot_att is None and tot_pas is None:
         tot_att = _control_amount('sp', 'left', 'TOTALI')
         tot_pas = _control_amount('sp', 'right', 'TOTALI')
+    # Il pareggio dello stato patrimoniale, mai quello del conto economico: con le
+    # pagine di CE in fondo "TOTALE A PAREGGIO" trovava il pareggio dei componenti di
+    # reddito (1.809.957,59 invece dei 1.119.893,69 dei totali dello SP, budget_435).
+    sp_up = re.sub(r'\s+', ' ', ' '.join(
+        up for _w, is_sp, is_ce, up, _width in pages_data if is_sp and not is_ce))
     pareggio = ((_control_amount('sp', None, 'TOTALE', 'PAREGGIO')
                  if use_garbled_reconstruction else None)
-                or _find_total('TOTALE A PAREGGIO', 'TOTALEAPAREGGIO'))
+                or (_be_amount(sp_up.split('TOTALE A PAREGGIO', 1)[1][:40])
+                    if 'TOTALE A PAREGGIO' in sp_up else None)
+                or (_find_total('TOTALE A PAREGGIO', 'TOTALEAPAREGGIO')
+                    if not sp_up else None))
 
     # Risultato degli esercizi precedenti non ancora destinato, stampato SENZA codice
     # SOTTO "Totale passivita'" ("Eccedenza esercizio precedente", "Utile esercizio
@@ -5874,6 +6031,11 @@ def extract_contrapposte_best_effort(file_path: str) -> Tuple[Dict[str, Decimal]
                              <= Decimal('0.05'))
     if use_garbled_reconstruction and result_controls_agree:
         utile = independent_results[0]
+    elif (total_gap is not None and abs(total_gap) <= Decimal('0.05')
+          and booked_results and result[0]):
+        # Totali stampati uguali: il conto di risultato e' gia' dentro il totale del
+        # passivo, e la differenza dei totali (zero) non e' l'utile (budget_435).
+        utile = result[0]
     elif total_gap is not None:
         utile = total_gap
     else:

@@ -1165,6 +1165,17 @@ def import_pdf_balance_sheet(
                             _dati_snello["totale_passivo"] = sum(
                                 (Decimal(_dati_snello.get(k, 0)) for k in _PASSIVO_FIELDS), Decimal(0))
                     # Il blocco e' riuscito per intero: solo ora si adotta il risultato.
+                    if (_pdf_mineru is not None
+                            and _risultato_snello.report.get("esito") not in ("ok", "tappo")
+                            and _risultato_snello.report.get("causa") != "documento_sbilanciato"):
+                        # Su una scansione lo snello si adotta solo se quadra: una sua lettura
+                        # squadrata di un PDF sintetico non e' migliore di quella della route C
+                        # (Bilancino, Gerevini 689: piu' lontana, e oltre il 5% la regola delle
+                        # scansioni rifiutava il file). Si torna alla route C, come prima.
+                        _rep = dict(_risultato_snello.report)
+                        raise import_snello.SnelloNonRiuscito(
+                            {"esito": "ripiego", "fase": "scansione_non_quadra",
+                             "misura": _rep.get("misura"), "fonte_testo": "tabelle_mineru"})
                     _snello = _risultato_snello
                     _snello_report = _snello.report
                     if _pdf_mineru is not None:

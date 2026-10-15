@@ -268,6 +268,9 @@ def collect_source_rows(file_path: str, ocr_text: str | None = None) -> list[Sou
                 split = repair_candidate
             else:
                 split = _be_split(words) if two_sides else None
+                if split is not None:
+                    from importers.situazione_contabile_parser import _hier_split_ai_codici
+                    split = _hier_split_ai_codici(words, split, page.rect.width)
             layout = (round(page.rect.width), round(page.rect.height))
             if split and two_sides:
                 physical_splits[layout] = split

@@ -659,6 +659,12 @@ def _importa_modello(file_path: str, _det: dict, t0: float, *, ocr_text, analizz
         # mix: l'anno precedente segue la lettura che vince (qui non c'e' quello deterministico).
         _m_det = _det["lettura"]["misura"]
         _peggio_det, _peggio_mod = _scarto_massimo(_m_det), _scarto_massimo(m)
+        if _det["lettura"]["bs"].get("_ce_massa_non_letta") is not None:
+            # lo scarto CE/SP della lettura deterministica e' la massa che i totali stampati
+            # del CE dichiarano non letta (importi disegnati come grafica, budget_619): e'
+            # spiegato dal documento, non e' un errore di lettura. Conta il resto.
+            _peggio_det = max(abs(Decimal(_m_det["scarto_sp"])),
+                              abs(Decimal(_m_det["scarto_stampati"])))
         _vince = "deterministica" if _peggio_det < _peggio_mod else "modello"
         _confronto = {"deterministica": str(_peggio_det), "modello": str(_peggio_mod),
                       "vince": _vince, "parser": _det["parser"]}

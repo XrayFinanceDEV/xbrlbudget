@@ -198,3 +198,17 @@ def test_ripiego_evitato_senza_struttura_resta_non_richiesta(tmp_path, monkeypat
     r = S.importa(pdf, ocr_text=_TESTO_BILANCIO_DI_VERIFICA, analizza=rotta, leggi_voci=_modello("3000000"))
     assert r.report["ripiego_evitato"]["fase"] == "struttura"
     assert r.report["struttura"]["stato"] == "non_richiesta"
+
+
+def test_lo_scarto_ce_dichiarato_dai_totali_stampati_non_conta_nel_confronto(tmp_path, monkeypatch):
+    """budget_619: la lettura deterministica ha lo SP esatto e uno scarto CE/SP che e' la massa
+    di costi che il PDF disegna come grafica, dichiarata dai totali stampati del CE. Il
+    modello ha uno scarto piu' piccolo ma sullo SP, cioe' una lettura sbagliata: vince la
+    lettura deterministica."""
+    _det_949(monkeypatch, bs={"sp09": D("3000000.00"), "sp11": D("1500000.00"),
+                              "sp13": D("1500000.00"), "_ce_massa_non_letta": D("745.89")})
+    r = _importa(tmp_path, _modello("2999700"))            # scarto SP 300
+    assert r.report["fonte"] == "deterministico:situazione_contabile_parser"
+    assert r.report["causa"] == "ce_non_letto"
+    c = r.report["confronto_letture"]
+    assert (c["deterministica"], c["modello"], c["vince"]) == ("0.00", "300.00", "deterministica")

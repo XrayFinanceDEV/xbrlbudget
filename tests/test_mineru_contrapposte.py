@@ -197,3 +197,45 @@ def test_con_lo_snello_acceso_la_scansione_passa_dal_percorso_snello(tmp_path, m
     assert snello["fonte_testo"] == "tabelle_mineru"
     assert snello["fonte"] == "deterministico:situazione_contabile_parser"
     assert risultato["validation_status"] == "verified"
+
+
+def test_una_lettura_snello_squadrata_della_scansione_torna_alla_route_c(tmp_path, monkeypatch):
+    """Bilancino, Gerevini 689 (staging 14/10/2026): lo snello leggeva il PDF sintetico peggio
+    della route C e la regola delle scansioni (oltre il 5% si rifiuta) faceva fallire l'import.
+    Su una scansione lo snello si adotta solo quando quadra."""
+    from types import SimpleNamespace as NS
+
+    from sqlalchemy import create_engine
+    from sqlalchemy.orm import sessionmaker
+
+    import fitz
+    from database.db import Base
+    from importers import import_snello, pdf_importer
+    from importers.mineru_adapter import MinerUExtractionContext
+
+    scansione = tmp_path / "scansione.pdf"
+    doc = fitz.open()
+    doc.new_page()
+    doc.save(scansione)
+    doc.close()
+    testo = "Bilancio di verifica al 31/08/2026\nSTATO PATRIMONIALE\nCONTO ECONOMICO\n"
+    contesto = MinerUExtractionContext(
+        full_text=testo, page_texts=(testo,), rows=(), tables=(SP, CE), headings=(),
+        current_year=2026, comparative_year=None, raw_format="test", mineru_version="3.4.5")
+    engine = create_engine("sqlite:///:memory:")
+    Base.metadata.create_all(engine)
+    monkeypatch.setattr(pdf_importer, "SessionLocal", sessionmaker(bind=engine))
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    monkeypatch.setenv("IMPORT_MOTORE", "snello")
+    squadrata = NS(bs={"sp09_disponibilita_liquide": D("1")}, ce={}, prior_bs=None, prior_ce=None,
+                   report={"esito": "squadrato", "misura": {"corrente": {"scarto_sp": "500000.00"}}})
+    monkeypatch.setattr(import_snello, "importa", lambda *a, **k: squadrata)
+
+    risultato = pdf_importer.import_pdf_balance_sheet(
+        file_path=str(scansione), fiscal_year=2026, period_months=8,
+        company_name="SCANSIONE", create_company=True, sector=1,
+        user_id="u-mineru-route-c", extraction_context=contesto)
+
+    assert risultato["extraction_method"] == "mineru+situazione_contabile_mineru"
+    assert risultato["validation_status"] == "verified"
+    assert risultato["validation_report"]["import_snello"]["fase"] == "scansione_non_quadra"

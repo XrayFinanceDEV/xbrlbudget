@@ -3729,15 +3729,12 @@ def _hier_canon(raw: str) -> str:
 def _hier_collect(words, lo: float, hi: float) -> List[Tuple[str, str, Decimal]]:
     """Collect (canon_code, desc_upper, amount) rows in x-band [lo, hi), preserving
     the hierarchical code structure and DOCUMENT (top-to-bottom) order."""
-    from collections import defaultdict
-    rows: Dict[int, list] = defaultdict(list)
-    for w in words:
-        cx = (w[0] + w[2]) / 2
-        if lo <= cx < hi:
-            rows[round(w[1] / 2.0)].append(w)
+    # righe fisiche per sovrapposizione verticale, non per round(y/2): codice e importo in
+    # font diversi finivano in due righe e il conto, rimasto senza importo, spariva
+    # (budget_703: "336 ALTRI COSTI MANO D'OPERA 886,35", "340 ACQUA 393,46")
     out = []
-    for y in sorted(rows):
-        toks = [w[4] for w in sorted(rows[y], key=lambda w: w[0])]
+    for riga in _be_cluster_physical_rows(words, lo, hi):
+        toks = [w[4] for w in sorted(riga, key=lambda w: w[0])]
         i, code_toks = 0, []
         while i < len(toks) and re.match(r'^[\d./*]+$', toks[i]) and not _BE_AMT_RE.match(toks[i]):
             code_toks.append(toks[i])
@@ -3754,6 +3751,37 @@ def _hier_collect(words, lo: float, hi: float) -> List[Tuple[str, str, Decimal]]
         desc = ' '.join(t for t in rest if not _BE_AMT_RE.match(t)).upper().strip()
         out.append((cc, desc, amts[-1]))
     return out
+
+
+def _hier_split_ai_codici(words, split: float, width: float) -> float:
+    """La separazione fra le due colonne, rimessa sull'inizio della colonna dei codici di
+    destra (la x piu' frequente a cui cominciano i codici numerici nella meta' destra), ma
+    solo quando fra la stima e quell'inizio ci sono soltanto importi della colonna sinistra
+    (stima troppo a sinistra: un importo corto allineato a destra, "886,35" fra x 257 e 281,
+    aveva il centro oltre 268 e finiva nella colonna accanto) o soltanto codici della colonna
+    destra (stima troppo a destra: "37", "755" a x 294 finivano a sinistra). budget_703,
+    pagine 2 e 1. Qualunque altra parola nel mezzo: la stima resta quella."""
+    from collections import Counter
+    if split is None:
+        return split
+    codice = re.compile(r'\d{1,3}(?:[./]\d+)*')
+    xs = Counter(round(w[0]) for w in words if codice.fullmatch(w[4]) and w[0] > width * 0.35)
+    if not xs:
+        return split
+    x_codici, volte = xs.most_common(1)[0]
+    if volte < 3:
+        return split
+    nuovo = x_codici - 1
+    lo, hi = sorted((split, nuovo))
+    # solo il corpo dei conti: l'intestazione di pagina ("Pagina: 2 di 4") non conta
+    y_corpo = min(w[1] for w in words if codice.fullmatch(w[4]) and abs(w[0] - x_codici) <= 2)
+    nel_mezzo = [w for w in words if lo <= (w[0] + w[2]) / 2 < hi and w[1] >= y_corpo - 2]
+    if nuovo > split and all(_BE_AMT_RE.match(w[4]) and w[2] < x_codici for w in nel_mezzo):
+        return nuovo
+    if nuovo < split and all(codice.fullmatch(w[4]) and abs(w[0] - x_codici) <= 2
+                             for w in nel_mezzo):
+        return nuovo
+    return split
 
 
 def _hier_lvl1(rows: List[Tuple[str, str, Decimal]]) -> List[Tuple[str, str, Decimal]]:
@@ -3773,9 +3801,41 @@ def _hier_lvl1(rows: List[Tuple[str, str, Decimal]]) -> List[Tuple[str, str, Dec
                 break
             if '.' not in cj:
                 break
+        if not is_mastro:
+            is_mastro = _hier_mastro_per_somma(rows, i)
         if is_mastro:
             res.append((c, d, a))
+    # Un mastro senza conti sotto ("19 CLIENTI", "10 FORNITORI", budget_703) vale da se':
+    # stesso livello di codice dei mastri riconosciuti per somma, e nessun codice piu' lungo
+    # che lo segua. Il totale stampato, in _hier_reconstruct, decide se la lettura regge.
+    # Solo senza codici a punti: li' la gerarchia la dicono i punti.
+    lunghezze = {len(c) for c, _d, _a in res}
+    if res and len(lunghezze) == 1 and not any('.' in c for c, _d, _a in rows):
+        livello = lunghezze.pop()
+        scelti = {(c, d, a) for c, d, a in res}
+        res = []
+        for i, (c, d, a) in enumerate(rows):
+            con_figli = i + 1 < n and len(rows[i + 1][0]) > len(c)
+            if (c, d, a) in scelti or (len(c) == livello and not con_figli
+                                       and 'TOTALE' not in d and 'PAREGGIO' not in d):
+                res.append((c, d, a))
     return res
+
+
+def _hier_mastro_per_somma(rows: List[Tuple[str, str, Decimal]], i: int) -> bool:
+    """Un codice senza punti i cui conti non ne portano il prefisso (budget_703, "BILANCIO
+    CONTABILE": mastro "85 ONERI FINANZIARI", conti "070", "075", ... che si ripetono sotto
+    mastri diversi). La lunghezza del codice e' solo l'ipotesi: e' un mastro quando le righe
+    che lo seguono, con codici piu' lunghi e fino al codice successivo non piu' lungo del
+    suo, ne ricostruiscono l'importo al centesimo. Una sezione ("1 ATTIVITA'") non lo e':
+    sotto ha mastri e conti insieme, la somma e' doppia."""
+    c, d, a = rows[i]
+    figli = []
+    for cj, dj, aj in rows[i + 1:]:
+        if '.' in cj or 'TOTALE' in dj or 'PAREGGIO' in dj or len(cj) <= len(c):
+            break
+        figli.append(aj)
+    return bool(figli) and abs(sum(figli, Decimal('0')) - a) <= Decimal('0.01')
 
 
 def _is_prior_result_caption(desc_upper: str) -> bool:
@@ -4611,6 +4671,7 @@ def _hier_reconstruct(pages_data, full: str):
         split = _be_split(words)
         if split is None:
             split = width / 2
+        split = _hier_split_ai_codici(words, split, width)
         left = _hier_collect(words, -1e9, split)
         right = _hier_collect(words, split, 1e9)
         if is_sp and not is_ce:
@@ -4832,6 +4893,12 @@ def _hier_reconstruct(pages_data, full: str):
 
     tot_att = final_attivi[-1] if final_attivi else _ft(
         'TOTALE ATTIV', 'TOTALEATTIV')
+    if not tot_att:
+        # nessuna didascalia "TOTALE ATTIVITA'": il gestionale stampa il totale sulla riga
+        # di sezione ("1 ATTIVITA' 2.303.519,78", budget_703)
+        sezioni = [a for c, d, a in att
+                   if len(c) == 1 and d.startswith('ATTIVIT') and 'PASSIV' not in d]
+        tot_att = sezioni[0] if len(sezioni) == 1 else None
     if not tot_att or tot_att <= 0:
         return None
     tol = max(Decimal('50'), Decimal('0.005') * tot_att)
@@ -5551,7 +5618,10 @@ def extract_contrapposte_best_effort(file_path: str) -> Tuple[Dict[str, Decimal]
     # _hier_reconstruct) — so a file the best-effort already balances is untouched.
     plug_now = bs.get('_plug_residual', Z)
     total_now = bs.get('totale_attivo', Z) or Z
-    if plug_now > max(Decimal('1'), Decimal('0.01') * total_now) and is_dotted_hierarchical(full):
+    # Anche senza codici a punti (budget_703: mastri a 2 cifre, conti a 3 che non ne portano
+    # il prefisso): i mastri si riconoscono dalla somma dei loro conti e la ricostruzione si
+    # tiene solo se si verifica da sola sul totale stampato e sul risultato del CE.
+    if plug_now > max(Decimal('1'), Decimal('0.01') * total_now):
         try:
             rescued = _hier_reconstruct(pages_data, full)
         except Exception as he:

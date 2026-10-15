@@ -199,8 +199,17 @@ se una sezione non torna, la lettura è vuota. Quando il dare stampato (attivit�
 dall'avere (passività + ricavi), di solito per un risultato dell'anno prima non destinato, il
 parser lo dichiara (`_verifica_dare`/`_verifica_avere`) e il percorso snello adotta la lettura
 **squadrata** (`causa: documento_sbilanciato`, tipo `verifica`) senza chiamare il modello, se il suo
-scarto Attivo/Passivo è esattamente quella differenza e il CE torna. Nessuna deduzione del
-risultato non destinato: l'utente lo sistema in Rettifiche.
+scarto Attivo/Passivo è esattamente quella differenza e il CE torna.
+
+**Risultato dell'anno prima non riaperto** (verifica progressiva, decisione del proprietario
+2026-10-15, che rivede quella del 2026-10-06 su budget_680). Il saldo finale è apertura + dare −
+avere: se la colonna d'apertura stampata («Saldo al 31/12» dell'anno prima) ha solo stato
+patrimoniale, non pareggia, e lo sbilancio dare/avere del saldo finale è **la stessa cifra al
+centesimo**, i movimenti dell'anno pareggiano e lo sbilancio è il risultato dell'anno prima che le
+scritture d'apertura non hanno riaperto. `_ie_risultato_in_apertura` lo mette negli utili (perdite)
+portati a nuovo (`sp12`/`sp12g`, segno dell'apertura) e l'import lo dichiara con un avviso che cita
+le due colonne. Se le due cifre non coincidono non si tocca nulla: resta il documento sbilanciato.
+680: perdita 2025 −348.287,23, verificato.
 
 ## 6. Dopo il gate strutturale: la quadratura
 

@@ -247,3 +247,13 @@ def test_mastri_del_gestionale_a_quattro_sezioni():
     assert _classify_ce_costi("SPESE AMMIN.,COMM. E DI RAPPRES") == "ce06"
     assert _classify_ce_costi("ONERI DIVERSI DI GESTIONE SPESE AMMINISTRATIVE VARIE") == "ce12"
     assert _classify_sp_passivo("F.DO AMM.DIR.BREV.E UTILIZZ.OPERE INGE") == "depr_sp02"
+
+
+def test_autocarri_e_beni_di_valore_inferiore_sono_cespiti():
+    """budget_238 (CARP 2025) e MBS: senza regola finivano nei crediti mentre i loro fondi
+    nettavano le immobilizzazioni materiali; 36.646,88 attraversavano il confine sp03/sp06."""
+    from importers.situazione_contabile_parser import _classify_sp_attivo, _sp03_detail_field
+    assert _classify_sp_attivo("AUTOCARRI") == "gross_sp03"
+    assert _classify_sp_attivo("BENI DI VALORE UNITARIO INFERIORE") == "gross_sp03"
+    assert _sp03_detail_field("FONDO AMMORTAMENTO AUTOCARRI") == "sp03d_altri_beni"
+    assert _sp03_detail_field("FONDO AMMORTAMENTO BENI VALORE") == "sp03d_altri_beni"

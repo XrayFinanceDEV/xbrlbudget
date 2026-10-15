@@ -117,6 +117,23 @@ def _declared_totals_contradiction(file_path: str, text: Optional[str]) -> Optio
     )
 
 
+def _avviso_risultato_in_apertura(bs: Dict[str, Any]) -> str:
+    """Verifica progressiva il cui saldo d'apertura non riapre il risultato dell'anno prima
+    (budget_680): l'importo e' messo negli utili (perdite) portati a nuovo e si dichiara."""
+    v = Decimal(str(bs['_risultato_anno_prima_apertura']))
+    voce = "perdita" if v < 0 else "utile"
+    def e(k):
+        try:
+            return f"€{_euro_it(Decimal(str(bs[k])))}"
+        except Exception:
+            return "n/d"
+    return (f"RISULTATO DELL'ANNO PRIMA NON DESTINATO: nella colonna d'apertura del bilancio di "
+            f"verifica attività ({e('_apertura_attivo')}) e passività ({e('_apertura_passivo')}) "
+            f"differiscono di €{_euro_it(abs(v))}, la stessa cifra che sbilancia il saldo finale: "
+            f"è la {voce} dell'anno prima non riaperta. È stata messa negli utili (perdite) portati "
+            f"a nuovo — verificare in Rettifiche")
+
+
 def _snello_squadrato_reason(report: Dict[str, Any]) -> str:
     """Avviso per un risultato del percorso snello con esito 'squadrato' (Task 17): lo
     scarto e' quello MISURATO dal percorso snello stesso (``report['misura']['corrente']``),
@@ -2092,6 +2109,8 @@ def import_pdf_balance_sheet(
             warnings.insert(0, _tc.avviso(_testo_cifrato))
         if _risultato_report:
             warnings.append(_rs.avviso(_risultato_report))
+        if balance_sheet_data.get('_risultato_anno_prima_apertura') is not None:
+            warnings.append(_avviso_risultato_in_apertura(balance_sheet_data))
         _maturity_audit = _detail_report.get('periods', {}).get('current', {}).get('maturity', {}).get('families', {})
         if any(e.get('basis', '').startswith('management_')
                for family in _maturity_audit.values() for e in family.get('evidence', [])) or any(

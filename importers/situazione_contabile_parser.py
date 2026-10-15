@@ -340,6 +340,17 @@ _SP_ATTIVO_RULES = [
     (['AUTOMEZZ'], 'gross_sp03'),
     (['AUTOVEICOL'], 'gross_sp03'),
     (['AUTOVETTUR'], 'gross_sp03'),
+    (['AUTOCARR'], 'gross_sp03'),                 # budget_238: finiva nei crediti
+    # budget_680: sigle e categorie che nessuna regola riconosceva
+    (['MACCHIN/'], 'gross_sp03'),
+    (['MACC.', 'IMP'], 'gross_sp03'),
+    (['HARDWARE'], 'gross_sp03'),
+    (['CELLULAR'], 'gross_sp03'),
+    (['CENTRALINO'], 'gross_sp03'),
+    (['COSTRUZIONI', 'LEGGER'], 'gross_sp03'),
+    (['CERTIFICAZION'], 'gross_sp02'),
+    # beni strumentali sotto 516,46 euro ("BENI DI VALORE UNITARIO INFERIORE")
+    (['BENI', 'VALORE', 'INFERIOR'], 'gross_sp03'),
     (['MEZZI', 'TRASP'], 'gross_sp03'),
     (['AUTO', 'MOTO'], 'gross_sp03'),
     (['ARREDAMENT'], 'gross_sp03'),
@@ -400,7 +411,8 @@ _SP_PASSIVO_RULES = [
     (['F.DO', 'AMM', 'MANUT'], 'depr_sp02'),               # "spese di manut.beni di ter(zi)" B.I.7
     (['F.DO', 'AMM', 'BENI DI TERZ'], 'depr_sp02'),        # idem, grafia "lav. str. su beni di terzi"
     (['F.DO', 'AMM', 'LICENZE'], 'depr_sp02'),
-    (['F.DO', 'AMM', 'OPERE INGE'], 'depr_sp02'),          # "F.do amm.dir.brev.e utilizz.opere inge"
+    (['F.DO', 'AMM', 'OPERE INGE'], 'depr_sp02'),
+    (['F.DO', 'AMM', 'CERTIFICAZ'], 'depr_sp02'),           # budget_680, B.I immateriale          # "F.do amm.dir.brev.e utilizz.opere inge"
     (['F.DO', 'AMM', 'DIR.BREV'], 'depr_sp02'),
     (['FOND', 'AMM', 'IMMOBILIZZAZ. IMM'], 'depr_sp02'),   # mastro "FONDI AMMORT. IMMOBILIZZAZ. IMM"
     (['F.DO', 'AMM', 'MACCHINE'], 'depr_sp03'),
@@ -652,17 +664,20 @@ def _sp03_detail_field(desc_upper: str) -> Optional[str]:
     """Return the B.II detail from semantics, independently of account codes."""
     if _kw_any(desc_upper, ['IN CORSO', 'ACCONT']):
         return 'sp03e_immob_in_corso'
-    if _kw_any(desc_upper, ['TERREN', 'FABBRICAT']):
+    if _kw_any(desc_upper, ['TERREN', 'FABBRICAT', 'COSTRUZIONI LEGGER']):
         return 'sp03a_terreni_fabbricati'
-    if 'ATTREZZ' in desc_upper:
+    if 'ATTREZ' in desc_upper:                 # anche "ATTREZ./REPARTO OFFIC" (budget_680)
         return 'sp03c_attrezzature'
-    if _kw_any(desc_upper, [
-        "MACCHINE D'UFFICIO", 'MACCHINE UFFICIO', 'MOBIL', 'ARRED',
-        'AUTOMEZZ', 'AUTOVEICOL', 'AUTOVETTUR', 'AUTO.', 'AUTO,',
-        'MEZZI TRASP', 'ALTRI BENI MATERIAL',
+    # "MOBIL" ma non dentro IMMOBIL...: "IMMOBILIZZI TECNICI" non e' un mobile
+    if re.search(r'(?<!IM)MOBIL', desc_upper) or _kw_any(desc_upper, [
+        "MACCHINE D'UFFICIO", 'MACCHINE UFFICIO', 'MACCHINE UFF', 'ARRED',
+        'AUTOMEZZ', 'AUTOVEICOL', 'AUTOVETTUR', 'AUTO.', 'AUTO,', 'AUTOCARR',
+        'BENI VALORE', 'BENI DI VALORE', 'HARDWARE', 'CELLULAR', 'CENTRALINO',
+        'TELEFON', 'MEZZI TRASP', 'ALTRI BENI MATERIAL',
     ]):
         return 'sp03d_altri_beni'
-    if _kw_any(desc_upper, ['IMPIANT', 'MACCHINAR']):
+    # "MACCHIN/IMP", "MACC./IMP.", "IMP.DEPURAZIONE" (budget_680)
+    if _kw_any(desc_upper, ['IMPIANT', 'MACCHINAR', 'MACCHIN/', 'MACCHIN.', 'MACC.', 'IMP.', 'IMP/']):
         return 'sp03b_impianti_macchinari'
     return None
 
@@ -2750,6 +2765,37 @@ def _regola_sp(desc_upper: str, lato: str) -> Optional[str]:
     return None
 
 
+def _ie_risultato_in_apertura(bs: Dict[str, Decimal], entries: List[Entry],
+                              differenza: Decimal) -> Dict[str, Decimal]:
+    """Verifica progressiva (saldo al 31/12 dell'anno prima + dare - avere = saldo finale):
+    se la colonna d'apertura ha solo stato patrimoniale e non pareggia, e lo sbilancio della
+    colonna finale e' esattamente la stessa cifra, i movimenti dell'anno pareggiano e lo
+    sbilancio e' il risultato dell'anno prima che le scritture d'apertura non hanno riaperto
+    (budget_680: perdita 2025 di 348.287,23, conto "PERDITA D'ESERCIZIO" vuoto in ogni
+    colonna). Va negli utili (perdite) portati a nuovo e si dichiara (decisione del
+    proprietario, 2026-10-15). Due controlli stampati che coincidono al centesimo, nessun
+    importo inventato; altrimenti il foglio resta sbilanciato e lo dichiara."""
+    ap = {e.section: e.amount for e in entries if e.level == 6}
+    tol = Decimal('0.05')
+    if abs(differenza) <= tol or 'attivo' not in ap or 'passivo' not in ap:
+        return bs
+    if ap.get('costi') or ap.get('ricavi'):
+        return bs                      # un'apertura con il conto economico non e' questo caso
+    apertura = ap['attivo'] + ap['passivo']          # D+ / A-: zero se pareggia
+    if abs(apertura - differenza) > tol:
+        return bs
+    new_bs = dict(bs)
+    for k in ('sp12', 'sp12g_utili_perdite_portati'):
+        new_bs[k] = (new_bs.get(k) or Decimal('0')) + differenza
+    new_bs['totale_passivo'] = (new_bs.get('totale_passivo') or Decimal('0')) + differenza
+    new_bs['_risultato_anno_prima_apertura'] = differenza
+    new_bs['_apertura_attivo'] = ap['attivo']
+    new_bs['_apertura_passivo'] = -ap['passivo']
+    logger.warning(f"Verifica IE/E: risultato dell'anno prima non riaperto {differenza:,.2f} "
+                   f"(colonna d'apertura e saldo finale sbilanciati della stessa cifra)")
+    return new_bs
+
+
 def parse_entries_verifica_ie(file_path: str) -> List[Entry]:
     """Le foglie (conti) della verifica, una ``Entry`` di livello 0 ciascuna, col saldo
     FINALE. Nello SP il lato lo decide il segno D/A del saldo (la colonna e' la verita'
@@ -2794,23 +2840,33 @@ def parse_entries_verifica_ie(file_path: str) -> List[Entry]:
                         raise ValueError(f"saldo senza segno a pagina {page.number + 1}: {testo[:80]}")
                     saldo = _parse_amount(finali[0][4]) * (1 if segni[0] == 'D' else -1)
                 desc = ' '.join(w[4] for w in ws if 75 < w[0] < 400)
-                righe.append((livello, c[4], desc, saldo))
+                apertura = None
+                if livello == 'sezione':
+                    # colonna "Saldo al 31/12 dell'anno prima" (importo fino a x 460, segno dopo)
+                    ap = [w for w in ws if _IE_AMT_RE.match(w[4]) and 400 < w[2] <= 460]
+                    sg = [w[4] for w in ws if w[4] in ('D', 'A') and 460 < w[0] < 472]
+                    if len(ap) == 1 and len(sg) == 1:
+                        apertura = _parse_amount(ap[0][4]) * (1 if sg[0] == 'D' else -1)
+                righe.append((livello, c[4], desc, saldo, apertura))
     finally:
         doc.close()
 
     sezione = None
     mastro_desc = ''
     totali: Dict[str, Decimal] = {}
+    aperture: Dict[str, Decimal] = {}
     foglie: Dict[str, Decimal] = defaultdict(Decimal)
     mastri: Dict[Tuple[str, str], Optional[Decimal]] = {}
     con_foglie: set = set()
     entries: List[Entry] = []
     mastro = None
-    for livello, codice, desc, saldo in righe:
+    for livello, codice, desc, saldo, apertura in righe:
         if livello == 'sezione':
             sezione = _IE_SEZIONI.get(codice)
             if sezione and saldo is not None:
                 totali[sezione] = saldo
+            if sezione and apertura is not None:
+                aperture[sezione] = apertura
             continue
         if sezione is None:
             continue
@@ -2834,6 +2890,10 @@ def parse_entries_verifica_ie(file_path: str) -> List[Entry]:
             if (_regola_sp(du, lato) is None and saldo_mastro
                     and (saldo_mastro > 0) == (saldo > 0)
                     and _regola_sp(mastro_desc.upper(), lato) is not None):
+                du = mastro_desc.upper()
+            # sotto un mastro di controparti il conto porta un nome di azienda, non una
+            # voce: "MANTERO SETA SPA DIV.LICENZE" sotto CLIENTI non e' una licenza
+            elif re.search(r'\b(CLIENTI|FORNITORI|DEBITORI|CREDITORI)\b', mastro_desc.upper()):
                 du = mastro_desc.upper()
             entries.append(Entry(code=codice, description=du, amount=abs(saldo),
                                  level=0, section=lato))
@@ -2875,6 +2935,10 @@ def parse_entries_verifica_ie(file_path: str) -> List[Entry]:
     for sez in ('attivo', 'passivo', 'costi', 'ricavi'):
         entries.append(Entry(code='', description=f'TOTALE {sez.upper()}',
                              amount=abs(totali[sez]), level=3, section=sez))
+    # i totali d'apertura stampati (livello 6: build_iv_cee li ignora), firmati D+ / A-
+    for sez, v in aperture.items():
+        entries.append(Entry(code='', description=f'APERTURA {sez.upper()}',
+                             amount=v, level=6, section=sez))
     logger.info(f"Verifica IE/E: {len(entries) - 1} conti, totali di sezione e risultato "
                 f"ricostruiti al centesimo")
     return entries
@@ -6590,6 +6654,7 @@ def extract_situazione_contabile(
             # dare != avere nei totali stampati: la verifica non pareggia da sola (budget_680,
             # perdita 2025 non girata). Si dichiara: il foglio lo riprodurra' tale e quale.
             bs['_verifica_dare'], bs['_verifica_avere'] = dare, avere
+            bs = _ie_risultato_in_apertura(bs, entries, dare - avere)
     if used_c8:
         bs = _c8_recover_orphan_passivo(file_path, bs)
         bs = _c8_risultato_stampato(full_text, entries, bs)

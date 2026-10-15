@@ -132,3 +132,51 @@ def test_sezione_che_non_torna_col_suo_totale_non_si_legge(tmp_path):
     doc.save(str(path2))
     bs, _ce = extract_situazione_contabile(str(path2))
     assert not bs.get("totale_attivo")           # mai una lettura non verificata
+
+
+def test_sigle_dei_cespiti_e_conti_sotto_un_mastro_di_controparti():
+    """budget_680: sigle che nessuna regola riconosceva, e un cliente con LICENZE nel nome."""
+    from importers.situazione_contabile_parser import _classify_sp_attivo, _sp03_detail_field
+    assert _sp03_detail_field("F.DO AMM.MACC.AMBIENTE CORROS.") == "sp03b_impianti_macchinari"
+    assert _sp03_detail_field("F.DO AMM.IMP.DEPURAZIONE ACQUE") == "sp03b_impianti_macchinari"
+    assert _sp03_detail_field("F.DO AMM.ATTREZ./REPARTO OFFIC") == "sp03c_attrezzature"
+    assert _sp03_detail_field("F.DO AMM.MACCHINE UFF.ELETTRON. PC") == "sp03d_altri_beni"
+    assert _sp03_detail_field("IMMOBILIZZI TECNICI") is None     # MOBIL non dentro IMMOBIL
+    assert _classify_sp_attivo("MATERIALE HARDWARE") == "gross_sp03"
+    assert _classify_sp_attivo("CERTIFICAZIONI_IMM") == "gross_sp02"
+
+
+def _con_apertura(path, path_out, apertura_attivo, apertura_passivo):
+    """Il documento che non pareggia di 150, con la colonna d'apertura stampata sulle sezioni."""
+    _documento(str(path), patrimonio="1.050,00")
+    doc = fitz.open(str(path))
+    p = doc[0]
+    for r in p.search_for("3.850,00"):
+        p.add_redact_annot(r)
+    p.apply_redactions()
+    p.insert_text((776 - 4.2 * 8, 85 + 13 * 8), "3.700,00", fontsize=7)
+    for y, importo, segno in ((85, apertura_attivo, "D"), (85 + 13 * 8, apertura_passivo, "A")):
+        p.insert_text((459 - 4.2 * len(importo), y), importo, fontsize=7)
+        p.insert_text((463, y), segno, fontsize=7)
+    doc.save(str(path_out))
+
+
+def test_risultato_dell_anno_prima_non_riaperto_nella_colonna_d_apertura(tmp_path):
+    """budget_680: saldo al 31/12 dell'anno prima sbilanciato della stessa cifra del saldo
+    finale -> e' il risultato dell'anno prima non riaperto, negli utili portati a nuovo."""
+    path = tmp_path / "ie2.pdf"
+    _con_apertura(tmp_path / "ie.pdf", path, "4.050,00", "3.900,00")
+    bs, _ce = extract_situazione_contabile(str(path))
+    assert bs["sp12g_utili_perdite_portati"] == D("150.00")
+    assert bs["totale_attivo"] == bs["totale_passivo"]
+    assert bs["_risultato_anno_prima_apertura"] == D("150.00")
+    r = tentativo(str(path))
+    assert r["adottato"] and r["esito"] == "ok"
+
+
+def test_apertura_che_non_spiega_lo_sbilancio_non_tocca_nulla(tmp_path):
+    path = tmp_path / "ie2.pdf"
+    _con_apertura(tmp_path / "ie.pdf", path, "4.050,00", "3.950,00")     # apertura: 100, non 150
+    bs, _ce = extract_situazione_contabile(str(path))
+    assert "_risultato_anno_prima_apertura" not in bs
+    assert bs["totale_attivo"] - bs["totale_passivo"] == D("150.00")

@@ -26,6 +26,27 @@ _IMPORTO = re.compile(r"-?\d{1,3}(?:\.\d{3})*,\d{2}-?")
 _CODICE = re.compile(r"^\d{1,3}(?:[./]\d{1,4})*$")
 # un importo spezzato fra due celle o da uno spazio: "1.440.337" + ",23"
 _VIRGOLA_STACCATA = re.compile(r"(\d)\s*\|?\s*,(\d{2})(?!\d)")
+# Le grafie OCR di un importo viste sulle scansioni (budget_689): il punto al posto della
+# virgola ("94.086.46"), gli spazi al posto dei punti ("11 396,02") e la virgola persa
+# ("7 467 04"). Solo celle interamente numeriche e con almeno un gruppo di migliaia: un
+# codice di conto stampato con lo spazio ("57 90") non diventa un importo.
+_OCR_PUNTO_DECIMALE = re.compile(r"(-?\d{1,3}(?:\.\d{3})+)\.(\d{2})")
+_OCR_SPAZI = re.compile(r"(-?\d{1,3}(?: \d{3})+)[ ,](\d{2})")
+
+
+def _importo_ocr(cella: str) -> str:
+    """La cella nella forma "1.234,56" quando e' una delle grafie OCR riconosciute,
+    altrimenti senza spazi come prima."""
+    c = cella.strip()
+    m = _OCR_PUNTO_DECIMALE.fullmatch(c)
+    if m:
+        return f"{m.group(1)},{m.group(2)}"
+    m = _OCR_SPAZI.fullmatch(c)
+    if m:
+        return f"{m.group(1).replace(' ', '.')},{m.group(2)}"
+    return c.replace(" ", "")
+
+
 _PAROLA_TOTALE = re.compile(r"(?i)\b(totale|eccedenza|utile|perdita|risultato|differenza)")
 
 _LARGHEZZA = 595.0
@@ -65,10 +86,21 @@ class _Ricucitore:
     def riga(self, celle: list[str]) -> list:
         """I conti completati da questa riga, come (lato, (codice, descrizione, importo))."""
         usciti, lato, sinistra_toccata = [], "L", False
+        codice_appena_letto = None              # lato del codice della cella prima
         for i, c in enumerate(celle):
             if not c:
                 continue
-            importo = c.replace(" ", "")
+            if codice_appena_letto and _CODICE.match(c):
+                # La colonna "Partitario" subito dopo il conto ("19.01.01 | 1 | BANCO BPM",
+                # budget_689): e' il sottoconto di quel conto, non un conto nuovo. Preso da
+                # solo, "1" diventava il padre di 19/1901/190101 e "4" quello dei fondi 41,
+                # delle svalutazioni 43 e dei ratei 45, e la banca si portava via la loro massa.
+                a = self.attesa[codice_appena_letto]
+                a[0] = f"{a[0]}.{c}"
+                codice_appena_letto = None
+                continue
+            codice_appena_letto = None
+            importo = _importo_ocr(c)
             if _IMPORTO.fullmatch(importo):
                 for s in (lato, "R" if lato == "L" else "L"):
                     a = self.attesa[s]
@@ -82,6 +114,7 @@ class _Ricucitore:
             if _CODICE.match(c):
                 lato = "R" if (sinistra_toccata or i >= 3) else "L"
                 self.attesa[lato] = [c, "", None]
+                codice_appena_letto = lato
                 if lato == "L":
                     sinistra_toccata = True
                 continue

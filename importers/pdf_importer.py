@@ -262,11 +262,14 @@ def _classify_balance_failure(
                       abs(_q.totale_attivo - _ta), abs(_q.totale_passivo - _tp))
         _base = max(abs(_q.totale_attivo), abs(_q.totale_passivo), abs(_ta), abs(_tp))
         if _base > 0 and _scarto <= _base * _SCANSIONE_SBILANCIO_AMMESSO:
+            # attivo e passivo degli aggregati, cioe' di cio' che si salva: i totali
+            # dichiarati dal lettore possono pareggiare fra loro mentre gli aggregati no, e
+            # l'avviso citava "attivo X, passivo X" accanto a uno scarto (budget_689)
             return BalanceFailureVerdict(
                 None,
                 f"{_UNBALANCED_WARNING_PREFIX}: scansione letta dall'OCR, lo Stato "
                 f"Patrimoniale non quadra di {eur_it(_scarto)} (attivo "
-                f"{eur_it(_ta or _q.totale_attivo)}, passivo {eur_it(_tp or _q.totale_passivo)}): "
+                f"{eur_it(_q.totale_attivo or _ta)}, passivo {eur_it(_q.totale_passivo or _tp)}): "
                 "verificare le righe lette. "
                 f"{_UNBALANCED_WARNING_SUFFIX}",
             )

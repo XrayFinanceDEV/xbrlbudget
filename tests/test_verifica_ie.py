@@ -90,7 +90,7 @@ def test_verifica_ie_si_legge_e_si_verifica_sui_totali(tmp_path):
     assert bs["totale_attivo"] == bs["totale_passivo"] == D("4250.00")
     assert ce["ce05"] == D("1500.00")
     assert ce["ce15"] == D("50.00")              # gli interessi si', le assicurazioni no
-    assert ce["ce12"] == D("250.00")
+    assert ce["ce06"] == D("250.00")             # un'assicurazione e' un servizio
 
     r = tentativo(str(path))
     assert r["adottato"] and r["esito"] == "ok"

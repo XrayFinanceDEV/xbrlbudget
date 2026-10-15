@@ -417,6 +417,7 @@ _SP_PASSIVO_RULES = [
     (['F.DO', 'AMM', 'CERTIFICAZ'], 'depr_sp02'),           # budget_680, B.I immateriale          # "F.do amm.dir.brev.e utilizz.opere inge"
     (['F.DO', 'AMM', 'DIR.BREV'], 'depr_sp02'),
     (['F.DO', 'AMM', 'RICERCA'], 'depr_sp02'),             # B.I.2 sviluppo (Santini)
+    (['F.DO', 'AMM', 'DIRITTI'], 'depr_sp02'),             # "F.DO AMM.TO DIRITTI UTILIZZO" (budget_1343)
     (['F.DO', 'AMM', 'SVILUPPO'], 'depr_sp02'),
     (['FOND', 'AMM', 'IMMOBILIZZAZ. IMM'], 'depr_sp02'),   # mastro "FONDI AMMORT. IMMOBILIZZAZ. IMM"
     (['F.DO', 'AMM', 'MACCHINE'], 'depr_sp03'),
@@ -457,6 +458,7 @@ _SP_PASSIVO_RULES = [
     (['UTILI', 'NUOVO'], 'equity_total'),
     (['PERDITE', 'PORTATE'], 'equity_total'),
     (['SOVRAPPREZZO'], 'equity_total'),
+    (['CAP.', 'SOC'], 'equity_total'),
     # Fondi
     (['FONDI', 'RISCHI'], 'sp14'),
     (['FONDI', 'ONERI'], 'sp14'),
@@ -504,6 +506,7 @@ _SP_PASSIVO_RULES = [
 # CE keyword rules for COSTI section
 _CE_COSTI_RULES = [
     (['RIM.INIZ'], 'ce10'),
+    (['RIMAN', 'INIZ'], 'ce10'),                 # "RIMAN. INIZIALI MAT. PRIME/MER" (budget_1343)
     (['ESISTENZE', 'INIZIAL'], 'ce10'),
     (['RIMANENZE', 'INIZIAL'], 'ce10'),
     (['RICAVI'], 'ce01_return'),  # Returns/discounts in cost section
@@ -565,7 +568,9 @@ _CE_COSTI_RULES = [
     (['IMPOSTE', 'DIFFER'], 'ce20'),
     (['IRES'], 'ce20'),
     (['IRAP'], 'ce20'),
-    (['CAMBI'], 'ce16_cost'),                    # "DIFF.CAMBIO PASSIVO": C.17-bis
+    # "DIFF.CAMBIO PASSIVO": C.17-bis. Mai CAMBI da solo: e' dentro "SCAMBIO SUL POSTO"
+    (['DIFF', 'CAMBI'], 'ce16_cost'),
+    (['SU CAMBI'], 'ce16_cost'),
     # Proventi/oneri straordinari in costs
     (['ONERI STRAORD'], 'ce19'),
     (['PROVENTI', 'PARTECIP'], 'ce13_cost'),
@@ -587,6 +592,7 @@ _CE_COSTI_RULES = [
 # CE keyword rules for RICAVI section
 _CE_RICAVI_RULES = [
     (['RIM.FIN'], 'ce10_close'),
+    (['RIMAN', 'FINAL'], 'ce10_close'),
     (['RIMANENZE', 'FINAL'], 'ce10_close'),
     (['PROV.FIN'], 'ce14'),
     # More specific rules first
@@ -600,7 +606,8 @@ _CE_RICAVI_RULES = [
     # Santini, mastro "RICAVI DIVERSI": interessi, cambi, consolidato fiscale, incrementi
     (['INTERESSI', 'ATTIV'], 'ce14'),
     (['OPERAZIONI', 'FINANZ'], 'ce14'),
-    (['CAMBI'], 'ce16'),
+    (['DIFF', 'CAMBI'], 'ce16'),
+    (['SU CAMBI'], 'ce16'),
     (['CONSOLIDATO', 'FISCALE'], 'ce20_provento'),   # riduce le imposte
     (['INCREM', 'IMMOB'], 'ce03'),
     (['RICAVI', 'DIVERSI'], 'ce04'),
@@ -745,7 +752,7 @@ def _sp05_detail_field(desc_upper: str) -> Optional[str]:
 
 
 def _sp14_detail_field(desc_upper: str) -> Optional[str]:
-    if _kw_any(desc_upper, ['QUIESCENZA', 'INDENNIT', 'FINE MANDATO']):
+    if _kw_any(desc_upper, ['QUIESCENZA', 'INDENNIT', 'FINE MANDATO', 'T.F.M']):
         return 'sp14a_fondi_trattamento_quiescenza'
     if 'IMPOST' in desc_upper:
         return 'sp14b_fondi_imposte'
@@ -1244,7 +1251,9 @@ def build_iv_cee(entries: List[Entry], default_ce: bool = False) -> Tuple[Dict[s
                         _kw_match(desc_upper, ['PERDITA', 'ESERCIZ'])):
                     if not _kw_any(desc_upper, ['PORTATI', 'PRECEDENT', 'NUOVO']):
                         return
-                if _kw_match(desc_upper, ['CAPITALE']) and 'RISERV' not in desc_upper:
+                if ((_kw_match(desc_upper, ['CAPITALE'])
+                        or re.match(r'^CAP\.\s?SOC', desc_upper))      # "CAP. SOC./PATR.NET." (budget_1343)
+                        and 'RISERV' not in desc_upper):
                     capitale += entry.amount
                 else:
                     riserve += entry.amount
@@ -2783,7 +2792,7 @@ _IE_SEZIONI = {'01': 'attivo', '02': 'passivo', '03': 'costi', '04': 'ricavi'}
 # Le sole voci di CE che un mastro puo' prestare a un conto che nessuna regola riconosce:
 # restano sopra l'EBITDA. "ONERI FINANZIARI" con dentro assicurazioni e canoni non deve
 # trascinarli in ce15 (confine di KPI): il conto va nel ripiego neutro.
-_IE_CE_OPERATIVE = ('ce05', 'ce06', 'ce07', 'ce08', 'ce12', 'ce01', 'ce04')
+_IE_CE_OPERATIVE = ('ce05', 'ce06', 'ce07', 'ce08', 'ce12', 'ce01', 'ce04', 'ce10')
 
 
 def is_verifica_ie(text: str) -> bool:
@@ -3117,6 +3126,123 @@ def parse_entries_verifica_mastri(file_path: str) -> List[Entry]:
         if r[0] == 'sezione':
             r[3] = riepilogo[nomi[r[1]]] * _VM_SEZIONI[nomi[r[1]]][1]
     return _entries_da_righe_verifica([tuple(r) for r in righe], {ce}, "Verifica Mastri")
+
+
+# ---------------------------------------------------------------------------
+# Bilancio di verifica a "Totale Sub / Totale Mastro" (budget_1343, "BILANCIO PROVVISORIO",
+# piede "C44-1.0"): conto "NN NNNNNNN", importo del conto nella colonna "Totale Sub", sotto i
+# conti la riga del mastro con lo STESSO codice dell'ultimo conto e l'importo nella colonna
+# "Totale Mastro"; il segno meno in coda ("16.759,69-"). Una pagina per sezione, nominata
+# nell'intestazione di colonna (Attivita' / Passivita' / Ricavi / Costi); in fondo TOTALE
+# <SEZIONE>, DIFFERENZA D'ESERCIZIO e TOTALE A PAREGGIO.
+# ---------------------------------------------------------------------------
+
+_VS_AMT = re.compile(r'^\d{1,3}(?:\.\d{3})*,\d{2}-?$')
+_VS_SEZIONI = {"ATTIVITA'": ('01', 1), "PASSIVITA'": ('02', -1), 'COSTI': ('03', 1), 'RICAVI': ('04', -1)}
+
+
+def is_verifica_sub_mastro(text: str) -> bool:
+    if 'Totale Sub' not in text or 'Totale Mastro' not in text:
+        return False
+    if 'TOTALE A PAREGGIO' not in text or "DIFFERENZA D'ESERCIZIO" not in text:
+        return False
+    return len(re.findall(r'(?m)^\d{2} \d{7}$', text)) >= 20
+
+
+def _vs_importo(testo: str) -> Decimal:
+    v = _parse_amount(testo.rstrip('-'))
+    return -v if testo.endswith('-') else v
+
+
+def parse_entries_verifica_sub_mastro(file_path: str) -> List[Entry]:
+    """Le righe della verifica "Totale Sub / Totale Mastro", nella forma di
+    ``_entries_da_righe_verifica``: ogni mastro deve tornare con i suoi conti, ogni sezione col
+    suo TOTALE, e la DIFFERENZA D'ESERCIZIO deve pareggiare sia lo SP sia il CE (dal lato
+    passivita'/costi e' un utile, dal lato attivita'/ricavi una perdita)."""
+    doc = fitz.open(file_path)
+    righe: list = []
+    totali: Dict[str, Decimal] = {}
+    pareggi: Dict[str, Decimal] = {}
+    differenze: Dict[str, Decimal] = {}
+    tol = Decimal('0.05')
+    try:
+        sezione = None
+        segno = 1
+        conti: list = []                       # conti in attesa della riga del loro mastro
+        for page in doc:
+            per_y: Dict[int, list] = {}
+            for w in page.get_text('words'):
+                per_y.setdefault(round((w[1] + w[3]) / 2), []).append(w)
+            for y in sorted(per_y):
+                ws = sorted(per_y[y], key=lambda w: w[0])
+                testo = ' '.join(w[4] for w in ws)
+                parole = [w[4] for w in ws]
+                if parole[:2] == ['Conto', 'Descrizione']:
+                    nome = next((w.upper() for w in parole if w.upper() in _VS_SEZIONI), None)
+                    if nome is None:
+                        raise ValueError(f"intestazione senza sezione a pagina {page.number + 1}")
+                    if nome != sezione:
+                        sezione = nome
+                        codice_sez, segno = _VS_SEZIONI[nome]
+                        righe.append(['sezione', codice_sez, nome, None, None])
+                    continue
+                importi = [w for w in ws if _VS_AMT.match(w[4])]
+                m = re.match(r"^(TOTALE A PAREGGIO|DIFFERENZA D'ESERCIZIO|TOTALE (?:ATTIVITA'|PASSIVITA'|RICAVI|COSTI))\s", testo)
+                if m and sezione:
+                    if len(importi) != 1:
+                        raise ValueError(f"totale senza importo: {testo[:60]}")
+                    v = _vs_importo(importi[0][4])
+                    if m.group(1) == 'TOTALE A PAREGGIO':
+                        pareggi[sezione] = v
+                    elif m.group(1).startswith('DIFFERENZA'):
+                        differenze[sezione] = v
+                    else:
+                        totali[sezione] = v
+                    continue
+                if sezione is None or len(ws) < 3:
+                    continue
+                if not (re.fullmatch(r'\d{2}', ws[0][4]) and re.fullmatch(r'\d{7}', ws[1][4])):
+                    continue
+                codice = f"{ws[0][4]}{ws[1][4]}"
+                desc = ' '.join(w[4] for w in ws[2:] if w not in importi)
+                if len(importi) > 1:
+                    raise ValueError(f"riga con due importi a pagina {page.number + 1}: {testo[:60]}")
+                if not importi:
+                    continue                    # conto (o mastro) a zero
+                v = _vs_importo(importi[0][4])
+                if importi[0][2] < 450:
+                    conti.append(['conto', codice, desc, v * segno, None])
+                    continue
+                somma = sum((c[3] for c in conti), Decimal('0')) * segno
+                if conti and abs(somma - v) > tol:
+                    logger.warning(f"Verifica Sub/Mastro: il mastro {desc[:40]} ({v}) non torna con "
+                                   f"i suoi conti ({somma}): lettura scartata")
+                    return []
+                righe.append(['mastro', codice[:2], desc, v * segno, None])
+                righe.extend(conti)
+                conti = []
+        if conti:
+            logger.warning("Verifica Sub/Mastro: conti senza la riga del loro mastro: lettura scartata")
+            return []
+    finally:
+        doc.close()
+
+    if set(totali) != set(_VS_SEZIONI) or len(differenze) != 2:
+        logger.warning("Verifica Sub/Mastro: totali di sezione incompleti: lettura scartata")
+        return []
+    # la differenza sta sul lato che ha di meno: passivita'/costi per un utile
+    utile_sp = differenze.get("PASSIVITA'", Decimal('0')) - differenze.get("ATTIVITA'", Decimal('0'))
+    utile_ce = differenze.get('COSTI', Decimal('0')) - differenze.get('RICAVI', Decimal('0'))
+    if (abs(utile_sp - utile_ce) > tol
+            or abs(totali["ATTIVITA'"] - totali["PASSIVITA'"] - utile_sp) > tol
+            or abs(totali['RICAVI'] - totali['COSTI'] - utile_ce) > tol):
+        logger.warning("Verifica Sub/Mastro: la differenza d'esercizio non pareggia: lettura scartata")
+        return []
+    for r in righe:
+        if r[0] == 'sezione':
+            nome = r[2]
+            r[3] = totali[nome] * _VS_SEZIONI[nome][1]
+    return _entries_da_righe_verifica([tuple(r) for r in righe], {utile_ce}, "Verifica Sub/Mastro")
 
 
 # ---------------------------------------------------------------------------
@@ -6781,6 +6907,12 @@ def extract_situazione_contabile(
         entries = parse_entries_verifica_ie(file_path)
         default_ce = True
         logger.info(f"Verifica IE/E parser: {len(entries)} entries")
+    elif is_verifica_sub_mastro(full_text):
+        used_ie = True
+        logger.info("Bilancio di verifica 'Totale Sub / Totale Mastro' detected")
+        entries = parse_entries_verifica_sub_mastro(file_path)
+        default_ce = True
+        logger.info(f"Verifica Sub/Mastro parser: {len(entries)} entries")
     elif is_verifica_mastri(full_text):
         used_ie = True
         logger.info("Bilancio di verifica 'Mastri' detected")

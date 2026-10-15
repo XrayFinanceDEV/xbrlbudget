@@ -78,6 +78,18 @@ def test_scansione_ocr_poco_sbilanciata_si_importa_con_avviso():
     assert grande.hard_error is not None
 
 
+def test_avviso_scansione_cita_gli_aggregati_che_non_quadrano():
+    """budget_689: i totali dichiarati dal lettore pareggiavano fra loro, gli aggregati
+    no, e l'avviso diceva "non quadra di 10 (attivo 1.000, passivo 1.000)"."""
+    verdict = _classify_balance_failure(
+        {**_sheet(), "sp16_debiti_breve": Decimal("990")},
+        is_scanned=True, ocr_source=True,
+        is_trial_balance=True, sample_text="", file_path="x.pdf", ocr_text=None,
+    )
+    assert verdict.hard_error is None
+    assert "attivo 1.000,00, passivo 990,00" in verdict.warning
+
+
 def test_scansione_letta_dalla_vision_si_importa_con_avviso():
     """ERREGI 30/09/2026: schema di legge scansionato, cifre lette dalla vision sulle
     immagini; una volta su tre l'attivo usciva 1.000 sotto. Errore di lettura

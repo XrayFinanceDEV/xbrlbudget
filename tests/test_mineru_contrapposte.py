@@ -239,3 +239,54 @@ def test_una_lettura_snello_squadrata_della_scansione_torna_alla_route_c(tmp_pat
     assert risultato["extraction_method"] == "mineru+situazione_contabile_mineru"
     assert risultato["validation_status"] == "verified"
     assert risultato["validation_report"]["import_snello"]["fase"] == "scansione_non_quadra"
+
+
+def test_partitario_e_importi_ocr_della_scansione():
+    """budget_689 (Gerevini): una colonna "Partitario" dopo il conto e gli importi letti
+    male dall'OCR. Il partitario "4" preso come conto diventava il padre dei fondi "41" e
+    se ne portava via la massa; "94.086.46", "11 396,02", "7 467 04" non erano importi."""
+    sp = _tabella("STATO PATRIMONIALE", [
+        ["Attività", "Passività"],
+        ["Conto", "Partitario", "Descrizione", "Importo",
+         "Conto", "Partitario", "Descrizione", "Importo"],
+        ["05", "", "IMMOBILIZZAZIONI MATERIALI", "500.000,00",
+         "31", "", "FINANZIAMENTI DI TERZI", "300.000,00"],
+        ["05.01", "", "Macchinari", "500.000,00",
+         "31.03", "", "MUTUI BANCARI", "300.000,00"],
+        ["19", "", "DISPONIBILITA' LIQUIDE", "200.000,00",
+         "31.03.01", "4", "BANCO BPM SPA", "300.000,00"],
+        ["19.01", "", "Banca c/c", "200.000,00",
+         "41", "", "FONDI AMMORTAMENTO", "100.000,00"],
+        ["", "", "", "", "41.01", "", "F.do ammortamento macchinari", "100.000,00"],
+        ["", "Totale attività", "700.000,00", "Totale passività  400.000,00"],
+        ["", "Eccedenza (Utile)  200.000,00"],
+    ])
+    ce = _tabella("CONTO ECONOMICO", [
+        ["Costi", "Ricavi"],
+        ["Conto", "Partitario", "Descrizione", "Importo",
+         "Conto", "Partitario", "Descrizione", "Importo"],
+        ["57", "", "ACQUISTI DI SERVIZI", "94.086.46",
+         "47", "", "RICAVI DELLE VENDITE", "312.949,52"],
+        ["57.01", "", "Lavorazioni di terzi", "75.623,40",
+         "47.01", "", "Vendite prodotti", "312.949,52"],
+        ["57.90", "", "Locazioni e canoni", "11 396,02", "", "", "", ""],
+        ["57.91", "", "Canoni diversi", "7 467 04", "", "", "", ""],
+        ["Totale costi  94.086,46", "", "Totale ricavi  312.949,52", ""],
+    ])
+    percorso = pdf_da_tabelle(SimpleNamespace(tables=(sp, ce)))
+    try:
+        bs, ce_ = extract_situazione_contabile(percorso)
+    finally:
+        os.remove(percorso)
+    assert bs["sp03"] == D("400000.00")          # il fondo netta il cespite
+    assert bs["sp16"] == D("300000.00")
+    assert ce_["ce06"] + ce_.get("ce07", D("0")) == D("94086.46")
+    assert bs["totale_attivo"] == bs["totale_passivo"] == D("600000.00")
+
+
+def test_codice_con_lo_spazio_non_e_un_importo():
+    from importers.mineru_contrapposte import _importo_ocr
+    assert _importo_ocr("57 90") == "5790"
+    assert _importo_ocr("94.086.46") == "94.086,46"
+    assert _importo_ocr("11 396,02") == "11.396,02"
+    assert _importo_ocr("7 467 04") == "7.467,04"

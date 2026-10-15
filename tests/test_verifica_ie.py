@@ -180,3 +180,18 @@ def test_apertura_che_non_spiega_lo_sbilancio_non_tocca_nulla(tmp_path):
     bs, _ce = extract_situazione_contabile(str(path))
     assert "_risultato_anno_prima_apertura" not in bs
     assert bs["totale_attivo"] - bs["totale_passivo"] == D("150.00")
+
+
+def test_fondi_con_la_categoria_abbreviata_si_nettano_dalla_loro_sotto_voce():
+    """Santini 1325/1330 e budget_1343: un fondo senza sotto-voce resta lordo nel
+    dettaglio, e i dettagli superano la macrovoce (review_required)."""
+    from importers.situazione_contabile_parser import _sp02_detail_field, _sp03_detail_field
+    assert _sp03_detail_field("F.DO AMM.COSTR.LEGGERE E TETTOIE") == "sp03a_terreni_fabbricati"
+    assert _sp03_detail_field("F.DO AMMTO IMP AUDIO-VIDEO SORV") == "sp03b_impianti_macchinari"
+    assert _sp03_detail_field("F.DO AMM.TO MACCH. ORD. UFFICI") == "sp03d_altri_beni"
+    assert _sp03_detail_field("F.DO AMM. MACCH. UFF. ELETTRON") == "sp03d_altri_beni"
+    assert _sp03_detail_field("F.DO AMM.TO AUTOV. DA TRASPORT") == "sp03d_altri_beni"
+    assert _sp03_detail_field("IMPIANTI E MACCHINARI") == "sp03b_impianti_macchinari"
+    assert _sp02_detail_field("F.DO AMM.TO DIRITTI UTILIZZO") == "sp02c_brevetti"
+    assert _sp02_detail_field("MAN. E RIPARAZ. SU BENI DI TERZI") == "sp02g_altre_immob_imm"
+    assert _sp02_detail_field("F/AMM. LAV. STR. SU BENI DI TERZ") == "sp02g_altre_immob_imm"

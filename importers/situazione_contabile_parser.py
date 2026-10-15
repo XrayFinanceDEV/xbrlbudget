@@ -689,13 +689,16 @@ def _sp02_detail_field(desc_upper: str) -> Optional[str]:
         return 'sp02b_costi_sviluppo'
     if _kw_any(desc_upper, ['BREVETT', 'SOFTWARE', 'OPERE INGEGNO']):
         return 'sp02c_brevetti'
+    if _kw_match(desc_upper, ['DIRITTI', 'UTILIZZ']):   # "F.DO AMM.TO DIRITTI UTILIZZO" (1343)
+        return 'sp02c_brevetti'
     if _kw_any(desc_upper, ['CONCESS', 'LICENZ', 'MARCHI']):
         return 'sp02d_concessioni'
     if 'AVVIAMENTO' in desc_upper:
         return 'sp02e_avviamento'
     if _kw_any(desc_upper, ['IN CORSO', 'ACCONT']):
         return 'sp02f_immob_in_corso'
-    if _kw_any(desc_upper, ['PLURIENN', 'IMMATERIAL']):
+    # migliorie su beni di terzi ("MAN. E RIPARAZ. SU BENI DI TERZI", Santini): B.I.7
+    if _kw_any(desc_upper, ['PLURIENN', 'IMMATERIAL', 'BENI DI TERZ', 'MANUT', 'RIPARAZ']):
         return 'sp02g_altre_immob_imm'
     return None
 
@@ -704,12 +707,14 @@ def _sp03_detail_field(desc_upper: str) -> Optional[str]:
     """Return the B.II detail from semantics, independently of account codes."""
     if _kw_any(desc_upper, ['IN CORSO', 'ACCONT']):
         return 'sp03e_immob_in_corso'
-    if _kw_any(desc_upper, ['TERREN', 'FABBRICAT', 'COSTRUZIONI LEGGER']):
+    if (_kw_any(desc_upper, ['TERREN', 'FABBRICAT', 'COSTRUZIONI LEGGER'])
+            or _kw_match(desc_upper, ['COSTR', 'LEGGER'])):     # "F.DO AMM.COSTR.LEGGERE"
         return 'sp03a_terreni_fabbricati'
     if 'ATTREZ' in desc_upper:                 # anche "ATTREZ./REPARTO OFFIC" (budget_680)
         return 'sp03c_attrezzature'
     # "MOBIL" ma non dentro IMMOBIL...: "IMMOBILIZZI TECNICI" non e' un mobile
-    if re.search(r'(?<!IM)MOBIL', desc_upper) or _kw_any(desc_upper, [
+    # "MACCH. ORD. UFFICI", "MACCH. UFF. ELETTRON", "AUTOV. DA TRASPORT" (budget_1343)
+    if re.search(r'(?<!IM)MOBIL|MACC\w*\.?\s*(?:ORD|UFF)|\bAUTOV', desc_upper) or _kw_any(desc_upper, [
         "MACCHINE D'UFFICIO", 'MACCHINE UFFICIO', 'MACCHINE UFF', 'ARRED',
         'AUTOMEZZ', 'AUTOVEICOL', 'AUTOVETTUR', 'AUTO.', 'AUTO,', 'AUTOCARR',
         'BENI VALORE', 'BENI DI VALORE', 'HARDWARE', 'CELLULAR', 'CENTRALINO',
@@ -717,7 +722,9 @@ def _sp03_detail_field(desc_upper: str) -> Optional[str]:
     ]):
         return 'sp03d_altri_beni'
     # "MACCHIN/IMP", "MACC./IMP.", "IMP.DEPURAZIONE" (budget_680)
-    if _kw_any(desc_upper, ['IMPIANT', 'MACCHINAR', 'MACCHIN/', 'MACCHIN.', 'MACC.', 'IMP.', 'IMP/']):
+    # "F.DO AMMTO IMP AUDIO-VIDEO SORV" (Santini)
+    if (_kw_any(desc_upper, ['IMPIANT', 'MACCHINAR', 'MACCHIN/', 'MACCHIN.', 'MACC.', 'IMP.', 'IMP/'])
+            or re.search(r'\bIMP\b', desc_upper)):
         return 'sp03b_impianti_macchinari'
     return None
 

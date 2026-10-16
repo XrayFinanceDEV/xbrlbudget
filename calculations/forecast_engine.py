@@ -5185,6 +5185,17 @@ class ForecastEngine:
         else:
             sp04a = sp04b = sp04c = sp04d = sp04e = ZERO
 
+        # Crediti verso soci (sp01): l'aggregato segue la sua crescita, il dettaglio A.1/A.2 con
+        # la stessa proporzione dell'anno base. Senza, `sp01` resta positivo con le due righe a
+        # zero e `check_quadratura` lo legge come gerarchia incoerente: il report blocca ogni
+        # previsionale di un'azienda con crediti verso soci (SGH, 15.000 da richiamare).
+        total_base_sp01 = _base('sp01a_parte_richiamata') + _base('sp01b_parte_da_richiamare')
+        if total_base_sp01 > 0:
+            sp01a = _base('sp01a_parte_richiamata') * (sp01 / total_base_sp01)
+        else:
+            sp01a = ZERO
+        sp01b = sp01 - sp01a
+
         # Trade receivables / inventory detail (sp06*, sp05*): the engine drives only the
         # aggregates (sp06 from DSO, sp05 from DIO), but the forecast BS renders the IV-CEE
         # sub-rows (e.g. "1) verso clienti" = sp06a). Without writing them the rows stay
@@ -5387,6 +5398,8 @@ class ForecastEngine:
 
         result = {
             'sp01_crediti_soci': sp01,
+            'sp01a_parte_richiamata': sp01a,
+            'sp01b_parte_da_richiamare': sp01b,
             'sp02_immob_immateriali': sp02,
             'sp02a_costi_impianto': sp02a,
             'sp02b_costi_sviluppo': sp02b,

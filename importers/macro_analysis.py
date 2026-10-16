@@ -141,7 +141,7 @@ def read_macros(rows, periods, feedback=()):
     import anthropic
     from config import PDF_LLM_MODEL
 
-    if not os.environ.get('ANTHROPIC_API_KEY'):
+    if not llm_provider.chiave_anthropic():
         raise RuntimeError('api_key_unavailable')
     with anthropic.Anthropic(max_retries=0, timeout=60.0) as client:
         response = client.messages.create(

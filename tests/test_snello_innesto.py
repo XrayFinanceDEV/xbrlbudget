@@ -75,7 +75,9 @@ def _vieta_estrattori_di_oggi(monkeypatch):
 
 
 def test_interruttore_assente_non_chiama_la_finta_e_report_senza_chiave(tmp_path, monkeypatch):
-    monkeypatch.delenv("IMPORT_MOTORE", raising=False)
+    # dal 2026-10-16 l'interruttore assente vale "snello": l'importatore di prima si chiede
+    # esplicitamente (test_default_snello_senza_anthropic.py copre il default nuovo)
+    monkeypatch.setenv("IMPORT_MOTORE", "classico")
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
 
     def _vietata(*a, **k):
@@ -346,11 +348,11 @@ def test_scansione_non_tenta_il_percorso_snello(tmp_path, monkeypatch):
     assert persistito["import_snello"] == {"esito": "non_applicabile", "motivo": "scansione"}
 
 
-@pytest.mark.parametrize("valore_motore", [None, "altro", ""])
+@pytest.mark.parametrize("valore_motore", ["classico", "altro", ""])
 def test_interruttore_non_snello_e_byte_identico_a_oggi(tmp_path, monkeypatch, valore_motore):
-    """IMPORT_MOTORE assente o su un valore diverso da 'snello': l'esito deve essere
-    identico, campo per campo (tranne i tempi), a un import che non conosce affatto
-    l'interruttore — la garanzia esplicita del controllo (requisito 3)."""
+    """IMPORT_MOTORE su un valore diverso da 'snello': l'esito deve essere identico, campo per
+    campo (tranne i tempi), all'importatore classico — la garanzia esplicita del controllo
+    (requisito 3). Dal 2026-10-16 l'interruttore ASSENTE vale "snello"."""
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
 
     def _vietata(*a, **k):
@@ -368,13 +370,10 @@ def test_interruttore_non_snello_e_byte_identico_a_oggi(tmp_path, monkeypatch, v
             user_id="snello-confronto", period_months=12,
         )
 
-    monkeypatch.delenv("IMPORT_MOTORE", raising=False)
+    monkeypatch.setenv("IMPORT_MOTORE", "classico")
     riferimento = _esegui()
 
-    if valore_motore is None:
-        monkeypatch.delenv("IMPORT_MOTORE", raising=False)
-    else:
-        monkeypatch.setenv("IMPORT_MOTORE", valore_motore)
+    monkeypatch.setenv("IMPORT_MOTORE", valore_motore)
     confronto = _esegui()
 
     riferimento_confrontabile = {k: v for k, v in riferimento.items() if k not in _CHIAVI_TEMPO}

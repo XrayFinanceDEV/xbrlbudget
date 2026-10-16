@@ -547,6 +547,7 @@ def read_details(rows: list[SourceRow], balances: dict, fiscal_year: int | None)
     from config import PDF_LLM_MODEL
 
     messages = [{"role": "user", "content": testo}]
+    llm_provider.vieta_anthropic("lettura dei dettagli")
     client = anthropic.Anthropic(timeout=90.0, max_retries=1)
     for attempt in range(2):
         response = client.messages.create(

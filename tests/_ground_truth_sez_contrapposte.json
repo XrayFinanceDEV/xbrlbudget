@@ -58,12 +58,12 @@
       "status": "review_required",
       "fixed_by": "phase-3-no-false-ok",
       "tol": 2,
-      "note": "The fixed-asset net values are source-backed, but the classified statement still has a material unexplained residual. Earlier code erased _plug_residual after contra-netting while leaving compensating values in sp09/sp16, producing a false OK. The residual now remains visible and the record is not forecastable until the missing rows are classified.",
+      "note": "The fixed-asset net values are source-backed. Until 2026-10-16 the classified statement kept a material residual (fondi printed under masters named after the asset read as trade payables, anagraphic sub-ledgers summed with their masters); the hierarchical reconstruction now descends into those masters and reads masters only, so the statement balances with no plug: net assets = printed 16.052.631,36 minus depreciation funds minus the receivables write-down fund.",
       "expect": {
         "sp02": 0.61,
         "sp03": 5756144.64,
-        "plug_min": 1,
-        "quadra": false
+        "plug_max": 1,
+        "quadra": true
       }
     },
     "budget_131_Oprandi Fabrizio - 30.04.2026 (provvisoria).pdf": {

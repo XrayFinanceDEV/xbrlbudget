@@ -197,6 +197,8 @@ def read_accounts(frontier):
     def read(batch):
         accepted = {}
         feedback = []
+        if not gx10:
+            llm_provider.vieta_anthropic("classificazione dei sottoconti")
         client = None if gx10 else anthropic.Anthropic(timeout=90, max_retries=1)
         for attempt in range(3):
             pending = [(r, ancestors) for r, ancestors in batch if r.id not in accepted]

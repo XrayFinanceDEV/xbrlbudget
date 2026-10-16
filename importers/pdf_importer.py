@@ -714,6 +714,28 @@ def _ivcee_attivo(api_key: str) -> bool:
     return bool(api_key)
 
 
+def _modello_non_disponibile(messaggio_storico: str) -> str:
+    """Il messaggio quando serve un modello che non c'e'. Con Anthropic consentito resta quello
+    di sempre; senza, dice la verita': la fase richiederebbe Anthropic (non consentito) o gx10
+    (non configurato), ed e' stata saltata - mai un ripiego su un servizio a pagamento."""
+    from importers.llm_provider import anthropic_consentito, gx10_disponibile
+    if anthropic_consentito():
+        return messaggio_storico
+    if not gx10_disponibile():
+        return ("Lettura col modello non disponibile: gx10 non configurato (GX10_API_KEY) e "
+                "Anthropic non consentito. Nessun lettore a regole ha riconosciuto il documento.")
+    return ("Questa fase richiederebbe Anthropic, che non e' consentito (solo gx10 e MinerU "
+            "locali): fase saltata. Nessun lettore a regole ha riconosciuto il documento.")
+
+
+def _motore_snello() -> bool:
+    """Il percorso snello e' il motore di default (decisione del proprietario, 2026-10-16:
+    "devono essere tutti su snello"): lettori a regole prima di qualunque modello, poi gx10.
+    ``IMPORT_MOTORE=classico`` (o qualunque valore diverso da "snello") torna all'importatore
+    di prima; la variabile assente vale "snello"."""
+    return os.environ.get("IMPORT_MOTORE", "snello").strip().lower() == "snello"
+
+
 def _xbrl_reso_extract(file_path: str):
     """(bs, ce, prior_bs, prior_ce) del PDF reso da un XBRL depositato, oppure None.
 
@@ -1105,7 +1127,8 @@ def import_pdf_balance_sheet(
         # until some route is taught to read a printed "Totale patrimonio netto" and
         # add it to this dict under that key.
         _declared_for_reliability = None
-        api_key = os.environ.get('ANTHROPIC_API_KEY', '')
+        from importers.llm_provider import chiave_anthropic
+        api_key = chiave_anthropic()
 
         # Step 1: Detect format and extract PDF data
         prior_bs_data = None
@@ -1177,11 +1200,11 @@ def import_pdf_balance_sheet(
             local_coordinate_ocr = bool(ocr_text)
             if not ocr_text:
                 if not api_key:
-                    raise PDFImportError(
+                    raise PDFImportError(_modello_non_disponibile(
                         "Il PDF è una scansione (nessun testo selezionabile): questo "
                         "schema non è supportato dall'OCR locale e l'import richiede "
                         "ANTHROPIC_API_KEY."
-                    )
+                    ))
                 from importers.pdf_extractor_llm import ocr_pdf_sample_text
                 # OCR enough pages to cover the whole (usually short) document: the same
                 # text drives BOTH routing and the route-C value extraction.
@@ -1236,7 +1259,7 @@ def import_pdf_balance_sheet(
                 logger.warning(f"Tabelle MinerU non lette ({_mc_err})")
                 _pdf_mineru = None
         _file_snello = _pdf_mineru or file_path
-        if os.environ.get("IMPORT_MOTORE") == "snello":
+        if _motore_snello():
             if is_scanned or (_ocr_source and _pdf_mineru is None):
                 _snello_report = {
                     "esito": "non_applicabile",
@@ -1467,7 +1490,8 @@ def import_pdf_balance_sheet(
                 )
 
             if not _ivcee_attivo(api_key):
-                raise PDFImportError("ANTHROPIC_API_KEY is required for PDF import")
+                raise PDFImportError(_modello_non_disponibile(
+                    "ANTHROPIC_API_KEY is required for PDF import"))
             if not is_trial_balance and not is_scanned and not _ocr_source:
                 # Prefer source-verified macros, but incomplete coverage must not
                 # prevent importing. The existing extractor recovers the base;
@@ -1971,10 +1995,10 @@ def import_pdf_balance_sheet(
                         f"correggere in Rettifiche"
                     )
             elif not _ivcee_attivo(api_key):
-                raise PDFImportError(
+                raise PDFImportError(_modello_non_disponibile(
                     "Impossibile estrarre la situazione contabile (nessun dato) "
                     "e ANTHROPIC_API_KEY non impostata."
-                )
+                ))
             else:
                 # both extractors empty → IV-CEE LLM as a genuine last resort
                 logger.warning("Route C: entrambi gli estrattori vuoti; "

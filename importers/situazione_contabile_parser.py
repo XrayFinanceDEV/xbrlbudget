@@ -328,6 +328,14 @@ _SP_ATTIVO_RULES = [
     # finiva nei crediti mentre il suo fondo nettava le immobilizzazioni MATERIALI
     # (budget_281: 4.500,00 in sp06 e 2.471,86 sottratti a sp03).
     (['BENI DI TERZ'], 'gross_sp02'),
+    # Oneri pluriennali scritti per esteso (budget_367: "Altre spese ad utilita'
+    # pluriennale", "Manutenzioni e riparazioni da ammortizzare", "Disaggi su
+    # prestiti" — quest'ultimo gia' immateriale lato fondo, _FONDO_IMMAT_KW):
+    # finivano nel default crediti.
+    (['SPESE', 'PLURIENN'], 'gross_sp02'),
+    (['DA AMMORTIZZ'], 'gross_sp02'),
+    (['DISAGG'], 'gross_sp02'),
+    (['CONTENITOR'], 'gross_sp03'),
     (['FABBRICAT'], 'gross_sp03'),
     (['TERREN'], 'gross_sp03'),
     (['MACCHINAR'], 'gross_sp03'),
@@ -860,6 +868,41 @@ def _classify_ce_ricavi_foglia(desc_upper: str) -> Optional[str]:
     return None
 
 
+# Sinonimi di NATURA per mastri di conto economico che non usano le parole IV-CEE.
+# Valgono per qualunque gestionale, ma si consultano solo come ULTIMA risorsa prima
+# del secchio generico (massa non classificata): non spostano nulla che una regola
+# gia' riconosca.
+_CE_COSTI_SINONIMI = [
+    (['LAVORO NON'], 'ce06'),          # "PRESTAZIONI DI LAVORO NON (DIPENDENTE)" troncato
+    (['OPERA', 'TERZI'], 'ce06'),      # manodopera di terzi/esterna: un servizio B.7
+    (['OPERA', 'ESTERN'], 'ce06'),
+    (["MANO D'OPERA"], 'ce08'),        # manodopera: personale B.9
+    (['MANO D OPERA'], 'ce08'),
+    (['MANODOPERA'], 'ce08'),
+    (['COSTI', 'FABBRICA'], 'ce06'),   # come COSTI INDUSTRIALI
+    (['PROMOZIONAL'], 'ce06'),         # spese promozionali / pubblicita': B.7
+    (['PUBBLICIT'], 'ce06'),
+    (['ELABORAZ', 'DATI'], 'ce06'),    # CED / centro elettronico: servizio B.7
+    (['CENTRO', 'ELETTRONIC'], 'ce06'),
+    (['PERDITE', 'VARIE'], 'ce12'),    # oneri diversi di gestione B.14
+    (['ALTRI ONERI'], 'ce12'),         # idem (i finanziari li prende prima ONERI+FINANZ)
+]
+_CE_RICAVI_SINONIMI = [
+    (['VENDITE'], 'ce01'),             # mastro "VENDITE" (Italia/estero): fatturato A.1
+    (['PROFITTI', 'VARI'], 'ce04'),    # altri ricavi e proventi A.5
+    (['PROFITTI', 'DIVERS'], 'ce04'),
+]
+
+
+def _classify_ce_sinonimo(desc_upper: str, direction: str) -> Optional[str]:
+    """Ultima risorsa prima del secchio generico: il sinonimo di natura del mastro."""
+    rules = _CE_COSTI_SINONIMI if direction == 'costi' else _CE_RICAVI_SINONIMI
+    for keywords, field in rules:
+        if _kw_match(desc_upper, keywords):
+            return field
+    return None
+
+
 def _classify_ce_ricavi(desc_upper: str) -> Optional[str]:
     """Classify a CE ricavi entry by description keywords."""
     for keywords, field in _CE_RICAVI_RULES:
@@ -1186,6 +1229,16 @@ def _riserva_type(desc_upper: str) -> str:
     return 'e'  # altre riserve (straordinaria, riserva utili, ...)
 
 
+def _spesa_capitalizzata_orfana(desc_upper: str) -> bool:
+    """Un conto d'ATTIVO che nessuna regola riconosce (default sp06) ma che si
+    descrive come spesa di manutenzione/riparazione/ammodernamento: all'attivo una
+    spesa sta solo se capitalizzata (B.I.7), mai come credito. Usato SOLO quando un
+    fondo ammortamento immateriale resta senza lordo su cui nettarsi."""
+    if _kw_any(desc_upper, ['CREDIT', 'ERARIO', 'DEBIT', 'ANTICIP', 'ACCONT', 'CLIENT']):
+        return False
+    return 'SPESE' in desc_upper and _kw_any(desc_upper, ['MANUT', 'RIPARAZ', 'AMMODERN'])
+
+
 def build_iv_cee(entries: List[Entry], default_ce: bool = False) -> Tuple[Dict[str, Decimal], Dict[str, Decimal]]:
     """Map trial balance entries to IV CEE sp01-sp18 and ce01-ce20 fields.
 
@@ -1233,6 +1286,9 @@ def build_iv_cee(entries: List[Entry], default_ce: bool = False) -> Tuple[Dict[s
     typed_fixed_depr: Dict[str, Decimal] = defaultdict(Decimal)
     typed_direct_assets: Dict[str, Decimal] = defaultdict(Decimal)
     typed_fondi_rischi: Dict[str, Decimal] = defaultdict(Decimal)
+    # Conti d'attivo finiti nel default crediti che si descrivono come spese di
+    # manutenzione capitalizzabili: (importo, tipo credito, descrizione).
+    sp06_spese_capitalizzabili: List[Tuple[Decimal, str, str]] = []
 
     # CE sub-items
     ce_tfr_accrual = Decimal('0')
@@ -1304,6 +1360,9 @@ def build_iv_cee(entries: List[Entry], default_ce: bool = False) -> Tuple[Dict[s
                 # Typed depth: crediti breve by debtor type (clienti/tributari/altri)
                 if field == 'sp06':
                     typed_credit_breve[_credit_type(desc_upper)] += entry.amount
+                    if _spesa_capitalizzata_orfana(desc_upper):
+                        sp06_spese_capitalizzabili.append(
+                            (entry.amount, _credit_type(desc_upper), desc_upper))
             return
 
         # =================================================================
@@ -1585,6 +1644,21 @@ def build_iv_cee(entries: List[Entry], default_ce: bool = False) -> Tuple[Dict[s
     # never exceed its own gross asset, so a negative net immobilizzazione is always
     # a misclassification (fondo booked without/over its asset — budget_330/365/435)
     # and a negative asset is never a valid IV-CEE value.
+    # Un fondo ammortamento IMMATERIALE senza il suo lordo (depr_sp02 > gross_sp02)
+    # e' una contraddizione: il clamp qui sotto lo farebbe sparire in silenzio e lo
+    # SP non pareggerebbe piu' della sua eccedenza. Se fra i conti d'attivo finiti
+    # nel default crediti ci sono spese di manutenzione (capitalizzate per forza, un
+    # costo non sta nello SP), quello e' il lordo del fondo: si sposta da sp06 a
+    # sp02. Solo a contraddizione presente, cosi' nessun foglio che oggi netta
+    # correttamente cambia.
+    if depr_sp02 > gross_sp02 and sp06_spese_capitalizzabili:
+        for _amt, _ctype, _d in sp06_spese_capitalizzabili:
+            bs['sp06'] = bs.get('sp06', Decimal('0')) - _amt
+            typed_credit_breve[_ctype] -= _amt
+            gross_sp02 += _amt
+            _det = _sp02_detail_field(_d)
+            if _det:
+                typed_fixed_gross[_det] += _amt
     bs['sp02'] = bs.get('sp02', Decimal('0')) + max(Decimal('0'), gross_sp02 - depr_sp02)
     bs['sp03'] = bs.get('sp03', Decimal('0')) + max(Decimal('0'), gross_sp03 - depr_sp03)
 
@@ -2439,6 +2513,13 @@ def _c8_parse_side(words, lo: float, hi: float, axis: int = 1) -> List[Entry]:
             continue
         if code is None:
             continue
+        # Il pie' di pagina ("TOTALE PASSIVITA' / UTILE D'ESERCIZIO / TOTALE A
+        # PAREGGIO") chiude l'ultimo conto: non e' descrizione sua. Accodato, faceva
+        # leggere "UTILE ... ESERCIZIO" nella descrizione di un debito (budget_612).
+        if t.upper() == 'TOTALE':
+            flush()
+            code = None
+            continue
         if _C8_AMOUNT_RE.match(t):
             if amt is None:
                 amt = _parse_amount(t)
@@ -2488,7 +2569,12 @@ def _c8_refine_gutter_x(words, header_mid: float) -> float:
     if gap < 100:                      # a single code column: nothing to split
         return header_mid
     right_code_x = code_xs[gi + 1]
-    left_max = max((w[0] for w in words if w[0] < right_code_x), default=header_mid)
+    # Le parole allineate alla colonna codici di destra (entro 2 pt: es. le
+    # didascalie "TOTALE PASSIVITA'" a filo dei codici) appartengono a QUELLA
+    # colonna, non a sinistra: contarle mette il gutter a 0,001 pt dai codici e
+    # sulle pagine dove la colonna slitta di pochi decimi (budget_620: 417,12 ->
+    # 416,76) tutti i conti di destra finiscono a sinistra.
+    left_max = max((w[0] for w in words if w[0] < right_code_x - 2.0), default=header_mid)
     if left_max >= right_code_x:
         return header_mid
     if left_max <= header_mid <= right_code_x:
@@ -5334,8 +5420,20 @@ def _hier_reconstruct(pages_data, full: str):
             prior_pn += _hier_prior_result(words, split, 1e9)
             prior_pn -= _hier_prior_result(words, -1e9, split)
         elif is_ce and not is_sp:
-            if ('COSTI' in up[:400] and 'RICAVI' in up[:400]
-                    and up[:400].find('RICAVI') < up[:400].find('COSTI')):
+            # Il lato dei costi lo dicono le DESCRIZIONI dei conti, non l'ordine delle
+            # parole d'intestazione nel testo lineare (budget_405 stampa "RICAVI COSTI"
+            # ma i costi stanno a sinistra). L'ordine del testo resta solo quando le
+            # descrizioni non decidono.
+            _lc = sum(1 for _c, _d, _a in left if _classify_ce_costi(_d))
+            _lr = sum(1 for _c, _d, _a in left if _classify_ce_ricavi(_d))
+            _rc = sum(1 for _c, _d, _a in right if _classify_ce_costi(_d))
+            _rr = sum(1 for _c, _d, _a in right if _classify_ce_ricavi(_d))
+            if _lc + _rr != _rc + _lr:
+                scambiate = _rc + _lr > _lc + _rr
+            else:
+                scambiate = ('COSTI' in up[:400] and 'RICAVI' in up[:400]
+                             and up[:400].find('RICAVI') < up[:400].find('COSTI'))
+            if scambiate:
                 cos += right
                 ric += left
             else:
@@ -5411,6 +5509,18 @@ def _hier_reconstruct(pages_data, full: str):
         tag = _classify_sp_passivo(desc)
         ambiguous = (tag == 'equity_total' and 'CAPITALE' in desc and 'RISERV' in desc)
         ambiguous = ambiguous or (tag == 'sp16' and 'RISULTAT' in desc)
+        # Un mastro "FONDI ..." che nessuna regola riconosce ("FONDI SVALUTAZIONE")
+        # cadrebbe nel default debiti: un fondo non e' mai un debito. I figli diretti
+        # dicono di che fondo si tratta (svalutazione CREDITI -> nettato dai crediti).
+        ambiguous = ambiguous or (tag == 'sp16' and 'FOND' in desc)
+        # Sul passivo un nome di CESPITE ("IMMOBILIZZAZIONI MATERIALI", "TERRENI E
+        # FABBRICATI") e' la testa dei fondi ammortamento della categoria: i figli sono
+        # i fondi, che si nettano dal loro cespite; da solo cadrebbe fra i debiti.
+        # Stesso discorso per una testa di CREDITI stampata sul passivo: sotto ci sono
+        # il fondo svalutazione (che netta i crediti) e i crediti a saldo avere.
+        ambiguous = ambiguous or (tag == 'sp16' and (
+            _classify_sp_attivo(desc) in ('gross_sp02', 'gross_sp03')
+            or re.search(r'\bCRED(?:IT[IO]\b|\.)', desc)))   # non CREDITORI
         if ambiguous:
             descendants = list(dict.fromkeys(
                 (c, d, a) for c, d, a in pas if c.startswith(code + '.')
@@ -5461,7 +5571,7 @@ def _hier_reconstruct(pages_data, full: str):
 
     for _c, d, a in mc:
         f = (_classify_ce_costi(d) or _resolve_ce_field(d, 'costi')
-             or _classify_ce_costi_foglia(d))
+             or _classify_ce_costi_foglia(d) or _classify_ce_sinonimo(d, 'costi'))
         if f is None:
             f = fallback_field('ce')
             unclassified.append((d, a, 'ce'))
@@ -5477,7 +5587,7 @@ def _hier_reconstruct(pages_data, full: str):
             adde(f, a)
     for _c, d, a in mr:
         f = (_classify_ce_ricavi(d) or _resolve_ce_field(d, 'ricavi')
-             or _classify_ce_ricavi_foglia(d))
+             or _classify_ce_ricavi_foglia(d) or _classify_ce_sinonimo(d, 'ricavi'))
         if f is None:
             f = 'ce04'
             unclassified.append((d, a, 'ce'))
@@ -5782,6 +5892,47 @@ def classify_ricavi(desc_upper: str) -> Tuple[str, bool]:
     return (f, True) if f else (_classify_ce_ricavi_foglia(d) or 'ce04', False)
 
 
+def _be_split_sp_ce_page(words):
+    """Una pagina che si apre con lo STATO PATRIMONIALE e, chiusi i suoi totali, apre
+    il CONTO ECONOMICO a meta' pagina: restituisce (parole_sp, parole_ce), divise alla
+    riga del titolo «CONTO ECONOMICO»; None se la pagina non e' cosi'.
+
+    Il titolo della pagina decide la sezione di TUTTA la pagina, quindi i mastri di
+    costo e ricavo sotto il titolo finivano fra attivo e passivo. Si divide solo se
+    sopra il titolo la sezione patrimoniale ha gia' chiuso (pareggio/quadratura o
+    totale attivita' e passivita'), cosi' una didascalia qualunque che nomini il
+    conto economico non taglia una pagina a meta'."""
+    rows: Dict[int, list] = {}
+    for w in words:
+        rows.setdefault(round((w[1] + w[3]) / 2), []).append(w)
+    ce_y = None
+    sp_titolo = False       # una riga che APRE con "STATO/SITUAZIONE PATRIMONIALE", sopra
+    for y in sorted(rows):
+        toks = [w[4].upper() for w in sorted(rows[y], key=lambda w: w[0])]
+        line = re.sub(r'\s+', '', ''.join(toks))
+        if line.startswith('CONTOECONOMICO'):
+            ce_y = y
+            break
+        if line.startswith(('STATOPATRIMONIALE', 'SITUAZIONEPATRIMONIALE')):
+            sp_titolo = True
+    if ce_y is None:
+        return None
+    sopra = [w for w in words if (w[1] + w[3]) / 2 < ce_y - 1]
+    sotto = [w for w in words if (w[1] + w[3]) / 2 >= ce_y - 1]
+    testo_sopra = re.sub(r'\s+', '', ''.join(w[4] for w in sopra).upper())
+    sp_chiuso = 'PATRIMONIAL' in testo_sopra and (
+        'PAREGGIO' in testo_sopra or 'QUADRATURA' in testo_sopra
+        or ('TOTALEATTIV' in testo_sopra and 'TOTALEPASSIV' in testo_sopra))
+    # Due titoli di sezione, ciascuno in apertura della propria riga, SP sopra e CE sotto,
+    # bastano anche senza totali di chiusura stampati (budget_367: "STATO PATRIMONIALE"
+    # in testa, poi "CONTO ECONOMICO" a meta' pagina con le sue colonne).
+    if not (sp_chiuso or sp_titolo):
+        return None
+    if not sotto or not any(_be_amount(w[4]) is not None for w in sotto):
+        return None
+    return sopra, sotto
+
+
 def extract_contrapposte_best_effort(file_path: str) -> Tuple[Dict[str, Decimal], Dict[str, Decimal]]:
     """Best-effort extraction of a 2-column contrapposte trial balance.
 
@@ -5828,6 +5979,17 @@ def extract_contrapposte_best_effort(file_path: str) -> Tuple[Dict[str, Decimal]
         words = page.get_text('words')
         if not words:
             continue
+        if verdict == (True, False):
+            parti = _be_split_sp_ce_page(words)
+            if parti is not None:
+                sp_w, ce_w = parti
+                _txt = lambda ws: ' '.join(w[4] for w in sorted(
+                    ws, key=lambda w: (round((w[1] + w[3]) / 2), w[0]))).upper()
+                pages_data.append((sp_w, True, False, _txt(sp_w), page.rect.width))
+                pages_data.append((ce_w, False, True, _txt(ce_w), page.rect.width))
+                # la pagina dopo, se senza intestazione, continua il conto economico
+                previous, closed, totals_seen = (False, True), False, 0
+                continue
         pages_data.append((words, is_sp, is_ce, up, page.rect.width))
 
     doc.close()
@@ -6001,7 +6163,10 @@ def extract_contrapposte_best_effort(file_path: str) -> Tuple[Dict[str, Decimal]
     def _strip_result(side):
         keep = []
         for c, d, a in side:
-            if ('ESERCIZ' in d and ('UTILE' in d or 'PERDITA' in d or 'RISULTAT' in d)
+            # "Utile/Perdita in corso di formazione" e' il risultato del periodo nelle
+            # situazioni infrannuali (budget_367): stesso conto dell'utile d'esercizio.
+            if (('ESERCIZ' in d or 'CORSO DI FORMAZIONE' in d)
+                    and ('UTILE' in d or 'PERDITA' in d or 'RISULTAT' in d)
                     and not _kw_any(d, ['PORTAT', 'PORTATE', 'NUOVO', 'PRECEDENT'])):
                 result[0] += (-a if 'PERDITA' in d else a)
                 booked_results.append(-a if 'PERDITA' in d else a)

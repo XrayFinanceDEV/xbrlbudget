@@ -359,6 +359,23 @@ def extract_ago_source(file_path):
     }
 
 
+def extract_deterministic_source_candidates(file_path):
+    """The proofs that need no model at all: legal paths, legal subtotals, AGO physical
+    masters. The ledger reader (a model call) and the signed-controls inspection are left
+    out. Returns [] when none applies."""
+    from importers.legal_path_evidence import extract_path_source
+    qualified = extract_path_source(file_path)
+    if qualified:
+        return qualified
+    legal = extract_legal_source(file_path)
+    if legal[0][0] is not None:
+        return legal
+    ago = extract_ago_source(file_path)
+    if ago[2]['status'] != 'unsupported':
+        return [ago]
+    return []
+
+
 def extract_source_candidates(file_path):
     """Return current/prior proofs, never a best-effort balancing hypothesis."""
     from importers.legal_path_evidence import extract_path_source

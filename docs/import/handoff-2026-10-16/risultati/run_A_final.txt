@@ -1,0 +1,32 @@
+    133 non riconosciuto
+    585 OK anni=[2025, 2024] prior=letto massa=0.00
+    586 OK anni=[2025, 2024] prior=letto massa=0.00
+    665 NO {"controllo": "totale", "anno": 2026, "didascalia": "Totale altri ricavi e proventi", "stampato": "0", "letto": "2293", "sotto": "5) altri ricavi e proventi"} (+11)
+    672 NO {"controllo": "prospetto_non_letto"} (+0)
+    382 NO {"controllo": "totale", "anno": 2025, "didascalia": "Totale Crediti", "stampato": "1896772", "letto": "0", "sotto": "imposte anticipate"} (+19)
+    413 OK anni=[2025, 2024] prior=letto massa=0.00
+    594 NO {"controllo": "totale", "anno": 2025, "didascalia": "Totale delle imposte sul reddito dell'esercizio", "stampato": "42600.84", "letto": "0", "sotto": "Registro Imprese di CREMONA n. 01812890190 Capitale Sociale 10.000,00"} (+3)
+    597 OK anni=[2025, 2024] prior=letto massa=0.00
+    638 NO {"controllo": "didascalia_non_collocabile", "didascalia": "Risconti", "percorso": "SPA"} (+0)
+    315 NO {"controllo": "didascalia_non_collocabile", "didascalia": "esigibili entro l'esercizio successivo", "percorso": "SPA.II.1.E"} (+0)
+    138 non riconosciuto
+    161 NO {"controllo": "prospetto_non_letto"} (+0)
+    298 NO {"controllo": "totale", "anno": 2025, "didascalia": "Totale costi per il personale", "stampato": "825982", "letto": "871317", "sotto": "9) per il personale:"} (+9)
+    341 OK anni=[2025, 2024] prior=letto massa=0.00
+    289 NO {"controllo": "totale", "anno": 2025, "didascalia": "Totale Crediti", "stampato": "178453.97", "letto": "356907.94", "sotto": "II - Crediti"} (+20)
+    695 NO {"controllo": "totale", "anno": 2025, "didascalia": "Totale Crediti", "stampato": "131782.06", "letto": "263564.12", "sotto": "II - Crediti"} (+21)
+    355 NO {"controllo": "didascalia_non_collocabile", "didascalia": "VII - Riserva per operazioni di copertura dei flussi finanziari attesi", "percorso": "SPP.VII"} (+0)
+    150 NO {"controllo": "colonne_non_trovate"} (+0)
+    171 NO {"controllo": "didascalia_non_collocabile", "didascalia": "IMPIANTI GENERICI", "percorso": "SPA.B"} (+0)
+    257 OK anni=[2025, 2024] prior=letto massa=0.00
+    265 OK anni=[2025, 2024] prior=letto massa=0.00
+    137 non riconosciuto
+    314 NO {"controllo": "didascalia_non_collocabile", "didascalia": "54/25/005 COMPENSI NON RISCOSSI-PROFESS.", "percorso": "SPP"} (+0)
+    115 OK anni=[2025, 2024] prior=letto massa=0.00
+    135 NO {"controllo": "didascalia_non_collocabile", "didascalia": "Immobilizzazioni immateriali", "percorso": "SPA"} (+0)
+    152 NO {"controllo": "prospetto_non_letto"} (+0)
+    253 NO {"controllo": "totale", "anno": 2025, "didascalia": "Totale costi per il personale", "stampato": "615498", "letto": "645823", "sotto": "9) per il personale:"} (+9)
+    683 OK anni=[] prior=scartato massa=0.00
+    297 NO {"controllo": "didascalia_non_collocabile", "didascalia": "esigibili entro l'esercizio successivo", "percorso": "SPA.3.E"} (+0)
+sangae6 NO {"controllo": "didascalia_non_collocabile", "didascalia": "401002 FABBRICATI IND/COMM/DIREZ.", "percorso": "SPA.B"} (+0)
+adottabili 9 su 31

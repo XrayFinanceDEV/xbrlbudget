@@ -57,13 +57,47 @@ def stima_token(messaggi: list[dict], system_prompt: str = "") -> int:
     return caratteri // 3 + 1500 * immagini
 
 
+def anthropic_consentito() -> bool:
+    """Anthropic (Haiku, Sonnet) si usa solo se lo si chiede esplicitamente:
+    ``ANTHROPIC_CONSENTITO=1``. Decisione del proprietario, 2026-10-16: l'import gira su gx10
+    (Qwen) e MinerU, locali; se gx10 manca o fallisce la fase si salta e si dichiara, mai un
+    ripiego silenzioso su un servizio a pagamento."""
+    return os.environ.get("ANTHROPIC_CONSENTITO", "").strip().lower() in ("1", "true", "si", "sì", "yes")
+
+
+class AnthropicVietato(LLMProviderError):
+    """Una fase avrebbe chiamato Anthropic senza ``ANTHROPIC_CONSENTITO=1``: si salta e si
+    dichiara, nessuna richiesta parte."""
+
+
+def chiave_anthropic() -> str:
+    """La chiave Anthropic da usare: vuota senza consenso esplicito, anche se l'ambiente ne ha
+    una. Ogni ramo che controlla "se non c'e' la chiave salta la fase" la salta cosi'."""
+    if not anthropic_consentito():
+        return ""
+    return os.environ.get("ANTHROPIC_API_KEY", "")
+
+
+def vieta_anthropic(fase: str) -> None:
+    """Da chiamare prima di creare un client Anthropic: senza consenso esplicito solleva
+    ``AnthropicVietato``, che i chiamanti trattano come una fase non riuscita (avviso), mai come
+    un motivo per ripiegare su un altro servizio a pagamento."""
+    if not anthropic_consentito():
+        raise AnthropicVietato(
+            f"{fase}: richiederebbe Anthropic, che non e' consentito (ANTHROPIC_CONSENTITO "
+            f"non impostato); fase saltata")
+
+
 def _provider_da_env(nome: str) -> str:
-    return "gx10" if os.environ.get(nome) == "gx10" else "anthropic"
+    valore = os.environ.get(nome)
+    if valore == "gx10":
+        return "gx10"
+    return "anthropic" if anthropic_consentito() else "gx10"
 
 
 def provider_coge() -> str:
-    """Il fornitore del pass CoGe di route C. Solo il valore esatto "gx10" lo cambia:
-    assente o qualunque altra cosa -> "anthropic", cioe' il comportamento di oggi."""
+    """Il fornitore del pass CoGe di route C: gx10, salvo ``ANTHROPIC_CONSENTITO=1`` (allora,
+    senza "gx10" esplicito, Anthropic come prima)."""
     return _provider_da_env("PDF_LLM_PROVIDER_COGE")
 
 
@@ -85,7 +119,7 @@ def lettore_dettagli_disponibile() -> bool:
     """Le credenziali del fornitore scelto per read_details/read_accounts sono pronte."""
     if provider_dettagli() == "gx10":
         return gx10_disponibile()
-    return bool(os.environ.get("ANTHROPIC_API_KEY"))
+    return bool(chiave_anthropic())
 
 
 def _invia(system_prompt: str, messaggi: list[dict], *, max_tokens: int, timeout: float,

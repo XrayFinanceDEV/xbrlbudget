@@ -31,6 +31,7 @@ import os
 import re
 from dataclasses import dataclass, field
 from decimal import Decimal
+from contextvars import ContextVar
 from typing import Optional
 
 import fitz
@@ -510,6 +511,16 @@ class _Nodo:
     sezione: str = "sp"
 
 
+# Scarto ammesso fra un totale stampato e la somma delle righe: zero (al centesimo) per il PDF reso
+# da XBRL; lo schema di legge generico lo alza solo per un documento a importi interi, dove ogni
+# voce e' gia' arrotondata e il totale stampato e' l'arrotondamento della somma vera.
+_TOLLERANZA: ContextVar[Decimal] = ContextVar("tolleranza_totali", default=Decimal("0"))
+
+
+def _diversi(a: Decimal, b: Decimal) -> bool:
+    return abs(Decimal(a) - Decimal(b)) > _TOLLERANZA.get()
+
+
 class _Rifiuto(Exception):
     def __init__(self, controllo: str, **dettaglio):
         super().__init__(controllo)
@@ -578,10 +589,16 @@ def _foglie(nodo: _Nodo):
         yield from _foglie(f)
 
 
-def _costruisci(righe: list[_Riga], colonne: int, vuote_zero: bool = False):
+def _costruisci(righe: list[_Riga], colonne: int, vuote_zero: bool = False,
+                eredita_dal_padre: bool = False):
     """Albero dei prospetti. Ritorna (radici, calcolati, totali, errori): i totali nell'ordine
     di stampa ``(didascalia, valori, nodo_chiuso)``, gli errori come ``(colonna, controllo,
-    dettaglio)`` per ogni totale stampato che le righe sotto di lui non riproducono."""
+    dettaglio)`` per ogni totale stampato che le righe sotto di lui non riproducono.
+
+    ``eredita_dal_padre``: una riga senza enumeratore eredita la voce del padre anche fuori dalle
+    sezioni aperte della tassonomia, purche' il padre abbia un campo suo (schema di legge dei
+    gestionali: "Capitale sottoscritto richiamato" sotto A), "Contributi in conto esercizio"
+    sotto 5)). Resta dentro l'aggregato del padre, e i totali stampati la verificano."""
     errori: list[tuple[int, str, dict]] = []
     radici: list[_Nodo] = []
     calcolati: dict[str, list[Decimal]] = {}
@@ -628,7 +645,7 @@ def _costruisci(righe: list[_Riga], colonne: int, vuote_zero: bool = False):
             chiuso = None
             for i in range(len(pila) - 1, -1, -1):
                 cand = pila[i]
-                if (cand.figli or not any(r.valori)) and _somma(cand, colonne)[0] == r.valori[0]:
+                if (cand.figli or not any(r.valori)) and not _diversi(_somma(cand, colonne)[0], r.valori[0]):
                     chiuso = i
                     break
             if chiuso is None:
@@ -640,7 +657,7 @@ def _costruisci(righe: list[_Riga], colonne: int, vuote_zero: bool = False):
             nodo = pila[chiuso]
             letti = _somma(nodo, colonne)
             for col in range(1, colonne):
-                if letti[col] != r.valori[col]:
+                if _diversi(letti[col], r.valori[col]):
                     errori.append((col, "totale", {
                         "didascalia": r.didascalia, "stampato": str(r.valori[col]),
                         "letto": str(letti[col]), "sotto": nodo.didascalia}))
@@ -723,7 +740,7 @@ def _costruisci(righe: list[_Riga], colonne: int, vuote_zero: bool = False):
                                      valori=r.valori, sezione=sezione))
             continue
         aperto = any(padre.percorso == p or padre.percorso.startswith(p + ".")
-                     for p in _PADRI_APERTI)
+                     for p in _PADRI_APERTI) or (eredita_dal_padre and _campo(padre.percorso) is not None)
         valori = r.valori
         if padre.percorso == "CE.20" and valori and _norm(r.didascalia).startswith("proventi (oneri)"):
             # "proventi (oneri) da adesione al regime di consolidato fiscale": un provento stampato
@@ -1093,11 +1110,11 @@ def _verifica(col: int, bs: dict, ce: dict, stampati: dict, calcolati: dict,
         return [(col, "estrazione_vuota", {})]
 
     def conf(nome, letto, stamp):
-        if stamp is not None and Decimal(letto) != stamp[col]:
+        if stamp is not None and _diversi(Decimal(letto), stamp[col]):
             errori.append((col, nome, {"letto": str(letto), "stampato": str(stamp[col])}))
     conf("attivo_campi", att, stampati.get("attivo"))
     conf("passivo_campi", pas, stampati.get("passivo"))
-    if att != pas:
+    if _diversi(att, pas):
         errori.append((col, "attivo_diverso_da_passivo", {"attivo": str(att), "passivo": str(pas)}))
     from importers.import_snello.percorsi import NOMI
     for didascalia, valori, nodo in totali:
@@ -1106,7 +1123,7 @@ def _verifica(col: int, bs: dict, ce: dict, stampati: dict, calcolati: dict,
             continue
         sorgente = ce if nodo.percorso.startswith("CE") else bs
         letto = sum((Decimal(sorgente.get(NOMI[c], 0)) for c in campi), _ZERO)
-        if letto != valori[col]:
+        if _diversi(letto, valori[col]):
             errori.append((col, "aggregati_del_totale", {
                 "didascalia": didascalia, "campi": list(campi), "letto": str(letto),
                 "stampato": str(valori[col])}))
@@ -1117,7 +1134,7 @@ def _verifica(col: int, bs: dict, ce: dict, stampati: dict, calcolati: dict,
     conf("prima_delle_imposte", r.profit_before_tax, calcolati.get("prima_imposte"))
     conf("utile_ce", r.net_profit, calcolati.get("utile"))
     sp13 = Decimal(bs.get("sp13_utile_perdita", 0))
-    if sp13 != r.net_profit:
+    if _diversi(sp13, r.net_profit):
         errori.append((col, "ce_diverso_da_sp13", {"ce": str(r.net_profit), "sp13": str(sp13)}))
     return errori
 
@@ -1127,21 +1144,21 @@ def _controlli_documento(col: int, stampati: dict, calcolati: dict) -> list:
     errori = []
     a, b = stampati.get("valore_produzione"), stampati.get("costi_produzione")
     d = calcolati.get("differenza")
-    if a and b and d and a[col] - b[col] != d[col]:
+    if a and b and d and _diversi(a[col] - b[col], d[col]):
         errori.append((col, "stampato_differenza_A_B", {
             "A": str(a[col]), "B": str(b[col]), "differenza": str(d[col])}))
     p = calcolati.get("prima_imposte")
     if d and p:
         fin = stampati.get("finanziari", [_ZERO] * (col + 1))[col]
         ret = stampati.get("rettifiche", [_ZERO] * (col + 1))[col]
-        if d[col] + fin + ret != p[col]:
+        if _diversi(d[col] + fin + ret, p[col]):
             errori.append((col, "stampato_prima_delle_imposte", {
                 "differenza": str(d[col]), "finanziari": str(fin), "rettifiche": str(ret),
                 "prima": str(p[col])}))
     u = calcolati.get("utile")
     if p and u:
         imp = stampati.get("imposte", [_ZERO] * (col + 1))[col]
-        if p[col] - imp != u[col]:
+        if _diversi(p[col] - imp, u[col]):
             errori.append((col, "stampato_utile", {
                 "prima": str(p[col]), "imposte": str(imp), "utile": str(u[col])}))
     return errori
@@ -1197,18 +1214,40 @@ def _estrai_con(file_path: str, geometria: bool) -> Optional[dict]:
                                     else _leggi_righe(documento))
         except _Rifiuto as exc:
             return _rifiutato([], exc.controllo, **exc.dettaglio)
-        if not righe or not colonne:
-            return _rifiutato(anni, "prospetto_non_letto")
-        if len(anni) >= 2 and anni[1] > anni[0]:
-            # intestazioni invertite (`2024 | 2025`): la prima colonna non e' l'anno corrente
-            return _rifiutato(anni, "anni_invertiti", anni_letti=list(anni), motivo="la seconda colonna e' piu' recente della prima")
-        try:
-            radici, calcolati, totali, errori = _costruisci(righe, colonne, vuote_zero=geometria)
-            colonne_dati = [_importi_colonna(radici, c) for c in range(colonne)]
-        except _Rifiuto as exc:
-            return _rifiutato(anni, exc.controllo, **exc.dettaglio)
-        ultima = max(r.pagina for r in righe)
-        tabelle = _leggi_tabelle(documento, ultima + 1)
+        return estrai_da_righe(documento, righe, colonne, anni, vuote_zero=geometria)
+
+
+def estrai_da_righe(documento: fitz.Document, righe: list[_Riga], colonne: int, anni: list[int],
+                    *, vuote_zero: bool, eredita_dal_padre: bool = False,
+                    tolleranza: Decimal = Decimal("0")) -> dict:
+    token = _TOLLERANZA.set(tolleranza)
+    try:
+        return _estrai_da_righe(documento, righe, colonne, anni, vuote_zero=vuote_zero,
+                                eredita_dal_padre=eredita_dal_padre)
+    finally:
+        _TOLLERANZA.reset(token)
+
+
+def _estrai_da_righe(documento: fitz.Document, righe: list[_Riga], colonne: int, anni: list[int],
+                     *, vuote_zero: bool, eredita_dal_padre: bool) -> dict:
+    """Albero, traduzione percorso -> campo e controlli al centesimo, da righe gia' lette.
+
+    Il cuore comune a ogni lettore dello schema di legge: il PDF reso da XBRL (qui sopra) e lo
+    schema di legge generico (``schema_legge_generico``), che legge le righe in un altro modo
+    ma le giudica con gli stessi controlli, senza alcuna tolleranza in piu'."""
+    if not righe or not colonne:
+        return _rifiutato(anni, "prospetto_non_letto")
+    if len(anni) >= 2 and anni[1] > anni[0]:
+        # intestazioni invertite (`2024 | 2025`): la prima colonna non e' l'anno corrente
+        return _rifiutato(anni, "anni_invertiti", anni_letti=list(anni), motivo="la seconda colonna e' piu' recente della prima")
+    try:
+        radici, calcolati, totali, errori = _costruisci(righe, colonne, vuote_zero=vuote_zero,
+                                                        eredita_dal_padre=eredita_dal_padre)
+        colonne_dati = [_importi_colonna(radici, c) for c in range(colonne)]
+    except _Rifiuto as exc:
+        return _rifiutato(anni, exc.controllo, **exc.dettaglio)
+    ultima = max(r.pagina for r in righe)
+    tabelle = _leggi_tabelle(documento, ultima + 1)
 
     stampati = _stampati(totali)
     anomalie: dict[int, list] = {c: [] for c in range(colonne)}

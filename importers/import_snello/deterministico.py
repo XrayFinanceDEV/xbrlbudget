@@ -386,7 +386,82 @@ def _tentativo_classico(file_path: str, ocr_text: str | None = None) -> dict:
     return {"adottato": False, "parser": None, "esito": "non_applicabile"}
 
 
+def _prova_fonti(file_path: str) -> dict | None:
+    """Le prove incrociate sui totali stampati del vecchio importatore che non chiamano alcun
+    modello (``extract_deterministic_source_candidates``: percorsi di legge, subtotali di legge,
+    mastri fisici AGO). Prima di questo il percorso snello non le provava, e un documento che il
+    vecchio importatore leggeva a zero chiamate andava al modello. Stesse regole di adozione."""
+    from importers.source_reconciliation import extract_deterministic_source_candidates
+
+    candidati = extract_deterministic_source_candidates(file_path)
+    if not candidati or candidati[0][0] is None or candidati[0][1] is None:
+        return None
+    metodo = (candidati[0][2] or {}).get("method", "") if len(candidati[0]) > 2 else ""
+    nome = "fonti_ago" if "ago" in str(metodo) else "fonti_legge"
+    esito = _esito(nome, candidati[0][0], candidati[0][1], None)
+    if esito["adottato"]:
+        if len(candidati) > 1 and candidati[1][0] is not None and candidati[1][1] is not None:
+            precedente = _esito(nome, candidati[1][0], candidati[1][1], None)
+            if precedente["adottato"] and precedente["esito"] == "ok":
+                esito["prior_bs"], esito["prior_ce"] = precedente["bs"], precedente["ce"]
+                esito["prior_stato"] = "letto"
+            else:
+                esito["prior_stato"] = "scartato"
+        else:
+            esito["prior_stato"] = "assente"
+    return esito
+
+
+def _prova_schema_generico(file_path: str) -> dict | None:
+    """Lo schema di legge di un gestionale qualunque (``schema_legge_generico``): stessa forma e
+    stesse regole del PDF reso da XBRL - ogni totale stampato riprodotto, poi ``_esito``."""
+    from importers.schema_legge_generico import estrai
+
+    candidato = estrai(file_path)
+    if candidato is None:
+        return None
+    if not candidato["adottabile"]:
+        return {"adottato": False, "parser": "schema_legge_generico", "esito": "oltre_soglia",
+                "rifiuto": candidato["rifiuto"]}
+    esito = _esito("schema_legge_generico", candidato["bs"], candidato["ce"], candidato["stampati"])
+    esito["ignoti"] = candidato.get("ignoti")
+    esito["prior_stato"] = candidato.get("prior_stato")
+    if esito["adottato"] and candidato.get("prior_bs") is not None:
+        esito["prior_bs"] = _adatta(candidato["prior_bs"])
+        esito["prior_ce"] = _adatta(candidato["prior_ce"])
+    if len(candidato.get("anni") or []) > 1:
+        esito["anno_precedente"] = candidato["anni"][1]
+    if candidato.get("prior_rifiuto"):
+        esito["prior_rifiuto"] = candidato["prior_rifiuto"]
+    return esito
+
+
+# Dopo i lettori di sempre, che non hanno adottato: le prove incrociate e lo schema di legge
+# generico. Vengono DOPO, cosi' un documento che i lettori di sempre adottano resta letto
+# esattamente come prima.
+_ULTIMI_LETTORI = (_prova_fonti, _prova_schema_generico)
+
+
 def tentativo(file_path: str, ocr_text: str | None = None) -> dict:
+    esito = _tentativo(file_path, ocr_text)
+    if esito["adottato"]:
+        return esito
+    for prova in _ULTIMI_LETTORI:
+        try:
+            altro = prova(file_path)
+        except Exception as exc:
+            altro = {"adottato": False, "parser": prova.__name__, "esito": "errore",
+                     "errore": f"{type(exc).__name__}: {exc}"}
+        if altro is not None and altro["adottato"]:
+            altro["prima"] = {k: esito[k] for k in ("parser", "esito") if k in esito}
+            return altro
+        if altro is not None:
+            esito.setdefault("altri_lettori", []).append(
+                {k: altro[k] for k in ("parser", "esito", "rifiuto", "errore") if k in altro})
+    return esito
+
+
+def _tentativo(file_path: str, ocr_text: str | None = None) -> dict:
     """Come ``_tentativo_classico``, preceduto dal lettore del PDF reso da XBRL (Task 25): se il
     documento e' di quella famiglia ed e' adottabile si adotta, senza provare nient'altro (nessun
     secondo candidato sommato). Altrimenti la ricerca prosegue ESATTAMENTE come prima; un

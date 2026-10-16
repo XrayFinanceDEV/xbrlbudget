@@ -134,6 +134,21 @@ def _avviso_risultato_in_apertura(bs: Dict[str, Any]) -> str:
             f"a nuovo — verificare in Rettifiche")
 
 
+def _avviso_risultato_anno_prima_conti(bs: Dict[str, Any]) -> str:
+    """Un conto "utile (perdita) d'esercizio" fra i conti del patrimonio, diverso dal risultato
+    del periodo (COLOMBO 2026): e' il risultato dell'anno prima non ancora destinato."""
+    v = Decimal(str(bs['_risultato_anno_prima_conti']))
+    voce = "perdita" if v < 0 else "utile"
+    try:
+        periodo = f"€{_euro_it(Decimal(str(bs.get('sp13_utile_perdita', bs.get('sp13', 0)))))}"
+    except Exception:
+        periodo = "n/d"
+    return (f"RISULTATO DELL'ANNO PRIMA NON DESTINATO: il conto {voce} d'esercizio di "
+            f"€{_euro_it(abs(v))} fra i conti del patrimonio non è il risultato del periodo "
+            f"({periodo}): è il risultato dell'anno prima non ancora destinato, ed è stato messo "
+            f"negli utili (perdite) portati a nuovo — verificare in Rettifiche")
+
+
 def _snello_squadrato_reason(report: Dict[str, Any]) -> str:
     """Avviso per un risultato del percorso snello con esito 'squadrato' (Task 17): lo
     scarto e' quello MISURATO dal percorso snello stesso (``report['misura']['corrente']``),
@@ -699,6 +714,92 @@ def _ivcee_attivo(api_key: str) -> bool:
     return bool(api_key)
 
 
+def _xbrl_reso_extract(file_path: str):
+    """(bs, ce, prior_bs, prior_ce) del PDF reso da un XBRL depositato, oppure None.
+
+    Lo stesso lettore che il percorso snello prova per primo (``xbrl_reso_parser``: ogni totale
+    stampato riprodotto al centesimo, nessuna tolleranza), qui anche per il percorso di sempre:
+    senza, un micro reso da XBRL (SGH 31/12/2025) finiva al modello, sei minuti e il passivo
+    perso. Si adotta solo il candidato che il lettore dichiara ``adottabile`` e che passa gli
+    stessi cancelli degli altri lettori deterministici."""
+    from importers import xbrl_reso_parser
+    from importers.iv_cee_hierarchy import check_quadratura
+
+    candidato = xbrl_reso_parser.estrai(file_path)
+    if candidato is None:
+        return None
+    if not candidato.get("adottabile"):
+        logger.info("PDF reso da XBRL riconosciuto ma non adottato: %s", candidato.get("rifiuto"))
+        return None
+    mapper = IVCEEMapper()
+    bs, ce = dict(candidato["bs"]), dict(candidato["ce"])
+
+    def _con_totali(b, stampati):
+        if stampati.get("totale_attivo") is not None:
+            b["totale_attivo"] = Decimal(stampati["totale_attivo"])
+        if stampati.get("totale_passivo") is not None:
+            b["totale_passivo"] = Decimal(stampati["totale_passivo"])
+        return b
+
+    bs = _con_totali(bs, candidato.get("stampati") or {})
+    if not (mapper.validate_balance(bs) and check_quadratura(bs, ce, tol=Decimal("2")).quadra):
+        return None
+    prior_bs, prior_ce = candidato.get("prior_bs"), candidato.get("prior_ce")
+    if prior_bs is not None and prior_ce is not None:
+        from importers.iv_cee_hierarchy import _ATTIVO_FIELDS, _PASSIVO_FIELDS
+        prior_bs = dict(prior_bs)
+        prior_bs["totale_attivo"] = sum((Decimal(prior_bs.get(k, 0) or 0) for k in _ATTIVO_FIELDS), Decimal(0))
+        prior_bs["totale_passivo"] = sum((Decimal(prior_bs.get(k, 0) or 0) for k in _PASSIVO_FIELDS), Decimal(0))
+        if not (mapper.validate_balance(prior_bs)
+                and check_quadratura(prior_bs, prior_ce, tol=Decimal("2")).quadra):
+            prior_bs = prior_ce = None
+    logger.info("Using deterministic XBRL-rendered PDF reader (prior=%s)", candidato.get("prior_stato"))
+    return bs, ce, prior_bs, prior_ce
+
+
+def _schema_etichette_extract(file_path: str, extraction_context: Any = None):
+    """(bs, ce, prior_bs, prior_ce) dello schema col percorso nell'etichetta, oppure None.
+
+    Le tabelle MinerU quando c'e' una scansione, altrimenti il testo del PDF. Il lettore ha
+    gia' verificato ogni totale stampato; qui passano gli stessi cancelli degli altri lettori
+    deterministici (``validate_balance`` e ``check_quadratura``), e l'anno precedente si
+    porta solo se li passa anche lui. Un anno che il lettore rifiuta non si sostituisce:
+    si torna None e prosegue la catena di sempre, che lo dichiarera' a modo suo."""
+    from importers import schema_etichette_parser as etichette
+    from importers.iv_cee_hierarchy import check_quadratura
+
+    mapper = IVCEEMapper()
+    if extraction_context is not None:
+        letto = etichette.estrai_da_mineru(extraction_context)
+    else:
+        letto = etichette.estrai(file_path)
+    if letto is None:
+        return None
+    bs, ce = letto.get("bs"), letto.get("ce")
+    if bs is None or ce is None:
+        logger.info("Schema con percorso nell'etichetta riconosciuto ma non adottato: %s",
+                    letto.get("rifiuto"))
+        return None
+
+    def _passa(b, c) -> bool:
+        return mapper.validate_balance(b) and check_quadratura(b, c, tol=Decimal("2")).quadra
+
+    if not _passa(bs, ce):
+        logger.info("Schema con percorso nell'etichetta letto ma non quadrato: catena di sempre")
+        return None
+    prior_bs, prior_ce = letto.get("prior_bs"), letto.get("prior_ce")
+    prior_ok = prior_bs is not None and prior_ce is not None and _passa(prior_bs, prior_ce)
+    if extraction_context is not None:
+        for dati in (bs, prior_bs if prior_ok else None):
+            if dati is not None:
+                dati["_mineru_source_detail_fields"] = Decimal(sum(
+                    1 for k, v in dati.items() if not k.startswith("_") and k.startswith("sp")
+                    and len(k.split("_")[0]) > 4 and v))
+    logger.info("Using deterministic legal schema with path labels (prior_valid=%s, anni=%s)",
+                prior_ok, letto.get("anni"))
+    return bs, ce, (prior_bs if prior_ok else None), (prior_ce if prior_ok else None)
+
+
 def _extract_route_c_last_resort(llm_extract):
     """Run the IV-CEE last resort without claiming a gross-vs-net measurement.
 
@@ -1233,6 +1334,29 @@ def import_pdf_balance_sheet(
         def _llm_extract():
             """IV CEE extraction via LLM. Returns (bs, ce, prior_bs, prior_ce)."""
             nonlocal _macro_report
+            # "Situazione contabile riclassificata dettagliata" (BILAQ, detail_riclass,
+            # Santini): lo schema di legge col percorso nell'etichetta, letto per percorso e
+            # verificato su ogni totale stampato, dalle tabelle MinerU di una scansione o dal
+            # testo del PDF. Prima di qualunque modello: su questa famiglia il modello prendeva
+            # sotto-righe per totali ("B.6.2) Materie prime" per B.6), contava due volte i
+            # crediti oltre 12 mesi e perdeva i debiti verso il gruppo. Si adotta solo se
+            # passa gli stessi cancelli degli altri lettori deterministici.
+            if extraction_context is None:
+                try:
+                    adottato = _xbrl_reso_extract(file_path)
+                except Exception as reso_err:
+                    adottato = None
+                    logger.info("PDF reso da XBRL non letto (%s: %s)", type(reso_err).__name__, reso_err)
+                if adottato is not None:
+                    return adottato
+            try:
+                adottato = _schema_etichette_extract(file_path, extraction_context)
+            except Exception as etichette_err:
+                adottato = None
+                logger.info("Schema con percorso nell'etichetta non letto (%s: %s)",
+                            type(etichette_err).__name__, etichette_err)
+            if adottato is not None:
+                return adottato
             # /import/pdf-ocr supplies structured MinerU table rows.  Build an
             # evidence-only IV-CEE candidate from those rows before touching the
             # original PDF.  It is accepted only through the same structural and
@@ -2025,6 +2149,8 @@ def import_pdf_balance_sheet(
                     not is_trial_balance and _snello is None
                     and not balance_sheet_data.get("_source_mineru_ivcee")
                     and not balance_sheet_data.get("_source_standard_ivcee")
+                    and not balance_sheet_data.get("_source_schema_etichette")
+                    and not balance_sheet_data.get("_source_xbrl_reso")
                     and _is_image_pdf(file_path))
             except Exception:
                 _cifre_da_vision = False
@@ -2114,6 +2240,8 @@ def import_pdf_balance_sheet(
             warnings.append(_rs.avviso(_risultato_report))
         if balance_sheet_data.get('_risultato_anno_prima_apertura') is not None:
             warnings.append(_avviso_risultato_in_apertura(balance_sheet_data))
+        if balance_sheet_data.get('_risultato_anno_prima_conti') is not None:
+            warnings.append(_avviso_risultato_anno_prima_conti(balance_sheet_data))
         _maturity_audit = _detail_report.get('periods', {}).get('current', {}).get('maturity', {}).get('families', {})
         if any(e.get('basis', '').startswith('management_')
                for family in _maturity_audit.values() for e in family.get('evidence', [])) or any(
@@ -2295,6 +2423,8 @@ def import_pdf_balance_sheet(
                 )
             elif balance_sheet_data.get("_source_mineru_ivcee"):
                 _ocr_accounting_method = "ivcee_deterministic"
+            elif balance_sheet_data.get("_source_schema_etichette"):
+                _ocr_accounting_method = "schema_etichette"
             elif balance_sheet_data.get("_source_standard_ivcee"):
                 _ocr_accounting_method = "ivcee_source"
             else:
@@ -2536,6 +2666,10 @@ def import_pdf_balance_sheet(
                 else "situazione_contabile_llm" if _coge_ok else "situazione_contabile")
         elif balance_sheet_data.get("_source_mineru_ivcee"):
             extraction_method = "ivcee_deterministic"
+        elif balance_sheet_data.get("_source_schema_etichette"):
+            extraction_method = "schema_etichette"
+        elif balance_sheet_data.get("_source_xbrl_reso"):
+            extraction_method = "xbrl_reso"
         elif balance_sheet_data.get("_source_standard_ivcee"):
             extraction_method = "ivcee_source"
         else:

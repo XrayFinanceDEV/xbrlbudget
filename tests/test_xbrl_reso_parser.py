@@ -48,7 +48,13 @@ def _pdf(tmp_path, pagine, nome="reso.pdf", piede=True):
                 pagina.insert_text((40, y), linea, fontname="helv", fontsize=9)
                 y += 12
             y += 14
-        if piede == "pagina":
+        if piede == "ripetuto":
+            # altro generatore (SGH 31/12/2025): ragione sociale in testa, "Nota integrativa XBRL
+            # al ... / Pag. N" in fondo, identici su ogni pagina e senza tassonomia
+            pagina.insert_text((40, 36), "AZIENDA S.R.L.", fontname="helv", fontsize=8)
+            pagina.insert_text((40, 805), "Nota integrativa XBRL al 31/12/2025", fontname="helv", fontsize=7)
+            pagina.insert_text((520, 805), f"Pag. {numero}", fontname="helv", fontsize=7)
+        elif piede == "pagina":
             # altro generatore, senza tassonomia: "Bilancio di esercizio / Pagina N di M" in fondo
             pagina.insert_text((57, 700), "Bilancio di esercizio ", fontname="helv", fontsize=7)
             pagina.insert_text((57, 712), f"Pagina {numero} di {totale} ", fontname="helv", fontsize=7)
@@ -167,6 +173,25 @@ def _sostituisci(righe, prima, dopo):
 
 
 # ---- riconoscimento --------------------------------------------------------------------------
+
+def test_intestazione_e_piede_ripetuti_su_ogni_pagina_non_sono_righe_del_prospetto(tmp_path):
+    # SGH 31/12/2025: ragione sociale in testa e "Nota integrativa XBRL al ... Pag. N" in fondo a
+    # ogni pagina, e le date nello stesso blocco del titolo. Prima il lettore si ritirava
+    # ("prospetto_non_letto", poi "riga_fuori_prospetto") e il file finiva al modello, che in
+    # sei minuti perdeva l'intero passivo.
+    date = "31/12/2025\n31/12/2024"
+    sp = [f"{date}\nStato patrimoniale" if r == "Stato patrimoniale" else r
+          for r in SP_ABBREVIATO if r != DATE]
+    sp = sp[:1] + [r for r in sp[1:] if r != "Stato patrimoniale"]
+    ce = [r.replace("31-12-2025 31-12-2024", "31/12/2025 31/12/2024") for r in CE_ABBREVIATO]
+    path = _pdf(tmp_path, [sp, ce], piede="ripetuto")
+    c = X.estrai(path)
+    assert c is not None and c["adottabile"], c and c["rifiuto"]
+    assert c["bs"]["sp16_debiti_breve"] == D("782871.00")
+    assert c["bs"]["sp17_debiti_lungo"] == D("10275.00")
+    assert c["bs"]["sp13_utile_perdita"] == D("100419.00")
+    assert c["prior_stato"] == "letto"
+
 
 def test_riconosci_dal_piede_di_tassonomia(tmp_path):
     assert X.riconosci(_abbreviato(tmp_path)) is True

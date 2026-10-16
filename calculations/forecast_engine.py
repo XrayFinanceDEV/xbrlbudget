@@ -5229,6 +5229,11 @@ class ForecastEngine:
         sp03a, sp03b, sp03c, sp03d, sp03e = _alloc(
             sp03, sp03_fields, primary_idx=3
         )
+        # Crediti verso soci: stessa regola. Senza dettaglio in base, tutto su
+        # sp01b (da richiamare), il campo neutro di default del gruppo.
+        sp01a, sp01b = _alloc(
+            sp01, ['sp01a_parte_richiamata', 'sp01b_parte_da_richiamare'], primary_idx=1
+        )
 
         # Allocate the DSO-driven TRADE total across the commercial buckets only
         # (a/b/c/d/g). Crediti tributari (sp06e) and imposte anticipate (sp06f) keep the

@@ -592,7 +592,7 @@ traduce nel campo `sp`/`ce` con una tabella fissa.
 `tentativo()`). Prima di qualunque chiamata di modello si prova, nell'ordine: il PDF reso dall'XBRL
 depositato (`importers/xbrl_reso_parser.py`: prospetti e tabelle di scadenza della nota integrativa,
 ogni totale stampato riprodotto al centesimo, letto anche per posizione quando il testo a blocchi
-non chiude), lo schema di legge col percorso come codice di riga («1.B.2», «3.B.9.a»; `importers/schema_codici_parser.py`: legge la sola colonna «Totali», una voce conta solo se nessuna voce sotto di lei ha un campo, anno precedente compreso), lo schema di legge IV-CEE (`standard_ivcee_parser`), lo schema di legge con dettaglio
+non chiude), lo schema di legge col percorso come codice di riga («1.B.2», «3.B.9.a»; `importers/schema_codici_parser.py`: legge la sola colonna «Totali», una voce conta solo se nessuna voce sotto di lei ha un campo, anno precedente compreso), lo schema di legge col percorso nell'etichetta (`schema_etichette_parser`, sotto), lo schema di legge IV-CEE (`standard_ivcee_parser`), lo schema di legge con dettaglio
 conti (`extract_ivcee_didascalie`), la situazione contabile. Un candidato si adotta solo se quadra
 entro il tappo e la sua massa non classificata sta entro `soglia()`: allora la struttura **non si
 chiede** (`struttura.stato = "non_richiesta"`, zero chiamate vision, zero gx10). Lo schema di
@@ -607,6 +607,24 @@ con le stesse regole di adozione dell'anno corrente ma **solo con esito `"ok"`**
 sull'anno precedente non avrebbe dove essere dichiarato. `deterministico.prior_stato` nel report
 vale `"letto"`, `"scartato"` (con `prior_rifiuto`) o `"assente"`. Prima il percorso snello
 lo scartava sempre, e solo il reso XBRL portava l'anno precedente.
+
+**Schema col percorso nell'etichetta** (`importers/schema_etichette_parser.py`, 2026-10-16): la
+"Situazione contabile riclassificata dettagliata" (BILAQ, detail_riclass, nicee, 2R, Santini),
+`Cod. | Descrizione | esercizio | precedente | Differenza | Scost. %`, dove la descrizione comincia
+col percorso di legge ("B.I.2) Costi di sviluppo", "C.II.5 bis.1) Esigibili entro…", "20)
+Imposte") e il gestionale stampa sotto ogni voce i propri dettagli e i conti. Si legge **solo la
+voce di legge**, tradotta con `campo_da_percorso`; le righe "Esigibili entro/oltre" sotto crediti e
+debiti decidono la scadenza, le lettere di B.9/B.10 il dettaglio del personale e degli
+ammortamenti; le sotto-righe del gestionale ("B.6.2) Materie prime", "(Fondi di ammortamento)",
+il percorso ripetuto sulla riga sotto) e i conti non entrano mai. **Ogni totale stampato deve
+essere la somma delle voci lette sotto di lui**, altrimenti l'anno non si adotta e `rifiuto`
+nomina il totale più interno che non torna. A.3/A.4 seguono `data/iv_cee_tree.json` (A.4 →
+`ce03`), non la tabella dello snello. Gira in tre punti: qui in F0, e nel percorso di sempre
+(`_schema_etichette_extract` in testa a `_llm_extract`) sul testo del PDF **e sulle tabelle
+MinerU di una scansione** (`estrai_da_mineru`: la colonna Differenza ricompone le cifre che l'OCR
+sposta da una cella alla successiva). Prima questa famiglia andava al modello, che prendeva
+sotto-righe per totali, contava due volte i crediti oltre 12 mesi e perdeva i debiti verso il
+gruppo (Santini 31/12/2025, sbilancio di 1,1 milioni).
 
 **F1 — Struttura.** Riusa la mappa del branch struttura (vision Sonnet, un blocco per chiamata):
 per ogni pagina, quali sono SP/CE/dettaglio, lo `schema` (di legge / riclassificato / piano dei

@@ -196,6 +196,36 @@ def _prova_schema_codici(file_path: str) -> dict | None:
     return esito
 
 
+def _prova_schema_etichette(file_path: str) -> dict | None:
+    """Schema di legge col percorso nell'etichetta ("Situazione contabile riclassificata
+    dettagliata": "B.I.2) Costi di sviluppo", BILAQ, detail_riclass): None se il documento non
+    e' di questa famiglia; un anno il cui totale stampato non torna e' rifiutato nominando quel
+    totale; altrimenti le stesse regole di adozione degli altri lettori."""
+    from importers.schema_etichette_parser import estrai
+
+    letto = estrai(file_path)
+    if letto is None:
+        return None
+    if letto.get("bs") is None or letto.get("ce") is None:
+        return {"adottato": False, "parser": "schema_etichette", "esito": "oltre_soglia",
+                "rifiuto": letto.get("rifiuto")}
+    esito = _esito("schema_etichette", letto["bs"], letto["ce"], letto.get("stampati"))
+    if esito["adottato"]:
+        prior_bs, prior_ce = letto.get("prior_bs"), letto.get("prior_ce")
+        if prior_bs and prior_ce:
+            precedente = _esito("schema_etichette", prior_bs, prior_ce, letto.get("prior_stampati"))
+            if precedente["adottato"] and precedente["esito"] == "ok":
+                esito["prior_bs"], esito["prior_ce"] = precedente["bs"], precedente["ce"]
+                esito["prior_stato"] = "letto"
+            else:
+                esito["prior_stato"] = "scartato"
+        else:
+            esito["prior_stato"] = "assente"
+            if letto.get("prior_rifiuto"):
+                esito["prior_rifiuto"] = letto["prior_rifiuto"]
+    return esito
+
+
 def _prova_standard_ivcee(file_path: str) -> dict | None:
     """Schema di legge a colonne comparative, o compatto a colonna unica (Task 23):
     ``has_comparative_ivcee_columns`` falso non significa piu' "non provarci" - vuol
@@ -322,6 +352,12 @@ def _tentativo_classico(file_path: str, ocr_text: str | None = None) -> dict:
         codici = None
     if codici is not None and codici["adottato"]:
         return codici
+    try:
+        etichette = _prova_schema_etichette(file_path)
+    except Exception:
+        etichette = None
+    if etichette is not None and etichette["adottato"]:
+        return etichette
     try:
         standard = _prova_standard_ivcee(file_path)
     except Exception:

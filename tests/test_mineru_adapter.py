@@ -74,6 +74,25 @@ def test_build_context_detects_years():
     assert ctx.comparative_year == 2023
 
 
+def test_detect_years_ignores_four_digit_row_codes():
+    # Santini 31/12/2025: la colonna "Cod." porta codici di riga come 2086 o 1950 nella
+    # stessa tabella dell'intestazione; l'anno e' quello delle date d'intestazione
+    raw = {
+        "md_content": "",
+        "content_list": json.dumps([{
+            "type": "table", "page_idx": 0,
+            "table_body": "<table><tr><td>Cod.</td><td>Descrizione</td><td>31/12/2025</td>"
+                          "<td>31/12/2024</td></tr><tr><td>1950</td><td>A.IV) Riserva legale</td>"
+                          "<td>100.000,00</td><td>100.000,00</td></tr><tr><td>2086</td>"
+                          "<td>A.IX) Utile</td><td>82.308,26</td><td>58.606,08</td></tr></table>",
+        }]),
+        "middle_json": "",
+        "version": "3.4.5",
+    }
+    ctx = build_extraction_context(raw)
+    assert (ctx.current_year, ctx.comparative_year) == (2025, 2024)
+
+
 def test_build_context_headings_present():
     ctx = build_extraction_context(_raw_result())
     assert any("bilancio" in h.lower() or "economico" in h.lower() for h in ctx.headings)

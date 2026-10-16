@@ -50,16 +50,17 @@ class Settings(BaseSettings):
     # Anthropic API (for PDF LLM extraction)
     ANTHROPIC_API_KEY: Optional[str] = None
 
-    # MinerU OCR import (POST /import/pdf-ocr). Enabled in the integrated Docker
-    # deployment so standard PDF and OCR PDF remain two explicit user choices.
-    # Setting this to false is still the emergency kill switch for the OCR endpoint.
+    # MinerU OCR: su POST /import/pdf legge i soli PDF scansionati (testo vuoto o
+    # corrotto, pdf_importer.pdf_e_scansione); /import/pdf-ocr lo usa sempre.
+    # false = interruttore d'emergenza: le scansioni tornano all'OCR di ripiego
+    # (dichiarato), /import/pdf-ocr da' 503.
     # lang_list uses "latin" (MinerU has no standalone "it").
     MINERU_OCR_ENABLED: bool = True
-    # Local development reaches the already-running MinerU container through a
-    # loopback-only bridge. Docker Compose overrides this with
-    # http://mineru:8000, where service-name DNS is available.
-    MINERU_BASE_URL: str = "http://127.0.0.1:8002"
-    MINERU_EXPECTED_VERSION: str = "3.2.0"
+    # MinerU gira su gx10 (GPU), come Qwen (GX10_BASE_URL): misurato 2026-10-13,
+    # /health risponde su :18400 con la 3.4.5. Un server fuori dalla tailnet (lo
+    # staging) lo imposta in `budget-env-staging`.
+    MINERU_BASE_URL: str = "http://100.65.63.12:18400"
+    MINERU_EXPECTED_VERSION: str = "3.4.5"
     MINERU_BACKEND: str = "pipeline"
     MINERU_PARSE_METHOD: str = "ocr"
     MINERU_LANGUAGE: str = "latin"

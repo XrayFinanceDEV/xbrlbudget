@@ -8,16 +8,15 @@ services:
     environment:
       - DATABASE_PATH=/app/data/financial_analysis.db
       - DEBUG=false
-      # MinerU OCR import. OFF by default: the `mineru` service below is behind a
-      # compose profile and is NOT deployed on the staging/production VPS (its base
-      # image is vllm/vllm-openai — several GB, GPU-oriented). It runs on the
-      # developer machine only. Turn both on together:
-      #   MINERU_OCR_ENABLED=true docker compose --profile mineru up -d
-      # NOTE: no depends_on:mineru here on purpose — a broken/unhealthy MinerU must
-      # NOT prevent the backend (and thus XBRL/CSV//import/pdf) from starting;
-      # availability is checked per-request (503).
-      - MINERU_OCR_ENABLED=${MINERU_OCR_ENABLED:-false}
-      - MINERU_BASE_URL=http://mineru:8000
+      # MinerU OCR: le scansioni caricate su /import/pdf passano da MinerU, che
+      # gira su gx10 (GPU), mai sul VPS. MINERU_OCR_ENABLED / MINERU_BASE_URL /
+      # MINERU_EXPECTED_VERSION NON stanno qui di proposito: una riga `environment:`
+      # scavalcherebbe l'env_file, cioe' la credenziale Jenkins `budget-env-staging`
+      # che li imposta per server. Default in backend/app/core/config.py (gx10 sulla
+      # tailnet). Se MinerU non risponde la scansione prosegue sull'OCR di ripiego
+      # e lo dichiara.
+      # Il servizio `mineru` qui sotto resta solo per la macchina di sviluppo:
+      #   MINERU_BASE_URL=http://mineru:8000 docker compose --profile mineru up -d
     volumes:
       - db-data:/app/data
     restart: unless-stopped

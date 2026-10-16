@@ -47,7 +47,7 @@ def test_estrazione_vuota_resta_errore_duro():
     assert "nessun dato" in verdict.hard_error.lower()
 
 
-def test_ocr_resta_errore_duro():
+def test_ocr_di_ripiego_resta_errore_duro():
     verdict = _classify_balance_failure(
         _sheet(totale_passivo=Decimal("960")),
         is_scanned=True, ocr_source=False,
@@ -56,6 +56,43 @@ def test_ocr_resta_errore_duro():
     )
     assert verdict.hard_error is not None
     assert "OCR" in verdict.hard_error
+
+
+def test_ocr_mineru_squadrato_si_importa_con_avviso():
+    """Letta da MinerU (ocr_source), una scansione che non quadra si importa con
+    avviso; letta dall'OCR di ripiego (test sopra) resta un errore duro."""
+    verdict = _classify_balance_failure(
+        _sheet(totale_passivo=Decimal("960")),
+        is_scanned=False, ocr_source=True,
+        is_trial_balance=False, sample_text="B) II 1) Terreni 100",
+        file_path="x.pdf", ocr_text=None,
+    )
+    assert verdict.hard_error is None
+    assert verdict.warning.startswith(f"{_UNBALANCED_WARNING_PREFIX} (lettura OCR MinerU)")
+    assert "scarto €40,00" in verdict.warning
+
+
+def test_ocr_mineru_vuoto_resta_errore_duro():
+    verdict = _classify_balance_failure(
+        _sheet(totale_attivo=Decimal("0"), totale_passivo=Decimal("0"),
+               sp09_disponibilita_liquide=Decimal("0"), sp16_debiti_breve=Decimal("0")),
+        is_scanned=False, ocr_source=True,
+        is_trial_balance=False, sample_text="", file_path="x.pdf", ocr_text=None,
+    )
+    assert verdict.hard_error is not None
+    assert "nessun dato" in verdict.hard_error.lower()
+
+
+@pytest.mark.parametrize("testo,atteso", [
+    ("", False),
+    # budget_1269 Unicarton: text layer corrotto da PDF24, lettere spostate di 29
+    ("8QLFDUWRQ 6UO\n%LODQFLR GL\nY HULILFD\n6\x11$QWRQLR\x0f 1\x11", False),
+    ("SITUAZIONE PATRIMONIALE\nCassa 1.000,00  Fornitori 1.000,00", True),
+    ("STATO PATRIMONIALE ATTIVO\nB) Immobilizzazioni\nTotale attivo", True),
+])
+def test_testo_leggibile(testo, atteso):
+    from importers.pdf_importer import _testo_leggibile
+    assert _testo_leggibile(testo) is atteso
 
 
 def test_sbilancio_e_importabile_con_avviso():

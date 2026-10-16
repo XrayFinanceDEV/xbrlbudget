@@ -230,3 +230,109 @@ def test_ocr_success_passes_context_to_importer(ctx):
     assert captured.get("extraction_context") is not None
     assert captured["extraction_context"].full_text.strip() != ""
     assert captured["fiscal_year"] == 2024
+
+
+# ---------------------------------------------------------------------------
+# /import/pdf: solo le scansioni passano da MinerU (gx10); ripiego dichiarato.
+# ---------------------------------------------------------------------------
+
+def _capture_import(mp, imports_router, *, scansione):
+    captured = {}
+
+    def fake_import(**kwargs):
+        captured.update(kwargs)
+        return {"success": True, "company_id": 1, "fiscal_year": 2024,
+                "validation_report": {"warnings": []}}
+
+    mp.setattr(imports_router, "import_pdf_balance_sheet", fake_import)
+    mp.setattr(imports_router, "pdf_e_scansione", lambda path: scansione)
+    return captured
+
+
+def _post_pdf(client):
+    return client.post(
+        "/api/v1/import/pdf?fiscal_year=2024&company_name=Acme&create_company=true",
+        files={"file": ("b.pdf", PDF_BYTES, "application/pdf")}, headers=_auth("u1"),
+    )
+
+
+def test_import_pdf_scansione_passa_da_mineru(ctx):
+    client, settings, imports_router, mc, mp = ctx
+    mp.setattr(mc, "MinerUClient", _fake_client_cls(md="Stato Patrimoniale Attivo 100"))
+    captured = _capture_import(mp, imports_router, scansione=True)
+
+    r = _post_pdf(client)
+
+    assert r.status_code == 200, r.text
+    assert captured["extraction_context"] is not None
+    assert captured["extraction_context"].full_text.strip() != ""
+    report = r.json()["validation_report"]
+    assert report["mineru"]["esito"] == "ok"
+    assert not any("MINERU NON USATO" in w for w in report["warnings"])
+
+
+def test_import_pdf_con_testo_non_chiama_mineru(ctx):
+    client, settings, imports_router, mc, mp = ctx
+    chiamato = []
+
+    class _Vietato:
+        @classmethod
+        def from_settings(cls, *a, **k):
+            chiamato.append(True)
+            raise AssertionError("MinerU non va chiamato su un PDF con testo leggibile")
+
+    mp.setattr(mc, "MinerUClient", _Vietato)
+    captured = _capture_import(mp, imports_router, scansione=False)
+
+    r = _post_pdf(client)
+
+    assert r.status_code == 200, r.text
+    assert chiamato == []
+    assert captured["extraction_context"] is None
+    assert "mineru" not in r.json()["validation_report"]
+
+
+def test_import_pdf_scansione_mineru_giu_ripiega_e_lo_dichiara(ctx):
+    client, settings, imports_router, mc, mp = ctx
+    from app.services.mineru_client import MinerUUnavailableError
+    mp.setattr(mc, "MinerUClient", _fake_client_cls(health_exc=MinerUUnavailableError("down")))
+    captured = _capture_import(mp, imports_router, scansione=True)
+
+    r = _post_pdf(client)
+
+    assert r.status_code == 200, r.text
+    assert captured["extraction_context"] is None
+    report = r.json()["validation_report"]
+    assert report["mineru"] == {"esito": "non_disponibile", "errore": "MinerUUnavailableError"}
+    assert any("MINERU NON USATO (non_disponibile)" in w for w in report["warnings"])
+
+
+def test_import_pdf_scansione_mineru_spento_lo_dichiara(ctx):
+    client, settings, imports_router, mc, mp = ctx
+    mp.setattr(settings, "MINERU_OCR_ENABLED", False)
+    captured = _capture_import(mp, imports_router, scansione=True)
+
+    r = _post_pdf(client)
+
+    assert r.status_code == 200, r.text
+    assert captured["extraction_context"] is None
+    assert r.json()["validation_report"]["mineru"] == {"esito": "disattivato"}
+
+
+def test_pdf_e_scansione_su_unicarton_corrotto(tmp_path):
+    """budget_1269: testo corrotto da PDF24 (lettere spostate di 29) = scansione."""
+    import fitz
+    from importers.pdf_importer import pdf_e_scansione
+
+    corrotto, buono = tmp_path / "corrotto.pdf", tmp_path / "buono.pdf"
+    for path, righe in ((corrotto, ["8QLFDUWRQ 6UO", "%LODQFLR GL YHULILFD"]),
+                        (buono, ["SITUAZIONE PATRIMONIALE", "Totale attivo 1.000,00"])):
+        doc = fitz.open()
+        pagina = doc.new_page()
+        for i, riga in enumerate(righe):
+            pagina.insert_text((40, 60 + 14 * i), riga, fontsize=9)
+        doc.save(str(path))
+        doc.close()
+
+    assert pdf_e_scansione(str(corrotto)) is True
+    assert pdf_e_scansione(str(buono)) is False

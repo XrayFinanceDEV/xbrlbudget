@@ -54,6 +54,41 @@ class PDFImportError(Exception):
     pass
 
 
+# Parole che ogni documento contabile italiano leggibile contiene. Un text layer
+# che non ne porta almeno due non e' testo: o manca (scansione pura) o e' corrotto
+# (budget_1269 Unicarton: scansione ripassata da PDF24/Ghostscript, ogni lettera
+# spostata di 29 posizioni, 16.000 caratteri e nessuna parola). Sostituisce la
+# vecchia soglia "meno di 50 caratteri", che un testo corrotto supera sempre.
+# Misurato 2026-10-13 su 268 PDF (Test/ + lotto bilanci-10-2026): cambia verdetto
+# solo sugli 8 Unicarton corrotti.
+_PAROLE_CONTABILI = (
+    "totale", "attivo", "passivo", "crediti", "debiti", "patrimonio", "conto",
+    "ricavi", "costi", "capitale", "fondo", "immobilizzazioni", "rimanenze",
+    "fornitori", "clienti", "esercizio", "utile", "perdita", "riserva", "banca",
+    "imposte", "ammortament", "disponibilit", "saldo", "economico", "bilancio",
+    "attivit", "passivit", "situazione", "patrimonial", "cassa", "verifica",
+)
+
+
+def _testo_leggibile(text: str) -> bool:
+    """True se il text layer e' testo contabile vero, non vuoto ne' corrotto."""
+    low = (text or "").lower()
+    return sum(1 for parola in _PAROLE_CONTABILI if parola in low) >= 2
+
+
+def pdf_e_scansione(file_path: str) -> bool:
+    """True se il PDF va letto come una scansione: il suo testo non e' leggibile.
+
+    Stesso campione e stesso criterio di ``import_pdf_balance_sheet``, cosi'
+    l'endpoint decide se chiamare MinerU esattamente come l'importatore decide
+    se il file e' una scansione. Nessuna soglia di caratteri.
+    """
+    import fitz
+    with fitz.open(file_path) as doc:
+        sample_text = "".join(page.get_text() for page in doc[:14])
+    return not _testo_leggibile(sample_text)
+
+
 _UNBALANCED_WARNING_PREFIX = "BILANCIO SBILANCIATO"
 _UNBALANCED_WARNING_SUFFIX = (
     "Il bilancio è stato importato così com'è: correggilo in Rettifiche "
@@ -189,7 +224,23 @@ def _classify_balance_failure(
     """
     # 1. Testo OCR: i totali stessi possono essere letti male, quindi non si puo'
     #    dichiarare sbilanciato il documento sorgente.
-    if is_scanned or ocr_source:
+    #    Letto da MinerU (ocr_source, lettura OCR strutturata): si importa con
+    #    avviso, come ogni squadrato, e l'utente corregge in Rettifiche.
+    #    Letto dall'OCR di ripiego (is_scanned senza MinerU): resta errore duro,
+    #    perche' su budget_1269 inventava importi (attivo 445.200 su ~5,9 milioni).
+    if ocr_source:
+        _attivo = balance_sheet_data.get('totale_attivo', Decimal('0'))
+        _passivo = balance_sheet_data.get('totale_passivo', Decimal('0'))
+        if _attivo != Decimal('0'):
+            return BalanceFailureVerdict(
+                None,
+                f"{_UNBALANCED_WARNING_PREFIX} (lettura OCR MinerU): attivo "
+                f"€{_it_amount(_attivo)} != passivo €{_it_amount(_passivo)} "
+                f"(scarto €{_it_amount(abs(_attivo - _passivo))}). Su una scansione "
+                "anche i totali possono essere letti male: il file sorgente non "
+                f"viene dichiarato sbilanciato. {_UNBALANCED_WARNING_SUFFIX}",
+            )
+    elif is_scanned:
         return BalanceFailureVerdict(
             "Il documento è una scansione contabile, ma l'OCR non ha "
             "ricostruito in modo affidabile colonne, gerarchie e totali. "
@@ -931,7 +982,7 @@ def import_pdf_balance_sheet(
         # extractor then re-reads the page images for the real figures. Needs an API key.
         ocr_text = None
         local_coordinate_ocr = False
-        is_scanned = len(sample_text.strip()) < 50
+        is_scanned = not _testo_leggibile(sample_text)
 
         # MinerU OCR context (route /import/pdf-ocr): when supplied, MinerU has already
         # produced document text. Use it for BOTH the classifier routing and the

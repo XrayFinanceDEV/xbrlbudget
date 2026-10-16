@@ -20,7 +20,7 @@ from app.schemas.imports import XBRLImportResponse, CSVImportResponse, ImportErr
 from app.services.upload_tracker import save_upload, mark_success, mark_error
 from importers.xbrl_parser_enhanced import import_xbrl_file_enhanced, XBRLParseError
 from importers.csv_importer import import_csv_file
-from importers.pdf_importer import import_pdf_balance_sheet, PDFImportError
+from importers.pdf_importer import import_pdf_balance_sheet, pdf_e_scansione, PDFImportError
 
 router = APIRouter()
 
@@ -69,6 +69,53 @@ async def _read_and_validate_pdf(
             detail="Either company_id or (create_company=True and company_name) must be provided",
         )
     return content
+
+
+async def _mineru_per_le_scansioni(content: bytes, filename: str, file_path: str):
+    """Fa leggere a MinerU (gx10) i soli PDF scansionati, prima dell'importatore.
+
+    Scansione = testo non leggibile, vuoto o corrotto (``pdf_e_scansione``, lo
+    stesso criterio dell'importatore, nessuna soglia di caratteri). Un PDF con
+    testo buono non passa da MinerU e torna ``(None, None)``.
+
+    Per una scansione restituisce ``(context, esito)``: ``context`` va passato come
+    ``extraction_context`` a ``import_pdf_balance_sheet``, ``esito`` finisce nel
+    ``validation_report["mineru"]``. Se MinerU e' spento, non risponde o non
+    produce testo, ``context`` e' ``None`` e la scansione prosegue sull'OCR di
+    ripiego: dichiarato nell'esito e negli avvisi, mai silenzioso.
+    """
+    if not await run_in_threadpool(pdf_e_scansione, file_path):
+        return None, None
+    if not settings.MINERU_OCR_ENABLED:
+        return None, {"esito": "disattivato"}
+    from app.services.mineru_client import MinerUClient
+    from importers.mineru_adapter import build_extraction_context
+    try:
+        client = MinerUClient.from_settings(settings)
+        await client.health()
+        raw = await client.parse_pdf(content=content, filename=filename)
+        context = await run_in_threadpool(build_extraction_context, raw)
+    except Exception as e:
+        logger.warning("MinerU non disponibile per la scansione: %s: %s", type(e).__name__, e)
+        return None, {"esito": "non_disponibile", "errore": type(e).__name__}
+    if not (context.full_text or "").strip():
+        return None, {"esito": "vuoto"}
+    return context, {"esito": "ok", "versione": raw.version, "caratteri": len(context.full_text)}
+
+
+def _dichiara_mineru(result, esito) -> None:
+    """Scrive l'esito di MinerU nel validation_report, con un avviso se non e' stato usato."""
+    if esito is None or not isinstance(result, dict):
+        return
+    report = result.get("validation_report")
+    if not isinstance(report, dict):
+        report = result["validation_report"] = {}
+    report["mineru"] = esito
+    if esito.get("esito") != "ok":
+        report.setdefault("warnings", []).append(
+            f"MINERU NON USATO ({esito.get('esito')}): la scansione è stata letta "
+            "dall'OCR di ripiego invece che da MinerU."
+        )
 
 
 @router.post(
@@ -444,6 +491,9 @@ async def upload_pdf(
         elif create_company:
             check_company_limit(db, user_id)
 
+        # Solo una scansione passa da MinerU; il suo testo guida routing ed estrazione.
+        mineru_context, mineru_esito = await _mineru_per_le_scansioni(content, file.filename, tmp_file)
+
         # Import PDF file (importer handles period_months + prior year internally)
         result = import_pdf_balance_sheet(
             file_path=tmp_file,
@@ -454,7 +504,9 @@ async def upload_pdf(
             sector=sector,
             period_months=period_months,
             user_id=user_id,
+            extraction_context=mineru_context,
         )
+        _dichiara_mineru(result, mineru_esito)
 
         mark_success(db, upload_record, company_id=result.get("company_id") if isinstance(result, dict) else None)
         return result

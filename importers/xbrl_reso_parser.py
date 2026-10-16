@@ -161,6 +161,32 @@ def _e_piede(righe: list[str]) -> bool:
                 or prima.startswith("Generato automaticamente"))
 
 
+# Fascia in testa e in fondo alla pagina dove stanno intestazione e piede ripetuti.
+_FASCIA_MARGINE = 0.09
+
+
+def _chiave_ripetuta(testo: str) -> str:
+    """Il testo di una riga di margine con i numeri tolti: "Pag. 2" e "Pag. 3" sono la stessa."""
+    return re.sub(r"\d+", "#", _norm(testo))
+
+
+def _ripetute(documento: fitz.Document) -> frozenset[str]:
+    """Le righe di margine che si ripetono su piu' pagine: intestazione e piede di qualunque
+    generatore (SGH 31/12/2025: la ragione sociale in testa, "Nota integrativa XBRL al ... Pag. N"
+    in fondo, senza tassonomia ne' "di M"). Si riconoscono dalla ripetizione, non dal testo: una
+    riga del prospetto non si ripete identica nella stessa fascia di pagine diverse."""
+    pagine_per_chiave: dict[str, set[int]] = {}
+    for numero, pagina in enumerate(documento):
+        altezza = float(pagina.rect.height)
+        for blocco in pagina.get_text("dict")["blocks"]:
+            for l in blocco.get("lines", ()):
+                testo = "".join(sp["text"] for sp in l["spans"]).strip()
+                y0, y1 = l["bbox"][1], l["bbox"][3]
+                if testo and (y1 <= _FASCIA_MARGINE * altezza or y0 >= (1 - _FASCIA_MARGINE) * altezza):
+                    pagine_per_chiave.setdefault(_chiave_ripetuta(testo), set()).add(numero)
+    return frozenset(k for k, p in pagine_per_chiave.items() if len(p) >= 2)
+
+
 def _leggi_righe(documento: fitz.Document) -> tuple[list[_Riga], int, list[int]]:
     """Le righe del prospetto, dal titolo dello Stato patrimoniale alla riga ``21)`` del conto
     economico. Un blocco del testo e' una cella: la didascalia (anche su piu' righe, quando la riga
@@ -172,13 +198,39 @@ def _leggi_righe(documento: fitz.Document) -> tuple[list[_Riga], int, list[int]]
     iniziato = False
     finito = False
     saltare_ragione_sociale = False
+    ripetute = _ripetute(documento)
     for numero, pagina in enumerate(documento):
         in_nota = False
+        altezza = float(pagina.rect.height)
         for blocco in pagina.get_text("blocks"):
             grezze = blocco[4].split("\n")
             pulite = [r.strip() for r in grezze if r.strip()]
             if not pulite:
                 continue
+            nel_margine = (blocco[3] <= _FASCIA_MARGINE * altezza
+                           or blocco[1] >= (1 - _FASCIA_MARGINE) * altezza)
+            if nel_margine and all(_chiave_ripetuta(r) in ripetute for r in pulite):
+                continue
+            # le date d'intestazione in testa a un blocco che prosegue col titolo
+            # ("31/12/2025 / 31/12/2024 / Stato patrimoniale", SGH): sono le colonne, il resto
+            # del blocco si legge come sempre
+            testa = 0
+            while testa < len(pulite) and all(_DATA.match(t) for t in pulite[testa].split()):
+                testa += 1
+            if 0 < testa < len(pulite):
+                if not colonne:
+                    token = [t for r in pulite[:testa] for t in r.split()]
+                    colonne = len(token)
+                    anni = [int(_DATA.match(t).group(1)) for t in token]
+                date_viste = 0
+                resto = []
+                for r in grezze:
+                    if date_viste < testa and r.strip() and all(_DATA.match(t) for t in r.split()):
+                        date_viste += 1
+                        continue
+                    resto.append(r)
+                grezze = resto
+                pulite = pulite[testa:]
             if _e_piede(pulite):
                 # "v.2.14.5" da sola: il blocco dopo e' la ragione sociale del piede, mai una riga
                 saltare_ragione_sociale = len(pulite) == 1 and bool(re.match(r"^v\.\d", pulite[0]))
@@ -280,14 +332,15 @@ def _ancore_pagina(pagina: fitz.Page) -> list[tuple[float, list[float], list[int
     return out
 
 
-def _linee_pagina(pagina: fitz.Page) -> list[_Linea]:
+def _linee_pagina(pagina: fitz.Page, ripetute: frozenset[str] = frozenset()) -> list[_Linea]:
     """Le righe di testo del prospetto di una pagina, con il loro riquadro: gli stessi filtri del
-    lettore a blocchi (piede di pagina, ragione sociale del piede, note a pie di tabella),
-    applicati blocco per blocco; le righe fatte di sole date (intestazioni di colonna) non sono
-    righe del prospetto."""
+    lettore a blocchi (piede di pagina, ragione sociale del piede, note a pie di tabella,
+    intestazione e piede ripetuti su piu' pagine), applicati blocco per blocco; le righe fatte di
+    sole date (intestazioni di colonna) non sono righe del prospetto."""
     out: list[_Linea] = []
     saltare_ragione_sociale = False
     in_nota = False
+    altezza_pagina = float(pagina.rect.height)
     for indice, blocco in enumerate(pagina.get_text("dict")["blocks"]):
         if blocco.get("type") != 0:
             continue
@@ -296,6 +349,10 @@ def _linee_pagina(pagina: fitz.Page) -> list[_Linea]:
             testo = "".join(sp["text"] for sp in l["spans"]).strip()
             if testo:
                 x0, y0, x1, y1 = l["bbox"]
+                if (_chiave_ripetuta(testo) in ripetute
+                        and (y1 <= _FASCIA_MARGINE * altezza_pagina
+                             or y0 >= (1 - _FASCIA_MARGINE) * altezza_pagina)):
+                    continue
                 linee.append(_Linea(testo, x0, x1, y0, y1, indice))
         if not linee:
             continue
@@ -352,12 +409,13 @@ def _leggi_righe_geometria(documento: fitz.Document) -> tuple[list[_Riga], int, 
     ancore_correnti: list[float] = []
     iniziato = finito = False
     blocco_riga: list[int] = []          # blocco dell'ultima riga di didascalia, per riga
+    ripetute = _ripetute(documento)
     for numero, pagina in enumerate(documento):
         ancore = _ancore_pagina(pagina)
         if ancore and not colonne:
             colonne = len(ancore[0][1])
             anni = list(ancore[0][2])
-        linee = sorted(_linee_pagina(pagina), key=lambda l: (l.centro, l.x0))
+        linee = sorted(_linee_pagina(pagina, ripetute), key=lambda l: (l.centro, l.x0))
         gruppi: list[list[_Linea]] = []
         for l in linee:
             if gruppi and abs(l.centro - gruppi[-1][0].centro) <= _TOLLERANZA_RIGA:

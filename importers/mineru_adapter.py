@@ -214,17 +214,26 @@ def _parse_table_html(html: str, page: int, block_id: str) -> tuple[MinerURow, .
 _YEAR_RE = re.compile(r"\b(?:31/12/|31\.12\.|al\s+31/12/)?(19|20)\d{2}\b")
 
 
+_DATE_YEAR_RE = re.compile(r"\b\d{1,2}[/.\-]\d{1,2}[/.\-]((?:19|20)\d{2})\b")
+
+
 def _detect_years(full_text: str, tables: tuple[MinerUTable, ...]) -> tuple[Optional[int], Optional[int]]:
-    """Best-effort year detection from table headers; None when unclear."""
+    """Best-effort year detection from table headers; None when unclear.
+
+    A full date ("31/12/2025") is the evidence. A bare four-digit number is accepted
+    only when no date is printed anywhere: in a table it is as likely a row code
+    ("2086 A.IX) Utile", Santini 31/12/2025) as a year."""
     candidates: list[int] = []
     haystacks = [t.html for t in tables[:3]] + [full_text[:2000]]
     for hs in haystacks:
-        for m in re.finditer(r"\b(19|20)(\d{2})\b", hs or ""):
+        candidates.extend(int(m.group(1)) for m in _DATE_YEAR_RE.finditer(hs or ""))
+        if candidates:
+            break
+    if not candidates:
+        for m in re.finditer(r"\b(19|20)(\d{2})\b", full_text[:2000]):
             yr = int(m.group(0))
             if 1990 <= yr <= 2100:
                 candidates.append(yr)
-        if candidates:
-            break
     if not candidates:
         return None, None
     uniq: list[int] = []

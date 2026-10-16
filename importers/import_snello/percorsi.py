@@ -22,7 +22,9 @@ def _nomi() -> dict[str, str]:
 
 
 NOMI = _nomi()
-_CR = {"1": "a", "2": "b", "3": "c", "4": "d", "5-bis": "e", "5-ter": "f", "5-quater": "g"}
+# C.II.5 (verso imprese sottoposte al controllo delle controllanti, dal 2016) non ha un campo
+# proprio: va negli altri crediti come i debiti D.11-bis, mai perso in un KeyError.
+_CR = {"1": "a", "2": "b", "3": "c", "4": "d", "5": "g", "5-bis": "e", "5-ter": "f", "5-quater": "g"}
 _DEB = {"1": "c", "2": "c", "3": "b", "4": "a", "5": "b", "6": "g", "7": "d", "8": "g", "9": "g",
         "10": "g", "11": "g", "11-bis": "g", "12": "e", "13": "f", "14": "g"}
 _PN = {"I": "sp11", "II": "sp12a", "III": "sp12b", "IV": "sp12c", "V": "sp12d", "VI": "sp12e",

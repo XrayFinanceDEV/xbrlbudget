@@ -90,6 +90,9 @@ def is_situazione_contabile(text: str) -> bool:
     # TeamSystem XX/YYYY/YYYY codes
     if is_teamsystem_sc(text):
         return True
+    # Verifica con la sezione in colonna (SEZBIL A/P/C/R e RIEPILOGO, COLOMBO 2026)
+    if is_verifica_sezbil(text):
+        return True
     return False
 
 
@@ -1204,6 +1207,11 @@ def build_iv_cee(entries: List[Entry], default_ce: bool = False) -> Tuple[Dict[s
     capitale = Decimal('0')
     riserve = Decimal('0')
     utile_esercizio = Decimal('0')
+    # conti "Utile/Perdita d'esercizio" dello SP scartati per non contarli due volte col
+    # risultato del periodo (livello 4): se non coincidono con lui sono il risultato
+    # dell'anno prima non ancora destinato (COLOMBO 2026), che non si perde
+    risultati_scartati: List[Decimal] = []
+    risultato_periodo_letto = False
 
     # Debt entro/oltre from detail lines
     debt_bank_entro = Decimal('0')
@@ -1326,6 +1334,9 @@ def build_iv_cee(entries: List[Entry], default_ce: bool = False) -> Tuple[Dict[s
                 if (_kw_match(desc_upper, ['UTILE', 'ESERCIZ']) or
                         _kw_match(desc_upper, ['PERDITA', 'ESERCIZ'])):
                     if not _kw_any(desc_upper, ['PORTATI', 'PRECEDENT', 'NUOVO']):
+                        risultati_scartati.append(
+                            -entry.amount if 'PERDITA' in desc_upper and 'UTILE' not in desc_upper
+                            else entry.amount)
                         return
                 if ((_kw_match(desc_upper, ['CAPITALE'])
                         or re.match(r'^CAP\.\s?SOC', desc_upper))      # "CAP. SOC./PATR.NET." (budget_1343)
@@ -1462,6 +1473,7 @@ def build_iv_cee(entries: List[Entry], default_ce: bool = False) -> Tuple[Dict[s
 
         if entry.level == 4:
             # UTILE DI ESERCIZIO
+            risultato_periodo_letto = True
             if entry.section in ('passivo', 'ricavi'):
                 utile_esercizio = entry.amount
             elif entry.section in ('attivo', 'costi'):
@@ -1518,6 +1530,9 @@ def build_iv_cee(entries: List[Entry], default_ce: bool = False) -> Tuple[Dict[s
                         _kw_match(desc_upper, ['PERDITA', 'ESERCIZ']) or
                         _kw_match(desc_upper, ['RISULTATO', 'ESERCIZ'])):
                     if not _kw_any(desc_upper, ['PORTATI', 'PRECEDENT', 'NUOVO', 'PORTATE']):
+                        risultati_scartati.append(
+                            -entry.amount if 'PERDITA' in desc_upper and 'UTILE' not in desc_upper
+                            else entry.amount)
                         continue
                 if _kw_match(desc_upper, ['CAPITALE']):
                     capitale += entry.amount
@@ -1541,6 +1556,9 @@ def build_iv_cee(entries: List[Entry], default_ce: bool = False) -> Tuple[Dict[s
                             _kw_match(desc_upper, ['PERDITA', 'ESERCIZ']) or
                             _kw_match(desc_upper, ['RISULTATO', 'ESERCIZ'])):
                         if not _kw_any(desc_upper, ['PORTATI', 'PRECEDENT', 'NUOVO', 'PORTATE']):
+                            risultati_scartati.append(
+                                -entry.amount if 'PERDITA' in desc_upper and 'UTILE' not in desc_upper
+                                else entry.amount)
                             continue
                     if _kw_match(desc_upper, ['CAPITALE']):
                         capitale += entry.amount
@@ -1613,6 +1631,16 @@ def build_iv_cee(entries: List[Entry], default_ce: bool = False) -> Tuple[Dict[s
 
     if _netted > 0:
         bs['_netted_contra'] = bs.get('_netted_contra', Decimal('0')) + _netted
+
+    # Il risultato dell'anno prima non destinato (un conto "utile d'esercizio" fra i conti
+    # del patrimonio diverso dal risultato del periodo): utili (perdite) portati a nuovo,
+    # dichiarato. Quando coincide col risultato del periodo e' lui, e non cambia nulla.
+    if risultati_scartati and risultato_periodo_letto:
+        _prima = sum(risultati_scartati, Decimal('0'))
+        if abs(_prima - utile_esercizio) > Decimal('0.05'):
+            riserve += _prima
+            typed_riserve['g'] += _prima
+            bs['_risultato_anno_prima_conti'] = _prima
 
     # Equity
     bs['sp11'] = capitale
@@ -3331,6 +3359,136 @@ def parse_entries_verifica_sub_mastro(file_path: str) -> List[Entry]:
             nome = r[2]
             r[3] = totali[nome] * _VS_SEZIONI[nome][1]
     return _entries_da_righe_verifica([tuple(r) for r in righe], {utile_ce}, "Verifica Sub/Mastro")
+
+
+# ---------------------------------------------------------------------------
+# Bilancio di verifica con la sezione in colonna (COLOMBO 2026): "Mastro | Descrizione | Conto |
+# Descrizione | Importo | SEZBIL". Un solo importo per conto, sempre nel verso della sezione,
+# senza separatore delle migliaia e con uno o due decimali ("203441,8"); la lettera della
+# colonna SEZBIL e' la sezione (A attivita', P passivita', C costi, R ricavi; "X" una riga
+# vuota). "Totale <MASTRO>" sotto i conti, e un RIEPILOGO con TOTALE ATTIVITA'/PASSIVITA'/
+# COSTI/RICAVI e la DIFFERENZA, che e' il risultato. Nessun "bilancio di verifica" ne'
+# "TOTALE A PAREGGIO": prima il classificatore lo rifiutava come documento non riconosciuto.
+# ---------------------------------------------------------------------------
+
+_SB_AMT = re.compile(r'^-?\d{1,3}(?:\.\d{3})+(?:,\d{1,2})?$|^-?\d+(?:,\d{1,2})?$')
+_SB_SEZIONI = {'A': ('01', 1), 'P': ('02', -1), 'C': ('03', 1), 'R': ('04', -1)}
+_SB_RIEPILOGO = {"ATTIVITA'": 'A', "PASSIVITA'": 'P', 'COSTI': 'C', 'RICAVI': 'R'}
+
+
+def is_verifica_sezbil(text: str) -> bool:
+    if 'SEZBIL' not in text or 'RIEPILOGO' not in text:
+        return False
+    upper = text.upper()
+    if not all(f"TOTALE {s}" in upper for s in _SB_RIEPILOGO):
+        return False
+    # l'importo e la lettera della sezione: "3845 A", "203441,8 A" (o la lettera da sola)
+    return len(re.findall(r'(?m)^(?:-?[\d.]+(?:,\d{1,2})? )?[APCR]$', text)) >= 10
+
+
+def _sb_importo(testo: str) -> Decimal:
+    neg = testo.startswith('-')
+    v = Decimal(testo.lstrip('-').replace('.', '').replace(',', '.'))
+    return -v if neg else v
+
+
+def parse_entries_verifica_sezbil(file_path: str) -> List[Entry]:
+    """Le righe della verifica con la sezione in colonna, nella forma di
+    ``_entries_da_righe_verifica``. Le colonne si leggono dall'intestazione di ogni pagina. Ogni
+    mastro deve tornare al centesimo con i suoi conti, ogni sezione col suo totale del
+    riepilogo, e la DIFFERENZA deve essere sia attivita' meno passivita' sia ricavi meno costi.
+    Altrimenti la lettura e' vuota."""
+    tol = Decimal('0.05')
+    mastri: List[dict] = []              # nell'ordine di stampa
+    totali: Dict[str, Decimal] = {}
+    differenze: List[Decimal] = []
+    doc = fitz.open(file_path)
+    try:
+        colonne = None
+        mastro = None
+        for page in doc:
+            per_y: Dict[int, list] = {}
+            for w in page.get_text('words'):
+                per_y.setdefault(round((w[1] + w[3]) / 2), []).append(w)
+            for y in sorted(per_y):
+                ws = sorted(per_y[y], key=lambda w: w[0])
+                parole = [w[4] for w in ws]
+                if 'SEZBIL' in parole and 'Conto' in parole and 'Importo' in parole:
+                    x = {w[4]: w for w in ws}
+                    colonne = {'mastro': ws[0][0], 'conto': x['Conto'][0],
+                               'importo': x['Importo'][0], 'sezbil': x['SEZBIL'][0]}
+                    continue
+                if colonne is None:
+                    continue
+                testo = ' '.join(parole)
+                # riepilogo: "TOTALE ATTIVITA' 7721026,18 TOTALE COSTI 5883928,84", "DIFFERENZA x DIFFERENZA x"
+                coppie = re.findall(r"TOTALE (ATTIVITA'|PASSIVITA'|COSTI|RICAVI) (\S+)", testo)
+                if coppie and all(_SB_AMT.match(v) for _, v in coppie):
+                    for nome, v in coppie:
+                        totali[_SB_RIEPILOGO[nome]] = _sb_importo(v)
+                    continue
+                if parole[0] == 'DIFFERENZA':
+                    differenze.extend(_sb_importo(v) for v in parole if _SB_AMT.match(v))
+                    continue
+                lettera = next((w[4] for w in ws if abs(w[0] - colonne['sezbil']) <= 8
+                                and w[4] in ('A', 'P', 'C', 'R', 'X')), None)
+                if lettera is None or lettera == 'X':
+                    continue
+                importi = [w for w in ws if _SB_AMT.match(w[4])
+                           and colonne['importo'] - 60 <= w[2] < colonne['sezbil'] + 2]
+                if len(importi) != 1:
+                    continue
+                v = _sb_importo(importi[0][4])
+                codice_conto = next((w[4] for w in ws if abs(w[0] - colonne['conto']) <= 10
+                                     and re.fullmatch(r'[0-9A-Z]{3,8}', w[4])
+                                     and re.search(r'\d', w[4])), None)
+                codice_mastro = next((w[4] for w in ws if abs(w[0] - colonne['mastro']) <= 10
+                                      and re.fullmatch(r'\d{2,4}', w[4])), None)
+                if codice_conto is None:
+                    # "Totale <MASTRO>" o il totale della sezione ("Totale", "Totale ricavi")
+                    if mastro is not None and parole[0] == 'Totale' and len(parole) > 3:
+                        mastro['stampato'] = v
+                        mastro = None
+                    continue
+                desc_x = (colonne['conto'] + 20, colonne['importo'] - 60)
+                desc = ' '.join(w[4] for w in ws if desc_x[0] < w[0] and w[2] <= desc_x[1]
+                                and w not in importi)
+                if codice_mastro is not None or mastro is None or mastro['sezione'] != lettera:
+                    desc_m = ' '.join(w[4] for w in ws if colonne['mastro'] + 30 < w[0] < colonne['conto'] - 5)
+                    mastro = {'codice': codice_mastro or (mastro or {}).get('codice', ''),
+                              'desc': desc_m or (mastro or {}).get('desc', ''),
+                              'sezione': lettera, 'conti': [], 'stampato': None}
+                    mastri.append(mastro)
+                mastro['conti'].append((codice_conto, desc, v))
+    finally:
+        doc.close()
+
+    if set(totali) != set(_SB_SEZIONI) or len(differenze) != 2 or not mastri:
+        logger.warning("Verifica SEZBIL: riepilogo incompleto: lettura scartata")
+        return []
+    for m in mastri:
+        somma = sum((c[2] for c in m['conti']), Decimal('0'))
+        if m['stampato'] is not None and abs(somma - m['stampato']) > tol:
+            logger.warning(f"Verifica SEZBIL: il mastro {m['desc'][:40]} ({m['stampato']}) non torna "
+                           f"con i suoi conti ({somma}): lettura scartata")
+            return []
+    utile_sp = totali['A'] - totali['P']
+    utile_ce = totali['R'] - totali['C']
+    if (abs(utile_sp - utile_ce) > tol
+            or any(abs(d - utile_sp) > tol for d in differenze)):
+        logger.warning("Verifica SEZBIL: la differenza non pareggia lo SP e il CE: lettura scartata")
+        return []
+    righe: list = []
+    for lettera, (codice_sez, segno) in _SB_SEZIONI.items():
+        nome = {'A': "ATTIVITA'", 'P': "PASSIVITA'", 'C': 'COSTI', 'R': 'RICAVI'}[lettera]
+        righe.append(('sezione', codice_sez, nome, totali[lettera] * segno, None))
+        for m in mastri:
+            if m['sezione'] != lettera:
+                continue
+            righe.append(('mastro', m['codice'], m['desc'], None, None))
+            for codice, desc, v in m['conti']:
+                righe.append(('conto', codice, desc, v * segno, None))
+    return _entries_da_righe_verifica(righe, {utile_ce}, "Verifica SEZBIL")
 
 
 # ---------------------------------------------------------------------------
@@ -7088,6 +7246,12 @@ def extract_situazione_contabile(
         entries = parse_entries_verifica_mastri(file_path)
         default_ce = True
         logger.info(f"Verifica Mastri parser: {len(entries)} entries")
+    elif is_verifica_sezbil(full_text):
+        used_ie = True
+        logger.info("Bilancio di verifica con la sezione in colonna (SEZBIL) detected")
+        entries = parse_entries_verifica_sezbil(file_path)
+        default_ce = True
+        logger.info(f"Verifica SEZBIL parser: {len(entries)} entries")
     elif is_ago_format(full_text) and not is_contrapposte_8digit(full_text):
         logger.info("AGO/ERP format detected, using block-based parser")
         entries, totali = parse_entries_ago(file_path)

@@ -15,7 +15,7 @@ from .editorial_plan import DossierTemplateBundle
 from .runtime import (
     Compiler, RendererBusy, RendererCompileError, RendererInputError,
     RendererTimeout, RendererUnavailable, RendererLimits, TemplateBundle,
-    TypstRenderer, _regular, log,
+    TypstRenderer, _O_NOFOLLOW, _regular, log,
 )
 
 _EXPRESSION = 'query(metadata).map(x => x.value)'
@@ -165,7 +165,7 @@ class NoteFitProbe(TypstRenderer):
         with super()._private_job(serialized, files, binary, options) as job:
             try:
                 destination = job / _INPUT
-                fd = os.open(destination, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
+                fd = os.open(destination, os.O_WRONLY | os.O_CREAT | os.O_EXCL | _O_NOFOLLOW, 0o600)
                 with os.fdopen(fd, 'wb') as stream:
                     stream.write(note_input)
             except OSError:

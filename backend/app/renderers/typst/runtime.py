@@ -29,6 +29,11 @@ import fitz
 
 from app.schemas.final_report_v2 import FinalReportModelV2
 
+# POSIX-only flags are absent on Windows (local dev); there the is_symlink check
+# stands alone, and O_BINARY keeps the CRT from translating newlines.
+_O_NOFOLLOW = getattr(os, 'O_NOFOLLOW', 0)
+_O_READ = os.O_RDONLY | _O_NOFOLLOW | getattr(os, 'O_NONBLOCK', 0) | getattr(os, 'O_BINARY', 0)
+
 log = logging.getLogger(__name__)
 _SHA = re.compile(r'^[0-9a-f]{64}$')
 
@@ -118,7 +123,7 @@ def _regular(path: Path, maximum: int) -> bytes:
     if any(p.is_symlink() for p in (path, *path.parents)):
         raise RendererUnavailable()
     try:
-        fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+        fd = os.open(path, _O_READ)
         with os.fdopen(fd, 'rb') as stream:
             info = os.fstat(stream.fileno())
             if not stat.S_ISREG(info.st_mode) or info.st_size > maximum:
@@ -287,7 +292,7 @@ class TypstRenderer:
             if stdout_path.parent != job / 'output' or stdout_path.name != 'layout.json':
                 raise RendererUnavailable()
             try:
-                fd = os.open(stdout_path, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
+                fd = os.open(stdout_path, os.O_WRONLY | os.O_CREAT | os.O_EXCL | _O_NOFOLLOW, 0o600)
                 output = os.fdopen(fd, 'wb')
             except OSError:
                 raise RendererUnavailable() from None

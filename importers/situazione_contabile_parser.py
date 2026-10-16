@@ -628,7 +628,7 @@ _EQUITY_RULES = [
 def _classify_sp_attivo(desc_upper: str) -> str:
     """Classify an attivo entry by description keywords. Returns field or 'sp06' default."""
     # RIM. is a ledger abbreviation, not an unknown asset to put in receivables.
-    desc_upper = re.sub(r'\bRIM\.(?=\s|$)', 'RIMANENZE', desc_upper)
+    desc_upper = re.sub(r'\bRIM\.(?=\s|$|[A-Z])', 'RIMANENZE ', desc_upper)
     desc_upper = re.sub(r'\bRIMAN\.', 'RIMANENZE ', desc_upper)     # "RIMAN.FINALI SEMILAVORATI"
     for keywords, field in _SP_ATTIVO_RULES:
         if _kw_match(desc_upper, keywords):
@@ -2926,7 +2926,7 @@ def _regola_sp(desc_upper: str, lato: str) -> Optional[str]:
     """La voce di SP che una descrizione riconosce davvero, o None se nessuna regola la
     nomina (i classificatori ripiegano allora su crediti/debiti generici)."""
     if lato == 'attivo':
-        d = re.sub(r'\bRIM\.(?=\s|$)', 'RIMANENZE', desc_upper)
+        d = re.sub(r'\bRIM\.(?=\s|$|[A-Z])', 'RIMANENZE ', desc_upper)
         regole = _SP_ATTIVO_RULES
     else:
         d = _canon_fondo_amm(desc_upper)
@@ -3371,7 +3371,8 @@ def parse_entries_verifica_sub_mastro(file_path: str) -> List[Entry]:
 # "TOTALE A PAREGGIO": prima il classificatore lo rifiutava come documento non riconosciuto.
 # ---------------------------------------------------------------------------
 
-_SB_AMT = re.compile(r'^-?\d{1,3}(?:\.\d{3})+(?:,\d{1,2})?$|^-?\d+(?:,\d{1,2})?$')
+# fino a tre decimali: il gestionale stampa "1712097,143" (conto di un factor) e "2721068,787"
+_SB_AMT = re.compile(r'^-?\d{1,3}(?:\.\d{3})+(?:,\d{1,3})?$|^-?\d+(?:,\d{1,3})?$')
 _SB_SEZIONI = {'A': ('01', 1), 'P': ('02', -1), 'C': ('03', 1), 'R': ('04', -1)}
 _SB_RIEPILOGO = {"ATTIVITA'": 'A', "PASSIVITA'": 'P', 'COSTI': 'C', 'RICAVI': 'R'}
 
@@ -3383,7 +3384,7 @@ def is_verifica_sezbil(text: str) -> bool:
     if not all(f"TOTALE {s}" in upper for s in _SB_RIEPILOGO):
         return False
     # l'importo e la lettera della sezione: "3845 A", "203441,8 A" (o la lettera da sola)
-    return len(re.findall(r'(?m)^(?:-?[\d.]+(?:,\d{1,2})? )?[APCR]$', text)) >= 10
+    return len(re.findall(r'(?m)^(?:-?[\d.]+(?:,\d{1,3})? )?[APCR]$', text)) >= 10
 
 
 def _sb_importo(testo: str) -> Decimal:
@@ -3444,6 +3445,24 @@ def parse_entries_verifica_sezbil(file_path: str) -> List[Entry]:
                                      and re.search(r'\d', w[4])), None)
                 codice_mastro = next((w[4] for w in ws if abs(w[0] - colonne['mastro']) <= 10
                                       and re.fullmatch(r'\d{2,4}', w[4])), None)
+                if codice_conto is None and parole.count('Totale') == 2:
+                    # Mastro di un solo conto, entrambi senza codice numerico (COLOMBO: "CLIENTI IT
+                    # Totale CLIENTI ITALIA CLIENTI IT Totale CLIENTI ITALIA 2721068,787 A"): la riga
+                    # e' insieme il conto e il totale del suo mastro. Mastro, conto e descrizioni si
+                    # separano dalle due parole "Totale"; senza quelle due, la riga non si legge.
+                    t1, t2 = [i for i, w in enumerate(ws) if w[4] == 'Totale']
+                    i_conto = next((i for i, w in enumerate(ws) if w[0] >= colonne['conto'] - 10), None)
+                    if i_conto is not None and t1 < i_conto < t2:
+                        def _testo(da, a):
+                            return ' '.join(w[4] for w in ws[da:a] if w not in importi and w[4] != lettera)
+                        mastri.append({'codice': _testo(0, t1), 'desc': _testo(t1 + 1, i_conto),
+                                       'sezione': lettera,
+                                       # il prefisso "00" e' un segnaposto: build_iv_cee scarta un conto
+                                                 # il cui codice non comincia per due cifre
+                                       'conti': [('00 ' + _testo(i_conto, t2), _testo(t2 + 1, len(ws)), v)],
+                                       'stampato': v})
+                        mastro = None
+                    continue
                 if codice_conto is None:
                     # "Totale <MASTRO>" o il totale della sezione ("Totale", "Totale ricavi")
                     if mastro is not None and parole[0] == 'Totale' and len(parole) > 3:

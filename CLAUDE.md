@@ -76,8 +76,8 @@ the ones that matter; the rest are legacy or per-year detail. Two things about t
 knowing:
 
 - **Import endpoints are four, not three:** `POST /api/v1/import/{xbrl|csv|pdf|pdf-ocr}`. XBRL = 6
-  taxonomies; CSV = TEBE format; PDF = PyMuPDF + LLM (Anthropic by default, or gx10 for the
-  configured CoGe, IV-CEE and detail passes; **not** Docling — that path has no caller);
+  taxonomies; CSV = TEBE format; PDF = PyMuPDF + deterministic readers first, then the LLM on gx10 (Anthropic
+  only with `ANTHROPIC_CONSENTITO=1`); **not** Docling — that path has no caller);
   `pdf-ocr` = MinerU (quello di gx10 sui VPS, acceso da `budget-env-staging`); `/import/pdf` manda
   **in automatico** a MinerU una scansione (meno di 50 caratteri di testo, oppure pagine che sono
   immagini intere con sopra un OCR), e se MinerU non risponde
@@ -218,7 +218,7 @@ ciò che non si può non sapere. Ogni voce dice la regola e **cosa si rompe** a 
   sbilanciata che diventa il generico «Balance sheet does not balance». È l'ultima risorsa **solo**
   quando il deterministico esce davvero vuoto. Ricablarlo come fallback di route C è una tentazione
   ricorrente; l'estrattore giusto per le liste CoGe è il pass CoGe dedicato.
-- **Percorso snello (`IMPORT_MOTORE=snello`)**: prima i lettori deterministici (PDF reso da XBRL
+- **Percorso snello (default dal 2026-10-16: `IMPORT_MOTORE` assente = snello, `classico` = importatore di prima; Anthropic vietato salvo `ANTHROPIC_CONSENTITO=1`, gx10 e MinerU ammessi)**: prima i lettori deterministici (PDF reso da XBRL
   depositato, schema di legge con o senza dettaglio conti, situazione contabile), **prima** della
   struttura: se uno quadra si adotta a zero chiamate di modello. Altrimenti il modello nomina il
   percorso di legge e, sugli schemi di legge, restituisce l'importo. Il codice chiude con un tappo

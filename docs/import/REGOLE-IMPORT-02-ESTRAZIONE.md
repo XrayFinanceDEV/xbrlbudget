@@ -575,16 +575,19 @@ semantica IV-CEE, mai per posizione di colonna**.
 
 Altrimenti: "Schema CSV non riconosciuto".
 
-## 10. Percorso snello (`IMPORT_MOTORE=snello`)
+## 10. Percorso snello (default; `IMPORT_MOTORE=classico` per tornare a prima)
 
 > Motori: `importers/import_snello/` (`righe.py`, `percorsi.py`, `lettura.py`, `verifica.py`,
 > `legenda.txt`), `importers/struttura_documento/mappa.py`. Spec:
 > `docs/superpowers/specs/2026-09-26-import-pdf-snello-design.md`.
 
-Un secondo motore d'import, dietro l'interruttore `IMPORT_MOTORE=snello` (vedi
-[PRODUCTION_CONFIG.md](../deployment/PRODUCTION_CONFIG.md)); assente o a qualunque altro valore,
-il percorso resta quello descritto nelle sezioni precedenti. Legge con Qwen locale (gx10), usa
-Anthropic (`STRUTTURA_MODEL`, Sonnet) solo per la struttura, e **non sceglie mai un codice da un
+Il motore d'import di default dal 2026-10-16 (vedi
+[PRODUCTION_CONFIG.md](../deployment/PRODUCTION_CONFIG.md)); con `IMPORT_MOTORE=classico` (o un
+altro valore) il percorso resta quello descritto nelle sezioni precedenti. Legge con Qwen locale
+(gx10); **Anthropic è vietato** salvo `ANTHROPIC_CONSENTITO=1` (`llm_provider.vieta_anthropic`):
+senza consenso, o con gx10 non configurato, la fase che servirebbe al modello si salta e si
+dichiara. Prima del modello girano i lettori a regole, `lettura generica dello schema di legge`
+compreso (`importers/schema_legge_generico.py`), e **non sceglie mai un codice da un
 elenco lungo**: il modello nomina la voce di legge (il percorso, es. `SPP.D.4.E`), il codice la
 traduce nel campo `sp`/`ce` con una tabella fissa.
 
@@ -735,7 +738,7 @@ un livello sopra quelli di `tappa()`:
 
 | Esito | Quando | Chiavi proprie |
 |---|---|---|
-| *(chiave assente)* | `IMPORT_MOTORE` spento o su un valore diverso da `"snello"` | — |
+| *(chiave assente)* | `IMPORT_MOTORE=classico` (o un valore diverso da `snello`) | — |
 | `"non_applicabile"` | il documento è una scansione o viene da OCR (RapidOCR locale, o MinerU senza tabelle a sezioni contrapposte): il percorso snello **non si tenta nemmeno**, un testo OCR non è mai un text layer nativo. Con le tabelle MinerU a sezioni contrapposte invece lo snello legge il loro PDF sintetico (pagina 01 §5) | `motivo`: `"scansione"` \| `"ocr"` (mai `fase`/`errore`) |
 | `"ok"` / `"tappo"` | successo dell'orchestratore | `modo`, `struttura`, `misura`, `tappo`, `letture`, `diag`, `anomalie`, `secondi`, più `precedente` (`"incluso"` \| `"escluso_oltre_soglia"` \| `"non_letto_dalla_lettura_deterministica"`) quando in modo `"legge"` c'è un anno precedente |
 | `"squadrato"` | scarto oltre il limite del tappo dopo l'unica rilettura (modo `"legge"`), direttamente (modo `"conti"`), o lettura deterministica vicina salvata al posto di quella del modello o del ripiego (Task 28, nessuna rilettura): si adotta comunque, `tappo.corrente` resta `None` e `misura` dichiara lo scarto | stesse chiavi di `"ok"`/`"tappo"`, più `confronto_letture` o `ripiego_evitato` nel caso Task 28 |

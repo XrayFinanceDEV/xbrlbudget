@@ -50,11 +50,14 @@ lettura dello stato patrimoniale fino a 3 volte, quindi un gx10 bloccato può te
 impegnato un import di route C a lungo prima di ripiegare sul candidato deterministico
 (misurato dal vivo: una chiamata normale impiega 15-26 s).
 
-## Percorso snello per l'import PDF (`IMPORT_MOTORE=snello`)
+## Percorso snello per l'import PDF (default; `IMPORT_MOTORE=classico` lo spegne)
 
-`IMPORT_MOTORE` — `snello` accende il motore alternativo di import PDF (struttura Sonnet vision +
-lettura macroconti su gx10 + verifica con tappo dichiarato); qualunque altro valore, o l'assenza
-della variabile (default), lascia l'importatore attuale invariato. Vedi
+`IMPORT_MOTORE` — l'assenza della variabile (default) o `snello` usano il motore di import PDF
+snello (lettori a regole, poi struttura e lettura macroconti su gx10, verifica con tappo
+dichiarato); `classico` (o un altro valore) torna all'importatore di prima. **Anthropic è
+vietato** salvo `ANTHROPIC_CONSENTITO=1`: un server che non configura gx10
+(`PDF_LLM_PROVIDER_*`/`GX10_*`) non ripiega più su Haiku, e gli import che servirebbero al modello
+falliscono con un messaggio che lo dice. Vedi
 [REGOLE-IMPORT-02-ESTRAZIONE.md §10](../import/REGOLE-IMPORT-02-ESTRAZIONE.md) e
 [REGOLE-IMPORT-04-QUADRATURE.md §12](../import/REGOLE-IMPORT-04-QUADRATURE.md).
 

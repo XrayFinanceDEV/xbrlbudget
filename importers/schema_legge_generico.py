@@ -112,6 +112,8 @@ def _norm(testo: str) -> str:
 
 def _importo(token: str) -> Optional[Decimal]:
     t = token.strip()
+    if t == "-":
+        return Decimal(0)       # la cella vuota dei prospetti Infocamere ("Imposte anticipate 59 -")
     if not _IMPORTO.match(t):
         return None
     negativo = t.startswith(("(", "-")) or t.endswith("-")
@@ -159,6 +161,8 @@ def _coda_importi(riga: list[tuple]) -> int:
     k = len(riga)
     while k > 0:
         t = str(riga[k - 1][4]).strip()
+        if t == "-" and k > 1 and re.fullmatch(r"\(\d+", str(riga[k - 2][4]).strip()):
+            break       # "(18 -" a capo di "19)": il trattino di un intervallo, non una cella vuota
         if _importo(t) is not None or _norm(t) in _EURO or _TRABOCCATO.match(t):
             k -= 1
             continue
@@ -208,7 +212,9 @@ def _testate_ripetute(pagine: list[list[list[tuple]]], altezze: list[float]) -> 
                 continue
             if not (k < prima or k > ultima or _nel_margine(r, altezze[numero])):
                 continue
-            numeri = any(_importo(str(w[4])) is not None for w in r)
+            # il numero di pagina in coda ("Bilancio XBRL 2", "Bilancio XBRL 3") non e' un importo
+            numeri = any(_importo(str(w[4])) is not None
+                         and not re.fullmatch(r"\d{1,3}", str(w[4]).strip()) for w in r)
             chiave = ("=" + _norm(testo)) if numeri else ("#" + reso._chiave_ripetuta(testo))
             candidate.append((numero, k, chiave))
             pagine_per_chiave.setdefault(chiave, set()).add(numero)
@@ -616,10 +622,51 @@ def _leggi(documento: fitz.Document):
     righe_out = _imposte_come_totale(righe_out)
     righe_out = _totali_di_sezione_ce(righe_out)
     righe_out = _sezioni_vuote(righe_out)
+    righe_out = _intestazioni_a_trattino(righe_out)
+    righe_out = _raggruppamenti_con_dettaglio(righe_out)
     anni = [anni_doc[i] for i in range(n_col) if i in anni_doc]
     if len(anni) != n_col:
         anni = anni[:1] if anni else []
     return righe_out, n_col, anni
+
+
+def _intestazioni_a_trattino(righe: list[reso._Riga]) -> list[reso._Riga]:
+    """ "17) interessi ed altri oneri finanziari - -" seguita da "altri 438 336" e dal suo totale:
+    i trattini della voce sono la cella vuota di un'intestazione (i prospetti Infocamere
+    stampano "-" dove non c'e' importo), non zero stampato. Una voce con enumeratore e tutti gli
+    importi a zero, seguita da una riga senza enumeratore che porta importi (sua sotto-voce),
+    e' un'intestazione: perde i valori, e la sotto-voce si colloca sotto di lei."""
+    out = list(righe)
+    for k in range(len(out) - 1):
+        r, dopo = out[k], out[k + 1]
+        if (r.valori and not any(r.valori) and reso._enumeratore(r.didascalia)
+                and any(dopo.valori) and not _strutturale(dopo.didascalia)):
+            out[k] = reso._Riga(r.didascalia, [], r.pagina)
+    return out
+
+
+_RE_RAGGRUPPAMENTO_SLASH = re.compile(r"^[a-e](?:/[a-e])+\)", re.I)
+
+
+def _raggruppamenti_con_dettaglio(righe: list[reso._Riga]) -> list[reso._Riga]:
+    """ "a/b/c) ammortamento delle immobilizzazioni immateriali e materiali, altre svalutazioni
+    22.712" seguita da "a) ... 21.066" e "b) ... 1.646": la riga a barre e' la somma delle
+    lettere che la seguono, stampata due volte (una compatta, una per lettera). Si toglie solo se
+    le lettere sommano alla riga in ogni colonna: contarle entrambe raddoppierebbe la voce."""
+    out: list[reso._Riga] = []
+    for k, r in enumerate(righe):
+        if r.valori and _RE_RAGGRUPPAMENTO_SLASH.match(r.didascalia.strip()):
+            seguenti = []
+            for f in righe[k + 1:]:
+                if f.valori and re.match(r"^[a-e]\)", f.didascalia.strip()):
+                    seguenti.append(f)
+                else:
+                    break
+            if seguenti and _uguali([sum((f.valori[c] for f in seguenti), _ZERO)
+                                     for c in range(len(r.valori))], r.valori, _ZERO):
+                continue
+        out.append(r)
+    return out
 
 
 def _parziali(lette: list[list], ruoli: list[int], anni_pag: dict[int, int],

@@ -27,6 +27,7 @@ Regole, tutte generali (nessuna e' scritta per un file):
 """
 from __future__ import annotations
 
+import itertools
 import re
 import unicodedata
 from decimal import Decimal, InvalidOperation
@@ -764,6 +765,32 @@ def _numerazione_che_riparte(righe: list[reso._Riga]) -> list[reso._Riga]:
     return out
 
 
+def _padre_di_cui_e_totale(out: list[reso._Riga], valori: list[Decimal]) -> Optional[reso._Riga]:
+    """L'ultima riga di ``out`` e' una voce senza importo e ha sorelle gia' stampate sotto lo
+    stesso padre (anch'esso senza importo): se le sorelle con importo sommano agli ``valori``,
+    quegli importi sono il totale del padre. None altrimenti."""
+    ultima = out[-1]
+    liv = _livello(ultima.didascalia)
+    if liv is None:
+        return None
+    somma = [_ZERO] * len(valori)
+    trovate = 0
+    for r in reversed(out[:-1]):
+        lr = _livello(r.didascalia)
+        if lr is None:
+            if r.didascalia in _RADICI or reso._calcolato(r.didascalia) or reso._e_totale(r.didascalia):
+                return None
+            continue
+        if lr < liv:
+            if r.valori or not trovate:
+                return None
+            return r if _uguali(somma, valori, _ZERO) else None
+        if lr == liv and r.valori:
+            somma = [a + b for a, b in zip(somma, r.valori)]
+            trovate += 1
+    return None
+
+
 def _totali_senza_didascalia(righe: list[reso._Riga]) -> list[reso._Riga]:
     """Una riga di soli importi, senza didascalia, chiude la voce intestazione aperta piu'
     interna (una voce con enumeratore stampata senza importi: "22) Imposte sul reddito" seguita
@@ -780,6 +807,16 @@ def _totali_senza_didascalia(righe: list[reso._Riga]) -> list[reso._Riga]:
             if out and out[-1].didascalia and not out[-1].valori \
                     and (_livello(out[-1].didascalia) is not None
                          or reso._scadenza(out[-1].didascalia)):
+                padre = _padre_di_cui_e_totale(out, r.valori)
+                if padre is not None:
+                    # "a) vari 191" / "b) contributi" (senza importo) / "191": le sorelle gia'
+                    # stampate sommano alla riga, che quindi chiude il padre, non e' di "b)"
+                    while aperte and aperte[-1][1] is not padre:
+                        aperte.pop()
+                    if aperte:
+                        aperte.pop()
+                    out.append(reso._Riga(_totale_di(padre.didascalia), r.valori, r.pagina))
+                    continue
                 if aperte and aperte[-1][1] is out[-1]:
                     aperte.pop()
                 out[-1] = reso._Riga(out[-1].didascalia, r.valori, out[-1].pagina)
@@ -919,6 +956,9 @@ def _scompone(bersaglio: list[Decimal], valori: list[list[Decimal]], tol: Decima
         return False
     for maschera in range(1, 1 << (n - 1)):
         segni = [1] + [-1 if maschera >> (k - 1) & 1 else 1 for k in range(1, n)]
+        if any(a != b and va == vb and any(va)
+               for (a, va), (b, vb) in itertools.combinations(zip(segni, valori), 2)):
+            continue        # due righe uguali di segno opposto si annullano: non e' una prova
         somma = [sum((s * v[c] for s, v in zip(segni, valori)), _ZERO) for c in range(colonne)]
         if _uguali(somma, bersaglio, tol):
             return True
@@ -976,6 +1016,11 @@ def _togli_dettaglio_conti(righe: list[reso._Riga], tol: Decimal = _ZERO) -> lis
         if i < k < fine:
             tagli.append(k)
         for taglio in tagli:
+            # una riga a zero toglie solo conti a zero: con i segni liberi lo zero "si compone"
+            # con qualunque mastro e i suoi conti ("Contributi 0" prima di "Altri 4.800" + il
+            # suo conto), e si perderebbe massa letta
+            if not any(r.valori) and any(any(f.valori) for f in righe[i:taglio]):
+                continue
             if _scompone(list(r.valori), _valori_corsa(righe[i:taglio]), tol):
                 i = taglio
                 break
@@ -1176,8 +1221,75 @@ def estrai(file_path: str) -> Optional[dict]:
             righe, colonne, anni = _leggi(documento)
         except reso._Rifiuto as exc:
             return reso._rifiutato([], exc.controllo, **exc.dettaglio)
-        return reso.estrai_da_righe(documento, righe, colonne, anni, vuote_zero=True,
-                                    eredita_dal_padre=True, tolleranza=_tolleranza(righe))
+        primo = reso.estrai_da_righe(documento, righe, colonne, anni, vuote_zero=True,
+                                     eredita_dal_padre=True, tolleranza=_tolleranza(righe))
+        if primo["adottabile"]:
+            return primo
+        variante = _segni_come_contributo(righe)
+        if variante is None:
+            return primo
+        secondo = reso.estrai_da_righe(documento, variante, colonne, anni, vuote_zero=True,
+                                       eredita_dal_padre=True, tolleranza=_tolleranza(variante))
+        return secondo if secondo["adottabile"] else primo
+
+
+def _negativa(r: reso._Riga) -> bool:
+    return bool(r.valori) and all(v <= 0 for v in r.valori) and any(v < 0 for v in r.valori)
+
+
+def _segni_come_contributo(righe: list[reso._Riga]) -> Optional[list[reso._Riga]]:
+    """Una seconda lettura del conto economico per i gestionali che stampano costi e oneri col
+    segno del loro effetto sul risultato ("TOTALE (B) -33.155.832", "17) interessi -11.460",
+    "22) imposte -458.043"), mentre lo schema di legge li stampa positivi e li sottrae.
+    - costi della produzione (B) stampati in maggioranza negativi: tutta la sezione ha il segno
+      del contributo, e si gira tutta (anche la variazione delle rimanenze positiva);
+      altrimenti si girano solo i totali di B stampati negativi;
+    - oneri finanziari (17), svalutazioni (18-19 lato 19) e imposte (20): si girano le righe
+      stampate tutte negative, non il totale della sezione C o D che le comprende.
+    Si prova solo se la lettura letterale non chiude, e si adotta solo se OGNI controllo chiude:
+    un'imposta negativa vera (un provento fiscale) girata non tornerebbe con l'utile stampato.
+    None se non c'e' nulla da girare."""
+
+    def scorri():
+        """(indice, riga, sezione A..E, voce aperta) per le righe del conto economico."""
+        in_ce, lettera, voce = False, None, None
+        for k, r in enumerate(righe):
+            if r.didascalia == "Conto economico":
+                in_ce = True
+            if not in_ce:
+                continue
+            e = reso._enumeratore(r.didascalia)
+            if e and e[0] == "L":
+                lettera, voce = e[1][0], None
+            elif e and e[0] == "N":
+                voce = e[1][0]
+            elif reso._calcolato(r.didascalia):
+                lettera = voce = None
+                continue
+            yield k, r, lettera, voce
+
+    voci_b = [r for _, r, lettera, _ in scorri() if lettera == "B" and r.valori
+              and not reso._e_totale(r.didascalia) and any(v != 0 for v in r.valori)]
+    b_tutta_negativa = bool(voci_b) and sum(1 for r in voci_b if _negativa(r)) * 2 > len(voci_b)
+    out = list(righe)
+    girate = 0
+    for k, r, lettera, voce in scorri():
+        if not r.valori:
+            continue
+        totale = reso._e_totale(r.didascalia)
+        if lettera == "B":
+            da_girare = b_tutta_negativa or (totale and _negativa(r))
+        elif voce in ("17", "19", "20") and _negativa(r):
+            # il totale della voce si', quello della sezione (C, D) che la comprende no
+            da_girare = not (totale and (
+                re.search(r"proventi e oneri|rettifiche", _norm(r.didascalia))
+                or _norm(r.didascalia) == "totale"))
+        else:
+            da_girare = False
+        if da_girare:
+            out[k] = reso._Riga(r.didascalia, [-v for v in r.valori], r.pagina)
+            girate += 1
+    return out if girate else None
 
 
 # Documento a importi interi: ogni voce e' gia' arrotondata all'euro, e il totale stampato e'

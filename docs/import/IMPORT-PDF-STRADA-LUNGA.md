@@ -15,7 +15,11 @@ ferma al primo che funziona (`importers/pdf_importer.py`, `_llm_extract`):
      Commercio, quello con "Nota integrativa XBRL al ..." in ogni pagina. Il nome dice da dove
      nasce il layout, ma legge il **PDF**, non il file `.xbrl`.
    - schema di legge con il percorso nell'etichetta (`schema_etichette_parser`);
-   - schema IV-CEE standard (`standard_ivcee_parser`).
+   - schema IV-CEE standard (`standard_ivcee_parser`);
+   - schema con il dettaglio dei conti e situazione contabile (otto famiglie di formato);
+   - dal 2026-10-16, dopo i precedenti: le prove incrociate fra fonti
+     (`extract_deterministic_source_candidates`) e il lettore generico dello schema di legge di
+     qualunque gestionale (`schema_legge_generico`).
 2. **Qwen sul gx10**, solo se i lettori a regole falliscono: prima la lettura delle macro-voci
    (`macro_analysis`), poi l'estrazione LLM di Stato patrimoniale e Conto economico
    (`pdf_extractor_llm`).
@@ -71,6 +75,71 @@ Il backend scrive solo sulla console di `avvia-backend.ps1`. Fonti alternative:
 - `/metrics` di vLLM sul gx10 (porta 18300): numero di richieste, token, latenze;
 - riprodurre fuori dal server con `DATABASE_PATH` su una copia del DB, cronometrando
   `llm_provider._invia`.
+
+## La misura sul corpus (2026-10-16 e 17)
+
+Il punto 1 qui sotto è stato fatto: i lettori a regole girano da soli, senza rete, su tutti i PDF
+distinti di `Test/` (175; 161 nella prima misura) e si confronta ogni file con la fotografia
+precedente. Gli strumenti sono in `docs/import/handoff-2026-10-16/strumenti/`
+(`snello_driver.py`, `confronta.py`).
+
+| Passo | PDF letti a regole |
+|---|---|
+| Prima del 16/10 | 96 su 161 |
+| Merge del lavoro del 16/10 (default snello, prove incrociate, regole delle situazioni contabili) | 123 su 175 |
+| Lettore generico dello schema di legge (`gen_M`, 14 schemi) | 136 |
+| 413, 115, sangae6 e 382 (regole di `gen_A`/`gen_B`/`gen_C` e due nuove) | 140 |
+| kps (prospetto Micro Infocamere) e SANTORO 394 | 142 |
+| 1337 (reso XBRL, riga di fondo pagina) | **143 su 175** |
+
+A ogni passo nessun file adottato prima è stato perso e nessun valore è cambiato, con una
+eccezione voluta: il 253 passa da un tappo di 3 € su `ce06` a una lettura esatta. Il confronto è
+sui valori di SP e CE, non sul solo esito.
+
+### Le famiglie risolte
+
+Ogni regola è generale, scritta sul comportamento del documento e non su un file:
+
+- **Costi stampati col segno del loro effetto** ("Totale (B) -33.155.832", "17) interessi
+  -11.460"): una seconda lettura, tentata solo se la letterale non chiude, che gira i costi e si
+  adotta solo se *ogni* controllo torna (413, 115).
+- **Dettaglio dei conti sotto la voce.** Una riga a zero non può togliere dettaglio con massa:
+  con i segni liberi lo zero "si compone" con qualunque mastro e i suoi conti. La prova coi segni
+  scarta due righe uguali di segno opposto, perché si annullano (un mastro e la sua foglia).
+  Prima perdevano "Altri 4.800" e le imposte differite (sangae6).
+- **Importi senza didascalia dopo una voce senza importo.** Se le sorelle già stampate sommano
+  agli importi, chiudono il padre e non appartengono alla voce sopra (382: "a) vari 191",
+  "b) contributi", "191").
+- **Prospetti Infocamere Micro.** Il numero di pagina in coda a un piede non è un importo; un
+  trattino in coda alla riga è una cella vuota, non l'intervallo di "(18 - 19)"; una voce a soli
+  trattini seguita dalla sua sotto-voce è un'intestazione; "a/b/c)" che somma le lettere
+  successive si toglie (kps).
+- **Reso XBRL: un piede ripetuto non è una riga.** L'ultima riga della pagina, dentro la fascia
+  del piede, con le celle che si ripetono in altre pagine, veniva scartata come piede: il totale
+  della voce risultava 0 contro 975.890 stampato (1337). Un blocco di margine con didascalia e
+  importo è una riga del prospetto.
+- **Situazioni contabili.** Separatore delle colonne, pagina SP+CE divisa al titolo "Conto
+  economico", "utile in corso di formazione" come risultato, sinonimi del CE come ultima risorsa,
+  fondo sotto un mastro-cespite (9 file in più: 229, 243, 367, 405, 588, 696, 697, 702, 703).
+
+### Che cosa resta sulla strada lunga (32 file)
+
+| Causa | N. | Che cosa serve |
+|---|---|---|
+| Non sono bilanci (un'email, una distinta di bollo) | 2 | niente: il rifiuto è giusto |
+| Solo conto economico | 2 | niente: il parser lo dichiara |
+| Scansioni senza testo | 3 | MinerU |
+| Conti disegnati come grafica (mastri e importi vettoriali) | 5 | MinerU |
+| Artefatti di 1-2 pagine, non bilanci | 5 | niente |
+| Documenti che si contraddicono | 8 | niente: restano rifiuti. Il 314 va tenuto tale: leggerlo salverebbe i numeri di un anno diverso da quello scelto |
+| Da lavorare | 7 | vedi sotto |
+
+Da lavorare: due bilanci di verifica (667, 376) che il parser delle situazioni contabili non
+legge; un AGO (614) con le cifre sporche nel testo ("_3_.81_4_,_5_3_") che il parser scambia per un
+documento senza stato patrimoniale; uno schema Infocamere "esteso con scostamento" (1341) con gli
+importi prima dell'etichetta; tre situazioni contabili oltre soglia (674, 676, 1327) non ancora
+esaminate. L'`except Exception` che inghiotte la causa in `import_snello/deterministico.py`
+(riga 380) rende i casi di errore indiagnosticabili senza richiamare il parser a mano.
 
 ## Che cosa fare perché altri PDF non prendano la strada lunga
 

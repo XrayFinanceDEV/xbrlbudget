@@ -166,6 +166,16 @@ def _e_piede(righe: list[str]) -> bool:
 _FASCIA_MARGINE = 0.09
 
 
+def _riga_con_importi(righe: list[str]) -> bool:
+    """Un blocco di margine con una didascalia E un importo ("esigibili entro l'esercizio
+    successivo / 975.890 / 2.397.742", ultima riga della pagina, dentro la fascia del piede) e'
+    una riga del prospetto, non un piede: le sue celle si "ripetono" su altre pagine perche' una
+    didascalia e le cifre (numeri tolti dalla chiave) si ripetono in ogni prospetto. Un piede
+    ("Pag. 2 di 37", "Generato automaticamente ...") non ha mai una riga che sia un importo."""
+    righe = [r.strip() for r in righe if r.strip()]
+    return len(righe) > 1 and any(_IMPORTO.match(r) for r in righe)
+
+
 def _chiave_ripetuta(testo: str) -> str:
     """Il testo di una riga di margine con i numeri tolti: "Pag. 2" e "Pag. 3" sono la stessa."""
     return re.sub(r"\d+", "#", _norm(testo))
@@ -210,7 +220,8 @@ def _leggi_righe(documento: fitz.Document) -> tuple[list[_Riga], int, list[int]]
                 continue
             nel_margine = (blocco[3] <= _FASCIA_MARGINE * altezza
                            or blocco[1] >= (1 - _FASCIA_MARGINE) * altezza)
-            if nel_margine and all(_chiave_ripetuta(r) in ripetute for r in pulite):
+            if nel_margine and all(_chiave_ripetuta(r) in ripetute for r in pulite) \
+                    and not _riga_con_importi(pulite):
                 continue
             # le date d'intestazione in testa a un blocco che prosegue col titolo
             # ("31/12/2025 / 31/12/2024 / Stato patrimoniale", SGH): sono le colonne, il resto
@@ -346,11 +357,13 @@ def _linee_pagina(pagina: fitz.Page, ripetute: frozenset[str] = frozenset()) -> 
         if blocco.get("type") != 0:
             continue
         linee = []
+        con_importi = _riga_con_importi(
+            ["".join(sp["text"] for sp in l["spans"]).strip() for l in blocco["lines"]])
         for l in blocco["lines"]:
             testo = "".join(sp["text"] for sp in l["spans"]).strip()
             if testo:
                 x0, y0, x1, y1 = l["bbox"]
-                if (_chiave_ripetuta(testo) in ripetute
+                if (not con_importi and _chiave_ripetuta(testo) in ripetute
                         and (y1 <= _FASCIA_MARGINE * altezza_pagina
                              or y0 >= (1 - _FASCIA_MARGINE) * altezza_pagina)):
                     continue

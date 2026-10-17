@@ -240,6 +240,8 @@ def read_section(file_path: str, pages: Sequence[int], section: str,
             return None
         if client is None:
             import anthropic
+            from importers.llm_provider import vieta_anthropic
+            vieta_anthropic("riscatto in vision")
             client = anthropic.Anthropic()
 
         content: List[dict] = [

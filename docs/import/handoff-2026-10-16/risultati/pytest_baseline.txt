@@ -1,0 +1,1302 @@
+C:\DEV\xbrlbudget-main\xbrlbudget\backend\.venv\Lib\site-packages\pytest_asyncio\plugin.py:208: PytestDeprecationWarning: The configuration option "asyncio_default_fixture_loop_scope" is unset.
+The event loop scope for asynchronous fixtures will default to the fixture caching scope. Future versions of pytest-asyncio will default the loop scope for asynchronous fixtures to function scope. Set the default fixture loop scope explicitly in order to avoid unexpected behavior in the future. Valid fixture loop scopes are: "function", "class", "module", "package", "session"
+
+  warnings.warn(PytestDeprecationWarning(_DEFAULT_FIXTURE_LOOP_SCOPE_UNSET))
+...................................ss....ss.....ssss..........sssss..... [  2%]
+........................................................................ [  4%]
+................................................................s....... [  6%]
+.........................................s...............s.............. [  8%]
+....................................................ss..........s....F.. [ 11%]
+......................s.....sss........ss............................... [ 13%]
+s.ssss............ssssss................................................ [ 15%]
+.................................s...........................x.xxxxxxxxx [ 17%]
+xxxxxx............s..............sssss.......ss.......F................. [ 20%]
+........................................................................ [ 22%]
+...................................s.................................... [ 24%]
+........................................................................ [ 26%]
+........................................................................ [ 28%]
+........................................................................ [ 31%]
+........................................................................ [ 33%]
+........................................................................ [ 35%]
+....................................................................s... [ 37%]
+....................s.......s.sss...........s...........sss..sssssssssss [ 40%]
+ssss.............sssssssss.................sssss........................ [ 42%]
+........................................................................ [ 44%]
+.......sss.............................................................. [ 46%]
+.......................................................ssss..s.......... [ 48%]
+........................................................................ [ 51%]
+............................................................ssss.....F.. [ 53%]
+..............................sssss..................................... [ 55%]
+........................................................................ [ 57%]
+.......sssssssssssssssssssssssssssssssss................................ [ 60%]
+...........s............................................................ [ 62%]
+................................s....................................... [ 64%]
+........................................................................ [ 66%]
+........................................................................ [ 68%]
+.........................................s.............................. [ 71%]
+........................................................................ [ 73%]
+........................................................................ [ 75%]
+........................................................................ [ 77%]
+........................................................................ [ 80%]
+........................................................................ [ 82%]
+...sssssssss.................................s.......................... [ 84%]
+........................................................F.........ssssss [ 86%]
+ssssssssssssssssssssssssssssssssssssssssssssssssssssFFFFFFF.ssssssssssss [ 88%]
+ssssssssssssssssssssssssssssssssssssssss........ssssssssssssssssssssssss [ 91%]
+sss...F..ssssss............F.FFFFFFFFFFFFFFFFFFFFFFFF................... [ 93%]
+.......................................F................................ [ 95%]
+........................ss....................sssssssssssss............. [ 97%]
+.........................................................s............   [100%]
+================================== FAILURES ===================================
+______ test_nessun_riferimento_al_backend_dismesso[PRODUCTION_CONFIG.md] ______
+
+path = WindowsPath('C:/DEV/xbrlbudget-main/xbrlbudget/docs/deployment/PRODUCTION_CONFIG.md')
+
+    @pytest.mark.parametrize("path", _cluster_files(), ids=lambda p: p.name)
+    def test_nessun_riferimento_al_backend_dismesso(path: Path) -> None:
+        """Né l'host `*.w3pro.it` né la porta 8001 sopravvivono in configurazione o guide."""
+        text = path.read_text(encoding="utf-8")
+>       assert DEAD_HOST not in text, f"{path.relative_to(ROOT)} cita ancora l'host dismesso"
+E       AssertionError: docs\deployment\PRODUCTION_CONFIG.md cita ancora l'host dismesso
+E       assert 'kpsfinanciallab.w3pro.it' not in '# Productio...i collega.\n'
+E         
+E         'kpsfinanciallab.w3pro.it' is contained here:
+E           L=https://kpsfinanciallab.w3pro.it:18443
+E           GX10_API_KEY=<la chiave Bearer di vLLM su gx10>
+E           GX10_CONCORRENZA=3
+E           ```
+E           ...
+E         
+E         ...Full output truncated (96 lines hidden), use '-vv' to show
+
+tests\test_deployment_docs.py:42: AssertionError
+_ test_automatic_prose_definition_changes_invalidate_fit_signature_and_require_worker_reload _
+
+tmp_path = WindowsPath('C:/Users/user/AppData/Local/Temp/pytest-of-user/pytest-259/test_automatic_prose_definitio0')
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x000001EF11E39970>
+
+    def test_automatic_prose_definition_changes_invalidate_fit_signature_and_require_worker_reload(tmp_path, monkeypatch):
+        from app.renderers.typst.runtime import RendererUnavailable
+>       original = service.current_render_signature()
+
+tests\test_editorial_notes_service.py:71: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+backend\app\services\editorial_notes_service.py:81: in current_render_signature
+    version, entry, files = bundle.read(RendererLimits())
+backend\app\renderers\typst\editorial_plan.py:48: in read
+    version, _, files = super().read(limits)
+backend\app\renderers\typst\chart_components.py:23: in read
+    version, _, files = super().read(limits)
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = DossierTemplateBundle(path=WindowsPath('C:/DEV/xbrlbudget-main/xbrlbudget/backend/app/renderers/typst/templates/dossier-base'))
+limits = RendererLimits(timeout_seconds=30, max_input_bytes=8388608, max_output_bytes=33554432, memory_bytes=536870912, cpu_seconds=25, max_pages=200, max_concurrent=2, max_asset_bytes=16777216, max_assets=64)
+
+    def read(self, limits: RendererLimits) -> tuple[str, str, dict[str, bytes]]:
+        try:
+            metadata = json.loads(_regular(self.path.absolute() / 'manifest.json', 64 * 1024))
+            if set(metadata) != {'version', 'entrypoint', 'files'} or not isinstance(metadata['version'], str) or not metadata['version']:
+                raise ValueError()
+            files = metadata['files']
+            if not isinstance(files, dict) or not files or len(files) > limits.max_assets:
+                raise ValueError()
+            result, total = {}, 0
+            for name, digest in files.items():
+                relative = PurePosixPath(name)
+                if (relative.is_absolute() or any(p in ('..', '.') for p in name.split('/'))
+                        or '\\' in name or str(relative) != name or not _SHA.fullmatch(digest)
+                        or name in ('model.json', 'options.json', 'compiler', 'manifest.json')
+                        or name.startswith(('output/', 'packages/', 'cache/'))):
+                    raise ValueError()
+                data = _regular(self.path.absolute() / name, limits.max_asset_bytes)
+                total += len(data)
+                if total > limits.max_asset_bytes or hashlib.sha256(data).hexdigest() != digest:
+                    raise ValueError()
+                result[name] = data
+            entry = metadata['entrypoint']
+            if not isinstance(entry, str) or entry not in result or not entry.endswith('.typ'):
+                raise ValueError()
+            return metadata['version'], entry, result
+        except (KeyError, TypeError, ValueError):
+>           raise RendererUnavailable() from None
+E           app.renderers.typst.runtime.RendererUnavailable: Compilatore o isolamento del documento non disponibile.
+
+backend\app\renderers\typst\runtime.py:201: RendererUnavailable
+_ SpikeFixtureFactoryTest.test_canonical_source_files_remain_byte_for_byte_unchanged _
+
+self = <tests.test_m2_00_spike_fixtures.SpikeFixtureFactoryTest testMethod=test_canonical_source_files_remain_byte_for_byte_unchanged>
+
+    def test_canonical_source_files_remain_byte_for_byte_unchanged(self):
+        for name, expected in CANONICAL_FIXTURE_SHA256.items():
+>           self.assertEqual(hashlib.sha256((CANONICAL_DIR / f"{name}.json").read_bytes()).hexdigest(), expected)
+E           AssertionError: '6be0a516b16a5e5317324f0260d980a571c2c283c1f13a0c239f9f4b14d3d9c2' != 'd202fbbc5e07ca2f4654a024806e522223f8dc64c3d728f1fbef330bf57fb60c'
+E           - 6be0a516b16a5e5317324f0260d980a571c2c283c1f13a0c239f9f4b14d3d9c2
+E           + d202fbbc5e07ca2f4654a024806e522223f8dc64c3d728f1fbef330bf57fb60c
+
+tests\test_m2_00_spike_fixtures.py:26: AssertionError
+_______________ test_esiti_junit_prende_il_peggiore_per_rilievo _______________
+
+tmp_path = WindowsPath('C:/Users/user/AppData/Local/Temp/pytest-of-user/pytest-259/test_esiti_junit_prende_il_peg0')
+
+    def test_esiti_junit_prende_il_peggiore_per_rilievo(tmp_path):
+        x = tmp_path / "r.xml"
+        x.write_text(
+            '<testsuites><testsuite>'
+            '<testcase name="test_A01_scostamento"/>'
+            '<testcase name="test_A01_bis_salvataggio"><failure message="x"/></testcase>'
+            '<testcase name="test_C02_dso"><skipped/></testcase>'
+            '<testcase name="A06 un solo comando"/>'
+            '<testcase name="rilievi AMBIENTA · wizard &gt; A03 il passo Imposte"/>'
+            '<testcase name="test_kit_la_base"/>'
+            '</testsuite></testsuites>')
+>       assert esiti_junit(x) == {"A01": "fail", "C02": "skip", "A06": "pass", "A03": "pass"}
+
+tests\test_triage_rilievi_tool.py:25: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+tools\triage_rilievi.py:122: in esiti_junit
+    for tc in ET.parse(path).iter("testcase"):
+C:\Users\user\AppData\Local\Programs\Python\Python312\Lib\xml\etree\ElementTree.py:1204: in parse
+    tree.parse(source, parser)
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = <xml.etree.ElementTree.ElementTree object at 0x000001EF18E09BB0>
+source = <_io.BufferedReader name='C:\\Users\\user\\AppData\\Local\\Temp\\pytest-of-user\\pytest-259\\test_esiti_junit_prende_il_peg0\\r.xml'>
+parser = <xml.etree.ElementTree.XMLParser object at 0x000001EF20AF1C60>
+
+    def parse(self, source, parser=None):
+        """Load external XML document into element tree.
+    
+        *source* is a file name or file object, *parser* is an optional parser
+        instance that defaults to XMLParser.
+    
+        ParseError is raised if the parser fails to parse the document.
+    
+        Returns the root element of the given source document.
+    
+        """
+        close_source = False
+        if not hasattr(source, "read"):
+            source = open(source, "rb")
+            close_source = True
+        try:
+            if parser is None:
+                # If no parser was specified, create a default XMLParser
+                parser = XMLParser()
+                if hasattr(parser, '_parse_whole'):
+                    # The default XMLParser, when it comes from an accelerator,
+                    # can define an internal _parse_whole API for efficiency.
+                    # It can be used to parse the whole source without feeding
+                    # it with chunks.
+>                   self._root = parser._parse_whole(source)
+E                   xml.etree.ElementTree.ParseError: not well-formed (invalid token): line 1, column 259
+
+C:\Users\user\AppData\Local\Programs\Python\Python312\Lib\xml\etree\ElementTree.py:569: ParseError
+______ test_dimension_contract_rejects_invalid_verified_config[negative] ______
+
+mutation = 'negative'
+
+    @pytest.mark.parametrize('mutation', ['negative', 'sum', 'too_wide', 'bool', 'styles', 'float_json', 'legal_but_changed'])
+    def test_dimension_contract_rejects_invalid_verified_config(mutation):
+>       _, _, files = ChartTemplateBundle(BASE).read(RendererLimits())
+
+tests\test_typst_charts.py:262: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+backend\app\renderers\typst\chart_components.py:23: in read
+    version, _, files = super().read(limits)
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = ChartTemplateBundle(path=WindowsPath('C:/DEV/xbrlbudget-main/xbrlbudget/backend/app/renderers/typst/templates/dossier-base'))
+limits = RendererLimits(timeout_seconds=30, max_input_bytes=8388608, max_output_bytes=33554432, memory_bytes=536870912, cpu_seconds=25, max_pages=200, max_concurrent=2, max_asset_bytes=16777216, max_assets=64)
+
+    def read(self, limits: RendererLimits) -> tuple[str, str, dict[str, bytes]]:
+        try:
+            metadata = json.loads(_regular(self.path.absolute() / 'manifest.json', 64 * 1024))
+            if set(metadata) != {'version', 'entrypoint', 'files'} or not isinstance(metadata['version'], str) or not metadata['version']:
+                raise ValueError()
+            files = metadata['files']
+            if not isinstance(files, dict) or not files or len(files) > limits.max_assets:
+                raise ValueError()
+            result, total = {}, 0
+            for name, digest in files.items():
+                relative = PurePosixPath(name)
+                if (relative.is_absolute() or any(p in ('..', '.') for p in name.split('/'))
+                        or '\\' in name or str(relative) != name or not _SHA.fullmatch(digest)
+                        or name in ('model.json', 'options.json', 'compiler', 'manifest.json')
+                        or name.startswith(('output/', 'packages/', 'cache/'))):
+                    raise ValueError()
+                data = _regular(self.path.absolute() / name, limits.max_asset_bytes)
+                total += len(data)
+                if total > limits.max_asset_bytes or hashlib.sha256(data).hexdigest() != digest:
+                    raise ValueError()
+                result[name] = data
+            entry = metadata['entrypoint']
+            if not isinstance(entry, str) or entry not in result or not entry.endswith('.typ'):
+                raise ValueError()
+            return metadata['version'], entry, result
+        except (KeyError, TypeError, ValueError):
+>           raise RendererUnavailable() from None
+E           app.renderers.typst.runtime.RendererUnavailable: Compilatore o isolamento del documento non disponibile.
+
+backend\app\renderers\typst\runtime.py:201: RendererUnavailable
+________ test_dimension_contract_rejects_invalid_verified_config[sum] _________
+
+mutation = 'sum'
+
+    @pytest.mark.parametrize('mutation', ['negative', 'sum', 'too_wide', 'bool', 'styles', 'float_json', 'legal_but_changed'])
+    def test_dimension_contract_rejects_invalid_verified_config(mutation):
+>       _, _, files = ChartTemplateBundle(BASE).read(RendererLimits())
+
+tests\test_typst_charts.py:262: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+backend\app\renderers\typst\chart_components.py:23: in read
+    version, _, files = super().read(limits)
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = ChartTemplateBundle(path=WindowsPath('C:/DEV/xbrlbudget-main/xbrlbudget/backend/app/renderers/typst/templates/dossier-base'))
+limits = RendererLimits(timeout_seconds=30, max_input_bytes=8388608, max_output_bytes=33554432, memory_bytes=536870912, cpu_seconds=25, max_pages=200, max_concurrent=2, max_asset_bytes=16777216, max_assets=64)
+
+    def read(self, limits: RendererLimits) -> tuple[str, str, dict[str, bytes]]:
+        try:
+            metadata = json.loads(_regular(self.path.absolute() / 'manifest.json', 64 * 1024))
+            if set(metadata) != {'version', 'entrypoint', 'files'} or not isinstance(metadata['version'], str) or not metadata['version']:
+                raise ValueError()
+            files = metadata['files']
+            if not isinstance(files, dict) or not files or len(files) > limits.max_assets:
+                raise ValueError()
+            result, total = {}, 0
+            for name, digest in files.items():
+                relative = PurePosixPath(name)
+                if (relative.is_absolute() or any(p in ('..', '.') for p in name.split('/'))
+                        or '\\' in name or str(relative) != name or not _SHA.fullmatch(digest)
+                        or name in ('model.json', 'options.json', 'compiler', 'manifest.json')
+                        or name.startswith(('output/', 'packages/', 'cache/'))):
+                    raise ValueError()
+                data = _regular(self.path.absolute() / name, limits.max_asset_bytes)
+                total += len(data)
+                if total > limits.max_asset_bytes or hashlib.sha256(data).hexdigest() != digest:
+                    raise ValueError()
+                result[name] = data
+            entry = metadata['entrypoint']
+            if not isinstance(entry, str) or entry not in result or not entry.endswith('.typ'):
+                raise ValueError()
+            return metadata['version'], entry, result
+        except (KeyError, TypeError, ValueError):
+>           raise RendererUnavailable() from None
+E           app.renderers.typst.runtime.RendererUnavailable: Compilatore o isolamento del documento non disponibile.
+
+backend\app\renderers\typst\runtime.py:201: RendererUnavailable
+______ test_dimension_contract_rejects_invalid_verified_config[too_wide] ______
+
+mutation = 'too_wide'
+
+    @pytest.mark.parametrize('mutation', ['negative', 'sum', 'too_wide', 'bool', 'styles', 'float_json', 'legal_but_changed'])
+    def test_dimension_contract_rejects_invalid_verified_config(mutation):
+>       _, _, files = ChartTemplateBundle(BASE).read(RendererLimits())
+
+tests\test_typst_charts.py:262: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+backend\app\renderers\typst\chart_components.py:23: in read
+    version, _, files = super().read(limits)
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = ChartTemplateBundle(path=WindowsPath('C:/DEV/xbrlbudget-main/xbrlbudget/backend/app/renderers/typst/templates/dossier-base'))
+limits = RendererLimits(timeout_seconds=30, max_input_bytes=8388608, max_output_bytes=33554432, memory_bytes=536870912, cpu_seconds=25, max_pages=200, max_concurrent=2, max_asset_bytes=16777216, max_assets=64)
+
+    def read(self, limits: RendererLimits) -> tuple[str, str, dict[str, bytes]]:
+        try:
+            metadata = json.loads(_regular(self.path.absolute() / 'manifest.json', 64 * 1024))
+            if set(metadata) != {'version', 'entrypoint', 'files'} or not isinstance(metadata['version'], str) or not metadata['version']:
+                raise ValueError()
+            files = metadata['files']
+            if not isinstance(files, dict) or not files or len(files) > limits.max_assets:
+                raise ValueError()
+            result, total = {}, 0
+            for name, digest in files.items():
+                relative = PurePosixPath(name)
+                if (relative.is_absolute() or any(p in ('..', '.') for p in name.split('/'))
+                        or '\\' in name or str(relative) != name or not _SHA.fullmatch(digest)
+                        or name in ('model.json', 'options.json', 'compiler', 'manifest.json')
+                        or name.startswith(('output/', 'packages/', 'cache/'))):
+                    raise ValueError()
+                data = _regular(self.path.absolute() / name, limits.max_asset_bytes)
+                total += len(data)
+                if total > limits.max_asset_bytes or hashlib.sha256(data).hexdigest() != digest:
+                    raise ValueError()
+                result[name] = data
+            entry = metadata['entrypoint']
+            if not isinstance(entry, str) or entry not in result or not entry.endswith('.typ'):
+                raise ValueError()
+            return metadata['version'], entry, result
+        except (KeyError, TypeError, ValueError):
+>           raise RendererUnavailable() from None
+E           app.renderers.typst.runtime.RendererUnavailable: Compilatore o isolamento del documento non disponibile.
+
+backend\app\renderers\typst\runtime.py:201: RendererUnavailable
+________ test_dimension_contract_rejects_invalid_verified_config[bool] ________
+
+mutation = 'bool'
+
+    @pytest.mark.parametrize('mutation', ['negative', 'sum', 'too_wide', 'bool', 'styles', 'float_json', 'legal_but_changed'])
+    def test_dimension_contract_rejects_invalid_verified_config(mutation):
+>       _, _, files = ChartTemplateBundle(BASE).read(RendererLimits())
+
+tests\test_typst_charts.py:262: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+backend\app\renderers\typst\chart_components.py:23: in read
+    version, _, files = super().read(limits)
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = ChartTemplateBundle(path=WindowsPath('C:/DEV/xbrlbudget-main/xbrlbudget/backend/app/renderers/typst/templates/dossier-base'))
+limits = RendererLimits(timeout_seconds=30, max_input_bytes=8388608, max_output_bytes=33554432, memory_bytes=536870912, cpu_seconds=25, max_pages=200, max_concurrent=2, max_asset_bytes=16777216, max_assets=64)
+
+    def read(self, limits: RendererLimits) -> tuple[str, str, dict[str, bytes]]:
+        try:
+            metadata = json.loads(_regular(self.path.absolute() / 'manifest.json', 64 * 1024))
+            if set(metadata) != {'version', 'entrypoint', 'files'} or not isinstance(metadata['version'], str) or not metadata['version']:
+                raise ValueError()
+            files = metadata['files']
+            if not isinstance(files, dict) or not files or len(files) > limits.max_assets:
+                raise ValueError()
+            result, total = {}, 0
+            for name, digest in files.items():
+                relative = PurePosixPath(name)
+                if (relative.is_absolute() or any(p in ('..', '.') for p in name.split('/'))
+                        or '\\' in name or str(relative) != name or not _SHA.fullmatch(digest)
+                        or name in ('model.json', 'options.json', 'compiler', 'manifest.json')
+                        or name.startswith(('output/', 'packages/', 'cache/'))):
+                    raise ValueError()
+                data = _regular(self.path.absolute() / name, limits.max_asset_bytes)
+                total += len(data)
+                if total > limits.max_asset_bytes or hashlib.sha256(data).hexdigest() != digest:
+                    raise ValueError()
+                result[name] = data
+            entry = metadata['entrypoint']
+            if not isinstance(entry, str) or entry not in result or not entry.endswith('.typ'):
+                raise ValueError()
+            return metadata['version'], entry, result
+        except (KeyError, TypeError, ValueError):
+>           raise RendererUnavailable() from None
+E           app.renderers.typst.runtime.RendererUnavailable: Compilatore o isolamento del documento non disponibile.
+
+backend\app\renderers\typst\runtime.py:201: RendererUnavailable
+_______ test_dimension_contract_rejects_invalid_verified_config[styles] _______
+
+mutation = 'styles'
+
+    @pytest.mark.parametrize('mutation', ['negative', 'sum', 'too_wide', 'bool', 'styles', 'float_json', 'legal_but_changed'])
+    def test_dimension_contract_rejects_invalid_verified_config(mutation):
+>       _, _, files = ChartTemplateBundle(BASE).read(RendererLimits())
+
+tests\test_typst_charts.py:262: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+backend\app\renderers\typst\chart_components.py:23: in read
+    version, _, files = super().read(limits)
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = ChartTemplateBundle(path=WindowsPath('C:/DEV/xbrlbudget-main/xbrlbudget/backend/app/renderers/typst/templates/dossier-base'))
+limits = RendererLimits(timeout_seconds=30, max_input_bytes=8388608, max_output_bytes=33554432, memory_bytes=536870912, cpu_seconds=25, max_pages=200, max_concurrent=2, max_asset_bytes=16777216, max_assets=64)
+
+    def read(self, limits: RendererLimits) -> tuple[str, str, dict[str, bytes]]:
+        try:
+            metadata = json.loads(_regular(self.path.absolute() / 'manifest.json', 64 * 1024))
+            if set(metadata) != {'version', 'entrypoint', 'files'} or not isinstance(metadata['version'], str) or not metadata['version']:
+                raise ValueError()
+            files = metadata['files']
+            if not isinstance(files, dict) or not files or len(files) > limits.max_assets:
+                raise ValueError()
+            result, total = {}, 0
+            for name, digest in files.items():
+                relative = PurePosixPath(name)
+                if (relative.is_absolute() or any(p in ('..', '.') for p in name.split('/'))
+                        or '\\' in name or str(relative) != name or not _SHA.fullmatch(digest)
+                        or name in ('model.json', 'options.json', 'compiler', 'manifest.json')
+                        or name.startswith(('output/', 'packages/', 'cache/'))):
+                    raise ValueError()
+                data = _regular(self.path.absolute() / name, limits.max_asset_bytes)
+                total += len(data)
+                if total > limits.max_asset_bytes or hashlib.sha256(data).hexdigest() != digest:
+                    raise ValueError()
+                result[name] = data
+            entry = metadata['entrypoint']
+            if not isinstance(entry, str) or entry not in result or not entry.endswith('.typ'):
+                raise ValueError()
+            return metadata['version'], entry, result
+        except (KeyError, TypeError, ValueError):
+>           raise RendererUnavailable() from None
+E           app.renderers.typst.runtime.RendererUnavailable: Compilatore o isolamento del documento non disponibile.
+
+backend\app\renderers\typst\runtime.py:201: RendererUnavailable
+_____ test_dimension_contract_rejects_invalid_verified_config[float_json] _____
+
+mutation = 'float_json'
+
+    @pytest.mark.parametrize('mutation', ['negative', 'sum', 'too_wide', 'bool', 'styles', 'float_json', 'legal_but_changed'])
+    def test_dimension_contract_rejects_invalid_verified_config(mutation):
+>       _, _, files = ChartTemplateBundle(BASE).read(RendererLimits())
+
+tests\test_typst_charts.py:262: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+backend\app\renderers\typst\chart_components.py:23: in read
+    version, _, files = super().read(limits)
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = ChartTemplateBundle(path=WindowsPath('C:/DEV/xbrlbudget-main/xbrlbudget/backend/app/renderers/typst/templates/dossier-base'))
+limits = RendererLimits(timeout_seconds=30, max_input_bytes=8388608, max_output_bytes=33554432, memory_bytes=536870912, cpu_seconds=25, max_pages=200, max_concurrent=2, max_asset_bytes=16777216, max_assets=64)
+
+    def read(self, limits: RendererLimits) -> tuple[str, str, dict[str, bytes]]:
+        try:
+            metadata = json.loads(_regular(self.path.absolute() / 'manifest.json', 64 * 1024))
+            if set(metadata) != {'version', 'entrypoint', 'files'} or not isinstance(metadata['version'], str) or not metadata['version']:
+                raise ValueError()
+            files = metadata['files']
+            if not isinstance(files, dict) or not files or len(files) > limits.max_assets:
+                raise ValueError()
+            result, total = {}, 0
+            for name, digest in files.items():
+                relative = PurePosixPath(name)
+                if (relative.is_absolute() or any(p in ('..', '.') for p in name.split('/'))
+                        or '\\' in name or str(relative) != name or not _SHA.fullmatch(digest)
+                        or name in ('model.json', 'options.json', 'compiler', 'manifest.json')
+                        or name.startswith(('output/', 'packages/', 'cache/'))):
+                    raise ValueError()
+                data = _regular(self.path.absolute() / name, limits.max_asset_bytes)
+                total += len(data)
+                if total > limits.max_asset_bytes or hashlib.sha256(data).hexdigest() != digest:
+                    raise ValueError()
+                result[name] = data
+            entry = metadata['entrypoint']
+            if not isinstance(entry, str) or entry not in result or not entry.endswith('.typ'):
+                raise ValueError()
+            return metadata['version'], entry, result
+        except (KeyError, TypeError, ValueError):
+>           raise RendererUnavailable() from None
+E           app.renderers.typst.runtime.RendererUnavailable: Compilatore o isolamento del documento non disponibile.
+
+backend\app\renderers\typst\runtime.py:201: RendererUnavailable
+_ test_dimension_contract_rejects_invalid_verified_config[legal_but_changed] __
+
+mutation = 'legal_but_changed'
+
+    @pytest.mark.parametrize('mutation', ['negative', 'sum', 'too_wide', 'bool', 'styles', 'float_json', 'legal_but_changed'])
+    def test_dimension_contract_rejects_invalid_verified_config(mutation):
+>       _, _, files = ChartTemplateBundle(BASE).read(RendererLimits())
+
+tests\test_typst_charts.py:262: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+backend\app\renderers\typst\chart_components.py:23: in read
+    version, _, files = super().read(limits)
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = ChartTemplateBundle(path=WindowsPath('C:/DEV/xbrlbudget-main/xbrlbudget/backend/app/renderers/typst/templates/dossier-base'))
+limits = RendererLimits(timeout_seconds=30, max_input_bytes=8388608, max_output_bytes=33554432, memory_bytes=536870912, cpu_seconds=25, max_pages=200, max_concurrent=2, max_asset_bytes=16777216, max_assets=64)
+
+    def read(self, limits: RendererLimits) -> tuple[str, str, dict[str, bytes]]:
+        try:
+            metadata = json.loads(_regular(self.path.absolute() / 'manifest.json', 64 * 1024))
+            if set(metadata) != {'version', 'entrypoint', 'files'} or not isinstance(metadata['version'], str) or not metadata['version']:
+                raise ValueError()
+            files = metadata['files']
+            if not isinstance(files, dict) or not files or len(files) > limits.max_assets:
+                raise ValueError()
+            result, total = {}, 0
+            for name, digest in files.items():
+                relative = PurePosixPath(name)
+                if (relative.is_absolute() or any(p in ('..', '.') for p in name.split('/'))
+                        or '\\' in name or str(relative) != name or not _SHA.fullmatch(digest)
+                        or name in ('model.json', 'options.json', 'compiler', 'manifest.json')
+                        or name.startswith(('output/', 'packages/', 'cache/'))):
+                    raise ValueError()
+                data = _regular(self.path.absolute() / name, limits.max_asset_bytes)
+                total += len(data)
+                if total > limits.max_asset_bytes or hashlib.sha256(data).hexdigest() != digest:
+                    raise ValueError()
+                result[name] = data
+            entry = metadata['entrypoint']
+            if not isinstance(entry, str) or entry not in result or not entry.endswith('.typ'):
+                raise ValueError()
+            return metadata['version'], entry, result
+        except (KeyError, TypeError, ValueError):
+>           raise RendererUnavailable() from None
+E           app.renderers.typst.runtime.RendererUnavailable: Compilatore o isolamento del documento non disponibile.
+
+backend\app\renderers\typst\runtime.py:201: RendererUnavailable
+____________ test_bundle_verification_rejects_mutated_assets[fifo] ____________
+
+tmp_path = WindowsPath('C:/Users/user/AppData/Local/Temp/pytest-of-user/pytest-259/test_bundle_verification_rejec3')
+mutation = 'fifo'
+
+    @pytest.mark.parametrize('mutation', ['checksum', 'traversal', 'symlink', 'fifo', 'reserved', 'oversize'])
+    def test_bundle_verification_rejects_mutated_assets(tmp_path, mutation):
+        asset = bundle(tmp_path, 'Hello')
+        manifest = asset.path / 'manifest.json'
+        metadata = json.loads(manifest.read_text())
+        limits = RendererLimits()
+        if mutation == 'checksum':
+            (asset.path / 'template.typ').write_text('ALTERED')
+        elif mutation == 'symlink':
+            (tmp_path / 'outside.typ').write_text('Hello')
+            (asset.path / 'template.typ').unlink()
+            (asset.path / 'template.typ').symlink_to(tmp_path / 'outside.typ')
+        elif mutation == 'fifo':
+            (asset.path / 'template.typ').unlink()
+>           os.mkfifo(asset.path / 'template.typ')
+E           AttributeError: module 'os' has no attribute 'mkfifo'
+
+tests\test_typst_runtime.py:115: AttributeError
+______ TypstToolchainTest.test_corrupted_archive_fails_before_extraction ______
+
+self = <tests.test_typst_toolchain.TypstToolchainTest testMethod=test_corrupted_archive_fails_before_extraction>
+
+    def test_corrupted_archive_fails_before_extraction(self):
+        archive, _sha = self._fake_source_archive()
+        manifest = make_manifest(
+            self.tmp, url=str(archive),
+            sha256="0" * 64,  # digest does not match the bytes on disk
+        )
+        proc = run_script(INSTALL_SH, manifest, self.root)
+>       self.assertEqual(proc.returncode, 3, proc.stderr)
+E       AssertionError: 1 != 3 : <3>WSL (9 - Relay) ERROR: CreateProcessCommon:875: execvpe(/bin/bash) failed: No such file or directory
+
+tests\test_typst_toolchain.py:215: AssertionError
+_ TypstToolchainTest.test_failed_reinstall_preserves_the_verified_installation _
+
+self = <tests.test_typst_toolchain.TypstToolchainTest testMethod=test_failed_reinstall_preserves_the_verified_installation>
+
+    def test_failed_reinstall_preserves_the_verified_installation(self):
+>       manifest = self._install_ok()
+
+tests\test_typst_toolchain.py:411: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+tests\test_typst_toolchain.py:121: in _install_ok
+    self.assertEqual(proc.returncode, 0, proc.stderr)
+E   AssertionError: 1 != 0 : <3>WSL (12 - Relay) ERROR: CreateProcessCommon:875: execvpe(/bin/bash) failed: No such file or directory
+________ TypstToolchainTest.test_install_rejects_absolute_path_archive ________
+
+self = <tests.test_typst_toolchain.TypstToolchainTest testMethod=test_install_rejects_absolute_path_archive>
+
+    def test_install_rejects_absolute_path_archive(self):
+        sentinel = Path("/tmp") / ("typst-tool-test-absolute-%d" % os.getpid())
+        sentinel.unlink(missing_ok=True)
+        self.addCleanup(sentinel.unlink, missing_ok=True)
+        manifest = self._malicious_manifest(lambda tar: (
+            self._add_regular(tar),
+            _add_text(tar, str(sentinel), b"escaped"),
+        ))
+>       self._assert_malicious_rejected(manifest, sentinel)
+
+tests\test_typst_toolchain.py:270: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+tests\test_typst_toolchain.py:248: in _assert_malicious_rejected
+    self.assertIn("refusing to extract", proc.stderr)
+E   AssertionError: 'refusing to extract' not found in '<3>WSL (15 - Relay) ERROR: CreateProcessCommon:875: execvpe(/bin/bash) failed: No such file or directory\n'
+_ TypstToolchainTest.test_install_rejects_hardlink_and_special_member_archives _
+
+self = <tests.test_typst_toolchain.TypstToolchainTest testMethod=test_install_rejects_hardlink_and_special_member_archives>
+
+    def test_install_rejects_hardlink_and_special_member_archives(self):
+        manifest = self._malicious_manifest(lambda tar: (
+            self._add_regular(tar),
+            _add_link(tar, "typst.link", tarfile.LNKTYPE, "typst"),
+        ))
+>       self._assert_malicious_rejected(
+            manifest, self.root / "bin" / "typst.link")
+
+tests\test_typst_toolchain.py:292: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+tests\test_typst_toolchain.py:248: in _assert_malicious_rejected
+    self.assertIn("refusing to extract", proc.stderr)
+E   AssertionError: 'refusing to extract' not found in '<3>WSL (18 - Relay) ERROR: CreateProcessCommon:875: execvpe(/bin/bash) failed: No such file or directory\n'
+______ TypstToolchainTest.test_install_rejects_parent_traversal_archive _______
+
+self = <tests.test_typst_toolchain.TypstToolchainTest testMethod=test_install_rejects_parent_traversal_archive>
+
+    def test_install_rejects_parent_traversal_archive(self):
+        manifest = self._malicious_manifest(lambda tar: (
+            self._add_regular(tar),
+            _add_text(tar, "../../../escaped.txt", b"escaped"),
+        ))
+>       self._assert_malicious_rejected(manifest, self.root / "escaped.txt")
+
+tests\test_typst_toolchain.py:260: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+tests\test_typst_toolchain.py:248: in _assert_malicious_rejected
+    self.assertIn("refusing to extract", proc.stderr)
+E   AssertionError: 'refusing to extract' not found in '<3>WSL (21 - Relay) ERROR: CreateProcessCommon:875: execvpe(/bin/bash) failed: No such file or directory\n'
+___________ TypstToolchainTest.test_install_rejects_symlink_archive ___________
+
+self = <tests.test_typst_toolchain.TypstToolchainTest testMethod=test_install_rejects_symlink_archive>
+
+    def test_install_rejects_symlink_archive(self):
+        # A 'typst' that is a symlink to /etc/passwd: extracting and chmod'ing
+        # or executing it would touch a file outside the repo. It must be
+        # rejected by the member scan, before extraction and execution.
+        passwd = Path("/etc/passwd")
+>       mode_before = passwd.stat().st_mode
+
+tests\test_typst_toolchain.py:277: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = WindowsPath('/etc/passwd')
+
+    def stat(self, *, follow_symlinks=True):
+        """
+        Return the result of the stat() system call on this path, like
+        os.stat() does.
+        """
+>       return os.stat(self, follow_symlinks=follow_symlinks)
+E       FileNotFoundError: [WinError 3] Impossibile trovare il percorso specificato: '\\etc\\passwd'
+
+C:\Users\user\AppData\Local\Programs\Python\Python312\Lib\pathlib.py:840: FileNotFoundError
+_______ TypstToolchainTest.test_install_success_then_verify_offline_ok ________
+
+self = <tests.test_typst_toolchain.TypstToolchainTest testMethod=test_install_success_then_verify_offline_ok>
+
+    def test_install_success_then_verify_offline_ok(self):
+        archive, sha = self._fake_source_archive()
+        manifest = make_manifest(self.tmp, url=str(archive), sha256=sha)
+    
+        proc = run_script(INSTALL_SH, manifest, self.root, marker=self.marker)
+>       self.assertEqual(proc.returncode, 0, proc.stderr)
+E       AssertionError: 1 != 0 : <3>WSL (24 - Relay) ERROR: CreateProcessCommon:875: execvpe(/bin/bash) failed: No such file or directory
+
+tests\test_typst_toolchain.py:159: AssertionError
+____ TypstToolchainTest.test_installer_handles_the_official_nested_layout _____
+
+self = <tests.test_typst_toolchain.TypstToolchainTest testMethod=test_installer_handles_the_official_nested_layout>
+
+    def test_installer_handles_the_official_nested_layout(self):
+        # The real asset nests everything under typst-x86_64-unknown-linux-musl/.
+        archive = self.tmp / "nested.tar.gz"
+        payload = FAKE_TYPST.format(version=PINNED_VERSION).encode("utf-8")
+        with tarfile.open(archive, "w:gz") as tar:
+            info = tarfile.TarInfo("typst-x86_64-unknown-linux-musl/typst")
+            info.size, info.mode = len(payload), 0o755
+            tar.addfile(info, BytesIO(payload))
+            lic = b"Apache-2.0 (fake)"
+            info = tarfile.TarInfo("typst-x86_64-unknown-linux-musl/LICENSE")
+            info.size, info.mode = len(lic), 0o644
+            tar.addfile(info, BytesIO(lic))
+        sha = hashlib.sha256(archive.read_bytes()).hexdigest()
+        manifest = make_manifest(self.tmp, url=str(archive), sha256=sha)
+        proc = run_script(INSTALL_SH, manifest, self.root)
+>       self.assertEqual(proc.returncode, 0, proc.stderr)
+E       AssertionError: 1 != 0 : <3>WSL (27 - Relay) ERROR: CreateProcessCommon:875: execvpe(/bin/bash) failed: No such file or directory
+
+tests\test_typst_toolchain.py:202: AssertionError
+_______________ TypstToolchainTest.test_installer_is_rerunnable _______________
+
+self = <tests.test_typst_toolchain.TypstToolchainTest testMethod=test_installer_is_rerunnable>
+
+    def test_installer_is_rerunnable(self):
+        archive, sha = self._fake_source_archive()
+        manifest = make_manifest(self.tmp, url=str(archive), sha256=sha)
+        for attempt in (1, 2):
+            proc = run_script(INSTALL_SH, manifest, self.root)
+>           self.assertEqual(proc.returncode, 0, f"run {attempt}: {proc.stderr}")
+E           AssertionError: 1 != 0 : run 1: <3>WSL (30 - Relay) ERROR: CreateProcessCommon:875: execvpe(/bin/bash) failed: No such file or directory
+
+tests\test_typst_toolchain.py:181: AssertionError
+_____________ TypstToolchainTest.test_network_failure_is_explicit _____________
+
+self = <tests.test_typst_toolchain.TypstToolchainTest testMethod=test_network_failure_is_explicit>
+
+    def test_network_failure_is_explicit(self):
+        # Port 9 (discard) on loopback: connection refused, no egress.
+        manifest = make_manifest(
+            self.tmp, url="http://127.0.0.1:9/typst.tar.gz", sha256="ab" * 32,
+        )
+        proc = run_script(INSTALL_SH, manifest, self.root)
+        self.assertNotEqual(proc.returncode, 0)
+>       self.assertIn("download failed", proc.stderr)
+E       AssertionError: 'download failed' not found in '<3>WSL (33 - Relay) ERROR: CreateProcessCommon:875: execvpe(/bin/bash) failed: No such file or directory\n'
+
+tests\test_typst_toolchain.py:468: AssertionError
+___________ TypstToolchainTest.test_scripts_pass_bash_syntax_check ____________
+
+self = <tests.test_typst_toolchain.TypstToolchainTest testMethod=test_scripts_pass_bash_syntax_check>
+
+    def test_scripts_pass_bash_syntax_check(self):
+        for script in (INSTALL_SH, VERIFY_SH):
+            proc = subprocess.run(
+                ["bash", "-n", str(script)], capture_output=True, text=True, timeout=30,
+            )
+>           self.assertEqual(proc.returncode, 0, f"{script.name}: {proc.stderr}")
+E           AssertionError: 1 != 0 : install.sh: <3>WSL (36 - Relay) ERROR: CreateProcessCommon:875: execvpe(/bin/bash) failed: No such file or directory
+
+tests\test_typst_toolchain.py:506: AssertionError
+_____ TypstToolchainTest.test_unsupported_platform_stops_before_any_fetch _____
+
+self = <tests.test_typst_toolchain.TypstToolchainTest testMethod=test_unsupported_platform_stops_before_any_fetch>
+
+    def test_unsupported_platform_stops_before_any_fetch(self):
+        manifest = make_manifest(
+            self.tmp, url="https://github.invalid/never-fetched", sha256="ab" * 32,
+        )
+        env = dict(os.environ)
+        env["TYPST_TOOL_MANIFEST"] = str(manifest)
+        env["TYPST_TOOL_ROOT"] = str(self.root)
+        env["TYPST_TOOL_TEST_OS"] = "Darwin"
+        proc = subprocess.run(
+            ["bash", str(INSTALL_SH)], env=env, capture_output=True, text=True, timeout=60,
+        )
+>       self.assertEqual(proc.returncode, 2, proc.stderr)
+E       AssertionError: 1 != 2 : <3>WSL (39 - Relay) ERROR: CreateProcessCommon:875: execvpe(/bin/bash) failed: No such file or directory
+
+tests\test_typst_toolchain.py:458: AssertionError
+_ TypstToolchainTest.test_verify_duplicate_or_unknown_provenance_keys_never_execute _
+
+self = <tests.test_typst_toolchain.TypstToolchainTest testMethod=test_verify_duplicate_or_unknown_provenance_keys_never_execute>
+
+    def test_verify_duplicate_or_unknown_provenance_keys_never_execute(self):
+>       manifest = self._install_ok()
+
+tests\test_typst_toolchain.py:399: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+tests\test_typst_toolchain.py:121: in _install_ok
+    self.assertEqual(proc.returncode, 0, proc.stderr)
+E   AssertionError: 1 != 0 : <3>WSL (42 - Relay) ERROR: CreateProcessCommon:875: execvpe(/bin/bash) failed: No such file or directory
+___________ TypstToolchainTest.test_verify_fails_for_missing_binary ___________
+
+self = <tests.test_typst_toolchain.TypstToolchainTest testMethod=test_verify_fails_for_missing_binary>
+
+    def test_verify_fails_for_missing_binary(self):
+        archive, sha = self._fake_source_archive()
+        manifest = make_manifest(self.tmp, url=str(archive), sha256=sha)
+        proc = run_script(VERIFY_SH, manifest, self.root, marker=self.marker)
+        self.assertNotEqual(proc.returncode, 0)
+>       self.assertIn("missing", proc.stderr)
+E       AssertionError: 'missing' not found in '<3>WSL (45 - Relay) ERROR: CreateProcessCommon:875: execvpe(/bin/bash) failed: No such file or directory\n'
+
+tests\test_typst_toolchain.py:306: AssertionError
+_____ TypstToolchainTest.test_verify_malformed_provenance_never_executes ______
+
+self = <tests.test_typst_toolchain.TypstToolchainTest testMethod=test_verify_malformed_provenance_never_executes>
+
+    def test_verify_malformed_provenance_never_executes(self):
+>       manifest = self._install_ok()
+
+tests\test_typst_toolchain.py:353: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+tests\test_typst_toolchain.py:121: in _install_ok
+    self.assertEqual(proc.returncode, 0, proc.stderr)
+E   AssertionError: 1 != 0 : <3>WSL (48 - Relay) ERROR: CreateProcessCommon:875: execvpe(/bin/bash) failed: No such file or directory
+______ TypstToolchainTest.test_verify_missing_provenance_fails_not_warns ______
+
+self = <tests.test_typst_toolchain.TypstToolchainTest testMethod=test_verify_missing_provenance_fails_not_warns>
+
+    def test_verify_missing_provenance_fails_not_warns(self):
+>       manifest = self._install_ok()
+
+tests\test_typst_toolchain.py:343: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+tests\test_typst_toolchain.py:121: in _install_ok
+    self.assertEqual(proc.returncode, 0, proc.stderr)
+E   AssertionError: 1 != 0 : <3>WSL (51 - Relay) ERROR: CreateProcessCommon:875: execvpe(/bin/bash) failed: No such file or directory
+_ TypstToolchainTest.test_verify_provenance_archive_digest_mismatch_never_executes _
+
+self = <tests.test_typst_toolchain.TypstToolchainTest testMethod=test_verify_provenance_archive_digest_mismatch_never_executes>
+
+    def test_verify_provenance_archive_digest_mismatch_never_executes(self):
+>       manifest = self._install_ok()
+
+tests\test_typst_toolchain.py:426: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+tests\test_typst_toolchain.py:121: in _install_ok
+    self.assertEqual(proc.returncode, 0, proc.stderr)
+E   AssertionError: 1 != 0 : <3>WSL (54 - Relay) ERROR: CreateProcessCommon:875: execvpe(/bin/bash) failed: No such file or directory
+___ TypstToolchainTest.test_verify_provenance_asset_mismatch_never_executes ___
+
+self = <tests.test_typst_toolchain.TypstToolchainTest testMethod=test_verify_provenance_asset_mismatch_never_executes>
+
+    def test_verify_provenance_asset_mismatch_never_executes(self):
+>       manifest = self._install_ok()
+
+tests\test_typst_toolchain.py:382: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+tests\test_typst_toolchain.py:121: in _install_ok
+    self.assertEqual(proc.returncode, 0, proc.stderr)
+E   AssertionError: 1 != 0 : <3>WSL (57 - Relay) ERROR: CreateProcessCommon:875: execvpe(/bin/bash) failed: No such file or directory
+____ TypstToolchainTest.test_verify_provenance_url_mismatch_never_executes ____
+
+self = <tests.test_typst_toolchain.TypstToolchainTest testMethod=test_verify_provenance_url_mismatch_never_executes>
+
+    def test_verify_provenance_url_mismatch_never_executes(self):
+>       manifest = self._install_ok()
+
+tests\test_typst_toolchain.py:391: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+tests\test_typst_toolchain.py:121: in _install_ok
+    self.assertEqual(proc.returncode, 0, proc.stderr)
+E   AssertionError: 1 != 0 : <3>WSL (60 - Relay) ERROR: CreateProcessCommon:875: execvpe(/bin/bash) failed: No such file or directory
+_ TypstToolchainTest.test_verify_provenance_version_mismatch_fails_before_execution _
+
+self = <tests.test_typst_toolchain.TypstToolchainTest testMethod=test_verify_provenance_version_mismatch_fails_before_execution>
+
+    def test_verify_provenance_version_mismatch_fails_before_execution(self):
+        # The record names another typst version than the manifest pins: the
+        # version verdict (4) comes from provenance, without running anything.
+>       manifest = self._install_ok()
+
+tests\test_typst_toolchain.py:437: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+tests\test_typst_toolchain.py:121: in _install_ok
+    self.assertEqual(proc.returncode, 0, proc.stderr)
+E   AssertionError: 1 != 0 : <3>WSL (63 - Relay) ERROR: CreateProcessCommon:875: execvpe(/bin/bash) failed: No such file or directory
+_ TypstToolchainTest.test_verify_provenance_with_invalid_sha_format_never_executes _
+
+self = <tests.test_typst_toolchain.TypstToolchainTest testMethod=test_verify_provenance_with_invalid_sha_format_never_executes>
+
+    def test_verify_provenance_with_invalid_sha_format_never_executes(self):
+>       manifest = self._install_ok()
+
+tests\test_typst_toolchain.py:373: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+tests\test_typst_toolchain.py:121: in _install_ok
+    self.assertEqual(proc.returncode, 0, proc.stderr)
+E   AssertionError: 1 != 0 : <3>WSL (66 - Relay) ERROR: CreateProcessCommon:875: execvpe(/bin/bash) failed: No such file or directory
+_ TypstToolchainTest.test_verify_provenance_without_binary_sha_never_executes _
+
+self = <tests.test_typst_toolchain.TypstToolchainTest testMethod=test_verify_provenance_without_binary_sha_never_executes>
+
+    def test_verify_provenance_without_binary_sha_never_executes(self):
+>       manifest = self._install_ok()
+
+tests\test_typst_toolchain.py:362: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+tests\test_typst_toolchain.py:121: in _install_ok
+    self.assertEqual(proc.returncode, 0, proc.stderr)
+E   AssertionError: 1 != 0 : <3>WSL (69 - Relay) ERROR: CreateProcessCommon:875: execvpe(/bin/bash) failed: No such file or directory
+________ TypstToolchainTest.test_verify_tampered_binary_never_executes ________
+
+self = <tests.test_typst_toolchain.TypstToolchainTest testMethod=test_verify_tampered_binary_never_executes>
+
+    def test_verify_tampered_binary_never_executes(self):
+        # Right version string, different bytes: the sha256-vs-provenance
+        # check must stop it BEFORE the binary is ever run.
+>       manifest = self._install_ok()
+
+tests\test_typst_toolchain.py:331: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+tests\test_typst_toolchain.py:121: in _install_ok
+    self.assertEqual(proc.returncode, 0, proc.stderr)
+E   AssertionError: 1 != 0 : <3>WSL (72 - Relay) ERROR: CreateProcessCommon:875: execvpe(/bin/bash) failed: No such file or directory
+_ TypstToolchainTest.test_verify_wrong_version_reports_four_only_after_consistent_provenance _
+
+self = <tests.test_typst_toolchain.TypstToolchainTest testMethod=test_verify_wrong_version_reports_four_only_after_consistent_provenance>
+
+    def test_verify_wrong_version_reports_four_only_after_consistent_provenance(self):
+        # A binary from another release whose provenance record was made
+        # consistent with it: every byte check passes, so --version may run
+        # and the version gate is what rejects it (exit 4).
+>       manifest = self._install_ok()
+
+tests\test_typst_toolchain.py:315: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+tests\test_typst_toolchain.py:121: in _install_ok
+    self.assertEqual(proc.returncode, 0, proc.stderr)
+E   AssertionError: 1 != 0 : <3>WSL (75 - Relay) ERROR: CreateProcessCommon:875: execvpe(/bin/bash) failed: No such file or directory
+__________ TypstToolchainTest.test_wrong_version_binary_is_rejected ___________
+
+self = <tests.test_typst_toolchain.TypstToolchainTest testMethod=test_wrong_version_binary_is_rejected>
+
+    def test_wrong_version_binary_is_rejected(self):
+        archive, sha = self._fake_source_archive(version="0.14.3")
+        manifest = make_manifest(self.tmp, url=str(archive), sha256=sha)
+        proc = run_script(INSTALL_SH, manifest, self.root, marker=self.marker)
+>       self.assertEqual(proc.returncode, 4, proc.stderr)
+E       AssertionError: 1 != 4 : <3>WSL (78 - Relay) ERROR: CreateProcessCommon:875: execvpe(/bin/bash) failed: No such file or directory
+
+tests\test_typst_toolchain.py:223: AssertionError
+_____ test_build_ce_non_manda_un_ricavo_sconosciuto_su_una_voce_di_costo ______
+
+    def test_build_ce_non_manda_un_ricavo_sconosciuto_su_una_voce_di_costo():
+        # Il gemello del precedente, e il difetto che ha tenuto chiuso budget_624.
+        # 'Rim.fin.mat.prime' non e' nella tabella a parole chiave e l'albero non la
+        # risolve: il ripiego generico e' 'ce06' (COSTI PER SERVIZI), scelto neutro
+        # DENTRO i costi della produzione. Su una riga della colonna RICAVI quel
+        # ripiego e' del segno sbagliato e sposta il risultato di 2x l'importo.
+        rows = [
+            ("71", "RICAVI DELLE VENDITE", D("800.00"), "right"),
+            ("73", "RIM.FIN.MAT.PRIME, SUSSID, CONS.E MERCI", D("200.00"), "right"),
+        ]
+        ce = build_ce_from_vision(rows)
+        assert ce.get("ce06", D("0")) == D("0")
+        # Il totale della colonna e' conservato, tutto sul lato dei ricavi.
+>       assert ce["ce01"] + ce["ce04"] == D("1000.00")
+E       KeyError: 'ce04'
+
+tests\test_vision_rescue.py:192: KeyError
+============================== warnings summary ===============================
+database\db.py:29
+  C:\DEV\xbrlbudget-main\xbrlbudget\database\db.py:29: MovedIn20Warning: The ``declarative_base()`` function is now available as sqlalchemy.orm.declarative_base(). (deprecated since: 2.0) (Background on SQLAlchemy 2.0 at: https://sqlalche.me/e/b8d9)
+    Base = declarative_base()
+
+backend\.venv\Lib\site-packages\starlette\formparsers.py:12
+  C:\DEV\xbrlbudget-main\xbrlbudget\backend\.venv\Lib\site-packages\starlette\formparsers.py:12: PendingDeprecationWarning: Please use `import python_multipart` instead.
+    import multipart
+
+backend\.venv\Lib\site-packages\starlette\testclient.py:40
+  C:\DEV\xbrlbudget-main\xbrlbudget\backend\.venv\Lib\site-packages\starlette\testclient.py:40: DeprecationWarning: The anyio.abc.BlockingPortal alias is deprecated, use anyio.from_thread.BlockingPortal instead.
+    _PortalFactoryType = typing.Callable[[], typing.ContextManager[anyio.abc.BlockingPortal]]
+
+backend\.venv\Lib\site-packages\reportlab\lib\rl_safe_eval.py:12
+  C:\DEV\xbrlbudget-main\xbrlbudget\backend\.venv\Lib\site-packages\reportlab\lib\rl_safe_eval.py:12: DeprecationWarning: ast.NameConstant is deprecated and will be removed in Python 3.14; use ast.Constant instead
+    haveNameConstant = hasattr(ast,'NameConstant')
+
+backend\.venv\Lib\site-packages\matplotlib\_fontconfig_pattern.py:64
+  C:\DEV\xbrlbudget-main\xbrlbudget\backend\.venv\Lib\site-packages\matplotlib\_fontconfig_pattern.py:64: PyparsingDeprecationWarning: 'oneOf' deprecated - use 'one_of'
+    prop = Group((name + Suppress("=") + comma_separated(value)) | oneOf(_CONSTANTS))
+
+backend\.venv\Lib\site-packages\matplotlib\_fontconfig_pattern.py:85
+backend\.venv\Lib\site-packages\matplotlib\_fontconfig_pattern.py:85
+backend\.venv\Lib\site-packages\matplotlib\_fontconfig_pattern.py:85
+backend\.venv\Lib\site-packages\matplotlib\_fontconfig_pattern.py:85
+backend\.venv\Lib\site-packages\matplotlib\_fontconfig_pattern.py:85
+backend\.venv\Lib\site-packages\matplotlib\_fontconfig_pattern.py:85
+  C:\DEV\xbrlbudget-main\xbrlbudget\backend\.venv\Lib\site-packages\matplotlib\_fontconfig_pattern.py:85: PyparsingDeprecationWarning: 'parseString' deprecated - use 'parse_string'
+    parse = parser.parseString(pattern)
+
+backend\.venv\Lib\site-packages\matplotlib\_fontconfig_pattern.py:89
+backend\.venv\Lib\site-packages\matplotlib\_fontconfig_pattern.py:89
+backend\.venv\Lib\site-packages\matplotlib\_fontconfig_pattern.py:89
+backend\.venv\Lib\site-packages\matplotlib\_fontconfig_pattern.py:89
+backend\.venv\Lib\site-packages\matplotlib\_fontconfig_pattern.py:89
+backend\.venv\Lib\site-packages\matplotlib\_fontconfig_pattern.py:89
+  C:\DEV\xbrlbudget-main\xbrlbudget\backend\.venv\Lib\site-packages\matplotlib\_fontconfig_pattern.py:89: PyparsingDeprecationWarning: 'resetCache' deprecated - use 'reset_cache'
+    parser.resetCache()
+
+backend\.venv\Lib\site-packages\matplotlib\_mathtext.py:45
+  C:\DEV\xbrlbudget-main\xbrlbudget\backend\.venv\Lib\site-packages\matplotlib\_mathtext.py:45: PyparsingDeprecationWarning: 'enablePackrat' deprecated - use 'enable_packrat'
+    ParserElement.enablePackrat()
+
+backend\.venv\Lib\site-packages\pydantic\_internal\_config.py:295
+backend\.venv\Lib\site-packages\pydantic\_internal\_config.py:295
+backend\.venv\Lib\site-packages\pydantic\_internal\_config.py:295
+backend\.venv\Lib\site-packages\pydantic\_internal\_config.py:295
+  C:\DEV\xbrlbudget-main\xbrlbudget\backend\.venv\Lib\site-packages\pydantic\_internal\_config.py:295: PydanticDeprecatedSince20: Support for class-based `config` is deprecated, use ConfigDict instead. Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.10/migration/
+    warnings.warn(DEPRECATION_MESSAGE, DeprecationWarning)
+
+backend\app\main.py:47
+tests/test_final_report_narrative.py::test_get_is_pure_and_explicit_generation_uses_canonical_model
+  C:\DEV\xbrlbudget-main\xbrlbudget\backend\app\main.py:47: DeprecationWarning: 
+          on_event is deprecated, use lifespan event handlers instead.
+  
+          Read more about it in the
+          [FastAPI docs for Lifespan Events](https://fastapi.tiangolo.com/advanced/events/).
+          
+    @app.on_event("startup")
+
+backend\.venv\Lib\site-packages\fastapi\applications.py:4495
+tests/test_final_report_narrative.py::test_get_is_pure_and_explicit_generation_uses_canonical_model
+  C:\DEV\xbrlbudget-main\xbrlbudget\backend\.venv\Lib\site-packages\fastapi\applications.py:4495: DeprecationWarning: 
+          on_event is deprecated, use lifespan event handlers instead.
+  
+          Read more about it in the
+          [FastAPI docs for Lifespan Events](https://fastapi.tiangolo.com/advanced/events/).
+          
+    return self.router.on_event(event_type)
+
+tests/test_aliquota_proposta.py: 24 warnings
+tests/test_analysis_exact_decimals.py: 56 warnings
+tests/test_bp_endpoint.py: 88 warnings
+tests/test_budget_615_semantic_classification.py: 8 warnings
+tests/test_budget_pregresso.py: 918 warnings
+tests/test_build_assumption_row.py: 12 warnings
+tests/test_bulk_tipizzato.py: 245 warnings
+tests/test_calculations.py: 8 warnings
+tests/test_cashflow_debito_finanziario.py: 130 warnings
+tests/test_cashflow_dividendi.py: 84 warnings
+tests/test_cashflow_svalutazione_crediti.py: 19 warnings
+tests/test_cashflow_tributi.py: 112 warnings
+tests/test_coge_provider.py: 16 warnings
+tests/test_csv_import.py: 2 warnings
+tests/test_csv_schema_detection.py: 11 warnings
+tests/test_db.py: 8 warnings
+tests/test_detail_enrichment.py: 15 warnings
+tests/test_detail_search.py: 15 warnings
+tests/test_docx_endpoint_bp.py: 88 warnings
+tests/test_editorial_notes_concurrency.py: 110 warnings
+tests/test_editorial_notes_endpoint.py: 198 warnings
+tests/test_editorial_persistence.py: 5 warnings
+tests/test_engine_accounting_invariants.py: 231 warnings
+tests/test_engine_meta.py: 74 warnings
+tests/test_fgpmi.py: 8 warnings
+tests/test_final_report_endpoint.py: 196 warnings
+tests/test_final_report_narrative.py: 185 warnings
+tests/test_final_report_pdf_endpoint.py: 528 warnings
+tests/test_final_report_v2.py: 141 warnings
+tests/test_fix_rilievi_avvisi.py: 374 warnings
+tests/test_fix_rilievi_bep.py: 112 warnings
+tests/test_fix_rilievi_dscr.py: 74 warnings
+tests/test_fix_rilievi_e2e_cassa.py: 111 warnings
+tests/test_fix_rilievi_liquidita.py: 56 warnings
+tests/test_fix_rilievi_motore.py: 832 warnings
+tests/test_fix_rilievi_rendiconto.py: 222 warnings
+tests/test_fix_rilievi_report.py: 337 warnings
+tests/test_forecast_altri_finanziatori.py: 274 warnings
+tests/test_forecast_compute.py: 148 warnings
+tests/test_forecast_contratti_per_anno.py: 38 warnings
+tests/test_forecast_crediti_soci_dettaglio.py: 76 warnings
+tests/test_forecast_dichiarato_vs_persistito.py: 34394 warnings
+tests/test_forecast_fidi.py: 232 warnings
+tests/test_forecast_fidi_tiraggio.py: 148 warnings
+tests/test_forecast_finanziamento_pregresso.py: 950 warnings
+tests/test_forecast_giorni_degeneri.py: 178 warnings
+tests/test_forecast_indicizzazione.py: 477 warnings
+tests/test_forecast_magazzino_settore.py: 137 warnings
+tests/test_forecast_override_crediti.py: 221 warnings
+tests/test_forecast_override_residuo.py: 60 warnings
+tests/test_forecast_override_tributario.py: 2420 warnings
+tests/test_forecast_pareggio.py: 40 warnings
+tests/test_forecast_prestito_quota_breve.py: 841 warnings
+tests/test_forecast_preview.py: 151 warnings
+tests/test_forecast_residuo_neutro.py: 2604 warnings
+tests/test_forecast_residuo_quadratura_sp16.py: 540 warnings
+tests/test_forecast_scoperto.py: 583 warnings
+tests/test_forecast_stale.py: 184 warnings
+tests/test_forecast_sweep_piani.py: 422 warnings
+tests/test_forecast_tfr_liquidazioni.py: 98 warnings
+tests/test_home_existing_balances.py: 28 warnings
+tests/test_http_full_cycle.py: 215 warnings
+tests/test_import_semantic_validation.py: 8 warnings
+tests/test_imposte_commercialista.py: 174 warnings
+tests/test_infrannuale_comments_stale.py: 35 warnings
+tests/test_intra_year_acconti_versati.py: 162 warnings
+tests/test_intra_year_circolante_modo.py: 240 warnings
+tests/test_intra_year_crediti_commerciali.py: 72 warnings
+tests/test_intra_year_debito_bancario.py: 168 warnings
+tests/test_intra_year_end_to_end_periods.py: 120 warnings
+tests/test_intra_year_imposte.py: 227 warnings
+tests/test_intra_year_magazzino_coerente.py: 120 warnings
+tests/test_intra_year_override_cassa.py: 96 warnings
+tests/test_intra_year_plug_negativo.py: 48 warnings
+tests/test_intra_year_semantics.py: 93 warnings
+tests/test_lifecycle_repeat.py: 142 warnings
+tests/test_m1_01_persistence.py: 19 warnings
+tests/test_m1_02_scenario_provenance.py: 199 warnings
+tests/test_m1_03_extra_accounting_alerts.py: 127 warnings
+tests/test_m1_05a_final_report_domain.py: 100 warnings
+tests/test_messaggi_italiani.py: 20 warnings
+tests/test_migra_previdenza_tendina.py: 123 warnings
+tests/test_mineru_contrapposte.py: 24 warnings
+tests/test_mineru_import_integration.py: 14 warnings
+tests/test_multi_year_ratios_years.py: 184 warnings
+tests/test_numeric_stress_cycle.py: 288 warnings
+tests/test_override_rejection_not_persisted.py: 83 warnings
+tests/test_pregresso_tributari_oltre.py: 114 warnings
+tests/test_provenienza_llm.py: 24 warnings
+tests/test_r07_materie_consumo.py: 370 warnings
+tests/test_report_solo_bp.py: 44 warnings
+tests/test_residual_finalization.py: 155 warnings
+tests/test_rilievi_61_62_magazzino.py: 423 warnings
+tests/test_rilievi_61_62_motore.py: 978 warnings
+tests/test_rilievi_61_62_sezione10.py: 259 warnings
+tests/test_rilievi_ambienta.py: 1058 warnings
+tests/test_route_ab_ivcee_gx10_senza_chiave.py: 8 warnings
+tests/test_scanned_verifica_segno.py: 8 warnings
+tests/test_schema_etichette.py: 28 warnings
+tests/test_snello_innesto.py: 152 warnings
+tests/test_snello_riepilogo.py: 8 warnings
+tests/test_source_reconciliation.py: 32 warnings
+tests/test_sp_override_body_schema.py: 146 warnings
+tests/test_sp_override_multi_year_batch.py: 76 warnings
+tests/test_standard_ivcee_parser.py: 226 warnings
+tests/test_verifica_sezbil.py: 8 warnings
+tests/test_xbrl_csv_full_cycle.py: 103 warnings
+tests/test_xbrl_period_contexts.py: 16 warnings
+tests/test_xbrl_reso_parser.py: 14 warnings
+  C:\DEV\xbrlbudget-main\xbrlbudget\backend\.venv\Lib\site-packages\sqlalchemy\sql\schema.py:3596: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    return util.wrap_callable(lambda ctx: fn(), fn)  # type: ignore
+
+tests/test_budget_615_semantic_classification.py: 1 warning
+tests/test_coge_provider.py: 2 warnings
+tests/test_detail_enrichment.py: 1 warning
+tests/test_detail_search.py: 1 warning
+tests/test_http_full_cycle.py: 18 warnings
+tests/test_lifecycle_repeat.py: 5 warnings
+tests/test_mineru_contrapposte.py: 3 warnings
+tests/test_mineru_import_integration.py: 1 warning
+tests/test_provenienza_llm.py: 3 warnings
+tests/test_residual_finalization.py: 11 warnings
+tests/test_route_ab_ivcee_gx10_senza_chiave.py: 2 warnings
+tests/test_scanned_verifica_segno.py: 1 warning
+tests/test_schema_etichette.py: 2 warnings
+tests/test_snello_innesto.py: 19 warnings
+tests/test_snello_riepilogo.py: 2 warnings
+tests/test_source_reconciliation.py: 3 warnings
+tests/test_standard_ivcee_parser.py: 12 warnings
+tests/test_verifica_sezbil.py: 1 warning
+tests/test_xbrl_reso_parser.py: 1 warning
+  C:\DEV\xbrlbudget-main\xbrlbudget\importers\pdf_importer.py:1091: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    extraction_start = datetime.utcnow()
+
+tests/test_budget_615_semantic_classification.py: 1 warning
+tests/test_coge_provider.py: 2 warnings
+tests/test_detail_enrichment.py: 1 warning
+tests/test_detail_search.py: 1 warning
+tests/test_http_full_cycle.py: 18 warnings
+tests/test_lifecycle_repeat.py: 5 warnings
+tests/test_mineru_contrapposte.py: 3 warnings
+tests/test_mineru_import_integration.py: 1 warning
+tests/test_provenienza_llm.py: 3 warnings
+tests/test_residual_finalization.py: 11 warnings
+tests/test_route_ab_ivcee_gx10_senza_chiave.py: 1 warning
+tests/test_scanned_verifica_segno.py: 1 warning
+tests/test_schema_etichette.py: 2 warnings
+tests/test_snello_innesto.py: 19 warnings
+tests/test_snello_riepilogo.py: 1 warning
+tests/test_source_reconciliation.py: 3 warnings
+tests/test_standard_ivcee_parser.py: 12 warnings
+tests/test_verifica_sezbil.py: 1 warning
+tests/test_xbrl_reso_parser.py: 1 warning
+  C:\DEV\xbrlbudget-main\xbrlbudget\importers\pdf_importer.py:2660: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    extraction_time = (datetime.utcnow() - extraction_start).total_seconds()
+
+tests/test_bulk_tipizzato.py: 3 warnings
+tests/test_engine_accounting_invariants.py: 6 warnings
+tests/test_fix_rilievi_motore.py: 3 warnings
+tests/test_forecast_stale.py: 2 warnings
+tests/test_lifecycle_repeat.py: 3 warnings
+tests/test_override_rejection_not_persisted.py: 2 warnings
+tests/test_sp_override_body_schema.py: 2 warnings
+  C:\DEV\xbrlbudget-main\xbrlbudget\calculations\forecast_engine.py:2953: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    fy.updated_at = datetime.utcnow()
+
+tests/test_cashflow_debito_finanziario.py::test_gli_anni_storici_non_contano_due_volte_il_debito_finanziario_a_breve
+  C:\DEV\xbrlbudget-main\xbrlbudget\tests\test_cashflow_debito_finanziario.py:194: LegacyAPIWarning: The Query.get() method is considered legacy as of the 1.x series of SQLAlchemy and becomes a legacy construct in 2.0. The method is now available as Session.get() (deprecated since: 2.0) (Background on SQLAlchemy 2.0 at: https://sqlalche.me/e/b8d9)
+    fy_prev = db.query(FinancialYear).get(fy_prev_id)
+
+tests/test_cashflow_dividendi.py::test_sulla_holding_i_dividendi_incassati_stanno_nell_operativo_e_lo_scarto_e_zero
+tests/test_cashflow_dividendi.py::test_senza_partecipazioni_nulla_cambia_e_lo_scarto_e_dichiarato_a_zero
+  C:\DEV\xbrlbudget-main\xbrlbudget\tests\test_cashflow_dividendi.py:22: LegacyAPIWarning: The Query.get() method is considered legacy as of the 1.x series of SQLAlchemy and becomes a legacy construct in 2.0. The method is now available as Session.get() (deprecated since: 2.0) (Background on SQLAlchemy 2.0 at: https://sqlalche.me/e/b8d9)
+    base = db.query(FinancialYear).get(fy_id)
+
+tests/test_cashflow_dividendi.py::test_l_analisi_dichiara_lo_scarto_dei_mezzi_di_terzi_come_il_rendiconto
+  C:\DEV\xbrlbudget-main\xbrlbudget\tests\test_cashflow_dividendi.py:92: LegacyAPIWarning: The Query.get() method is considered legacy as of the 1.x series of SQLAlchemy and becomes a legacy construct in 2.0. The method is now available as Session.get() (deprecated since: 2.0) (Background on SQLAlchemy 2.0 at: https://sqlalche.me/e/b8d9)
+    base = db.query(FinancialYear).get(fy_id)
+
+tests/test_cashflow_tributi.py::test_la_variazione_tributaria_ha_la_sua_riga_e_il_totale_non_cambia
+  C:\DEV\xbrlbudget-main\xbrlbudget\tests\test_cashflow_tributi.py:23: LegacyAPIWarning: The Query.get() method is considered legacy as of the 1.x series of SQLAlchemy and becomes a legacy construct in 2.0. The method is now available as Session.get() (deprecated since: 2.0) (Background on SQLAlchemy 2.0 at: https://sqlalche.me/e/b8d9)
+    base = db.query(FinancialYear).get(fy_id)
+
+tests/test_cashflow_tributi.py::test_R1_imposte_pagate_sono_i_versamenti_e_la_cassa_non_cambia
+tests/test_cashflow_tributi.py::test_R1_le_due_pagine_del_rendiconto_mostrano_le_stesse_imposte_pagate
+tests/test_cashflow_tributi.py::test_R1_senza_imposte_versate_il_rendiconto_e_quello_di_prima
+  C:\DEV\xbrlbudget-main\xbrlbudget\tests\test_cashflow_tributi.py:61: LegacyAPIWarning: The Query.get() method is considered legacy as of the 1.x series of SQLAlchemy and becomes a legacy construct in 2.0. The method is now available as Session.get() (deprecated since: 2.0) (Background on SQLAlchemy 2.0 at: https://sqlalche.me/e/b8d9)
+    base = db.query(FinancialYear).get(fy_id)
+
+tests/test_complete_import.py::test_complete_xbrl_import
+  C:\DEV\xbrlbudget-main\xbrlbudget\backend\.venv\Lib\site-packages\_pytest\python.py:163: PytestReturnNotNoneWarning: Expected None, but tests/test_complete_import.py::test_complete_xbrl_import returned False, which will be an error in a future version of pytest.  Did you mean to use `assert` instead of `return`?
+    warnings.warn(
+
+tests/test_editorial_persistence.py::test_orm_company_deletion_removes_all_editorial_history
+  C:\DEV\xbrlbudget-main\xbrlbudget\tests\test_editorial_persistence.py:67: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    content_ids=["cover"], text="Commento manuale", provenance="user", revision=1, updated_at=datetime.utcnow()))
+
+tests/test_engine_accounting_invariants.py::test_forecast_generation_is_deterministic
+tests/test_lifecycle_repeat.py::test_override_survives_save_and_clears_on_request
+  C:\DEV\xbrlbudget-main\xbrlbudget\backend\app\api\v1\budget_scenarios.py:1176: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    generated_at=datetime.utcnow()
+
+tests/test_final_report_endpoint.py::test_stale_forecast_quadratura_and_adjustment_reconciliation_block_not_conflict
+  C:\DEV\xbrlbudget-main\xbrlbudget\tests\test_final_report_endpoint.py:108: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    assumption.updated_at = datetime.utcnow() + timedelta(minutes=2)
+
+tests/test_fix_rilievi_e2e_cassa.py::test_compensazione_imposte_pagate_uguali_sulle_due_pagine_e_rendiconto_chiude[senza_piano]
+tests/test_fix_rilievi_e2e_cassa.py::test_compensazione_imposte_pagate_uguali_sulle_due_pagine_e_rendiconto_chiude[con_piano_crediti_tributari]
+  C:\DEV\xbrlbudget-main\xbrlbudget\tests\test_fix_rilievi_e2e_cassa.py:22: LegacyAPIWarning: The Query.get() method is considered legacy as of the 1.x series of SQLAlchemy and becomes a legacy construct in 2.0. The method is now available as Session.get() (deprecated since: 2.0) (Background on SQLAlchemy 2.0 at: https://sqlalche.me/e/b8d9)
+    sc = db.query(BudgetScenario).get(scenario_id)
+
+tests/test_forecast_stale.py::test_infrannuale_rigenerato_due_volte_non_e_stantio
+tests/test_lifecycle_repeat.py::test_promote_then_budget_chain_stays_quadrato
+tests/test_standard_ivcee_parser.py::test_pdf_to_adjustments_to_assumptions_full_workflow_matrix[six-month-no-prior]
+tests/test_standard_ivcee_parser.py::test_pdf_to_adjustments_to_assumptions_full_workflow_matrix[nine-month-parenthesized-negatives]
+tests/test_standard_ivcee_parser.py::test_pdf_to_adjustments_to_assumptions_full_workflow_matrix[three-month-trailing-minus]
+tests/test_standard_ivcee_parser.py::test_full_workflow_matrix_partial_gap_equals_declared_amount[six-month-no-prior]
+tests/test_standard_ivcee_parser.py::test_full_workflow_matrix_partial_gap_equals_declared_amount[nine-month-parenthesized-negatives]
+tests/test_standard_ivcee_parser.py::test_full_workflow_matrix_partial_gap_equals_declared_amount[three-month-trailing-minus]
+  C:\DEV\xbrlbudget-main\xbrlbudget\calculations\intra_year_engine.py:2813: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    fy.updated_at = datetime.utcnow()
+
+tests/test_lifecycle_repeat.py::test_reimport_same_year_replaces_not_duplicates
+tests/test_residual_finalization.py::test_conflicting_comparative_never_replaces_previously_valid_prior
+  C:\DEV\xbrlbudget-main\xbrlbudget\importers\pdf_importer.py:2340: SAWarning: DELETE statement on table 'balance_sheets' expected to delete 1 row(s); 0 were matched.  Please set confirm_deleted_rows=False within the mapper configuration to prevent this warning.
+    db.flush()
+
+tests/test_m1_03_extra_accounting_alerts.py::test_get_defaults_null_and_put_round_trips_all_keys_including_false
+tests/test_m1_03_extra_accounting_alerts.py::test_get_normalizes_legacy_sparse_json_and_allows_infrannuale_12_months
+tests/test_m1_03_extra_accounting_alerts.py::test_foreign_scenario_is_not_visible
+tests/test_m1_03_extra_accounting_alerts.py::test_budget_scenario_rejects_alert_resource
+tests/test_m1_03_extra_accounting_alerts.py::test_put_requires_exact_strict_boolean_map[payload0]
+tests/test_m1_03_extra_accounting_alerts.py::test_put_requires_exact_strict_boolean_map[payload1]
+tests/test_m1_03_extra_accounting_alerts.py::test_put_requires_exact_strict_boolean_map[payload2]
+tests/test_m1_03_extra_accounting_alerts.py::test_generic_scenario_writes_and_create_time_fields_are_rejected[extra_accounting_alerts-value0]
+tests/test_m1_03_extra_accounting_alerts.py::test_generic_scenario_writes_and_create_time_fields_are_rejected[extra_accounting_alerts_updated_at-2026-09-14T00:00:00Z]
+  C:\DEV\xbrlbudget-main\xbrlbudget\tests\test_m1_03_extra_accounting_alerts.py:71: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    extra_accounting_alerts_updated_at=datetime.utcnow(),
+
+tests/test_priority_mapping.py::test_priority_mapping_structure
+  C:\DEV\xbrlbudget-main\xbrlbudget\backend\.venv\Lib\site-packages\_pytest\python.py:163: PytestReturnNotNoneWarning: Expected None, but tests/test_priority_mapping.py::test_priority_mapping_structure returned True, which will be an error in a future version of pytest.  Did you mean to use `assert` instead of `return`?
+    warnings.warn(
+
+tests/test_priority_mapping.py::test_priority_extraction
+  C:\DEV\xbrlbudget-main\xbrlbudget\backend\.venv\Lib\site-packages\_pytest\python.py:163: PytestReturnNotNoneWarning: Expected None, but tests/test_priority_mapping.py::test_priority_extraction returned True, which will be an error in a future version of pytest.  Did you mean to use `assert` instead of `return`?
+    warnings.warn(
+
+tests/test_priority_mapping.py::test_xbrl_import_with_priorities
+  C:\DEV\xbrlbudget-main\xbrlbudget\backend\.venv\Lib\site-packages\_pytest\python.py:163: PytestReturnNotNoneWarning: Expected None, but tests/test_priority_mapping.py::test_xbrl_import_with_priorities returned True, which will be an error in a future version of pytest.  Did you mean to use `assert` instead of `return`?
+    warnings.warn(
+
+tests/test_priority_mapping.py::test_fallback_to_v1
+  C:\DEV\xbrlbudget-main\xbrlbudget\backend\.venv\Lib\site-packages\_pytest\python.py:163: PytestReturnNotNoneWarning: Expected None, but tests/test_priority_mapping.py::test_fallback_to_v1 returned True, which will be an error in a future version of pytest.  Did you mean to use `assert` instead of `return`?
+    warnings.warn(
+
+tests/test_reserves_fix.py::test_reserves_accumulation
+  C:\DEV\xbrlbudget-main\xbrlbudget\backend\.venv\Lib\site-packages\_pytest\python.py:163: PytestReturnNotNoneWarning: Expected None, but tests/test_reserves_fix.py::test_reserves_accumulation returned True, which will be an error in a future version of pytest.  Did you mean to use `assert` instead of `return`?
+    warnings.warn(
+
+tests/test_reserves_fix.py::test_full_xbrl_import
+  C:\DEV\xbrlbudget-main\xbrlbudget\backend\.venv\Lib\site-packages\_pytest\python.py:163: PytestReturnNotNoneWarning: Expected None, but tests/test_reserves_fix.py::test_full_xbrl_import returned True, which will be an error in a future version of pytest.  Did you mean to use `assert` instead of `return`?
+    warnings.warn(
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ===========================
+FAILED tests/test_deployment_docs.py::test_nessun_riferimento_al_backend_dismesso[PRODUCTION_CONFIG.md]
+FAILED tests/test_editorial_notes_service.py::test_automatic_prose_definition_changes_invalidate_fit_signature_and_require_worker_reload
+FAILED tests/test_m2_00_spike_fixtures.py::SpikeFixtureFactoryTest::test_canonical_source_files_remain_byte_for_byte_unchanged
+FAILED tests/test_triage_rilievi_tool.py::test_esiti_junit_prende_il_peggiore_per_rilievo
+FAILED tests/test_typst_charts.py::test_dimension_contract_rejects_invalid_verified_config[negative]
+FAILED tests/test_typst_charts.py::test_dimension_contract_rejects_invalid_verified_config[sum]
+FAILED tests/test_typst_charts.py::test_dimension_contract_rejects_invalid_verified_config[too_wide]
+FAILED tests/test_typst_charts.py::test_dimension_contract_rejects_invalid_verified_config[bool]
+FAILED tests/test_typst_charts.py::test_dimension_contract_rejects_invalid_verified_config[styles]
+FAILED tests/test_typst_charts.py::test_dimension_contract_rejects_invalid_verified_config[float_json]
+FAILED tests/test_typst_charts.py::test_dimension_contract_rejects_invalid_verified_config[legal_but_changed]
+FAILED tests/test_typst_runtime.py::test_bundle_verification_rejects_mutated_assets[fifo]
+FAILED tests/test_typst_toolchain.py::TypstToolchainTest::test_corrupted_archive_fails_before_extraction
+FAILED tests/test_typst_toolchain.py::TypstToolchainTest::test_failed_reinstall_preserves_the_verified_installation
+FAILED tests/test_typst_toolchain.py::TypstToolchainTest::test_install_rejects_absolute_path_archive
+FAILED tests/test_typst_toolchain.py::TypstToolchainTest::test_install_rejects_hardlink_and_special_member_archives
+FAILED tests/test_typst_toolchain.py::TypstToolchainTest::test_install_rejects_parent_traversal_archive
+FAILED tests/test_typst_toolchain.py::TypstToolchainTest::test_install_rejects_symlink_archive
+FAILED tests/test_typst_toolchain.py::TypstToolchainTest::test_install_success_then_verify_offline_ok
+FAILED tests/test_typst_toolchain.py::TypstToolchainTest::test_installer_handles_the_official_nested_layout
+FAILED tests/test_typst_toolchain.py::TypstToolchainTest::test_installer_is_rerunnable
+FAILED tests/test_typst_toolchain.py::TypstToolchainTest::test_network_failure_is_explicit
+FAILED tests/test_typst_toolchain.py::TypstToolchainTest::test_scripts_pass_bash_syntax_check
+FAILED tests/test_typst_toolchain.py::TypstToolchainTest::test_unsupported_platform_stops_before_any_fetch
+FAILED tests/test_typst_toolchain.py::TypstToolchainTest::test_verify_duplicate_or_unknown_provenance_keys_never_execute
+FAILED tests/test_typst_toolchain.py::TypstToolchainTest::test_verify_fails_for_missing_binary
+FAILED tests/test_typst_toolchain.py::TypstToolchainTest::test_verify_malformed_provenance_never_executes
+FAILED tests/test_typst_toolchain.py::TypstToolchainTest::test_verify_missing_provenance_fails_not_warns
+FAILED tests/test_typst_toolchain.py::TypstToolchainTest::test_verify_provenance_archive_digest_mismatch_never_executes
+FAILED tests/test_typst_toolchain.py::TypstToolchainTest::test_verify_provenance_asset_mismatch_never_executes
+FAILED tests/test_typst_toolchain.py::TypstToolchainTest::test_verify_provenance_url_mismatch_never_executes
+FAILED tests/test_typst_toolchain.py::TypstToolchainTest::test_verify_provenance_version_mismatch_fails_before_execution
+FAILED tests/test_typst_toolchain.py::TypstToolchainTest::test_verify_provenance_with_invalid_sha_format_never_executes
+FAILED tests/test_typst_toolchain.py::TypstToolchainTest::test_verify_provenance_without_binary_sha_never_executes
+FAILED tests/test_typst_toolchain.py::TypstToolchainTest::test_verify_tampered_binary_never_executes
+FAILED tests/test_typst_toolchain.py::TypstToolchainTest::test_verify_wrong_version_reports_four_only_after_consistent_provenance
+FAILED tests/test_typst_toolchain.py::TypstToolchainTest::test_wrong_version_binary_is_rejected
+FAILED tests/test_vision_rescue.py::test_build_ce_non_manda_un_ricavo_sconosciuto_su_una_voce_di_costo
+38 failed, 2877 passed, 307 skipped, 16 xfailed, 58511 warnings in 644.89s (0:10:44)

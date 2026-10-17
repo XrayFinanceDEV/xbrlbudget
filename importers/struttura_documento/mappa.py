@@ -397,6 +397,8 @@ def blocchi(pdf: str) -> list[Blocco]:
 
 def _client():
     import anthropic
+    from importers.llm_provider import vieta_anthropic
+    vieta_anthropic("mappa della struttura")
     return anthropic.Anthropic(max_retries=1, timeout=120)
 
 
@@ -439,6 +441,20 @@ def mappa_pagina(client, png: bytes) -> dict:
     return out
 
 
+def mappa_pagina_gx10(_client, png: bytes) -> dict:
+    """Come ``mappa_pagina``, sulla vision di gx10 (Qwen, locale): stesso prompt, stesso schema
+    vincolato. E' la mappa di default: Anthropic si usa solo con ``ANTHROPIC_CONSENTITO=1``."""
+    from importers import llm_provider
+    contenuto = [{"type": "text", "text": PROMPT},
+                 {"type": "image_url",
+                  "image_url": {"url": "data:image/png;base64," + base64.b64encode(png).decode()}}]
+    out = dict(llm_provider.chiama_gx10_json("", [{"role": "user", "content": contenuto}],
+                                             _schema_uscita(SCHEMA), max_tokens=3000,
+                                             timeout=120.0))
+    out["_token"] = {"fornitore": "gx10"}
+    return out
+
+
 def mappa_documento(pdf: str, mappa_pagina_fn=None, cache_dir: str | None = None, concorrenza: int = 6) -> list[dict]:
     """Una mappa per pagina, con UNA chiamata al modello per blocco: le pagine seguenti del
     blocco riusano la mappa con continuazione=True; le pagine senza importi sono nota_o_testo."""
@@ -450,6 +466,9 @@ def mappa_documento(pdf: str, mappa_pagina_fn=None, cache_dir: str | None = None
             with open(cache, encoding="utf-8") as fh:
                 return json.load(fh)
     import fitz
+    from importers.llm_provider import anthropic_consentito
+    if mappa_pagina_fn is None and not anthropic_consentito():
+        mappa_pagina_fn = mappa_pagina_gx10
     fn = mappa_pagina_fn or mappa_pagina
     gruppi = blocchi(pdf)
     client = None if mappa_pagina_fn else _client()

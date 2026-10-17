@@ -30,9 +30,16 @@ if backend_path not in sys.path:
 from app.core.config import settings
 from app.core.decimal_encoder import decimal_to_float
 
-# Propagate ANTHROPIC_API_KEY to os.environ so shared modules (pdf_importer) can access it
-if settings.ANTHROPIC_API_KEY:
+# Propagate ANTHROPIC_API_KEY to os.environ so shared modules (pdf_importer) can access it —
+# only when Anthropic is explicitly allowed (ANTHROPIC_CONSENTITO=1). Otherwise the key is
+# removed, so no code path can reach a paid service by accident: a phase that needs it fails
+# before sending anything, and the import declares it.
+from importers.llm_provider import anthropic_consentito  # noqa: E402
+
+if settings.ANTHROPIC_API_KEY and anthropic_consentito():
     os.environ['ANTHROPIC_API_KEY'] = settings.ANTHROPIC_API_KEY
+elif not anthropic_consentito():
+    os.environ.pop('ANTHROPIC_API_KEY', None)
 
 # Create FastAPI app
 app = FastAPI(

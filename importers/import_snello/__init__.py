@@ -18,6 +18,9 @@ _MODI_LEGGE = ("legge", "legge_con_dettaglio")
 _MODO_DA_PARSER = {"standard_ivcee_parser": "legge",
                    "schema_legge_con_dettaglio": "legge_con_dettaglio",
                    "xbrl_reso_parser": "legge",
+                   "schema_legge_generico": "legge",
+                   "fonti_legge": "legge",
+                   "fonti_ago": "conti",
                    "situazione_contabile_parser": "conti"}
 
 _IMMOBILIZZAZIONI_CAMPI = ("sp02_immob_immateriali", "sp03_immob_materiali", "sp04_immob_finanziarie")

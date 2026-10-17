@@ -2881,7 +2881,7 @@ def ocr_pdf_sample_text(file_path: str, max_pages: int = 6) -> str:
 
     Requires ANTHROPIC_API_KEY. Returns "" on any failure (caller decides how to surface).
     """
-    api_key = os.environ.get("ANTHROPIC_API_KEY", "")
+    api_key = llm_provider.chiave_anthropic()
     if not api_key:
         return ""
     try:
@@ -3479,7 +3479,7 @@ def extract_pdf_with_llm(
     # local provider (vincoli: "la vision resta su Anthropic"); the text branch
     # can run entirely on gx10 (PDF_LLM_PROVIDER_IVCEE=gx10) without ANTHROPIC_API_KEY.
     use_vision = _is_image_pdf(file_path)
-    api_key = os.environ.get("ANTHROPIC_API_KEY", "")
+    api_key = llm_provider.chiave_anthropic()
     client = None
     if use_vision or llm_provider.provider_ivcee() != "gx10":
         if not api_key:
@@ -3842,7 +3842,7 @@ def extract_trial_balance_with_llm(
     """
     provider = llm_provider.provider_coge()
     client = None
-    api_key = os.environ.get("ANTHROPIC_API_KEY", "")
+    api_key = llm_provider.chiave_anthropic()
     if provider == "anthropic":
         if not api_key:
             raise PDFImportError("ANTHROPIC_API_KEY environment variable not set")
@@ -5003,7 +5003,7 @@ def extract_pdf_both_years_with_llm(
     # local provider (vincoli: "la vision resta su Anthropic"); the text branch
     # can run entirely on gx10 (PDF_LLM_PROVIDER_IVCEE=gx10) without ANTHROPIC_API_KEY.
     use_vision = _is_image_pdf(file_path)
-    api_key = os.environ.get("ANTHROPIC_API_KEY", "")
+    api_key = llm_provider.chiave_anthropic()
     client = None
     if use_vision or llm_provider.provider_ivcee() != "gx10":
         if not api_key:

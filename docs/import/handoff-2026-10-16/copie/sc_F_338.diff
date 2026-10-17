@@ -1,0 +1,19 @@
+--- /c/Users/user/AppData/Local/Temp/claude/C--DEV-xbrlbudget-main/9b77a5d4-d0c0-48e2-861a-b5d64250448a/scratchpad/sc_F.py	2026-10-16 17:07:02.630627500 +0200
++++ /c/Users/user/AppData/Local/Temp/claude/C--DEV-xbrlbudget-main/9b77a5d4-d0c0-48e2-861a-b5d64250448a/scratchpad/sc_F_con338.py	2026-10-16 17:07:02.594060200 +0200
+@@ -5842,6 +5842,16 @@
+         if _kw_match(d, ['CAPITALE']):
+             return 'sp11', True
+         return 'sp12', True
++    # Sul passivo un nome di CESPITE ("ATTREZZATURE INDUSTR.E COMMERCIALI", "TERRENI E
++    # FABBRICATI") non e' un debito: e' la testa dei fondi ammortamento di quella
++    # categoria, che stanno nei figli. Fermarsi li' lo prendeva per un debito (qui
++    # COMMERCIALI -> fornitori) e il fondo non si nettava dal suo cespite. Si scende;
++    # senza figli resta nel secchio generico, cioe' visibile come non classificato.
++    if (tag == 'sp16'
++            and _classify_sp_attivo(d) in ('gross_sp02', 'gross_sp03')
++            and not _kw_any(d, ['DEBIT', 'FORNIT', 'FINANZ', 'MUTU', 'BANC', 'ACCONT',
++                                'ANTICIP', 'LEASING', 'ERARIO', 'TRIBUT', 'SOCI'])):
++        return 'sp16g', False
+     if tag in ('sp16', 'debt_bank', 'bank_avere'):
+         # Split debiti by OIC creditor type from the description (banche / fornitori /
+         # tributari / previdenza / ...) instead of collapsing everything into the sp16

@@ -1,0 +1,124 @@
+--- importers/situazione_contabile_parser.py	2026-10-16 15:12:42.016764400 +0200
++++ /c/Users/user/AppData/Local/Temp/claude/C--DEV-xbrlbudget-main/9b77a5d4-d0c0-48e2-861a-b5d64250448a/scratchpad/sc_E.py	2026-10-16 17:03:40.456469300 +0200
+@@ -328,6 +328,14 @@
+     # finiva nei crediti mentre il suo fondo nettava le immobilizzazioni MATERIALI
+     # (budget_281: 4.500,00 in sp06 e 2.471,86 sottratti a sp03).
+     (['BENI DI TERZ'], 'gross_sp02'),
++    # Oneri pluriennali scritti per esteso (budget_367: "Altre spese ad utilita'
++    # pluriennale", "Manutenzioni e riparazioni da ammortizzare", "Disaggi su
++    # prestiti" — quest'ultimo gia' immateriale lato fondo, _FONDO_IMMAT_KW):
++    # finivano nel default crediti.
++    (['SPESE', 'PLURIENN'], 'gross_sp02'),
++    (['DA AMMORTIZZ'], 'gross_sp02'),
++    (['DISAGG'], 'gross_sp02'),
++    (['CONTENITOR'], 'gross_sp03'),
+     (['FABBRICAT'], 'gross_sp03'),
+     (['TERREN'], 'gross_sp03'),
+     (['MACCHINAR'], 'gross_sp03'),
+@@ -2439,6 +2447,13 @@
+             continue
+         if code is None:
+             continue
++        # Il pie' di pagina ("TOTALE PASSIVITA' / UTILE D'ESERCIZIO / TOTALE A
++        # PAREGGIO") chiude l'ultimo conto: non e' descrizione sua. Accodato, faceva
++        # leggere "UTILE ... ESERCIZIO" nella descrizione di un debito (budget_612).
++        if t.upper() == 'TOTALE':
++            flush()
++            code = None
++            continue
+         if _C8_AMOUNT_RE.match(t):
+             if amt is None:
+                 amt = _parse_amount(t)
+@@ -2488,7 +2503,12 @@
+     if gap < 100:                      # a single code column: nothing to split
+         return header_mid
+     right_code_x = code_xs[gi + 1]
+-    left_max = max((w[0] for w in words if w[0] < right_code_x), default=header_mid)
++    # Le parole allineate alla colonna codici di destra (entro 2 pt: es. le
++    # didascalie "TOTALE PASSIVITA'" a filo dei codici) appartengono a QUELLA
++    # colonna, non a sinistra: contarle mette il gutter a 0,001 pt dai codici e
++    # sulle pagine dove la colonna slitta di pochi decimi (budget_620: 417,12 ->
++    # 416,76) tutti i conti di destra finiscono a sinistra.
++    left_max = max((w[0] for w in words if w[0] < right_code_x - 2.0), default=header_mid)
+     if left_max >= right_code_x:
+         return header_mid
+     if left_max <= header_mid <= right_code_x:
+@@ -5782,6 +5802,37 @@
+     return (f, True) if f else (_classify_ce_ricavi_foglia(d) or 'ce04', False)
+ 
+ 
++_TITOLO_SP_RE = re.compile(r"^(?:STATO|SITUAZIONE)\s+PATRIMONIALE\b")
++_TITOLO_CE_RE = re.compile(r"^CONTO\s+ECONOMICO\b")
++
++
++def _be_ce_title_cut(words) -> Optional[float]:
++    """Ordinata (y) della riga-titolo "CONTO ECONOMICO" quando la stessa pagina porta,
++    PIU' IN ALTO, una riga-titolo "STATO/SITUAZIONE PATRIMONIALE": e' il punto in cui
++    la pagina passa dallo SP al CE. Il titolo deve aprire la sua riga (non una
++    didascalia tipo "Utile da conto economico"), e sotto deve esserci almeno un
++    importo; altrimenti None (pagina di una sola sezione)."""
++    from collections import defaultdict
++    lines = defaultdict(list)
++    for w in words:
++        lines[(w[5], w[6])].append(w)
++    sp_y = ce_y = None
++    for ws in lines.values():
++        ws.sort(key=lambda w: w[7])
++        txt = ' '.join(w[4] for w in ws).strip().upper()
++        y = min(w[1] for w in ws)
++        if _TITOLO_SP_RE.match(txt) and (sp_y is None or y < sp_y):
++            sp_y = y
++        elif _TITOLO_CE_RE.match(txt) and (ce_y is None or y < ce_y):
++            ce_y = y
++    if sp_y is None or ce_y is None or ce_y <= sp_y:
++        return None
++    cut = ce_y - 0.5
++    if not any((w[1] + w[3]) / 2 >= cut and _C8_AMOUNT_RE.match(w[4]) for w in words):
++        return None
++    return cut
++
++
+ def extract_contrapposte_best_effort(file_path: str) -> Tuple[Dict[str, Decimal], Dict[str, Decimal]]:
+     """Best-effort extraction of a 2-column contrapposte trial balance.
+ 
+@@ -5828,6 +5879,28 @@
+         words = page.get_text('words')
+         if not words:
+             continue
++        # Pagina che chiude lo Stato Patrimoniale e APRE il Conto Economico (budget_367:
++        # "STATO PATRIMONIALE" in testa, poi "Totale", poi il titolo "CONTO ECONOMICO"
++        # con le sue colonne Componenti negativi/positivi): la pagina intera era
++        # classificata SP dal primo titolo e i conti economici sotto il secondo titolo
++        # andavano persi. Si divide la pagina alla riga del titolo CE: sopra e' SP,
++        # sotto e' CE. Solo con entrambi i titoli su righe proprie, SP sopra e CE sotto.
++        cut = _be_ce_title_cut(words) if verdict == (True, False) else None
++        if cut is not None:
++            sp_words = [w for w in words if (w[1] + w[3]) / 2 < cut]
++            ce_words = [w for w in words if (w[1] + w[3]) / 2 >= cut]
++            sp_up = page.get_text(clip=fitz.Rect(0, 0, page.rect.width, cut)).upper()
++            ce_up = page.get_text(clip=fitz.Rect(0, cut, page.rect.width,
++                                                 page.rect.height)).upper()
++            pages_data.append((sp_words, True, False, sp_up, page.rect.width))
++            pages_data.append((ce_words, False, True, ce_up, page.rect.width))
++            previous = (False, True)
++            ce_flat = re.sub(r'\s+', '', ce_up)
++            totals_seen = len(re.findall(r'(?m)^\s*TOTALI\b', ce_up))
++            closed = ('PAREGGIO' in ce_flat or 'QUADRATURA' in ce_flat
++                      or ('TOTALECOST' in ce_flat and 'TOTALERICAV' in ce_flat)
++                      or totals_seen >= 2)
++            continue
+         pages_data.append((words, is_sp, is_ce, up, page.rect.width))
+ 
+     doc.close()
+@@ -6001,7 +6074,10 @@
+     def _strip_result(side):
+         keep = []
+         for c, d, a in side:
+-            if ('ESERCIZ' in d and ('UTILE' in d or 'PERDITA' in d or 'RISULTAT' in d)
++            # "Utile/Perdita in corso di formazione" e' il risultato del periodo nelle
++            # situazioni infrannuali (budget_367): stesso conto dell'utile d'esercizio.
++            if (('ESERCIZ' in d or 'CORSO DI FORMAZIONE' in d)
++                    and ('UTILE' in d or 'PERDITA' in d or 'RISULTAT' in d)
+                     and not _kw_any(d, ['PORTAT', 'PORTATE', 'NUOVO', 'PRECEDENT'])):
+                 result[0] += (-a if 'PERDITA' in d else a)
+                 booked_results.append(-a if 'PERDITA' in d else a)

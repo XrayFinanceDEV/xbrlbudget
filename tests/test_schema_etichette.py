@@ -360,8 +360,10 @@ def test_scansione_letta_da_mineru_si_importa_senza_modello(tmp_path, sessioni):
     assert ce0["ce05_materie_prime"] == D("280.00")
 
 
-def test_pdf_di_testo_si_importa_senza_modello(tmp_path, sessioni):
+def test_pdf_di_testo_si_importa_senza_modello(tmp_path, sessioni, monkeypatch):
     from importers import pdf_importer
+
+    monkeypatch.setenv("IMPORT_MOTORE", "classico")  # descrive il percorso classico: lo snello è il default
 
     result = pdf_importer.import_pdf_balance_sheet(
         file_path=_pdf(tmp_path), fiscal_year=2025, company_name="RICLASSIFICATA TESTO",

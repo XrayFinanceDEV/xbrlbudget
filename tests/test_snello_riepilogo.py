@@ -139,7 +139,7 @@ def test_innesto_rifiuta_con_messaggio_e_non_salva_nulla(tmp_path, monkeypatch):
 def test_senza_interruttore_il_riconoscitore_non_gira(tmp_path, monkeypatch):
     from tests.test_snello_innesto import _db_in_memoria
 
-    monkeypatch.delenv("IMPORT_MOTORE", raising=False)
+    monkeypatch.setenv("IMPORT_MOTORE", "classico")
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
 
     def _vietato(*a, **k):

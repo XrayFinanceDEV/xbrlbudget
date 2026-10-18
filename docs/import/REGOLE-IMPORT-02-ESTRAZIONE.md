@@ -629,7 +629,8 @@ sposta da una cella alla successiva). Prima questa famiglia andava al modello, c
 sotto-righe per totali, contava due volte i crediti oltre 12 mesi e perdeva i debiti verso il
 gruppo (Santini 31/12/2025, sbilancio di 1,1 milioni).
 
-**F1 — Struttura.** Riusa la mappa del branch struttura (vision Sonnet, un blocco per chiamata):
+**F1 — Struttura.** Riusa la mappa del branch struttura (vision su gx10, un blocco per chiamata;
+Sonnet solo con `ANTHROPIC_CONSENTITO=1`):
 per ogni pagina, quali sono SP/CE/dettaglio, lo `schema` (di legge / riclassificato / piano dei
 conti), la `disposizione` (colonna unica / sezioni contrapposte), colonne per ruolo e totali
 stampati. Decide quale dei due modi seguenti usare.

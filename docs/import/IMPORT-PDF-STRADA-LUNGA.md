@@ -19,7 +19,9 @@ ferma al primo che funziona (`importers/pdf_importer.py`, `_llm_extract`):
    - schema con il dettaglio dei conti e situazione contabile (otto famiglie di formato);
    - dal 2026-10-16, dopo i precedenti: le prove incrociate fra fonti
      (`extract_deterministic_source_candidates`) e il lettore generico dello schema di legge di
-     qualunque gestionale (`schema_legge_generico`).
+     qualunque gestionale (`schema_legge_generico`). Questi due lettori non stanno in
+     `_llm_extract`: li prova `tentativo()` in `import_snello/deterministico.py`, dopo i sei
+     precedenti.
 2. **Qwen sul gx10**, solo se i lettori a regole falliscono: prima la lettura delle macro-voci
    (`macro_analysis`), poi l'estrazione LLM di Stato patrimoniale e Conto economico
    (`pdf_extractor_llm`).

@@ -597,7 +597,7 @@ Three services: **nginx** (reverse proxy), **backend** (FastAPI + shared modules
 | `DEV_USER_ID` | Bypass JWT auth (any string) | - |
 | `ANTHROPIC_API_KEY` | Claude API key for PDF extraction | - |
 | `IMPORT_MOTORE` | `classico` = previous importer; unset/`snello` = lean PDF import (default, see «Local Qwen on gx10»). Anthropic needs `ANTHROPIC_CONSENTITO=1` | `snello` |
-| `PDF_LLM_PROVIDER_COGE` / `_IVCEE` / `_DETTAGLI` | `gx10` moves that PDF pass to local Qwen | `anthropic` |
+| `PDF_LLM_PROVIDER_COGE` / `_IVCEE` / `_DETTAGLI` | `gx10` moves that PDF pass to local Qwen; `anthropic` only with `ANTHROPIC_CONSENTITO=1` | `gx10` |
 | `GX10_API_KEY` | gx10 key, sent only as Bearer header | - |
 | `GX10_BASE_URL` | gx10 address | `http://100.65.63.12:18300` |
 | `GX10_CONCORRENZA` | Concurrent gx10 requests per process | 6 |

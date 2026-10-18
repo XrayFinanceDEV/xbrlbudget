@@ -63,8 +63,10 @@ falliscono con un messaggio che lo dice. Vedi
 
 `STRUTTURA_MODEL` — modello Anthropic per la fase di struttura (F1): quali pagine sono SP/CE/di
 dettaglio, schema (di legge / riclassificato / piano dei conti) e disposizione. Default
-`claude-sonnet-5-5` (dal 2026-10-02; la mappa si chiede con l'uscita strutturata, non con uno strumento forzato). **Le pagine intere del documento vanno ad Anthropic per questa fase**,
-indipendentemente da `PDF_LLM_PROVIDER_*`: la struttura non gira mai su gx10.
+`claude-sonnet-5-5` (dal 2026-10-02; la mappa si chiede con l'uscita strutturata, non con uno
+strumento forzato). **Vale solo con `ANTHROPIC_CONSENTITO=1`.** Senza consenso (il default dal
+2026-10-16) la mappa gira su gx10 (`mappa_pagina_gx10` in `struttura_documento/mappa.py`) e le
+pagine del documento non lasciano la rete locale.
 
 `GX10_CONCORRENZA` — richieste gx10 in parallelo per processo (un solo semaforo, condiviso da
 tutte le chiamate a gx10, non solo dal percorso snello). Default **6** (decisione del
@@ -115,8 +117,10 @@ GX10_CONCORRENZA=3
 ```
 
 `GX10_BASE_URL` senza `/v1` (lo aggiunge il codice) e senza barra finale. La chiave sta solo in
-quel file, mai nel repo né nei log. `ANTHROPIC_API_KEY` resta necessaria: la struttura (F1) e la
-vision girano su Anthropic, e l'importatore attuale la usa quando il percorso snello ripiega.
+quel file, mai nel repo né nei log. `ANTHROPIC_API_KEY` non serve più per importare: senza
+`ANTHROPIC_CONSENTITO=1` il backend la toglie dall'ambiente (`backend/app/main.py`), la struttura e
+la vision che la usavano si saltano o girano su gx10, e lo snello non ripiega su Anthropic. Serve
+solo se si vuole il consenso esplicito.
 
 - **Concorrenza.** Il semaforo di `GX10_CONCORRENZA` è **per processo**, e il backend gira con
   `--workers 2` (`backend/entrypoint.sh`): il default di Jenkins è quindi `3`, cioè al massimo 6

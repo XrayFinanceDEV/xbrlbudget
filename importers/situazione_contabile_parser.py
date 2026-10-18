@@ -698,7 +698,7 @@ def _sp02_detail_field(desc_upper: str) -> Optional[str]:
         return 'sp02a_costi_impianto'
     if _kw_any(desc_upper, ['SVILUPP', 'RICERCA']):
         return 'sp02b_costi_sviluppo'
-    if _kw_any(desc_upper, ['BREVETT', 'SOFTWARE', 'OPERE INGEGNO']):
+    if _kw_any(desc_upper, ['BREVETT', 'SOFTWARE', 'OPERE INGEGNO', 'PROCEDURE ELABOR']):
         return 'sp02c_brevetti'
     if _kw_match(desc_upper, ['DIRITTI', 'UTILIZZ']):   # "F.DO AMM.TO DIRITTI UTILIZZO" (1343)
         return 'sp02c_brevetti'
@@ -709,7 +709,8 @@ def _sp02_detail_field(desc_upper: str) -> Optional[str]:
     if _kw_any(desc_upper, ['IN CORSO', 'ACCONT']):
         return 'sp02f_immob_in_corso'
     # migliorie su beni di terzi ("MAN. E RIPARAZ. SU BENI DI TERZI", Santini): B.I.7
-    if _kw_any(desc_upper, ['PLURIENN', 'IMMATERIAL', 'BENI DI TERZ', 'MANUT', 'RIPARAZ']):
+    if _kw_any(desc_upper, ['PLURIENN', 'IMMATERIAL', 'BENI DI TERZ', 'BENI TERZI', 'MANUT',
+                            'RIPARAZ', 'MAN.E RIP', 'MIGLIORIE']):
         return 'sp02g_altre_immob_imm'
     return None
 
@@ -3153,6 +3154,21 @@ def _entries_da_righe_verifica(righe: list, utili: set, nome: str) -> List[Entry
             lato = 'attivo' if saldo > 0 else 'passivo'
             saldo_mastro = mastri.get((sezione, mastro))
             dal_mastro = _regola_sp(mastro_desc.upper(), lato)
+            # un fondo ammortamento senza il nome del suo cespite ("F.DO AMM. MAN.E RIP.BENI
+            # TERZI", "MIGLIORIE FABBR.TERZ", "PROCEDURE ELABOR.") cade nel default dei fondi
+            # materiali anche sotto un mastro che dice "IMMATER.": la massa passava da sp02
+            # a sp03 (COLOMBO, 88.776,72), attraversando un aggregato. Il mastro vince, e il
+            # conto tiene le sue parole per il dettaglio.
+            # Solo se il mastro nomina davvero la categoria immateriale: "COSTI UTILIZZO
+            # PLURIENNALI" (budget_680) e' un contenitore dove stanno anche fabbricati e hardware,
+            # e li' le parole del conto decidono.
+            if (sezione == 'passivo' and lato == 'passivo' and dal_mastro == 'depr_sp02'
+                    and any(k in mastro_desc.upper() for k in (
+                        'IMMAT', 'INGEGNO', 'BREVETT', 'LICENZ', 'MARCHI', 'SOFTWARE',
+                        'CONCESS', 'AVVIAMENT'))
+                    and _regola_sp(du, lato) == 'depr_sp03'
+                    and not any(k in du for k in _FONDO_MAT_KW)):
+                du = mastro_desc.upper() + ' ' + du
             # il mastro presta la descrizione solo a un conto che sta dal suo lato: un
             # rateo passivo a saldo dare sotto "IMMOBILIZZI PASSIVI" non e' un cespite. Dal
             # suo lato vuol dire nella sezione del mastro, o col segno del suo saldo; una

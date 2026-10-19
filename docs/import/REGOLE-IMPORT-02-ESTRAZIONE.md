@@ -605,6 +605,24 @@ quella porta e `a09e472` l'ha richiusa (2026-10-03), perché il parser delle sit
 adottava budget_238 e budget_338 quadrati ma con le voci sbagliate. Prima ancora, un
 riepilogo di poche macro-voci (`importers/import_snello/riepilogo.py`, tipo export xlsx) si rifiuta
 con `PDFImportError`: non è un bilancio (decisione del proprietario, 2026-10-03).
+**Prospetto sintetico** (`importers/prospetto_sintetico.py`, 2026-10-19, budget_1405): due pagine, una
+colonna, voci di legge **appiattite** («B) Immobilizzazioni materiali», «C.II) Crediti», «B.7) Servizi»,
+costi fra parentesi) e i totali di gruppo stampati. Non è un riepilogo da rifiutare: ha le voci che il
+modello usa, manca solo il dettaglio. Entra fra gli ultimi lettori (`_ULTIMI_LETTORI`, dopo i lettori di
+sempre, che non lo adottano) e ogni totale stampato deve tornare, altrimenti `rifiuto`. Il totale di una
+voce senza dettaglio va nel sotto-campo «altri» della famiglia (`iv_cee_hierarchy.residual_bucket`, la
+stessa convenzione di `residual_finalization`: massa letta, mai un plug), con una sola scelta propria,
+del proprietario: le immobilizzazioni materiali in `sp03b` impianti e macchinari, non in altri beni. Le
+assegnazioni stanno in `report['approssimazioni']` e nell'avviso «PROSPETTO SINTETICO»: l'utente le
+affina in Rettifiche.
+
+**Verifica «Mastri» a 3/5 cifre** (budget_1401, Metaldecor): stesso gestionale e tracciato del «Mastri»
+a 4/8 cifre di Santini, con mastri `\d{3,4}` e conti `\d{5,8}`. Tre particolarità: un mastro con la sola
+riga del totale («CLIENTI IT», codice a lettere) vale da sé; l'utile d'esercizio può essere già un conto
+del PASSIVO (attivo = passivo, la DIFFERENZA è il solo risultato del CE); la scadenza la dichiara il
+mastro («DEBITI V/FINANZ.ESIG.OLTRE 12M») e i suoi conti la ereditano, così i mutui non cadono a breve.
+Per lo stesso motivo «DEBITI V/FINANZ.» è debito finanziario (gli anticipi su fatture non sono «altri
+debiti»).
 Lo schema di legge adottato porta con sé anche la colonna comparativa (`_con_precedente`, #60),
 con le stesse regole di adozione dell'anno corrente ma **solo con esito `"ok"`**: un tappo
 sull'anno precedente non avrebbe dove essere dichiarato. `deterministico.prior_stato` nel report

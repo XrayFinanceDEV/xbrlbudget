@@ -436,10 +436,29 @@ def _prova_schema_generico(file_path: str) -> dict | None:
     return esito
 
 
+def _prova_prospetto_sintetico(file_path: str) -> dict | None:
+    """Prospetto CEE sintetico a una colonna, con le voci di legge appiattite
+    (``prospetto_sintetico``): ogni totale stampato riprodotto, il totale di una voce senza
+    dettaglio nel sotto-campo "altri" della sua famiglia (le approssimazioni stanno nel report),
+    poi ``_esito``. None se il documento non e' di questa famiglia."""
+    from importers.prospetto_sintetico import estrai
+
+    letto = estrai(file_path)
+    if letto is None:
+        return None
+    if letto.get("bs") is None:
+        return {"adottato": False, "parser": "prospetto_sintetico", "esito": "oltre_soglia",
+                "rifiuto": letto.get("rifiuto")}
+    esito = _esito("prospetto_sintetico", letto["bs"], letto["ce"], letto["stampati"])
+    esito["approssimazioni"] = letto["approssimazioni"]
+    esito["prior_stato"] = "assente"
+    return esito
+
+
 # Dopo i lettori di sempre, che non hanno adottato: le prove incrociate e lo schema di legge
 # generico. Vengono DOPO, cosi' un documento che i lettori di sempre adottano resta letto
 # esattamente come prima.
-_ULTIMI_LETTORI = (_prova_fonti, _prova_schema_generico)
+_ULTIMI_LETTORI = (_prova_fonti, _prova_schema_generico, _prova_prospetto_sintetico)
 
 
 def tentativo(file_path: str, ocr_text: str | None = None) -> dict:

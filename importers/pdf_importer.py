@@ -2096,6 +2096,14 @@ def import_pdf_balance_sheet(
                 usa_llm=not (_snello is not None and _snello.report.get("modo") == "conti"),
             )
         sc_quadratura_warnings.extend(_detail_report.get('warnings', []))
+        if _snello is not None and _snello.report.get('approssimazioni'):
+            # prospetto sintetico (voci appiattite, nessun dettaglio sotto): il totale di ogni voce sta
+            # nel sotto-campo convenzionale della famiglia, massa letta e non un plug - si dichiara
+            sc_quadratura_warnings.append(
+                'PROSPETTO SINTETICO: il documento stampa le sole voci di legge, senza dettaglio. '
+                'I totali sono stati assegnati ai sotto-campi convenzionali ('
+                + ', '.join(sorted({x['campo'] for x in _snello.report['approssimazioni']}))
+                + ') - affinare le riclassifiche in Rettifiche.')
 
         # Diagnose the CE/SP result gap for PDF routes. The helper records
         # differences, including comparisons with a declared result when present,

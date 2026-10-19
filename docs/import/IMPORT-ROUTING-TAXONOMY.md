@@ -1,7 +1,9 @@
 # Routing import bilanci per tipologia — analisi e tassonomia
 
-> ⚠️ **Conteggi e sintesi superati (verificato il 2026-07-16).** Il corpus è ora a **214 file
-> fisici / 137 contenuti unici**. Inoltre: la sintesi del blocco B (§4) attribuisce la soglia
+> ⚠️ **Conteggi e sintesi superati (verificato il 2026-07-16; conteggi del corpus aggiornati al
+> manifest del 2026-10-19).** Il corpus è ora a **252 file fisici / 159 contenuti unici**
+> (`tests/corpus/manifest.json`, chiavi `summary.physical_files` / `summary.unique_contents`, pinate
+> da `tests/test_corpus_manifest.py`). Inoltre: la sintesi del blocco B (§4) attribuisce la soglia
 > `coge_codes>=5` a tutto il blocco mentre nel codice la richiede **solo B2**; i segnali
 > `sit_contabile` e `dare_avere` sono elencati fra i discriminanti ma sono **inerti** (calcolati
 > e mai letti); le sottocategorie A4/Cerved, A5/riepiloghi AI, B4, C1b e C5 sono dichiarate ma

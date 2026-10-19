@@ -462,6 +462,7 @@ _SP_PASSIVO_RULES = [
     (['DISPONIBILIT'], 'bank_avere'),
     # Equity (sub2 total and sub3 components)
     (['PATRIMONIO NETTO'], 'equity_total'),
+    (['UTILI', 'DESTINAZ'], 'equity_total'),      # "Utili in attesa di destinaz." (Napolitano)
     (['CAPITALE'], 'equity_total'),
     (['RISERVA'], 'equity_total'),
     (['RISERVE'], 'equity_total'),
@@ -785,7 +786,13 @@ def _sp14_detail_field(desc_upper: str) -> Optional[str]:
     return None
 
 
-_CE_AMMORTAMENTO_RE = re.compile(r'^AMM(?:ORTAMENT[OI]|\.?\s?TO\b|\.)\s*')
+_CE_AMMORTAMENTO_RE = re.compile(r'^AMM(?:ORTAMENT[OI]|\.?\s?TO\b|/TO\b|\.(?!NE\b))\s*')
+# La stessa testa, ma senza l'"AMM." nudo (e' anche "AMM.NE", amministrazione): un conto
+# che comincia cosi' e nomina un cespite e' un ammortamento PRIMA di ogni altra parola -
+# "AMM/TO ATTREZZ.COMMERCIALI" (Napolitano) finiva nei servizi per COMMERCIAL, oltre il
+# confine dell'EBITDA.
+_CE_AMMORTAMENTO_PRIMA_RE = re.compile(
+    r'^AMM(?:ORTAMENT[OI]|\.?\s?TO\b|/TO\b|\.TI\b|\.(?=ORD|CIVIL))\.?\s*')
 
 # Conti foglia di un piano dei conti senza mastri (budget_435, sezioni contrapposte di
 # soli conti): ultima risorsa, solo dove oggi scatta il ripiego (ce12 fra i costi). Mai
@@ -798,6 +805,11 @@ _CE_COSTI_FOGLIE = [
     (['CONTRIBUTI', 'SANITAR'], 'ce08c'),         # assistenza sanitaria integrativa
     (['PREMI', 'ELEMENTI'], 'ce08b'),             # "PREMI E ALTRI ELEMENTI SIMILI"
     (['ASSISTENZA'], 'ce06'),                     # "CANONI DI ASSISTENZA TECNICA": servizio
+    (['CONSUL'], 'ce06'),                         # "COMP.PROF.CONSUL.AMM.VA/FISC." (Napolitano)
+    (['COMP', 'PROF'], 'ce06'),                   # compensi professionali
+    (['VIAGG'], 'ce06'),
+    (['RISTORANT'], 'ce06'),
+    (['PERNOTT'], 'ce06'),
     (['TELEMATIC'], 'ce06'),
     (['CARBURANT'], 'ce05'),
     (['LUBRIFICANT'], 'ce05'),
@@ -957,6 +969,12 @@ def _figli_puntati(righe):
 
 def _classify_ce_costi(desc_upper: str) -> Optional[str]:
     """Classify a CE cost entry by description keywords."""
+    m = _CE_AMMORTAMENTO_PRIMA_RE.match(desc_upper)
+    if m and desc_upper[m.end():].strip() and 'SVAL' not in desc_upper \
+            and 'FONDO' not in desc_upper and 'F.DO' not in desc_upper:
+        resto = desc_upper[m.end():]
+        immat = _classify_sp_attivo(resto) == 'gross_sp02' or _fondo_is_immat(resto)
+        return 'ce09a' if immat else 'ce09b'
     for keywords, field in _CE_COSTI_RULES:
         if _kw_match(desc_upper, keywords):
             return _rimanenze_per_natura(field, desc_upper)
@@ -1245,6 +1263,10 @@ def _debt_type(desc_upper: str) -> str:
     # steal "FINANZIATORI" or "SOCI C/FINANZIAMENTO" (D.5, not D.4).
     if _kw_any(desc_upper, ['ALTRI FINANZIAT', 'FINANZIAT', 'SOCI C/FINANZ', 'SOCI C/C',
                             'V/SOCI', 'FACTOR']):
+        return 'b'
+    # "DEBITI VARI/DIVERSI DI FINANZIAMENTO" non nomina una banca (Napolitano 30/09/2026:
+    # sotto ci sono i debiti v/dipendenti, il CEE dello stesso gestionale li mette in D.5).
+    if _kw_any(desc_upper, ['VARI DI FINANZ', 'DIVERSI DI FINANZ']) and 'BANC' not in desc_upper:
         return 'b'
     # Banks (D.4): 'BANC' covers BANCA/BANCO/BANCHE/BANCARIO and bank names ending in
     # -BANCA (EMILBANCA); incl. bank financings ("FINANZIAMENTO <banca>"), salvo-buon-fine
@@ -4953,6 +4975,7 @@ _FONDO_IMMAT_KW = (
     'AVVIAMENT', 'LICENZ', 'CONCESSION', 'RICERCA', 'SVILUPPO', 'PUBBLICIT',
     'WEB', 'PROGETTAZ', 'CONSULENZ', 'DIRITTI', 'INGEGNO', 'KNOW', 'MANUT',
     'AMPLIAMENT', "COSTI D'IMPIANTO", 'COSTI DI IMPIANTO',
+    'AMPL.', 'COSTI IMP', 'COSTITUZ',  # "Fondi ammort.costi imp.e ampl.", "spese di costituzione"
     'DISAGG',                       # disaggi su prestiti (budget_435)
 )
 
@@ -6127,7 +6150,9 @@ def classify_passivo(desc_upper: str) -> Tuple[str, bool]:
         # "CAPITALE E RISERVE" e' una testa di due voci diverse: si scende nei figli
         # (capitale sociale -> sp11, riserve -> sp12), e cio' che non coprono resta riserva.
         # Fermarsi li' metteva la riserva legale nel capitale (budget_590, Unicarton).
-        if re.search(r'CAPITALE(?:\s+SOCIALE)?\s+E\s+RISERV', d):
+        if re.search(r'CAPITALE(?:\s+SOCIALE)?\s+E\s+RISERV', d) or 'PATRIMONIO NETTO' in d:
+            # anche "PATRIMONIO NETTO": capitale, riserve e utili sotto lo stesso mastro
+            # (Napolitano 30/09/2026: il capitale sociale finiva nelle riserve, sp11 = 0)
             return 'sp12', False
         if _kw_match(d, ['CAPITALE']):
             return 'sp11', True
@@ -6143,8 +6168,11 @@ def classify_passivo(desc_upper: str) -> Tuple[str, bool]:
         # Una testa generica di finanziamenti senza "banca" ("FINANZIAMENTI DI TERZI",
         # "MUTUI E FINANZIAMENTI", budget_590) contiene anche il finanziamento soci: si
         # scende nei figli, e cio' che non coprono resta banca come prima.
+        # Anche "DEBITI VARI DI FINANZIAMENTO" (Napolitano 30/09/2026): sotto ci sono i
+        # debiti verso dipendenti, e da mastro specifico finivano tutti in banca.
         if (letter == 'a' and 'BANC' not in d
-                and _kw_any(d, ['FINANZIAMENTI DI TERZI', 'MUTUI E FINANZIAMENTI'])):
+                and _kw_any(d, ['FINANZIAMENTI DI TERZI', 'MUTUI E FINANZIAMENTI',
+                                'VARI DI FINANZ', 'DIVERSI DI FINANZ'])):
             return 'sp16a', False
         return 'sp16' + letter, letter != 'g'
     return tag, tag != 'sp16'
@@ -6546,6 +6574,12 @@ def extract_contrapposte_best_effort(file_path: str) -> Tuple[Dict[str, Decimal]
             return _be_amount(flat1.split(flat, 1)[1][:40])
         return None
 
+    def _control_exact(section, side, caption):
+        matches = [fact.amount for sec, sd, fact in controls
+                   if sec == section and sd == side
+                   and re.sub(r'[^A-Z]', '', fact.description) == caption]
+        return matches[-1] if len(matches) == 1 else None
+
     def _control_amount(section, side, *needles):
         matches = [fact.amount for sec, sd, fact in controls
                    if sec == section and (side is None or sd == side)
@@ -6571,6 +6605,12 @@ def extract_contrapposte_best_effort(file_path: str) -> Tuple[Dict[str, Decimal]
     if tot_att is None and tot_pas is None:
         tot_att = _control_amount('sp', 'left', 'TOTALI')
         tot_pas = _control_amount('sp', 'right', 'TOTALI')
+    # "TOTALE" e basta, uno per colonna (Napolitano 30/09/2026, ATTIVITA'/PASSIVITA' solo
+    # nell'intestazione): anche qui lo dice la colonna, ma solo la riga che e' esattamente
+    # "TOTALE" - mai un "Totale clienti" o un altro subtotale.
+    if tot_att is None and tot_pas is None:
+        tot_att = _control_exact('sp', 'left', 'TOTALE')
+        tot_pas = _control_exact('sp', 'right', 'TOTALE')
     # Il pareggio dello stato patrimoniale, mai quello del conto economico: con le
     # pagine di CE in fondo "TOTALE A PAREGGIO" trovava il pareggio dei componenti di
     # reddito (1.809.957,59 invece dei 1.119.893,69 dei totali dello SP, budget_435).
@@ -6622,8 +6662,10 @@ def extract_contrapposte_best_effort(file_path: str) -> Tuple[Dict[str, Decimal]
     explicit_result = explicit_results[-1] if explicit_results else None
     total_gap = (tot_att - tot_pas - prior_footer
                  if tot_att is not None and tot_pas is not None else None)
-    ce_cost_total = _control_amount('ce', 'left', 'TOTALE', 'COST')
-    ce_revenue_total = _control_amount('ce', 'right', 'TOTALE', 'RICAV')
+    ce_cost_total = (_control_amount('ce', 'left', 'TOTALE', 'COST')
+                     or _control_exact('ce', 'left', 'TOTALE'))
+    ce_revenue_total = (_control_amount('ce', 'right', 'TOTALE', 'RICAV')
+                        or _control_exact('ce', 'right', 'TOTALE'))
     ce_control_result = (ce_revenue_total - ce_cost_total
                          if ce_cost_total is not None and ce_revenue_total is not None
                          else None)

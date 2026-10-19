@@ -483,6 +483,7 @@ _SP_PASSIVO_RULES = [
     # Debiti v/banche (need entro/oltre split — from details OR from "(EE)"/"(OE)" suffix)
     (['DEBITI', 'BANCH'], 'debt_bank'),
     (['DEBITI', 'FINANZIAT'], 'debt_bank'),
+    (['DEBITI', 'V/FINANZ'], 'debt_bank'),      # "DEBITI V/FINANZ.ESIG.ENTRO 12M" (budget_1401): anticipi factoring compresi
     (['MUTUI'], 'debt_bank'),
     # Santini: "FINANZIAMENTO 07797790 BANCO BPM", "ANTICIPI ESTERO BPER" sotto
     # "ANTICIPI BANCARI", un conto bancario a saldo avere sotto "BANCHE"
@@ -3183,6 +3184,11 @@ def _entries_da_righe_verifica(righe: list, utili: set, nome: str) -> List[Entry
             # voce: "MANTERO SETA SPA DIV.LICENZE" sotto CLIENTI non e' una licenza
             elif re.search(r'\b(CLIENTI|FORNITORI|DEBITORI|CREDITORI)\b', mastro_desc.upper()):
                 du = mastro_desc.upper()
+            # la scadenza la dichiara il mastro ("DEBITI V/FINANZ.ESIG.OLTRE 12M"), non il conto
+            # ("MUTUO CHIROGRAFARIO B.P.S."): senza, il debito oltre l'esercizio cadeva a breve
+            if (sezione == 'passivo' and lato == 'passivo' and 'OLTRE' in mastro_desc.upper()
+                    and 'OLTRE' not in du and 'ENTRO' not in du and '(OE)' not in du):
+                du = du + ' OLTRE'
             if (sezione == 'passivo' and lato == 'attivo'
                     and _regola_sp(du, 'passivo') == 'equity_total'):
                 # una riserva a saldo dare resta nel patrimonio, in negativo (riserva per
@@ -3258,7 +3264,7 @@ def is_verifica_mastri(text: str) -> bool:
         return False
     if 'RIEPILOGO' not in text or not re.search(r"TOTALE ATTIVITÀ'?:", text):
         return False
-    return (len(re.findall(r'(?m)^\d{8}$', text)) >= 20
+    return (len(re.findall(r'(?m)^\d{5,8}$', text)) >= 20
             and len(re.findall(r'(?m)^Totale .+:$', text)) >= 5)
 
 
@@ -3301,9 +3307,17 @@ def parse_entries_verifica_mastri(file_path: str) -> List[Entry]:
                 if sezione is None or testo.startswith('TOTALE '):
                     continue
                 if re.match(r'Totale .+:', testo) and ws[0][0] > 200:
-                    if len(importi) != 1 or aperto is None:
+                    if len(importi) != 1:
                         continue
                     stampato = _parse_amount(importi[0][4])
+                    if aperto is None:
+                        # un mastro con la sola riga del totale ("CLIENTI IT" / "CLIENTI ITALIA"
+                        # senza conti sotto): il codice non e' numerico, il totale lo nomina
+                        nome = re.sub(r'^Totale\s+|:\s*$', '', ' '.join(
+                            w[4] for w in ws if w is not importi[0]))
+                        # (codice numerico sintetico: build_iv_cee scarta le voci senza prefisso)
+                        righe.append(['mastro', f'99{len(righe):04d}', nome, stampato * segno, None])
+                        continue
                     # un mastro stampato senza conti sotto (CLIENTI WEB) vale da se'
                     if aperto[2] and abs(stampato - aperto[1]) > Decimal('0.05'):
                         logger.warning(f"Verifica Mastri: {testo[:60]} non torna con i suoi conti "
@@ -3313,12 +3327,12 @@ def parse_entries_verifica_mastri(file_path: str) -> List[Entry]:
                     aperto = None
                     continue
                 codice = ws[0][4]
-                if re.fullmatch(r'\d{4}', codice) and ws[0][0] < 40:
+                if re.fullmatch(r'\d{3,4}', codice) and ws[0][0] < 40:
                     desc = ' '.join(w[4] for w in ws[1:] if w not in importi)
                     righe.append(['mastro', codice, desc, None, None])
                     aperto = [len(righe) - 1, Decimal('0'), 0]
                     continue
-                if re.fullmatch(r'\d{8}', codice) and 50 < ws[0][0] < 110:
+                if re.fullmatch(r'\d{5,8}', codice) and 50 < ws[0][0] < 110:
                     if len(importi) != 1 or aperto is None:
                         raise ValueError(f"conto senza importo a pagina {page.number + 1}: {testo[:80]}")
                     v = _parse_amount(importi[0][4])
@@ -3337,7 +3351,10 @@ def parse_entries_verifica_mastri(file_path: str) -> List[Entry]:
     differenza = next(iter(differenze))
     sp = riepilogo['ATTIVITÀ'] - riepilogo['PASSIVITÀ']
     ce = riepilogo['RICAVI'] - riepilogo['COSTI']
-    if abs(abs(sp) - differenza) > tol or abs(sp - ce) > tol:
+    # l'utile puo' stare gia' dentro la sezione PASSIVITA' come conto ("utile d'esercizio"): allora
+    # attivita' e passivita' pareggiano e la DIFFERENZA e' il solo risultato del conto economico
+    utile_gia_nel_passivo = abs(sp) <= tol and abs(differenza - ce) <= tol
+    if not utile_gia_nel_passivo and (abs(abs(sp) - differenza) > tol or abs(sp - ce) > tol):
         logger.warning("Verifica Mastri: la differenza del riepilogo non e' il risultato: lettura scartata")
         return []
     for r in righe:

@@ -181,8 +181,16 @@ def finish_search_report(report, balances, proposals=()):
     incomplete = search['status'] != 'complete'
     if incomplete:
         reason = search.get('reason') or report.get('reason') or 'blocchi non completati o riferimenti non validi'
-        warnings.append('RICERCA DETTAGLI NON COMPLETA: ' + reason +
-                        '. I dettagli non trovati non sono dichiarati assenti; il residuo resta nel contenitore previsto.')
+        if reason == 'llm_disattivato':
+            # Il lettore col modello e' spento PER SCELTA sugli elenchi di conti (``usa_llm=False``
+            # in pdf_importer): le sotto-voci sono i conti stampati, gia' letti dalle regole. Non e'
+            # una ricerca interrotta, e dirlo "non completa" faceva pensare a una mancanza.
+            warnings.append('DETTAGLI DAI CONTI: il documento e\' un elenco di conti e le sotto-voci sono quelle '
+                            'dei conti stampati; la ricerca col modello non serve. Le voci che i conti non '
+                            'distinguono restano nel contenitore previsto.')
+        else:
+            warnings.append('RICERCA DETTAGLI NON COMPLETA: ' + reason +
+                            '. I dettagli non trovati non sono dichiarati assenti; il residuo resta nel contenitore previsto.')
     for period, aggregates in active_families(balances).items():
         period_report = report.setdefault('periods', {}).setdefault(period, {'families': {}, 'rejected': []})
         outcomes = {}

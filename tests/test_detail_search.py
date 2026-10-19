@@ -293,3 +293,15 @@ def test_failed_search_warnings_and_coverage_persist_through_import_and_adjustme
         audit = json.loads(years[0].validation_report)
         assert audit['detail_enrichment']['search']['status'] == 'not_searched'
         assert any('RICERCA DETTAGLI NON COMPLETA' in w for w in audit['warnings'])
+
+
+def test_llm_spento_per_scelta_non_si_dice_ricerca_non_completa():
+    """Su un elenco di conti (``usa_llm=False``) i dettagli sono i conti stampati: l'avviso lo dice,
+    senza "RICERCA DETTAGLI NON COMPLETA". Ogni altra causa di ricerca incompleta lo mantiene."""
+    balances = {'current': {INV: D('100')}, 'prior': None}
+    spento = ds.finish_search_report({'reason': 'llm_disattivato'}, balances)
+    assert any(w.startswith('DETTAGLI DAI CONTI') for w in spento['warnings'])
+    assert not any('NON COMPLETA' in w for w in spento['warnings'])
+    for causa in ('no_api_key', 'TimeoutError'):
+        altro = ds.finish_search_report({'reason': causa}, balances)
+        assert any(w.startswith('RICERCA DETTAGLI NON COMPLETA: ' + causa) for w in altro['warnings'])

@@ -323,16 +323,18 @@ def account_contract(row, ancestors, proposed):
     """
     from importers.detail_enrichment import _ledger_maturity, _receivable_type, SourceRow
     from importers.situazione_contabile_parser import _debt_type, _sp05_detail_field
+    from importers.rimanenze_ce import e_conto_rimanenze, natura_rimanenze
     label = row.text.upper()
     captions = [label, *[s.upper() for s in reversed(ancestors)]]
     combined = ' '.join(captions)
     field = proposed
     policy = []
     if row.statement == 'ce':
-        if re.search(r'RIM[.A-Z]*\s*(?:INIZ|FINAL)', label) or 'RIMANENZE' in label:
-            if re.search(r'MAT(?:ERIE|\.)\s*PRIM|SUSSID|CONSUM', combined):
+        if e_conto_rimanenze(label):
+            natura = natura_rimanenze(*captions)
+            if natura == 'ce10':
                 field = 'ce10_var_rimanenze_mat_prime'
-            elif re.search(r'PRODOTT.*FINIT|SEMILAVORAT', combined):
+            elif natura == 'ce02':
                 field = 'ce02_variazioni_rimanenze'
         if 'PROVENT' in label and 'FINANZ' in label:
             field = 'ce14_altri_proventi_finanziari'

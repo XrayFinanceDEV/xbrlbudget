@@ -949,3 +949,26 @@ def test_t27_ce14_e_ce13_restano_a_segno_fisso():
     coppie = [("CE.A.1", D("3000")), ("CE.B.7", D("2000")), ("CE.C.16.d", D("-4"))]
     bs, ce, diag = da_coppie(coppie)
     assert ce.get("ce14_altri_proventi_finanziari") == D("4.00")
+
+
+def test_rimanenze_vanno_alla_natura_non_al_percorso_del_modello():
+    """Unicarton 2025: un conto di rimanenze finali instradato ad A.5 (altri ricavi) e uno di
+    iniziali a B.14 (oneri diversi) quadrano lo stesso e gonfiano valore e costi della
+    produzione. Il testo del conto decide la voce (prodotti A.2, materie B.11); la colonna
+    decide il segno - le iniziali di prodotti, fra i costi, riducono ce02."""
+    foglie = [
+        _f(1, "L", "700", "CE.B.6", sezione="ce"),
+        _f(2, "L", "100", "CE.B.7", sezione="ce"),
+        _f(3, "R", "1000", "CE.A.1", sezione="ce"),
+        _f(4, "R", "50", "CE.A.5", sezione="ce"),
+        _f(5, "L", "120", "CE.B.14", testo="51.01.01 Rimanenze iniziali prodotti finiti", sezione="ce"),
+        _f(6, "L", "90", "CE.B.14", testo="51.01.13 Rim.iniz.mat.prime, sussid.e di consumo", sezione="ce"),
+        _f(7, "R", "100", "CE.A.5", testo="49.01.01 Rimanenze finali prodotti finiti", sezione="ce"),
+        _f(8, "R", "80", "CE.A.5", testo="49.01.90 Rim.finali mat.prime", sezione="ce"),
+    ]
+    bs, ce, diag = da_foglie(foglie)
+    assert ce["ce02_variazioni_rimanenze"] == D("-20.00")        # 100 - 120
+    assert ce["ce10_var_rimanenze_mat_prime"] == D("10.00")      # 90 - 80
+    assert ce["ce04_altri_ricavi"] == D("50.00")
+    assert ce.get("ce12_oneri_diversi", D(0)) == 0
+    assert [r[3] for r in diag["rimanenze_per_natura"]] == ["ce02", "ce10", "ce02", "ce10"]

@@ -202,6 +202,13 @@ ciò che non si può non sapere. Ogni voce dice la regola e **cosa si rompe** a 
   già letta, quindi un fallback. Concedergli una tolleranza — anche piccola, anche «come quella
   del cancello» — lo trasforma in un plug che attribuisce a un conto vero un importo che nessuno
   ha letto, e il foglio quadra lo stesso. → `docs/import/REGOLE-IMPORT-02-ESTRAZIONE.md` §4-bis
+- **Le rimanenze di un elenco di conti vanno per natura, mai nel ripiego**: prodotti (anche
+  lavori in corso su ordinazione) in `ce02`, materie e merci in `ce10`, una regola sola per
+  tutti i lettori (`importers/rimanenze_ce.py`). Un mastro si legge dai suoi conti quando
+  sommano al totale stampato, anche contro il nome del mastro; un conto muto prende la natura
+  del capo opposto. Iniziali in `ce12` e finali in `ce04` quadrano lo stesso e gonfiano valore
+  e costi della produzione; un capo in `ce02` e l'altro in `ce10` fanno lo stesso con entrambi
+  gli importi. → `docs/import/REGOLE-IMPORT-03-SPACCHETTATURE-NETTING.md` §4-bis
 - **`TIER0_FIELDS` non è mai una destinazione di ripiego** (immobilizzazioni nette, patrimonio
   netto, debiti verso banche, `ce09`): `ce09` è l'unico confine di KPI dentro i costi operativi
   (`EBITDA = EBIT + ce09`), gli altri spostano un totale e rompono PFN, ROI, indipendenza

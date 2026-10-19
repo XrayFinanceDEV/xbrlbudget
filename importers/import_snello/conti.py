@@ -14,6 +14,7 @@ from importers.import_snello.risultato import (control_caption, has_account_code
                                                sign_by_caption)
 from importers.import_snello.verifica import misura, soglia
 from importers.iv_cee_hierarchy import detail_fields
+from importers.rimanenze_ce import e_conto_rimanenze, natura_rimanenze
 
 _C = Decimal("0.01")
 _IMMOBILIZZAZIONI = ("sp02", "sp03", "sp04")
@@ -237,6 +238,7 @@ def _e_riga_di_controllo(testo: str) -> bool:
 #   - 'ce01_return' (resa/sconto letta fra i costi) -> 'ce01' (ce01_total - ce01_returns)
 #   - 'ce13_cost'   (proventi da partecip. letti fra i costi) -> 'ce13' (ce13 - entry.amount)
 #   - 'ce10_close'  (rimanenze finali lette fra i ricavi) -> 'ce10' (opening - closing)
+#   - 'ce02_open'   (rimanenze iniziali di PRODOTTI lette fra i costi) -> 'ce02' (finali - iniziali)
 #   - 'ce08a_tfr'   (e' gia' il dettaglio vero, solo rinominato) -> 'ce08a' (ce08a_tfr_accrual)
 # Fix round 2 (ruling del proprietario, 2026-09-28): non serve piu' marcare i primi tre come
 # riduzione esplicita - la foglia entra nel voto di colonna di ``da_foglie`` (sotto) con la
@@ -246,6 +248,7 @@ def _e_riga_di_controllo(testo: str) -> bool:
 # fra i costi, una rimanenza finale fra i ricavi), il voto di colonna la marca gia' "fuori
 # colonna" da solo - lo stesso risultato di prima, senza bisogno di un marcatore apposito.
 _TAG_CE_INTERNI = {"ce01_return": "ce01", "ce13_cost": "ce13", "ce10_close": "ce10",
+                   "ce02_open": "ce02",
                    "ce08a_tfr": "ce08a"}
 
 
@@ -366,6 +369,27 @@ def riclassifica_ignote(foglie, diag: dict) -> None:
                 f.percorso = f"#{campo}"
 
 
+def _rimanenze_per_natura(f, codice: str, diag: dict) -> str:
+    """Un conto di rimanenze iniziali/finali va in A.2 (ce02, prodotti) o in B.11 (ce10,
+    materie e merci), mai nel campo che il modello gli ha dato per assonanza (A.5 altri
+    ricavi, B.14 oneri diversi): quel campo quadra lo stesso e gonfia valore e costi della
+    produzione. La natura la dice il testo del conto, poi quello del suo mastro; quando non
+    la dice si tiene ce02/ce10 se il modello ha scelto uno dei due, altrimenti ce10. Il
+    segno resta quello del voto di colonna (iniziali fra i costi = riduzione di ce02). Solo
+    il testo del conto decide che e' una rimanenza: sotto lo stesso mastro possono stare
+    conti che non lo sono (incrementi per lavori interni). Regola in importers/rimanenze_ce."""
+    if f.sezione != "ce" or not codice or not e_conto_rimanenze(f.testo):
+        return codice
+    natura = natura_rimanenze(f.testo, f.mastro or "")
+    if natura == "ce02" and codice == "ce03":
+        return codice                  # A.3, lavori in corso su ordinazione: e' gia' una A
+    nuovo = natura or (codice if codice in ("ce02", "ce03", "ce10") else "ce10")
+    if nuovo != codice:
+        diag["rimanenze_per_natura"].append(
+            [f.id, f.testo[:60], codice, nuovo, str(f.valore.quantize(_C))])
+    return nuovo
+
+
 def da_foglie(foglie):
     """Percorsi di legge -> campi, con una regola in piu' per il risultato d'esercizio (modo
     "conti", Task 14 2026-09-26): il corrente non entra MAI dalle righe stampate, sp13 e'
@@ -406,7 +430,8 @@ def da_foglie(foglie):
     diag = {"non_mappati": [], "escluse": [], "risultato_stampato": None, "lato_corretti": 0,
             "lato_irrisolti": [], "risultato_duplicato": [], "padri_esclusi": [],
             "risultato_precedente": [], "risultato_escluso": [], "risultato_ambiguo": None,
-            "riclassificati_vecchio_parser": [], "ce_segno_forzato": [], "grezzo_sp": {}}
+            "riclassificati_vecchio_parser": [], "ce_segno_forzato": [], "grezzo_sp": {},
+            "rimanenze_per_natura": []}
     diag["lato_corretti"] = applica_lato(foglie, diag["lato_irrisolti"])
     riclassifica_ignote(foglie, diag)
     irrisolti_ids = {r[0] for r in diag["lato_irrisolti"]}
@@ -445,7 +470,7 @@ def da_foglie(foglie):
             # posto (ce01_return/ce13_cost/ce10_close) - lasciarla votare la propria stessa
             # colonna falserebbe il voto con un pareggio auto-riferito (test preesistente,
             # ce10_close: un solo altro conto "cos" vero e questa foglia stessa, 1 a 1).
-            codice = f.percorso[1:]
+            codice = _rimanenze_per_natura(f, f.percorso[1:], diag)
             if famiglia(codice) in ("att", "pas"):
                 _grezzo(f)
             per_famiglia[famiglia(codice)].append((f, codice, True))
@@ -505,6 +530,7 @@ def da_foglie(foglie):
         if codice is None:
             diag["non_mappati"].append([f.id, f.percorso, str(f.valore.quantize(_C))])
             continue
+        codice = _rimanenze_per_natura(f, codice, diag)
         if famiglia(codice) in ("att", "pas"):
             _grezzo(f)
         per_famiglia[famiglia(codice)].append((f, codice, False))

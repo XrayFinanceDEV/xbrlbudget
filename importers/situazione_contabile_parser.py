@@ -28,6 +28,8 @@ from typing import Any, Dict, List, NamedTuple, Optional, Tuple
 
 import fitz  # PyMuPDF
 
+from importers.rimanenze_ce import e_conto_rimanenze, natura_rimanenze
+
 logger = logging.getLogger(__name__)
 
 
@@ -834,11 +836,80 @@ _CE_COSTI_FOGLIE = [
 ]
 
 
+def _rimanenze_per_natura(tag: str, *testi: str, ripiego: Optional[str] = None) -> str:
+    """Le rimanenze di PRODOTTI vanno in A.2 (ce02), non in B.11 (ce10): il tag di
+    rimanenze che le tabelle a parole danno sempre come materie ('ce10' fra i costi,
+    'ce10_close' fra i ricavi) diventa 'ce02_open' (iniziali: riducono ce02) o 'ce02'
+    (finali) quando la descrizione, o quella di un padre, dice prodotti. Natura non
+    detta o mista: decide ``ripiego`` (la natura del lato opposto, _natura_unanime),
+    poi il tag di sempre. Regola in importers/rimanenze_ce.py."""
+    if tag in ('ce10', 'ce10_close') and (natura_rimanenze(*testi) or ripiego) == 'ce02':
+        return 'ce02_open' if tag == 'ce10' else 'ce02'
+    return tag
+
+
+def _rimanenze_dal_dettaglio(tag, codice, desc, importo, figli, classify=None, ripiego=None):
+    """Un mastro di rimanenze si legge dai suoi conti: prodotti in ce02, materie e merci
+    in ce10 (_rimanenze_per_natura). Quando i figli sommano al centesimo il totale
+    stampato decidono loro, anche contro il nome del mastro (AITEC: "RIM.INIZ.SEMILAVORATI
+    PROD-FINITI" porta sotto anche le materie prime) - la profondita' propone, il totale
+    decide. Senza figli che quadrano decide la descrizione del conto, poi quella dei padri,
+    poi il tag di sempre. Un figlio che non e' un conto di rimanenze ("Incrementi per
+    lavori interni" sotto lo stesso mastro) prende la propria voce da ``classify``. Un
+    conto che la natura non la dice prende ``ripiego``, la natura unanime delle rimanenze
+    dell'altro lato (_natura_unanime): iniziali e finali sono lo stesso magazzino, e
+    mandarne un capo in ce02 e l'altro in ce10 gonfierebbe valore e costi della
+    produzione di entrambi gli importi (COLOMBO: "RIMANENZE INIZIALI" accanto a
+    "Prodotti finiti rimanenze finali").
+
+    ``tag`` e' quello del classificatore: 'ce10'/'ce02_open' fra i costi, 'ce10_close'/
+    'ce02' fra i ricavi (un altro tag passa intatto). ``figli(codice)`` -> [(codice,
+    descrizione, importo)] i figli diretti. Ritorna [(tag, importo)]."""
+    if tag in ('ce10', 'ce02_open'):
+        base = 'ce10'
+    elif tag == 'ce10_close' or (tag == 'ce02' and e_conto_rimanenze(desc)):
+        base = 'ce10_close'
+    else:
+        return [(tag, importo)]
+
+    def scendi(c, d, a, padri):
+        if padri and not e_conto_rimanenze(d) and natura_rimanenze(d) is None \
+                and classify is not None:
+            proprio = classify(d)
+            if proprio and proprio not in ('ce10', 'ce10_close', 'ce02_open', 'ce02'):
+                return [(proprio, a)]
+        ch = figli(c)
+        if ch and abs(sum((x[2] for x in ch), Decimal('0')) - a) <= Decimal('0.01'):
+            out = []
+            for x in ch:
+                out.extend(scendi(x[0], x[1], x[2], (d,) + padri))
+            return out
+        return [(_rimanenze_per_natura(base, d, *padri, ripiego=ripiego), a)]
+
+    return scendi(codice, desc, importo, ())
+
+
+def _natura_unanime(descrizioni) -> Optional[str]:
+    """La natura (ce02/ce10) dei conti di rimanenze di un lato, quando tutti quelli che la
+    dicono dicono la stessa; altrimenti None."""
+    nature = {natura_rimanenze(d) for d in descrizioni if e_conto_rimanenze(d)}
+    nature.discard(None)
+    return nature.pop() if len(nature) == 1 else None
+
+
+def _figli_puntati(righe):
+    """figli(codice) per i codici a punti ("49" -> "49.01" -> "49.01.01")."""
+    def figli(c):
+        pref = c + '.'
+        return [r for r in righe if r[0].startswith(pref) and '.' not in r[0][len(pref):]]
+    return figli
+
+
 def _classify_ce_costi(desc_upper: str) -> Optional[str]:
     """Classify a CE cost entry by description keywords."""
     for keywords, field in _CE_COSTI_RULES:
         if _kw_match(desc_upper, keywords):
-            return field
+            return _rimanenze_per_natura(field, desc_upper)
     # "AMM.IMPIANTI E MACCHINARI", "AMMORTAMENTO SOFTWARE", "AMMTO TELEFONIA" (Santini): la
     # quota di un cespite nominato. Immateriale se il cespite lo e', altrimenti materiale
     # (ce09a/ce09b stanno entrambi dentro ce09, l'errore resta dentro l'aggregato).
@@ -909,7 +980,7 @@ def _classify_ce_ricavi(desc_upper: str) -> Optional[str]:
     """Classify a CE ricavi entry by description keywords."""
     for keywords, field in _CE_RICAVI_RULES:
         if _kw_match(desc_upper, keywords):
-            return field
+            return _rimanenze_per_natura(field, desc_upper)
     return None
 
 
@@ -1320,6 +1391,46 @@ def build_iv_cee(entries: List[Entry], default_ce: bool = False) -> Tuple[Dict[s
         if entry.level in (1, 2) and entry.section:
             sections_with_subtotals.add(entry.section)
 
+    livello_di = {(e.code, e.section): e.level for e in entries}
+    ripiego_rimanenze = {
+        'costi': _natura_unanime(e.description.upper() for e in entries if e.section == 'ricavi'),
+        'ricavi': _natura_unanime(e.description.upper() for e in entries if e.section == 'costi'),
+    }
+
+    def _figli_entry(section):
+        """figli(codice) per i subtotali XX/**/*** e XX/YY/***: i conti del livello
+        subito sotto con la stessa radice di codice (un dettaglio non ne ha)."""
+        def figli(code):
+            stem = code.split('*')[0]
+            if not stem or stem == code:
+                return []
+            lvl = livello_di.get((code, section), 0)
+            cands = [e for e in entries
+                     if e.section == section and e.code != code
+                     and e.code.startswith(stem) and e.level < lvl]
+            if not cands:
+                return []
+            top = max(e.level for e in cands)
+            return [(e.code, e.description.upper(), e.amount) for e in cands if e.level == top]
+        return figli
+
+    def _rimanenze_entry(entry, tag, desc_upper, classify):
+        """[(campo, importo)] di una categoria di rimanenze, letta dai conti
+        (_rimanenze_dal_dettaglio): 'ce10'/'ce10_close' per le materie, 'ce02' col
+        segno gia' applicato per i prodotti, la voce propria per un conto che
+        rimanenza non e'."""
+        out = []
+        for t, x in _rimanenze_dal_dettaglio(tag, entry.code, desc_upper, entry.amount,
+                                             _figli_entry(entry.section), classify,
+                                             ripiego_rimanenze.get(entry.section)):
+            if t in ('ce10', 'ce10_close'):
+                out.append((t, x))
+            elif t == 'ce02_open':
+                out.append(('ce02', -x))
+            else:
+                out.append((_CE_HIER_SUBPARENT.get(t, t), x))
+        return out
+
     def _process_category(entry: Entry) -> None:
         """Process a sub2 or standalone sub3 entry through keyword classification."""
         nonlocal gross_sp02, gross_sp03, depr_sp02, depr_sp03
@@ -1455,8 +1566,12 @@ def build_iv_cee(entries: List[Entry], default_ce: bool = False) -> Tuple[Dict[s
                 ce09b += entry.amount
             elif field == 'ce09d':
                 ce09d += entry.amount
-            elif field == 'ce10':
-                ce10_opening += entry.amount
+            elif field in ('ce10', 'ce02_open'):
+                for t, x in _rimanenze_entry(entry, field, desc_upper, _classify_ce_costi):
+                    if t == 'ce10':
+                        ce10_opening += x
+                    else:
+                        ce[t] = ce.get(t, Decimal('0')) + x
             elif field == 'ce08a_tfr':
                 ce_tfr_accrual += entry.amount
                 ce['ce08'] = ce.get('ce08', Decimal('0')) + entry.amount
@@ -1499,8 +1614,12 @@ def build_iv_cee(entries: List[Entry], default_ce: bool = False) -> Tuple[Dict[s
             field = _classify_ce_ricavi(desc_upper)
             if field == 'ce01':
                 ce01_total += entry.amount
-            elif field == 'ce10_close':
-                ce10_closing += entry.amount
+            elif field in ('ce10_close', 'ce02'):
+                for t, x in _rimanenze_entry(entry, field, desc_upper, _classify_ce_ricavi):
+                    if t == 'ce10_close':
+                        ce10_closing += x
+                    else:
+                        ce[t] = ce.get(t, Decimal('0')) + x
             elif field == 'ce20_provento':
                 ce['ce20'] = ce.get('ce20', Decimal('0')) - entry.amount
             elif field:
@@ -4338,7 +4457,8 @@ def _be_split_codeless(words) -> Optional[float]:
     return best[1] if best else None
 
 
-def _be_reclassify(items: List[Tuple[str, str, Decimal]], classify) -> List[Tuple[str, Decimal]]:
+def _be_reclassify(items: List[Tuple[str, str, Decimal]], classify,
+                   ripiego_rimanenze: Optional[str] = None) -> List[Tuple[str, Decimal]]:
     """Reconcile mastri/subtotali to the IV-CEE reclassification.
 
     Walk the account-code hierarchy (parent = prefix) and emit ONE line at the
@@ -4385,11 +4505,20 @@ def _be_reclassify(items: List[Tuple[str, str, Decimal]], classify) -> List[Tupl
 
     out: List[Tuple[str, Decimal]] = []
 
+    def figli(c):
+        return [(x,) + info[x] for x in direct_children(c)]
+
+    def proprio(d):
+        f, spec = classify(d)
+        return f if spec else None
+
     def rec(c):
         d, a = info[c]
         field, specific = classify(d)
         if specific:
-            out.append((field, a))
+            # un mastro di rimanenze senza natura si legge dai conti (prodotti/materie)
+            out.extend(_rimanenze_dal_dettaglio(field, c, d, a, figli, proprio,
+                                                ripiego_rimanenze))
             return a
         ch = direct_children(c)
         if not ch:
@@ -5621,12 +5750,25 @@ def _hier_reconstruct(pages_data, full: str):
     def adde(k, v):
         ce[k] = ce.get(k, Z) + v
 
+    figli_costi, figli_ricavi = _figli_puntati(cos), _figli_puntati(ric)
+    ripiego_costi = _natura_unanime(d for _c, d, _a in ric)
+    ripiego_ricavi = _natura_unanime(d for _c, d, _a in cos)
     for _c, d, a in mc:
         f = (_classify_ce_costi(d) or _resolve_ce_field(d, 'costi')
              or _classify_ce_costi_foglia(d) or _classify_ce_sinonimo(d, 'costi'))
         if f is None:
             f = fallback_field('ce')
             unclassified.append((d, a, 'ce'))
+        if f in ('ce10', 'ce02_open'):
+            for t, x in _rimanenze_dal_dettaglio(f, _c, d, a, figli_costi, _classify_ce_costi,
+                                                 ripiego_costi):
+                if t == 'ce02_open':
+                    adde('ce02', -x)
+                elif t in _CE_HIER_SUBPARENT:
+                    adde(_CE_HIER_SUBPARENT[t], x)
+                else:
+                    adde(t, x)
+            continue
         if f == 'ce01_return':
             adde('ce01', -a)
         elif f == 'ce10_close':
@@ -5643,10 +5785,12 @@ def _hier_reconstruct(pages_data, full: str):
         if f is None:
             f = 'ce04'
             unclassified.append((d, a, 'ce'))
-        if f == 'ce10_close':
-            adde('ce10', -a)
-        else:
-            adde(f, a)
+        for t, x in _rimanenze_dal_dettaglio(f, _c, d, a, figli_ricavi, _classify_ce_ricavi,
+                                             ripiego_ricavi):
+            if t == 'ce10_close':
+                adde('ce10', -x)
+            else:
+                adde(t, x)
 
     att_sum = sum((bs.get(k, Z) for k in _ATTIVO_KEYS), Z)
 
@@ -6297,6 +6441,8 @@ def extract_contrapposte_best_effort(file_path: str) -> Tuple[Dict[str, Decimal]
             add(ce, 'ce01', -amt)
         elif tag == 'ce10_close':
             add(ce, 'ce10', -amt)
+        elif tag == 'ce02_open':
+            add(ce, 'ce02', -amt)
         elif tag == 'ce13_cost':
             add(ce, 'ce15', amt)
         elif tag in _CE_SUBFIELD_PARENT:
@@ -6305,9 +6451,11 @@ def extract_contrapposte_best_effort(file_path: str) -> Tuple[Dict[str, Decimal]
             add(ce, detail, amt)      # "di cui" detail (full DB key, survives _map_sc_keys)
         else:
             add(ce, tag, amt)
-    for tag, amt in _be_reclassify(costi, cl_cos):
+    for tag, amt in _be_reclassify(costi, cl_cos,
+                                   _natura_unanime(d for _c, d, _a in ricavi)):
         ce_add(tag, amt)
-    for tag, amt in _be_reclassify(ricavi, cl_ric):
+    for tag, amt in _be_reclassify(ricavi, cl_ric,
+                                   _natura_unanime(d for _c, d, _a in costi)):
         ce_add(tag, amt)
 
     # --- Declared totals & current-year result ---
@@ -6685,6 +6833,8 @@ def build_ce_from_vision(rows) -> Dict[str, Decimal]:
             add('ce01', -amount)
         elif tag == 'ce10_close':
             add('ce10', -amount)
+        elif tag == 'ce02_open':
+            add('ce02', -amount)
         elif tag == 'ce13_cost':
             add('ce15', amount)
         elif tag in _CE_SUBFIELD_PARENT:
@@ -6864,10 +7014,12 @@ def is_bilancio_verifica_segno(text: str) -> bool:
             or "TOTALEAPAREGGIO" in nos)
 
 
-def _vseg_split_rows(page) -> Tuple[list, list]:
+def _vseg_split_rows(page, details: Optional[list] = None) -> Tuple[list, list]:
     """Split a 2-column page into (left_rows, right_rows). Each row is
     (code, desc_upper, amount). Columns split at the gutter between the two
-    'Conto'/'Codice' header words (fallback: 290pt)."""
+    'Conto'/'Codice' header words (fallback: 290pt). With ``details`` the level-3
+    rows (_VSEG_DETAIL_CODE_RE) are appended there as (side, code, desc, amount),
+    the same channel as _vseg_split_ocr_rows."""
     words = page.get_text('words')  # (x0,y0,x1,y1,word,block,line,wordno)
     headers = sorted([w for w in words if w[4] in ('Conto', 'Codice')],
                      key=lambda w: w[0])
@@ -6885,12 +7037,19 @@ def _vseg_split_rows(page) -> Tuple[list, list]:
             if len(side_words) < 2:
                 continue
             code = side_words[0][4]
-            if not _VSEG_CODE_RE.match(code):
+            dettaglio = (details is not None and not _VSEG_CODE_RE.match(code)
+                         and _VSEG_DETAIL_CODE_RE.match(code))
+            if not (_VSEG_CODE_RE.match(code) or dettaglio):
                 continue
             amt = _vseg_num(side_words[-1][4])
             if amt is None:
                 continue
             desc = ' '.join(w[4] for w in side_words[1:-1])
+            if dettaglio:
+                if desc and not _VSEG_PARTITARIO_RE.match(desc):
+                    details.append(('left' if out is left else 'right', code,
+                                    _vseg_up(desc), amt))
+                continue
             out.append((code, _vseg_up(desc), amt))
     return left, right
 
@@ -7214,7 +7373,7 @@ def _vseg_classify_sp(bs: Dict[str, Decimal], rows: list, side: int) -> None:
 # PROVENTI, which also occurs in "ALTRI RICAVI E PROVENTI" → ce04).
 _VSEG_CE_RICAVI = [
     (['VENDIT'], 'ce01'), (['RICAVI DELLE'], 'ce01'), (['RICAVI DA PREST'], 'ce01'),
-    (['RIMANENZ'], 'ce02'), (['INCREMENTI'], 'ce03'),
+    (['INCREMENTI'], 'ce03'),
     (['FINANZIAR'], 'ce14'),
 ]
 # "ACQUISTI DI SERVIZI" contains both ACQUIST and SERVIZ → ce05 must require BENI/PRODUZ
@@ -7229,16 +7388,36 @@ _VSEG_CE_COSTI = [
     (['ONERI FINANZIAR'], 'ce15'), (['INTERESS'], 'ce15'),
     (['IMPOST'], 'ce20'),
     (['SERVIZ'], 'ce06'), (['PRESTAZION'], 'ce06'), (['SPESE'], 'ce06'),
+    (['GESTIONE', 'VEICOLI'], 'ce06'),
     (['ONERI'], 'ce12'),
 ]
 
 
-def _vseg_classify_ce(ce: Dict[str, Decimal], rows: list, side: int) -> None:
-    """side: 0 = Costi, 1 = Ricavi. MASTRO rows only."""
+def _vseg_classify_ce(ce: Dict[str, Decimal], rows: list, side: int,
+                      details: list = (), opposite: list = ()) -> None:
+    """side: 0 = Costi, 1 = Ricavi. MASTRO rows only; the level-2/3 rows (``details``,
+    as (side, code, desc, amount)) are read only to split an inventory mastro."""
     table = _VSEG_CE_RICAVI if side == 1 else _VSEG_CE_COSTI
     default = 'ce04' if side == 1 else 'ce12'
+    lato = 'right' if side == 1 else 'left'
+    figli = _figli_puntati(list(rows) + [(c, d, a) for sd, c, d, a in details if sd == lato])
+    ripiego = _natura_unanime([d for _c, d, _a in opposite]
+                              + [d for sd, _c, d, _a in details if sd != lato])
     for code, u, amt in rows:
         if '.' in code:
+            continue
+        if e_conto_rimanenze(u):
+            # Rimanenze iniziali fra i costi, finali fra i ricavi: mai il secchio di
+            # ripiego (oneri diversi / altri ricavi), che quadra e gonfia valore e costi
+            # della produzione. La natura la dicono i conti sotto il mastro.
+            classify = _classify_ce_ricavi if side == 1 else _classify_ce_costi
+            tag = 'ce10_close' if side == 1 else 'ce10'
+            for t, a in _rimanenze_dal_dettaglio(tag, code, u, amt, figli, classify, ripiego):
+                if t == 'ce10_close':
+                    t, a = 'ce10', -a
+                elif t == 'ce02_open':
+                    t, a = 'ce02', -a
+                ce[t] = ce.get(t, Decimal('0')) + a
             continue
         field = default
         for kws, f in table:
@@ -7289,8 +7468,8 @@ def parse_bilancio_verifica_segno(
                         if side == 'right'
                     )
                 elif section == 'ce':
-                    _vseg_classify_ce(ce, left, 0)
-                    _vseg_classify_ce(ce, right, 1)
+                    _vseg_classify_ce(ce, left, 0, region_details, right)
+                    _vseg_classify_ce(ce, right, 1, region_details, left)
     else:
         doc = fitz.open(file_path)
         try:
@@ -7307,9 +7486,10 @@ def parse_bilancio_verifica_segno(
                 _vseg_classify_sp(bs, left, 0)
                 _vseg_classify_sp(bs, right, 1)
             for page_number in ce_pages:
-                left, right = _vseg_split_rows(doc[page_number])
-                _vseg_classify_ce(ce, left, 0)
-                _vseg_classify_ce(ce, right, 1)
+                ce_details: list = []
+                left, right = _vseg_split_rows(doc[page_number], ce_details)
+                _vseg_classify_ce(ce, left, 0, ce_details, right)
+                _vseg_classify_ce(ce, right, 1, ce_details, left)
         finally:
             doc.close()
 

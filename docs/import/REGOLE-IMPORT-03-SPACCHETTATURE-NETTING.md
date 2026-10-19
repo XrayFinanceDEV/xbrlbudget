@@ -331,6 +331,51 @@ e rollarli fabbricherebbe.
 sbagliare da entrambi i lati — aggregato buono con dettagli sovra-estratti, o il contrario. Un
 rollup cieco risolveva budget_585 sul 2024 e ne rompeva il 2025 di circa 127.000 euro.
 
+## 4-bis. Le rimanenze nel conto economico
+
+Un elenco di conti stampa le rimanenze **in lordo**: le iniziali fra i costi, le finali fra i
+ricavi. Il CE di legge vuole invece due **variazioni**, divise per natura: A.2 (`ce02`, finali
+meno iniziali) per prodotti in corso, semilavorati, finiti e lavori in corso su ordinazione
+(A.3 confluisce qui), B.11 (`ce10`, iniziali meno finali) per materie prime, sussidiarie, di
+consumo e merci.
+
+**Che cosa si rompe senza la regola.** Il difetto quadra: l'utile resta giusto al centesimo, e
+nessun controllo lo vede.
+- **Le rimanenze nel secchio di ripiego.** Se finiscono in `ce04` (altri ricavi) e `ce12` (oneri
+  diversi), valore e costi della produzione si gonfiano dello stesso importo. Unicarton 2025 ne
+  aveva 193.691,65 da una parte e 218.314,13 dall'altra. Il previsionale avrebbe poi ripetuto
+  ogni anno quei ricavi e quei costi, accanto alla variazione di magazzino che calcola da sé.
+- **Tutto in `ce10`, prodotti finiti compresi.** Il consumo di materie risulta sbagliato, e con
+  lui il DIO e il motore del previsionale.
+
+**La regola, unica per tutti i lettori** (`importers/rimanenze_ce.py`):
+- **Riconoscimento.** `e_conto_rimanenze` riconosce il conto; `natura_rimanenze` legge la
+  natura dalla descrizione del conto, poi da quella dei padri. Una descrizione mista
+  («prodotti finiti e merci») non decide, e un padre non decide al suo posto. I «prodotti
+  commercializzati» e quelli «destinati alla rivendita» sono merci.
+- **Un mastro si legge dai suoi conti** quando questi sommano al centesimo il totale stampato
+  (`_rimanenze_dal_dettaglio`): la profondità propone, il totale decide. In questo caso
+  decidono i conti anche contro il nome del mastro. AITEC intitola «RIM.INIZ.SEMILAVORATI
+  PROD-FINITI» un mastro che contiene anche le materie prime.
+- **Un conto che non dice la natura** prende quella delle rimanenze **dell'altro lato**, se lì
+  è unanime (`_natura_unanime`). Iniziali e finali sono lo stesso magazzino: mandare un capo in
+  `ce02` e l'altro in `ce10` gonfierebbe valore e costi di entrambi gli importi. È il caso di
+  COLOMBO: «RIMANENZE INIZIALI» accanto a «Prodotti finiti rimanenze finali».
+- **Senza alcuna indicazione** resta B.11 (`ce10`), come prima.
+
+**Dove si applica.** Ai classificatori a parole (`_classify_ce_costi`/`_classify_ce_ricavi`).
+Il tag `ce02_open` indica le iniziali di prodotti lette fra i costi, che riducono `ce02`. La
+regola vale nei cinque montaggi del CE di `situazione_contabile_parser`: `build_iv_cee`,
+`_hier_reconstruct`, `_be_reclassify`, `build_ce_from_vision` e il lettore per segno
+`_vseg_classify_ce`, che ora legge anche i conti di terzo livello. Vale anche nel percorso snello:
+`conti._rimanenze_per_natura` sovrascrive la voce scelta dal modello quando il testo del conto è
+una rimanenza (diagnostica `rimanenze_per_natura`), mentre il segno resta quello del voto di
+colonna.
+
+**Misurato sul corpus il 2026-10-19:** 26 file su 278 cambiano. L'utile non cambia in nessuno;
+cambia la ripartizione fra `ce02`/`ce10` (o fra `ce04`/`ce12` e le due variazioni), verificata
+file per file sul testo stampato.
+
 ## 5. Da dove esce il risultato d'esercizio
 
 Ogni parser lo deriva diversamente, e vale la pena saperlo perché spiega molti sintomi:
@@ -486,6 +531,8 @@ Test: `tests/test_fallback_bucket.py`, `tests/test_classification_fallback.py`.
   210/211/613, la modalità OCR, e **cinque no-op** (già netto, senza fondi, scan che non
   riconcilia, senza dichiarati, IVA a un lato solo).
 - `tests/test_debiti_rollup.py` — la guardia auto-validante e la non-mutazione dell'input.
+- `tests/test_rimanenze_ce.py` — rimanenze per natura (§4-bis): Unicarton, il mastro dal nome
+  sbagliato, il capo opposto, `build_iv_cee`. Il percorso snello è in `tests/test_snello_conti.py`.
 - `tests/test_prod_route_c.py` — ground truth campo per campo. La premessa è esplicita:
   *la quadratura da sola non basta, budget_395 quadra con residuo zero e ha `sp02`/`sp03`
   entrambi sbagliati*.

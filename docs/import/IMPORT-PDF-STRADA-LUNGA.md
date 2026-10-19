@@ -21,7 +21,8 @@ ferma al primo che funziona (`importers/pdf_importer.py`, `_llm_extract`):
      (`extract_deterministic_source_candidates`) e il lettore generico dello schema di legge di
      qualunque gestionale (`schema_legge_generico`). Questi due lettori non stanno in
      `_llm_extract`: li prova `tentativo()` in `import_snello/deterministico.py`, dopo i sei
-     precedenti.
+     precedenti, e dopo di loro un terzo, `prospetto_sintetico` (2026-10-19, prospetti di due pagine
+     con le voci di legge appiattite).
 2. **Qwen sul gx10**, solo se i lettori a regole falliscono: prima la lettura delle macro-voci
    (`macro_analysis`), poi l'estrazione LLM di Stato patrimoniale e Conto economico
    (`pdf_extractor_llm`).

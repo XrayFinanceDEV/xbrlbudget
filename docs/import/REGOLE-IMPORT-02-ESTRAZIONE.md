@@ -300,8 +300,9 @@ della perdita a tornare.
 
 ### Le due regole di merito della ricostruzione
 
-**Scadenza non determinata → a breve, per prudenza.** I mastri non dicono se un debito è entro o
-oltre l'esercizio. In assenza di un segno che li distingua i debiti vanno **a breve**: anticipare
+**Scadenza non determinata → a breve, per prudenza.** Di norma i mastri non dicono se un debito è
+entro o oltre l'esercizio (fa eccezione la verifica «Mastri», dove il mastro dichiara «ESIG.OLTRE 12M» e i
+suoi conti ereditano la scadenza, `_entries_da_righe_verifica`). In assenza di un segno che li distingua i debiti vanno **a breve**: anticipare
 una scadenza peggiora gli indici di liquidità e non li abbellisce, ed è l'utente a spostarli in
 Rettifiche quando sa che sono a lungo. Non è un ripiego dell'estrattore vision, è la regola del
 progetto (la segue anche il best-effort di route C, che pure emette solo `sp16`). La ricostruzione

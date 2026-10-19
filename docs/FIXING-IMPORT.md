@@ -17,8 +17,8 @@ superseded by files 12/14/15 in the same folder.
 ```
 classify_bilancio (route A/B/C/XBRL)
   └─ route C runs BOTH extractors and keeps the better candidate:
-       ├─ extract_trial_balance_with_llm   (CoGe LLM, pdf_importer :916) ← primary
-       └─ extract_situazione_contabile → build_iv_cee (SHORT keys) → _map_sc_keys (:944)
+       ├─ extract_trial_balance_with_llm   (CoGe LLM, pdf_extractor_llm.py:3825) ← primary
+       └─ extract_situazione_contabile → build_iv_cee (SHORT keys) → _map_sc_keys (pdf_importer.py:682)
           selection: gap vs the DECLARED control total first, _plug_residual as tiebreaker
        └─ overlay_debt_typing → net_contra_accounts → _reconcile_trial_to_declared
             └─ enforce_ce_sp_identity → validate_balance   ← the HARD gate

@@ -1106,6 +1106,39 @@ def _direct_value_re(
     return _value_at(rows, _find_re(rows, pattern, start=start, end=end), 0)
 
 
+# Le sotto-voci di B.10 come le stampa lo schema di legge. Una riga "a), b), c)
+# Ammortamento ... altre svalutazioni" (riclassificato UE, budget_352) e' un subtotale,
+# non la a): il pattern vuole la parola subito dopo la lettera.
+_CE09_DETTAGLI = (
+    ("ce09a_ammort_immateriali", r"^a\)\s*amm\w*\.?\s.*immater"),
+    ("ce09b_ammort_materiali", r"^b\)\s*amm\w*\.?\s.*mater"),
+    ("ce09c_svalutazioni", r"^c\)\s*altre\s+svalut"),
+    ("ce09d_svalutazione_crediti", r"^d\)\s*svalut"),
+)
+
+
+def _ce09_dettaglio(
+    rows: Sequence[_Row], start: int, end: int, column: int, ce09: Decimal
+) -> dict:
+    """Le sotto-voci a)-d) di B.10 lette nel blocco della voce: ammortamenti immateriali e
+    materiali, altre svalutazioni, svalutazione crediti. Valgono solo se sommano al
+    centesimo il totale ``ce09`` letto (il totale stampato decide): altrimenti nessuna,
+    e la ripartizione resta da fare in Rettifiche. Il motore del previsionale e quello
+    dell'infrannuale ammortizzano sp02/sp03 da ce09a/ce09b: senza, i cespiti non
+    scendono."""
+    out: dict = {}
+    for field, pattern in _CE09_DETTAGLI:
+        for row in rows[start + 1:end]:
+            if re.match(pattern, row.label):
+                value = row.value(column)
+                if value is not None:
+                    out[field] = value
+                break
+    if not out or abs(sum(out.values(), Decimal("0")) - ce09) > Decimal("0.01"):
+        return {}
+    return out
+
+
 def _optional_direct_value_re(
     rows: Sequence[_Row], pattern: str, start: int, end: int
 ) -> Decimal:
@@ -1648,6 +1681,9 @@ def _parse_income_column(
         ce07 = _block_value(ce_rows, b8, b9, column)
         ce08 = _block_value(ce_rows, b9, b10, column)
         ce09 = _block_value(ce_rows, b10, b11, column)
+        ce09_sotto = _ce09_dettaglio(
+            ce_rows, b10, next((i for i in (b11, b12, b13, b14, difference_i) if i is not None)),
+            column, ce09)
         b_chain = (b11, b12, b13, b14, difference_i)
         ce10 = _chain_value(b_chain, b11)
         ce11 = _chain_value(b_chain, b12)
@@ -1729,6 +1765,7 @@ def _parse_income_column(
             "ce07_godimento_beni": ce07,
             "ce08_costi_personale": ce08,
             "ce09_ammortamenti": ce09,
+            **ce09_sotto,
             "ce10_var_rimanenze_mat_prime": ce10,
             "ce11_accantonamenti": ce11,
             "ce11b_altri_accantonamenti": ce11b,
@@ -1842,6 +1879,9 @@ def _parse_compact_income(rows: Sequence[_Row]) -> Optional[Dict[str, Decimal]]:
         )
         ce09 = (_caption_or_total(ce_rows, b10_i, total_b_i) if _VARIANTI.get()
                 else _value_at(ce_rows, b10_i, 0))
+        ce09_fine = next((i for i in range(b10_i + 1, total_b_i)
+                          if re.match(r"^1[1-4]\)", ce_rows[i].label)), total_b_i)
+        ce09_sotto = _ce09_dettaglio(ce_rows, b10_i, ce09_fine, 0, ce09)
         ce10 = _optional_direct_value_re(
             ce_rows, r"^11\) variazion[ei]" if _VARIANTI.get() else r"^11\) variazione", b10_i + 1, total_b_i
         )
@@ -1930,6 +1970,7 @@ def _parse_compact_income(rows: Sequence[_Row]) -> Optional[Dict[str, Decimal]]:
             "ce08c_oneri_sociali": ce08c,
             "ce08d_altri_costi_personale": ce08d,
             "ce09_ammortamenti": ce09,
+            **ce09_sotto,
             "ce10_var_rimanenze_mat_prime": ce10,
             "ce11_accantonamenti": ce11,
             "ce11b_altri_accantonamenti": ce11b,

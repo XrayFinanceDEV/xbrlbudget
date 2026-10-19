@@ -93,8 +93,10 @@ def test_no_cross_family_maturity_or_ce_sp_compensations_or_proportions():
     assert 'sp09_disponibilita_liquide' not in new_bs
     assert new_ce['ce08d_altri_costi_personale'] == 20
     assert 'ce08a_tfr_accrual' not in new_ce
-    assert new_ce['ce09c_svalutazioni'] == 10  # explicitly conventional UI bucket
-    assert 'ce09a_ammort_immateriali' not in new_ce and 'ce09b_ammort_materiali' not in new_ce
+    # conventional bucket: depreciation of the tangible assets the sheet carries, never
+    # ce09c (read by the engines as a write-down of sp04)
+    assert new_ce['ce09b_ammort_materiali'] == 10
+    assert 'ce09a_ammort_immateriali' not in new_ce and 'ce09c_svalutazioni' not in new_ce
     assert 'ce17a_rivalutazioni' not in new_ce  # non-additive family untouched
 
 
@@ -261,3 +263,11 @@ def test_conflicting_comparative_never_replaces_previously_valid_prior(import_fi
         kept = db.query(FinancialYear).filter_by(year=2024).one()
         assert kept.id == old_id and kept.validation_report == old_audit and kept.forecastable
         assert kept.balance_sheet.sp06a_crediti_clienti_breve == 120
+
+
+def test_ammortamenti_non_ripartiti_senza_materiali_vanno_agli_immateriali():
+    bs = {'sp02_immob_immateriali': D(30)}
+    ce = {'ce09_ammortamenti': D(10)}
+    _, new_ce, report = finalize_pdf_residuals(bs, ce)
+    assert new_ce['ce09a_ammort_immateriali'] == 10
+    assert report['families']['ce09_ammortamenti']['bucket'] == 'ce09a_ammort_immateriali'

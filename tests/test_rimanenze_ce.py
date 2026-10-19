@@ -173,3 +173,79 @@ def test_build_iv_cee_scende_nei_conti_della_categoria():
     assert ce["ce02"] == D("20")      # 80 - 60
     assert ce["ce10"] == D("-10")     # 40 - 50
     assert ce.get("ce04", D(0)) == 0 and ce.get("ce12", D(0)) == 0
+
+
+# --- ammortamenti: le sotto-voci di B.10 ---------------------------------------------
+# Senza ce09a/ce09b il previsionale e l'infrannuale non ammortizzano sp02/sp03, e il
+# vecchio ripiego ce09c il motore lo legge come svalutazione di sp04.
+
+def test_unicarton_ammortamenti_ripartiti_dai_conti():
+    from importers.situazione_contabile_parser import _vseg_classify_ce
+    costi = [
+        ("80", "AMMORTAMENTI", D("75275.95")),
+        ("80.01", "AMMORTAMENTI IMMOBILIZZAZ.IMMATERIALI", D("429.00")),
+        ("80.03", "AMMORTAMENTI IMMOBILIZZAZIONI MATERIALI", D("74846.95")),
+        ("83", "SVALUTAZIONI", D("3633.12")),
+        ("83.09", "SVALUTAZIONE CREDITI", D("3633.12")),
+    ]
+    ce = {}
+    _vseg_classify_ce(ce, costi, 0)
+    assert ce["ce09"] == D("78909.07")
+    assert ce["ce09a_ammort_immateriali"] == D("429.00")
+    assert ce["ce09b_ammort_materiali"] == D("74846.95")
+    assert ce["ce09d_svalutazione_crediti"] == D("3633.12")
+
+
+def test_descrizione_troncata_la_decidono_i_conti():
+    """budget_588: la stampa a tre colonne tronca entrambi i mastri in "AMM.TI CIVILISTICI
+    IMMOBILIZZ"; il ripiego li dava tutti ai materiali, l'avviamento compreso."""
+    from importers.situazione_contabile_parser import _ce09_dal_dettaglio, _figli_puntati
+    righe = [
+        ("80", "AMMORTAMENTI", D("11972.48")),
+        ("80.05", "AMM.TI CIVILISTICI IMMOBILIZZ", D("8936.63")),
+        ("80.07", "AMM.TI CIVILISTICI IMMOBILIZZ", D("3035.85")),
+        ("80.07.19", "AMM.TO CIVILISTICO AVVIAMENTO", D("3035.85")),
+    ]
+    tot = _tags(_ce09_dal_dettaglio("80", "AMMORTAMENTI", D("11972.48"), _figli_puntati(righe)))
+    assert tot == {"ce09b": D("8936.63"), "ce09a": D("3035.85")}
+
+
+def test_ammortamenti_e_svalutazioni_non_e_svalutazione_crediti():
+    """Pandoro: "AMMORTAMENTI E SVALUTAZIONI" andava per intero in ce09d per la parola
+    SVALUT. Con i conti che quadrano decidono loro; senza resta ce09 non ripartito."""
+    costi = [
+        ("35", "AMMORTAMENTI E SVALUTAZIONI", D("1000")),
+        ("355", "AMMORTAMENTO IMMOBILIZZ.IMMATERIALI", D("100")),
+        ("3510", "AMMORTAMENTO IMMOBILIZZ.MATERIALI", D("900")),
+    ]
+    assert _tags(_be_reclassify(costi, classify_costi)) == {"ce09a": D("100"), "ce09b": D("900")}
+    assert _tags(_be_reclassify(costi[:1], classify_costi)) == {"ce09": D("1000")}
+
+
+def test_build_iv_cee_ammortamenti_nudi_non_vanno_negli_oneri_diversi():
+    entries = [
+        Entry("70/**/***", "AMMORTAMENTI", D("100"), level=2, section="costi"),
+        Entry("70/01/001", "AMM.TO SOFTWARE", D("30"), level=0, section="costi"),
+        Entry("70/01/002", "AMM.TO IMPIANTI E MACCHINARI", D("70"), level=0, section="costi"),
+    ]
+    _bs, ce = build_iv_cee(entries, default_ce=True)
+    assert ce["ce09"] == D("100")
+    assert ce["ce09a_ammort_immateriali"] == D("30")
+    assert ce["ce09b_ammort_materiali"] == D("70")
+    assert ce.get("ce12", D(0)) == 0
+
+
+def test_schema_di_legge_legge_le_lettere_di_b10():
+    from importers.standard_ivcee_parser import _ce09_dettaglio, _Row
+    righe = [
+        _Row(1, 0, "10) ammortamenti e svalutazioni", (D("30310"), None)),
+        _Row(1, 1, "a) ammortamento delle immobilizzazioni immateriali", (D("780"), None)),
+        _Row(1, 2, "b) ammortamento delle immobilizzazioni materiali", (D("14581"), None)),
+        _Row(1, 3, "c) altre svalutazioni delle immobilizzazioni", (None, None)),
+        _Row(1, 4, "d) svalutazioni dei crediti compresi nell'attivo", (D("14949"), None)),
+    ]
+    assert _ce09_dettaglio(righe, 0, 5, 0, D("30310")) == {
+        "ce09a_ammort_immateriali": D("780"), "ce09b_ammort_materiali": D("14581"),
+        "ce09d_svalutazione_crediti": D("14949")}
+    # lettere che non chiudono sul totale stampato: nessuna
+    assert _ce09_dettaglio(righe, 0, 5, 0, D("30000")) == {}

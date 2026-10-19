@@ -897,6 +897,56 @@ def _natura_unanime(descrizioni) -> Optional[str]:
     return nature.pop() if len(nature) == 1 else None
 
 
+_CE09_SOTTO = ('ce09a', 'ce09b', 'ce09c', 'ce09d')
+
+
+def _ce09_sotto(desc_upper: str) -> Optional[str]:
+    """La sotto-voce di B.10 che la descrizione DICHIARA: ammortamento immateriali (ce09a)
+    o materiali (ce09b), altre svalutazioni delle immobilizzazioni (ce09c), svalutazione
+    crediti (ce09d). None per un "AMMORTAMENTI"/"SVALUTAZIONI" nudo e per una descrizione
+    troncata ("AMM.TI CIVILISTICI IMMOBILIZZ", budget_588): li' decidono i conti sotto,
+    non il ripiego "materiali" di _classify_ce_costi."""
+    if 'SVAL' in desc_upper:
+        if _kw_any(desc_upper, ['CREDIT', 'CLIENT']):
+            return 'ce09d'
+        if _kw_any(desc_upper, ['IMMOB', 'CESPIT']):
+            return 'ce09c'
+        return None
+    if _CE_AMMORTAMENTO_RE.match(desc_upper) or 'AMM.TI' in desc_upper:
+        if 'IMMAT' in desc_upper:
+            return 'ce09a'
+        if 'MATERIAL' in desc_upper:
+            return 'ce09b'
+    return None
+
+
+def _ce09_dal_dettaglio(codice, desc, importo, figli):
+    """Un mastro di ammortamenti e svalutazioni si ripartisce sulle sotto-voci di B.10:
+    al primo livello che la dice (_ce09_sotto), scendendo nei conti solo quando sommano
+    al centesimo il totale stampato. Ammortamenti non ripartiti restano 'ce09' (li
+    attribuisce residual_finalization, dichiarandolo); il motore del previsionale e
+    quello dell'infrannuale ammortizzano sp02/sp03 dai soli ce09a/ce09b.
+
+    ``figli(codice)`` -> [(codice, descrizione, importo)]. Ritorna [(tag, importo)] con
+    tag in 'ce09', 'ce09a'..'ce09d'."""
+    def scendi(c, d, a):
+        t = _ce09_sotto(d)
+        if t:
+            return [(t, a)]
+        ch = figli(c)
+        if ch and abs(sum((x[2] for x in ch), Decimal('0')) - a) <= Decimal('0.01'):
+            out = []
+            for x in ch:
+                out.extend(scendi(x[0], x[1], x[2]))
+            return out
+        f = _classify_ce_costi(d)
+        if f == 'ce09d' and 'AMMORT' in d:
+            f = 'ce09'          # "AMMORTAMENTI E SVALUTAZIONI": SVALUT non dice crediti
+        return [(f if f in _CE09_SOTTO else 'ce09', a)]
+
+    return scendi(codice, desc, importo)
+
+
 def _figli_puntati(righe):
     """figli(codice) per i codici a punti ("49" -> "49.01" -> "49.01.01")."""
     def figli(c):
@@ -1367,7 +1417,9 @@ def build_iv_cee(entries: List[Entry], default_ce: bool = False) -> Tuple[Dict[s
     ce_tfr_accrual = Decimal('0')
     ce09a = Decimal('0')  # ammort. immateriali
     ce09b = Decimal('0')  # ammort. materiali
+    ce09c = Decimal('0')  # altre svalutazioni delle immobilizzazioni
     ce09d = Decimal('0')  # svalutazioni
+    ce09_nd = Decimal('0')  # ammortamenti che il documento non ripartisce
     ce10_opening = Decimal('0')
     ce10_closing = Decimal('0')
     ce01_total = Decimal('0')
@@ -1436,7 +1488,7 @@ def build_iv_cee(entries: List[Entry], default_ce: bool = False) -> Tuple[Dict[s
         nonlocal gross_sp02, gross_sp03, depr_sp02, depr_sp03
         nonlocal bank_dare, bank_avere, crediti_deduction, capitale, riserve
         nonlocal debt_bank_total, debt_bank_entro, debt_bank_oltre
-        nonlocal ce09a, ce09b, ce09d, ce_tfr_accrual
+        nonlocal ce09a, ce09b, ce09c, ce09d, ce09_nd, ce_tfr_accrual
         nonlocal ce10_opening, ce10_closing, ce01_total, ce01_returns
 
         desc_upper = entry.description.upper()
@@ -1560,12 +1612,23 @@ def build_iv_cee(entries: List[Entry], default_ce: bool = False) -> Tuple[Dict[s
             field = _classify_ce_costi(desc_upper)
             if field == 'ce01_return':
                 ce01_returns += entry.amount
-            elif field == 'ce09a':
-                ce09a += entry.amount
-            elif field == 'ce09b':
-                ce09b += entry.amount
-            elif field == 'ce09d':
-                ce09d += entry.amount
+            elif field in ('ce09a', 'ce09b', 'ce09d') or (
+                    field is None and _CE_AMMORTAMENTO_RE.match(desc_upper)):
+                # "AMMORTAMENTI E SVALUTAZIONI" o "AMMORTAMENTI" nudo: le sotto-voci le
+                # dicono i conti sotto (_ce09_dal_dettaglio), mai la parola SVALUT da
+                # sola, e mai il ripiego fra gli oneri diversi (confine dell'EBITDA)
+                for t, x in _ce09_dal_dettaglio(entry.code, desc_upper, entry.amount,
+                                                _figli_entry(entry.section)):
+                    if t == 'ce09a':
+                        ce09a += x
+                    elif t == 'ce09b':
+                        ce09b += x
+                    elif t == 'ce09c':
+                        ce09c += x
+                    elif t == 'ce09d':
+                        ce09d += x
+                    else:
+                        ce09_nd += x
             elif field in ('ce10', 'ce02_open'):
                 for t, x in _rimanenze_entry(entry, field, desc_upper, _classify_ce_costi):
                     if t == 'ce10':
@@ -1919,11 +1982,11 @@ def build_iv_cee(entries: List[Entry], default_ce: bool = False) -> Tuple[Dict[s
     ce['ce10'] = ce10_opening - ce10_closing
     ce['ce08a_tfr_accrual'] = ce_tfr_accrual
 
-    total_amm = ce09a + ce09b + ce09d
+    total_amm = ce09a + ce09b + ce09c + ce09d + ce09_nd
     ce['ce09'] = total_amm
     ce['ce09a_ammort_immateriali'] = ce09a
     ce['ce09b_ammort_materiali'] = ce09b
-    ce['ce09c_svalutazioni'] = Decimal('0')
+    ce['ce09c_svalutazioni'] = ce09c
     ce['ce09d_svalutazione_crediti'] = ce09d
 
     # Defaults
@@ -4515,6 +4578,11 @@ def _be_reclassify(items: List[Tuple[str, str, Decimal]], classify,
     def rec(c):
         d, a = info[c]
         field, specific = classify(d)
+        if field in _CE09_SOTTO or (field == 'ce09' and specific):
+            # "AMMORTAMENTI E SVALUTAZIONI" non e' svalutazione crediti: le sotto-voci
+            # di B.10 le dicono i conti sotto (Pandoro, 138.838,83 tutti in ce09d)
+            out.extend(_ce09_dal_dettaglio(c, d, a, figli))
+            return a
         if specific:
             # un mastro di rimanenze senza natura si legge dai conti (prodotti/materie)
             out.extend(_rimanenze_dal_dettaglio(field, c, d, a, figli, proprio,
@@ -5759,6 +5827,12 @@ def _hier_reconstruct(pages_data, full: str):
         if f is None:
             f = fallback_field('ce')
             unclassified.append((d, a, 'ce'))
+        if f == 'ce09' or f in _CE09_SOTTO:
+            for t, x in _ce09_dal_dettaglio(_c, d, a, figli_costi):
+                adde('ce09', x)
+                if t != 'ce09':
+                    adde(_CE_SUBFIELD_PARENT[t][0], x)
+            continue
         if f in ('ce10', 'ce02_open'):
             for t, x in _rimanenze_dal_dettaglio(f, _c, d, a, figli_costi, _classify_ce_costi,
                                                  ripiego_costi):
@@ -7424,6 +7498,13 @@ def _vseg_classify_ce(ce: Dict[str, Decimal], rows: list, side: int,
             if all(kw in u for kw in kws):
                 field = f
                 break
+        if field == 'ce09':
+            for t, a in _ce09_dal_dettaglio(code, u, amt, figli):
+                ce['ce09'] = ce.get('ce09', Decimal('0')) + a
+                if t != 'ce09':
+                    detail = _CE_SUBFIELD_PARENT[t][0]
+                    ce[detail] = ce.get(detail, Decimal('0')) + a
+            continue
         ce[field] = ce.get(field, Decimal('0')) + amt
 
 

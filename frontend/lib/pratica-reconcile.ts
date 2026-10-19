@@ -48,10 +48,15 @@ export function reconcileSubfields(data: Record<string, number>, { adjustBalance
     ["ce08b_salari_stipendi", "ce08c_oneri_sociali", "ce08a_tfr_accrual", "ce08d_altri_costi_personale"],
     "ce08_costi_personale", "ce08b_salari_stipendi"
   );
-  // Ammortamenti: gap → ce09c_svalutazioni
+  // Ammortamenti: gap → ammortamento delle immobilizzazioni che lo SP porta, materiali
+  // (immateriali solo senza materiali), come `_ce_bucket` in importers/residual_finalization.py.
+  // Mai ce09c: i motori la leggono come svalutazione di sp04 e ammortizzano sp02/sp03
+  // solo da ce09a/ce09b.
+  const ce09Plug = (data.sp03_immob_materiali ?? 0) <= 0 && (data.sp02_immob_immateriali ?? 0) > 0
+    ? "ce09a_ammort_immateriali" : "ce09b_ammort_materiali";
   reconcile(
     ["ce09a_ammort_immateriali", "ce09b_ammort_materiali", "ce09c_svalutazioni", "ce09d_svalutazione_crediti"],
-    "ce09_ammortamenti", "ce09c_svalutazioni"
+    "ce09_ammortamenti", ce09Plug
   );
   // Debiti breve: gap → sp16g_altri_debiti_breve
   reconcile(

@@ -9,12 +9,24 @@ from decimal import Decimal
 from importers.iv_cee_hierarchy import aggregates_with_details, detail_fields, residual_bucket
 
 ZERO = Decimal('0')
-# The schema has no unclassified-depreciation field. Use the existing PDF UI
-# fallback, explicitly audited as conventional, not source-proved depreciation.
+# The schema has no unclassified-depreciation field. A B.10 total the source does not
+# split is depreciation of the fixed assets the balance sheet carries: materiali when
+# sp03 is there, otherwise immateriali - audited as conventional, not source-proved.
+# Never ce09c: both engines read ce09c as a write-down of sp04 (forecast_engine,
+# svalutazioni_cumulate) and depreciate sp02/sp03 only from ce09a/ce09b, so parked
+# depreciation drained the financial fixed assets every plan year while the tangible
+# ones never went down (Unicarton 2025: 78.909,07 a year against sp04 of 83.000).
 CE_BUCKETS = {
     'ce08_costi_personale': 'ce08d_altri_costi_personale',
-    'ce09_ammortamenti': 'ce09c_svalutazioni',
+    'ce09_ammortamenti': 'ce09b_ammort_materiali',
 }
+
+
+def _ce_bucket(aggregate: str, bs: dict) -> str:
+    if (aggregate == 'ce09_ammortamenti' and _decimal(bs.get('sp03_immob_materiali')) <= ZERO
+            and _decimal(bs.get('sp02_immob_immateriali')) > ZERO):
+        return 'ce09a_ammort_immateriali'
+    return CE_BUCKETS[aggregate]
 
 
 def _decimal(value):
@@ -47,7 +59,7 @@ def finalize_pdf_residuals(bs: dict, ce: dict | None = None) -> tuple[dict, dict
         summed = sum(values.values(), ZERO)
         difference = total - summed
         # Offsetting signed details are still details, even if their sum is 0.
-        bucket = (CE_BUCKETS[aggregate] if aggregate.startswith('ce') else
+        bucket = (_ce_bucket(aggregate, result_bs) if aggregate.startswith('ce') else
                   residual_bucket(aggregate, Decimal('1') if populated else ZERO))
         audit = {'aggregate': str(total) if present else None,
                  'detail_sum_before': str(summed), 'gap_before': str(difference) if present else None,

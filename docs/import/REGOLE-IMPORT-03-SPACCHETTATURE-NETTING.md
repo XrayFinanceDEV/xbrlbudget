@@ -376,6 +376,46 @@ colonna.
 cambia la ripartizione fra `ce02`/`ce10` (o fra `ce04`/`ce12` e le due variazioni), verificata
 file per file sul testo stampato.
 
+## 4-ter. Gli ammortamenti nel conto economico
+
+B.10 ha quattro sotto-voci: `ce09a` (ammortamenti immateriali), `ce09b` (materiali), `ce09c`
+(altre svalutazioni delle immobilizzazioni), `ce09d` (svalutazione crediti). Il totale `ce09` è
+un confine di KPI (`EBITDA = EBIT + ce09`); la ripartizione interna non lo tocca, ma i motori la
+leggono:
+- il previsionale e l'infrannuale ammortizzano `sp02`/`sp03` **solo** da `ce09a`/`ce09b`;
+- il previsionale legge `ce09c` come svalutazione delle immobilizzazioni **finanziarie** (`sp04`,
+  `svalutazioni_cumulate`).
+
+Ammortamenti parcheggiati in `ce09c` svuotavano quindi `sp04` ogni anno di piano, mentre i cespiti
+materiali non scendevano mai. Unicarton 2025: 78.909,07 l'anno contro un `sp04` di 83.000.
+
+**La regola** (`situazione_contabile_parser._ce09_dal_dettaglio`):
+- un mastro di ammortamenti e svalutazioni si ripartisce al primo livello che **dichiara** la
+  sotto-voce (`_ce09_sotto`: IMMAT, MATERIAL, SVAL con CREDIT/CLIENT, SVAL con IMMOB/CESPIT);
+- quando il livello non la dichiara, si scende nei conti, ma solo se sommano al centesimo il
+  totale stampato;
+- una descrizione troncata («AMM.TI CIVILISTICI IMMOBILIZZ», budget_588) non decide: decidono i
+  conti sotto. Il vecchio ripiego la dava ai materiali;
+- «AMMORTAMENTI E SVALUTAZIONI» non è svalutazione crediti per la sola parola SVALUT (Pandoro:
+  138.838,83 tutti in `ce09d`). Senza conti che quadrano resta `ce09` non ripartito.
+
+Vale nel lettore per segno, in `_hier_reconstruct`, `_be_reclassify` e `build_iv_cee`. In
+quest'ultimo un «AMMORTAMENTI» nudo finiva fra gli oneri diversi, attraverso il confine
+dell'EBITDA. Lo schema di legge (`standard_ivcee_parser._ce09_dettaglio`, anche per lo schema
+con dettaglio conti) legge le lettere a)-d) di B.10, solo se chiudono sul totale della voce.
+
+**Il ripiego.** La massa di B.10 che il documento non ripartisce la attribuisce
+`residual_finalization` (`_ce_bucket`), dichiarandola come convenzionale:
+- va ai materiali (`ce09b`);
+- va agli immateriali (`ce09a`) solo se lo SP ha `sp02` e non `sp03`;
+- non va mai a `ce09c`.
+
+Le Rettifiche (`frontend/lib/pratica-reconcile.ts`) seguono la stessa regola.
+
+**Misurato sul corpus il 2026-10-19:** 19 file guadagnano la ripartizione, nessun aggregato si
+muove. Limite noto: una foglia troncata («Amm.to altre immobilizz.», budget_1327) resta ai
+materiali anche quando il codice la direbbe immateriale.
+
 ## 5. Da dove esce il risultato d'esercizio
 
 Ogni parser lo deriva diversamente, e vale la pena saperlo perché spiega molti sintomi:
@@ -532,7 +572,8 @@ Test: `tests/test_fallback_bucket.py`, `tests/test_classification_fallback.py`.
   riconcilia, senza dichiarati, IVA a un lato solo).
 - `tests/test_debiti_rollup.py` — la guardia auto-validante e la non-mutazione dell'input.
 - `tests/test_rimanenze_ce.py` — rimanenze per natura (§4-bis): Unicarton, il mastro dal nome
-  sbagliato, il capo opposto, `build_iv_cee`. Il percorso snello è in `tests/test_snello_conti.py`.
+  sbagliato, il capo opposto, `build_iv_cee`; e le sotto-voci di B.10 (§4-ter). Il percorso snello
+  è in `tests/test_snello_conti.py`, il ripiego di B.10 in `tests/test_residual_finalization.py`.
 - `tests/test_prod_route_c.py` — ground truth campo per campo. La premessa è esplicita:
   *la quadratura da sola non basta, budget_395 quadra con residuo zero e ha `sp02`/`sp03`
   entrambi sbagliati*.

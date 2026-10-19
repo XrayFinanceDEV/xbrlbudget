@@ -209,6 +209,11 @@ ciò che non si può non sapere. Ogni voce dice la regola e **cosa si rompe** a 
   del capo opposto. Iniziali in `ce12` e finali in `ce04` quadrano lo stesso e gonfiano valore
   e costi della produzione; un capo in `ce02` e l'altro in `ce10` fanno lo stesso con entrambi
   gli importi. → `docs/import/REGOLE-IMPORT-03-SPACCHETTATURE-NETTING.md` §4-bis
+- **Gli ammortamenti si ripartiscono su `ce09a`/`ce09b`, mai su `ce09c` per ripiego**: i
+  motori ammortizzano `sp02`/`sp03` solo da `ce09a`/`ce09b` e il previsionale legge `ce09c` come
+  svalutazione di `sp04`. La massa non ripartita va ai materiali (agli immateriali senza `sp03`),
+  in `residual_finalization._ce_bucket` e in `pratica-reconcile.ts`; «AMMORTAMENTI E SVALUTAZIONI»
+  non è svalutazione crediti. → `docs/import/REGOLE-IMPORT-03-SPACCHETTATURE-NETTING.md` §4-ter
 - **`TIER0_FIELDS` non è mai una destinazione di ripiego** (immobilizzazioni nette, patrimonio
   netto, debiti verso banche, `ce09`): `ce09` è l'unico confine di KPI dentro i costi operativi
   (`EBITDA = EBIT + ce09`), gli altri spostano un totale e rompono PFN, ROI, indipendenza

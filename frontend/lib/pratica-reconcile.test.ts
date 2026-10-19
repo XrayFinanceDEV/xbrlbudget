@@ -87,7 +87,7 @@ describe("reconcileSubfields", () => {
     expect(data.sp16g_altri_debiti_breve).toBe(6_000);
     expect(data.sp17g_altri_debiti_lungo).toBe(7_000);
     expect(data.ce08b_salari_stipendi).toBe(8_000);
-    expect(data.ce09c_svalutazioni).toBe(9_000);
+    expect(data.ce09b_ammort_materiali).toBe(9_000);
   });
 
   it("gruppi con dettaglio valorizzato: sp04, sp07, sp17, ce08, ce09", () => {
@@ -108,7 +108,7 @@ describe("reconcileSubfields", () => {
       ce08_costi_personale: 2_000,
       ce08c_oneri_sociali: 1_200,
       ce08a_tfr_accrual: 300,
-      // ce09_ammortamenti: dettaglio 2.000, aggregato 2.100 -> gap 100 nel plug ce09c
+      // ce09_ammortamenti: dettaglio 2.000, aggregato 2.100 -> gap 100 nel plug ce09b
       ce09_ammortamenti: 2_100,
       ce09a_ammort_immateriali: 800,
       ce09b_ammort_materiali: 1_200,
@@ -121,7 +121,18 @@ describe("reconcileSubfields", () => {
     expect(data.sp07g_crediti_altri_lungo).toBe(800);
     expect(data.sp17g_altri_debiti_lungo).toBe(300);
     expect(data.ce08b_salari_stipendi).toBe(500);
-    expect(data.ce09c_svalutazioni).toBe(100);
+    expect(data.ce09b_ammort_materiali).toBe(1_300);
+    expect(data.ce09c_svalutazioni ?? 0).toBe(0);
+  });
+
+  it("ammortamenti non ripartiti senza immobilizzazioni materiali: agli immateriali", () => {
+    const data: Record<string, number> = {
+      sp02_immob_immateriali: 5_000,
+      ce09_ammortamenti: 1_000,
+    };
+    reconcileSubfields(data, { adjustBalance: false });
+    expect(data.ce09a_ammort_immateriali).toBe(1_000);
+    expect(data.ce09b_ammort_materiali ?? 0).toBe(0);
   });
 
   it("rimanenze e crediti a breve con dettaglio parziale: il resto resta in acconti e verso altri", () => {

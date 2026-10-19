@@ -153,7 +153,48 @@ def _righe_pagina(pagina: fitz.Page) -> list[list[tuple]]:
             gruppi[-1][1].append(w)
         else:
             gruppi.append([c, [w]])
-    return [sorted(g, key=lambda w: w[0]) for _, g in gruppi]
+    return [sorted(g, key=lambda w: w[0]) for g in _riattacca_importi([g for _, g in gruppi])]
+
+
+def _solo_importi(g: list[tuple]) -> bool:
+    """Riga fatta solo di importi: mai un enumeratore ("1)" e' anche un importo per _importo)."""
+    return _coda_importi(g) == 0 and not any(str(w[4]).strip().endswith(")") for w in g)
+
+
+def _ha_importi(g: list[tuple]) -> bool:
+    return _coda_importi(sorted(g, key=lambda w: w[0])) < len(g)
+
+
+def _sovrapposizione(a: list[tuple], b: list[tuple]) -> float:
+    """Quota dell'altezza di ``a`` coperta verticalmente da ``b``."""
+    a0, a1 = min(w[1] for w in a), max(w[3] for w in a)
+    b0, b1 = min(w[1] for w in b), max(w[3] for w in b)
+    altezza = a1 - a0
+    return max(0.0, min(a1, b1) - max(a0, b0)) / altezza if altezza > 0 else 0.0
+
+
+def _riattacca_importi(gruppi: list[list[tuple]]) -> list[list[tuple]]:
+    """Un importo stampato qualche punto sopra o sotto la propria didascalia (wkhtmltopdf,
+    Napolitano CEE 2026: "Totale crediti verso imprese collegate" a 750,4 e il suo "0" a 757,0;
+    "2) impianti e macchinario" e "-141") diventa una riga orfana: il lettore la prende per un
+    totale senza didascalia e l'albero dello schema di legge si sfasa di un livello. Una riga
+    di soli importi si riattacca alla riga vicina che non ne ha, quando i due riquadri si
+    sovrappongono per almeno meta' dell'altezza dell'importo; altrimenti resta com'e'."""
+    out = [list(g) for g in gruppi]
+    i = 0
+    while i < len(out):
+        g = sorted(out[i], key=lambda w: w[0])
+        if _solo_importi(g):
+            vicine = [j for j in (i - 1, i + 1) if 0 <= j < len(out)
+                      and not _ha_importi(out[j])]
+            vicine = [j for j in vicine if _sovrapposizione(g, out[j]) >= 0.5]
+            if vicine:
+                j = max(vicine, key=lambda k: _sovrapposizione(g, out[k]))
+                out[j].extend(g)
+                del out[i]
+                continue
+        i += 1
+    return out
 
 
 def _coda_importi(riga: list[tuple]) -> int:

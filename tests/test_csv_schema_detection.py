@@ -11,7 +11,7 @@ from importers.csv_importer import CSVImporter, CSVImportError
 
 
 ROOT = Path(__file__).resolve().parents[1]
-BILAQ = ROOT / "Test" / "june_sample" / "errori" / "budget_370_BILAQ-001.csv"
+BILAQ = ROOT / "Test" / "2026-06" / "june_sample" / "errori" / "budget_370_BILAQ-001.csv"
 TEBE = ROOT / "legacy" / "sample_data" / "sample_data.csv"
 
 

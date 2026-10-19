@@ -1,7 +1,7 @@
 """Deduplicated production PDF-import audit for the local corpus.
 
 The runner exercises ``import_pdf_balance_sheet`` against an isolated in-memory
-database for every unique IV-CEE PDF under ``Test``.  ``Test/july_budget`` and
+database for every unique IV-CEE PDF under ``Test``.  ``Test/2026-07/july_budget`` and
 ``Test/_analysis`` are always excluded.  SHA-256 aliases are retained in the
 report, but the external extractor is called once per unique content.
 
@@ -179,7 +179,7 @@ def _write_report(path: Path, inventory: list[dict[str, Any]], records: dict[str
     statuses = Counter(record.get("status", "PENDING") for record in records.values())
     report = {
         "generated_at_utc": datetime.now(timezone.utc).isoformat(),
-        "scope": "unique IVCEE PDFs under Test, excluding Test/july_budget and Test/_analysis",
+        "scope": "unique IVCEE PDFs under Test, excluding Test/2026-07/july_budget and Test/_analysis",
         "unique_inventory": len(inventory),
         "physical_aliases": sum(len(item["aliases"]) for item in inventory),
         "summary": dict(sorted(statuses.items())),

@@ -133,6 +133,6 @@ Il parser verifica pareggio e identità CE↔SP con `check_quadratura`; non chia
 CE-only / non-bilancio → errore onesto.
 
 ## Verifica
-`Test/_full_diagnostic.py Test/june_sample --llm` misura per-file rotta, validate_balance,
+`Test/_strumenti/_full_diagnostic.py Test/2026-06/june_sample --llm` misura per-file rotta, validate_balance,
 quadra/masked/vuoto e plug. La baseline pre-modifica è in `Test/_analysis/diag_june_llm.json`.
-CE↔SP per route: `Test/_ce_sp_ivcee2.py` (IV-CEE) e `Test/_repro_real2.py` (C + IV-CEE end-to-end).
+CE↔SP per route: `Test/_strumenti/_ce_sp_ivcee2.py` (IV-CEE) e `Test/_strumenti/_repro_real2.py` (C + IV-CEE end-to-end).

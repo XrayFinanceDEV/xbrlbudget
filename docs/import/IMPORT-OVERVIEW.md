@@ -570,14 +570,14 @@ nuovo tentativo, che di norma riesce).
 
 | Strumento | Cosa misura | Costo |
 |---|---|---|
-| `Test/_quadratura_harness.py` | tasso di quadratura dell'**estrazione** sul corpus (`area\|route\|mode\|quadra\|plug\|note`) | deterministico gratis (`--llm` per A/B) |
-| `Test/_full_diagnostic.py` | per-file: rotta, `validate_balance`, quadra/masked/vuoto, plug (`Test/june_sample --llm`) | LLM se `--llm` |
-| `Test/_budget_scenarios_loop.py` | il **previsionale** su 1 PDF: 5 profili PESSIMO→OTTIMO, variabili economiche **e** patrimoniali | import 1 volta (LLM), poi gratis |
-| `Test/_budget_loop_db.py` | stessa verifica su **tutti i bilanci già nel DB** | **zero** (nessun import) |
-| `Test/_budget_loop_batch.py` | batch sui PDF di una cartella (DB isolato per fan-out) | import LLM = costo API |
-| `Test/_ce_sp_ivcee2.py` / `Test/_repro_real2.py` | CE↔SP per route (IV-CEE / C end-to-end) | LLM |
+| `Test/_strumenti/_quadratura_harness.py` | tasso di quadratura dell'**estrazione** sul corpus (`area\|route\|mode\|quadra\|plug\|note`) | deterministico gratis (`--llm` per A/B) |
+| `Test/_strumenti/_full_diagnostic.py` | per-file: rotta, `validate_balance`, quadra/masked/vuoto, plug (`Test/2026-06/june_sample --llm`) | LLM se `--llm` |
+| `Test/_strumenti/_budget_scenarios_loop.py` | il **previsionale** su 1 PDF: 5 profili PESSIMO→OTTIMO, variabili economiche **e** patrimoniali | import 1 volta (LLM), poi gratis |
+| `Test/_strumenti/_budget_loop_db.py` | stessa verifica su **tutti i bilanci già nel DB** | **zero** (nessun import) |
+| `Test/_strumenti/_budget_loop_batch.py` | batch sui PDF di una cartella (DB isolato per fan-out) | import LLM = costo API |
+| `Test/_strumenti/_ce_sp_ivcee2.py` / `Test/_strumenti/_repro_real2.py` | CE↔SP per route (IV-CEE / C end-to-end) | LLM |
 
-Riproducibilità della tassonomia: `Test/_classify_dump.py` (dedup per hash, segnali, verdetti
+Riproducibilità della tassonomia: `Test/_strumenti/_classify_dump.py` (dedup per hash, segnali, verdetti
 parser → `Test/_analysis/index.json`), `Test/_analysis/consolidate.py`, `Test/_analysis/gen_doc.py`.
 
 Il loop del previsionale verifica, per ogni anno e scenario: che ogni variazione si rifletta col

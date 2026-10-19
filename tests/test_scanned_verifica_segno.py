@@ -10,7 +10,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
 ROOT = Path(__file__).resolve().parents[1]
-SOURCE = ROOT / "Test" / "sez-contrapposte" / "Bilancino 31-5-26.pdf"
+SOURCE = ROOT / "Test" / "2026-primo-lotto" / "sez-contrapposte" / "Bilancino 31-5-26.pdf"
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 

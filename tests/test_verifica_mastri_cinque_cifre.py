@@ -15,8 +15,8 @@ from decimal import Decimal
 import pytest
 
 _RADICE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-_PDF_1401 = os.path.join(_RADICE, "Test", "weekend-10-2026", "budget_1401_2025.12.31_BilancioVerifica.pdf")
-_PDF_COLOMBO = os.path.join(_RADICE, "Test", "COLOMBO.pdf")
+_PDF_1401 = os.path.join(_RADICE, "Test", "2026-10-weekend", "budget_1401_2025.12.31_BilancioVerifica.pdf")
+_PDF_COLOMBO = os.path.join(_RADICE, "Test", "2026-10-weekend", "COLOMBO.pdf")
 
 
 def _esito(pdf):

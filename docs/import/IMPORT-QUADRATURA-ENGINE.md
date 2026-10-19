@@ -71,13 +71,13 @@ conteggio. I sotto-conti li gestisce la discesa gerarchica nel ramo C.
 - `enforce_ce_sp_identity(bs, ce, label="", tol=None, prefer="sp13", declared=None) -> bs` — **tutte le
   rotte**: forza `utile_CE == sp13` (vedi `IMPORT-BALANCING-SCHEME.md` L2-bis per la logica dell'arbitro).
 
-### 2.3 Harness di misura — `Test/_quadratura_harness.py`
+### 2.3 Harness di misura — `Test/_strumenti/_quadratura_harness.py`
 Misura il **tasso di quadratura** sul corpus. Scansione **ricorsiva** + **dedup per hash** di
 contenuto. Per default solo route deterministiche (gratis); `--llm` include le aree A/B.
 ```
-python Test/_quadratura_harness.py Test          # tutto il corpus, deterministiche
-python Test/_quadratura_harness.py Test --llm     # include A/B (chiamate LLM)
-python Test/_quadratura_harness.py Test/june_sample
+python Test/_strumenti/_quadratura_harness.py Test          # tutto il corpus, deterministiche
+python Test/_strumenti/_quadratura_harness.py Test --llm     # include A/B (chiamate LLM)
+python Test/_strumenti/_quadratura_harness.py Test/2026-06/june_sample
 ```
 Colonne: `area | route | mode | quadra(SI/NO/MASK) | plug | note`.
 
@@ -159,7 +159,7 @@ I file mascherati avevano **plug enormi** (22–72% del totale): 405 = 57%, 343 
 li rifiuta (→ LLM/onesto) o, per plug minori, li importa con flag Rettifiche.
 
 > Il run completo con `--llm` (aree A/B) misura il resto del corpus; i numeri vanno aggiornati qui
-> quando disponibili. `python Test/_quadratura_harness.py Test --llm`.
+> quando disponibili. `python Test/_strumenti/_quadratura_harness.py Test --llm`.
 
 > **CAVEAT — l'harness è PESSIMISTA, non confonderlo con "importa?".** L'harness esegue
 > `extract → check_quadratura` ma NON le due fasi di produzione che `pdf_importer` esegue subito dopo:

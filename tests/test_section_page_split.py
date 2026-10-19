@@ -19,7 +19,7 @@ ROOT = Path(__file__).resolve().parents[1]
 # and whose CE page carries a stale "PASSIVO E PATRIMONIO NETTO" running header.
 # Regression: the spaced-dash SP_END anchor used to be missed, so sp_end fell
 # back forward and swallowed the CE page into the SP text.
-BUDGET_585 = ROOT / "Test" / "july_budget" / "budget_585_INQCEE-001.pdf"
+BUDGET_585 = ROOT / "Test" / "2026-07" / "july_budget" / "budget_585_INQCEE-001.pdf"
 
 
 @pytest.mark.skipif(not BUDGET_585.exists(), reason="local corpus is not present")

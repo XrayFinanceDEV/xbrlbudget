@@ -46,7 +46,7 @@ def test_manifest_builder_deduplicates_by_sha256_and_includes_csv(tmp_path):
 
 
 def test_committed_manifest_is_reproducible_and_complete_for_local_corpus():
-    if not (ROOT / "Test" / "sez-contrapposte").exists():
+    if not (ROOT / "Test" / "2026-primo-lotto" / "sez-contrapposte").exists():
         pytest.skip("local corpus is not present")
 
     committed = json.loads(MANIFEST_PATH.read_text(encoding="utf-8"))
@@ -54,11 +54,11 @@ def test_committed_manifest_is_reproducible_and_complete_for_local_corpus():
 
     assert committed == rebuilt
     assert rebuilt["hash_algorithm"] == "sha256"
-    assert rebuilt["summary"]["unique_contents"] == 137
-    assert rebuilt["summary"]["physical_files"] == 214
-    assert rebuilt["summary"]["formats"] == {"csv": 1, "pdf": 121, "xbrl": 15}
+    assert rebuilt["summary"]["unique_contents"] == 159
+    assert rebuilt["summary"]["physical_files"] == 252
+    assert rebuilt["summary"]["formats"] == {"csv": 1, "pdf": 140, "xbrl": 18}
     assert rebuilt["summary"]["truth_orphans"] == []
-    assert len({record["sha256"] for record in rebuilt["files"]}) == 137
+    assert len({record["sha256"] for record in rebuilt["files"]}) == 159
 
 
 def test_337_verified_truth_is_pinned_to_content_not_filename():

@@ -410,7 +410,7 @@ un file di 7.000 righe, e nessun'altra pagina li elenca.
 
 ## 7. Riproducibilità
 
-- `Test/_classify_dump.py` — dedup per hash, estrae il testo di ogni PDF/XBRL unico in `Test/_analysis/dumps/`, calcola i segnali strutturali e i verdetti dei parser esistenti → `Test/_analysis/index.json`.
+- `Test/_strumenti/_classify_dump.py` — dedup per hash, estrae il testo di ogni PDF/XBRL unico in `Test/_analysis/dumps/`, calcola i segnali strutturali e i verdetti dei parser esistenti → `Test/_analysis/index.json`.
 - `Test/_analysis/consolidate.py` — consolida le classificazioni (6 batch) → `Test/_analysis/classifications.json` + statistiche.
 - `Test/_analysis/gen_doc.py` — genera questo documento da `classifications.json`.
 

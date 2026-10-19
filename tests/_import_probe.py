@@ -5,7 +5,7 @@ function the `/import/pdf` endpoint calls) but binds `SessionLocal` to a fresh
 in-memory SQLite engine, so the real `financial_analysis.db` is never touched.
 
 Answers the only question that matters for the audit: *does this PDF import, and
-are the stored numbers right?* — unlike `Test/_quadratura_harness.py`, which
+are the stored numbers right?* — unlike `Test/_strumenti/_quadratura_harness.py`, which
 stops at `extract -> check_quadratura` and is therefore pessimistic on route A/B
 and optimistic on route C.
 

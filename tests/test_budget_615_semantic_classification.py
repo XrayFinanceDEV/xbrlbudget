@@ -22,7 +22,7 @@ from importers.situazione_contabile_parser import (
 D = Decimal
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 PDF_615 = os.path.join(
-    ROOT, "Test", "july_budget", "budget_615_2024 Lavori di meccanica generale.pdf"
+    ROOT, "Test", "2026-07", "july_budget", "budget_615_2024 Lavori di meccanica generale.pdf"
 )
 
 

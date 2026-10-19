@@ -43,7 +43,7 @@ Print both candidates before blaming either (`extract_contrapposte_best_effort` 
 easy to run; the LLM one needs `ANTHROPIC_API_KEY`).
 
 **The harness is not in the repo.** `Test/` is listed in `.gitignore`, so
-`Test/_quadratura_harness.py` and its corpus are local tools on the author's machine: several
+`Test/_strumenti/_quadratura_harness.py` and its corpus are local tools on the author's machine: several
 documents in `docs/import/` cite them as if a clone had them. The versioned equivalent for
 "did my change move anything?" is `tests/fixtures/import_baseline.json`
 (`docs/import/REGOLE-IMPORT-06-PERSISTENZA.md` §7).

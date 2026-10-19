@@ -143,7 +143,7 @@ def _print_table(folder):
 
 if __name__ == "__main__":
     target = (sys.argv[1] if len(sys.argv) > 1
-              else os.path.join(ROOT, "Test", "sez-contrapposte"))
+              else os.path.join(ROOT, "Test", "2026-primo-lotto", "sez-contrapposte"))
     if os.path.isdir(target):
         _print_table(target)
     else:

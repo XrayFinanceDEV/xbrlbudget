@@ -615,7 +615,7 @@ def test_garbled_text_layer_detector():
 
 
 PDF_337 = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-                       "Test", "sez-contrapposte", "budget_337_2023.pdf")
+                       "Test", "2026-primo-lotto", "sez-contrapposte", "budget_337_2023.pdf")
 
 
 @pytest.mark.skipif(not os.path.exists(PDF_337), reason="corpus PDF not present")

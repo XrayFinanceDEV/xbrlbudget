@@ -5,7 +5,7 @@ both wrong. This suite pins the CORRECT sp02/sp03/sp13/plug values (read from th
 source PDFs, audit 2026-07-14) against the production replica in
 `tests/_prod_route_c_runner.py`, so a silent netting corruption fails a test.
 
-The corpus PDFs live in the gitignored Test/sez-contrapposte/, so each test skips
+The corpus PDFs live in the gitignored Test/2026-primo-lotto/sez-contrapposte/, so each test skips
 when its PDF is absent (fresh clone / CI without the corpus). Rows marked
 status="open" are xfail(strict=True) until their fixing PR lands — flip them to
 status="good" in the JSON when the fix is implemented.
@@ -34,7 +34,7 @@ _GT = _GT_DOC["files"]
 
 
 def _check(fname, spec):
-    # `dir` per-file: il corpus non e' tutto sotto Test/sez-contrapposte/
+    # `dir` per-file: il corpus non e' tutto sotto Test/2026-primo-lotto/sez-contrapposte/
     base = os.path.join(ROOT, *spec["dir"].split("/")) if spec.get("dir") else CORPUS
     path = os.path.join(base, fname)
     if not os.path.exists(path):
@@ -89,7 +89,7 @@ for _i, (_fname, _spec) in enumerate(_GT.items()):
 def test_erp_legal_parent_suffixes_do_not_double_count_children(
     filename, expected_total, expected_result
 ):
-    path = os.path.join(ROOT, "Test", "june_sample", "success", filename)
+    path = os.path.join(ROOT, "Test", "2026-06", "june_sample", "success", filename)
     if not os.path.exists(path):
         pytest.skip(f"corpus PDF missing: {filename}")
 
@@ -104,7 +104,7 @@ def test_erp_legal_parent_suffixes_do_not_double_count_children(
 
 
 def test_company_address_header_is_not_treated_as_a_ledger_account():
-    path = os.path.join(ROOT, "Test", "BILANCIO-TEST.pdf")
+    path = os.path.join(ROOT, "Test", "2026-primo-lotto", "sciolti", "BILANCIO-TEST.pdf")
     if not os.path.exists(path):
         pytest.skip("corpus PDF missing: BILANCIO-TEST.pdf")
 
@@ -124,7 +124,7 @@ def test_company_address_header_is_not_treated_as_a_ledger_account():
 )
 def test_scanned_verifica_segno_uses_coordinate_ocr_without_a_balance_plug():
     path = os.path.join(
-        ROOT, "Test", "sez-contrapposte", "Bilancino 31-5-26.pdf"
+        ROOT, "Test", "2026-primo-lotto", "sez-contrapposte", "Bilancino 31-5-26.pdf"
     )
     if not os.path.exists(path):
         pytest.skip("scanned corpus PDF missing: Bilancino 31-5-26.pdf")

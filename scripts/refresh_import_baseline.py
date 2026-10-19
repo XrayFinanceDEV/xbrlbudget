@@ -14,8 +14,8 @@ Regole di sicurezza:
     dichiarare "atteso" un errore che non dipende dal software.
 
 Uso:
-    python scripts/refresh_import_baseline.py Test/successSecondo Test/june_sample/success
-    python scripts/refresh_import_baseline.py --method ocr Test/errori
+    python scripts/refresh_import_baseline.py Test/2026-primo-lotto/successSecondo Test/2026-06/june_sample/success
+    python scripts/refresh_import_baseline.py --method ocr Test/2026-primo-lotto/errori
     python scripts/refresh_import_baseline.py --verify <sha256> "TOTALE A PAREGGIO pag.4"
 """
 import argparse

@@ -179,7 +179,7 @@ def test_every_tree_short_key_is_routable_by_map_sc_keys():
 
 
 def _budget_342_pdf():
-    for folder in ("Test/july_budget", "tests/debug"):
+    for folder in ("Test/2026-07/july_budget", "tests/debug"):
         matches = sorted(
             __import__("pathlib").Path(ROOT, folder).glob("budget_342_*.pdf"))
         if matches:

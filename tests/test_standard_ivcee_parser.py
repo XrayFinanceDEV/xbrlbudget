@@ -18,6 +18,7 @@ ROOT = Path(__file__).resolve().parents[1]
 PDF_328 = (
     ROOT
     / "Test"
+    / "2026-primo-lotto"
     / "successTerzo"
     / "success"
     / "budget_328_2025- ELLE ERRE BIL.pdf"

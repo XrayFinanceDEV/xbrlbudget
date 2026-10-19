@@ -111,7 +111,7 @@ def test_current_period_result_is_never_collected_as_pn():
 
 
 def _budget_342_pdf():
-    for folder in ("Test/july_budget", "tests/debug"):
+    for folder in ("Test/2026-07/july_budget", "tests/debug"):
         matches = sorted((ROOT / folder).glob("budget_342_*.pdf"))
         if matches:
             return matches[0]

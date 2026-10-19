@@ -22,7 +22,7 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
 
 
-# The real budget_137 text layer (Test/successSecondo/budget_137_Bilancio_LUGS_2025_DEFINITIVO.pdf)
+# The real budget_137 text layer (Test/2026-primo-lotto/successSecondo/budget_137_Bilancio_LUGS_2025_DEFINITIVO.pdf)
 LUGS_137 = """BILANCIO D'ESERCIZIO 2025
 Schema IV Direttiva CEE (art. 2424 e 2425 c.c.) - versione definitiva
 STATO PATRIMONIALE - ATTIVO
@@ -69,7 +69,7 @@ Il bilancio è stato riclassificato secondo IV direttiva CEE. Il risultato d'ese
 incluso nel patrimonio netto, garantendo la perfetta quadratura tra attivo e passivo.
 """
 
-# The real budget_150 text layer (Test/successSecondo/budget_150_Bilancio_FINALE_CEE_SRL_2025.pdf):
+# The real budget_150 text layer (Test/2026-primo-lotto/successSecondo/budget_150_Bilancio_FINALE_CEE_SRL_2025.pdf):
 # also an over-aggregated summary, but it prints no Attivo total and its CE reconciles
 # through imposte. Nothing here contradicts anything -> must keep the "formato non
 # supportato" diagnosis.

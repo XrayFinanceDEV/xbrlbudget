@@ -13,7 +13,7 @@ import fitz
 import pytest
 
 _RADICE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-_PDF_REALE = os.path.join(_RADICE, "Test", "weekend-10-2026",
+_PDF_REALE = os.path.join(_RADICE, "Test", "2026-10-weekend",
                           "budget_1405_Metaldecor_Bilancio_CEE_Semplificato_2025.pdf")
 
 _SP_ATTIVO = [("B) Immobilizzazioni immateriali", "1.000,00"), ("B) Immobilizzazioni materiali", "2.000,00"),

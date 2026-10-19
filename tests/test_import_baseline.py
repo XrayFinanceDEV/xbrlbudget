@@ -112,7 +112,7 @@ def _index_corpus():
 #     FALLITO, alla riesecuzione importava (attivo 1.821.262,15): non oscilla di
 #     qualche centesimo, oscilla fra "si apre" e "non si apre".
 # Per questi file il riferimento utile e' la quadratura, non il centesimo: se ne
-# occupano `Test/_quadratura_harness.py` e i test mirati, non questa baseline.
+# occupano `Test/_strumenti/_quadratura_harness.py` e i test mirati, non questa baseline.
 #
 # Conseguenza da tenere presente prima di fidarsi del verde: in configurazione
 # "llm" questa baseline copre SEI file. Tutto cio' che passa da un LLM — rotta A/B

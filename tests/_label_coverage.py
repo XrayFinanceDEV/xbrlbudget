@@ -18,7 +18,7 @@ interrogata nello spazio corretto:
 crescono di circa il 18%" portano un importo ma non sono voci di bilancio.
 
 CLI:  python tests/_label_coverage.py <cartelle o pdf...>
-      python tests/_label_coverage.py --top 40 Test/june_sample/success
+      python tests/_label_coverage.py --top 40 Test/2026-06/june_sample/success
 """
 import argparse
 import glob

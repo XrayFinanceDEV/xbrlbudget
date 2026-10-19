@@ -13,7 +13,7 @@ from _prod_route_c_runner import run_prod_route_c  # noqa: E402
 
 
 def test_budget_588_uses_final_adjusted_column_without_fake_prior_year():
-    matches = list((Path(__file__).parents[1] / "Test" / "july_budget").glob(
+    matches = list((Path(__file__).parents[1] / "Test" / "2026-07" / "july_budget").glob(
         "budget_588_*.pdf"
     ))
     if not matches:

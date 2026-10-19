@@ -490,7 +490,7 @@ Test: `tests/test_fallback_bucket.py`, `tests/test_classification_fallback.py`.
   *la quadratura da sola non basta, budget_395 quadra con residuo zero e ha `sp02`/`sp03`
   entrambi sbagliati*.
 
-**L'harness di quadratura** (`Test/_quadratura_harness.py`) misura il tasso di quadratura su un
+**L'harness di quadratura** (`Test/_strumenti/_quadratura_harness.py`) misura il tasso di quadratura su un
 corpus: route deterministiche di default, `--llm` per includere A/B. È lo strumento di riferimento
 per il prima/dopo di una modifica all'estrazione — con due avvertenze:
 

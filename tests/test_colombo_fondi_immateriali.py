@@ -11,7 +11,7 @@ from decimal import Decimal
 
 import pytest
 
-_PDF = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "Test", "COLOMBO.pdf")
+_PDF = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "Test", "2026-10-weekend", "COLOMBO.pdf")
 
 pytestmark = pytest.mark.skipif(not os.path.exists(_PDF), reason="COLOMBO.pdf non presente in Test/")
 

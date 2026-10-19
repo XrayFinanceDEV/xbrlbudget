@@ -28,7 +28,7 @@ from importers.situazione_contabile_parser import (
 _ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 _PDF_615_CANDIDATES = (
     os.path.join(_ROOT, "tests", "debug", "budget_615_2024 Lavori di meccanica generale.pdf"),
-    os.path.join(_ROOT, "Test", "july_budget", "budget_615_2024 Lavori di meccanica generale.pdf"),
+    os.path.join(_ROOT, "Test", "2026-07", "july_budget", "budget_615_2024 Lavori di meccanica generale.pdf"),
 )
 PDF_615 = next((path for path in _PDF_615_CANDIDATES if os.path.exists(path)),
                _PDF_615_CANDIDATES[0])

@@ -959,6 +959,13 @@ def _ce09_dal_dettaglio(codice, desc, importo, figli):
     return scendi(codice, desc, importo)
 
 
+def _albero_da_dettagliare(aggregato, codice, desc, importo, figli):
+    """Un mastro che il lettore non sa ripartire sulle sotto-voci di legge, con i suoi
+    conti foglia: lo ripartisce il modello (importers/dettaglio_dal_modello.py)."""
+    from importers.dettaglio_dal_modello import albero
+    return albero(aggregato, codice, desc, importo, figli)
+
+
 def _figli_puntati(righe):
     """figli(codice) per i codici a punti ("49" -> "49.01" -> "49.01.01")."""
     def figli(c):
@@ -4605,6 +4612,12 @@ def _be_reclassify(items: List[Tuple[str, str, Decimal]], classify,
             # di B.10 le dicono i conti sotto (Pandoro, 138.838,83 tutti in ce09d)
             out.extend(_ce09_dal_dettaglio(c, d, a, figli))
             return a
+        if field == 'ce08':
+            # Personale senza sotto-voce: le parole chiave non bastano a ripartirlo, lo
+            # fa il modello sui conti sotto il mastro (importers/dettaglio_dal_modello.py)
+            out.append(('ce08', a))
+            out.append(('_ce_da_dettagliare', _albero_da_dettagliare('ce08', c, d, a, figli)))
+            return a
         if specific:
             # un mastro di rimanenze senza natura si legge dai conti (prodotti/materie)
             out.extend(_rimanenze_dal_dettaglio(field, c, d, a, figli, proprio,
@@ -5844,6 +5857,7 @@ def _hier_reconstruct(pages_data, full: str):
     figli_costi, figli_ricavi = _figli_puntati(cos), _figli_puntati(ric)
     ripiego_costi = _natura_unanime(d for _c, d, _a in ric)
     ripiego_ricavi = _natura_unanime(d for _c, d, _a in cos)
+    da_dettagliare = []
     for _c, d, a in mc:
         f = (_classify_ce_costi(d) or _resolve_ce_field(d, 'costi')
              or _classify_ce_costi_foglia(d) or _classify_ce_sinonimo(d, 'costi'))
@@ -5874,8 +5888,15 @@ def _hier_reconstruct(pages_data, full: str):
             adde('ce15', a)
         elif f in _CE_HIER_SUBPARENT:
             adde(_CE_HIER_SUBPARENT[f], a)
+        elif f == 'ce08':
+            # Personale senza sotto-voce: le parole chiave non bastano a ripartirlo, lo
+            # fa il modello sui conti sotto il mastro (importers/dettaglio_dal_modello.py)
+            adde('ce08', a)
+            da_dettagliare.append(_albero_da_dettagliare('ce08', _c, d, a, figli_costi))
         else:
             adde(f, a)
+    if da_dettagliare:
+        ce['_ce_da_dettagliare'] = da_dettagliare
     for _c, d, a in mr:
         f = (_classify_ce_ricavi(d) or _resolve_ce_field(d, 'ricavi')
              or _classify_ce_ricavi_foglia(d) or _classify_ce_sinonimo(d, 'ricavi'))
@@ -6551,6 +6572,8 @@ def extract_contrapposte_best_effort(file_path: str) -> Tuple[Dict[str, Decimal]
             detail, parent = _CE_SUBFIELD_PARENT[tag]
             add(ce, parent, amt)      # aggregate read by the EBIT/profit formula
             add(ce, detail, amt)      # "di cui" detail (full DB key, survives _map_sc_keys)
+        elif tag == '_ce_da_dettagliare':
+            ce.setdefault(tag, []).append(amt)      # un albero, non un importo
         else:
             add(ce, tag, amt)
     for tag, amt in _be_reclassify(costi, cl_cos,

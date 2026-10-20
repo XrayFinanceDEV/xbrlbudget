@@ -2126,6 +2126,16 @@ def import_pdf_balance_sheet(
         except Exception as _ce_sp_err:
             logger.warning(f"CE↔SP identity enforcement skipped: {_ce_sp_err}")
 
+        # Un mastro che il lettore delle contrapposte non sa ripartire sulle sotto-voci di
+        # legge (il personale di Unicarton 31/08/2026: retribuzioni e contributi INPS, tutto
+        # in ce08d) lo ripartisce il modello sui conti sotto, senza toccare l'aggregato; cio'
+        # che non spiega resta alla chiusura dei residui qui sotto, dichiarato come prima.
+        from importers.dettaglio_dal_modello import dettaglia
+        income_data, _dettaglio_report = dettaglia(income_data)
+        _prior_dettaglio_report = None
+        if prior_ce_data:
+            prior_ce_data, _prior_dettaglio_report = dettaglia(prior_ce_data)
+
         # Mandatory final closure, independent of analytical reader availability,
         # accepted proposals and extraction route. This changes only residual
         # subfields, never parent totals or either statement's balance/result.
@@ -2420,6 +2430,7 @@ def import_pdf_balance_sheet(
         _validation_payload["ivcee_provider"] = provider_ivcee()
         _validation_payload["dettagli_provider"] = provider_dettagli()
         _validation_payload['residual_finalization'] = _residual_report
+        _validation_payload['dettaglio_dal_modello'] = _dettaglio_report
         _validation_payload['warnings'].extend(_residual_report['warnings'])
         _validation_payload['warnings'].extend(_detail_report.get('warnings', []))
         _validation_payload['source_reconciliation'] = _source_current
@@ -2599,6 +2610,8 @@ def import_pdf_balance_sheet(
                     _prior_validation["ivcee_provider"] = provider_ivcee()
                     _prior_validation["dettagli_provider"] = provider_dettagli()
                     _prior_validation['residual_finalization'] = _prior_residual_report
+                    if _prior_dettaglio_report is not None:
+                        _prior_validation['dettaglio_dal_modello'] = _prior_dettaglio_report
                     _prior_validation['warnings'].extend(_prior_residual_report.get('warnings', []))
                     _prior_validation['warnings'].extend(_detail_report.get('warnings', []))
                     _prior_validation['source_reconciliation'] = _source_reports.get('prior', {})

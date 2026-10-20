@@ -416,6 +416,37 @@ Le Rettifiche (`frontend/lib/pratica-reconcile.ts`) seguono la stessa regola.
 muove. Limite noto: una foglia troncata («Amm.to altre immobilizz.», budget_1327) resta ai
 materiali anche quando il codice la direbbe immateriale.
 
+## 4-quater. Il personale: lo ripartisce il modello, il codice decide
+
+B.9 ha quattro sotto-voci nel nostro schema: `ce08b` salari e stipendi, `ce08c` oneri sociali,
+`ce08a` TFR, `ce08d` altri costi (anche il trattamento di quiescenza). La ripartizione conta: il
+previsionale stima il TFR dai salari (`ce08a = ce08b / 13,5`) e fa crescere ogni componente per
+conto suo.
+
+Il lettore delle contrapposte riconosce le sotto-voci solo con parole chiave (SALARI, STIPENDI,
+ONERI SOCIALI…). Un mastro «67 COSTI PERSONALE DIPENDENTE» con sotto «Retribuzioni lorde» e
+«Contributi INPS» (Unicarton 31/08/2026), o «CONTR. INPS PERSONALE DIRETTO» (Gustopronto), o una
+foglia OCR «SALXRI E STIPENDI» (budget_337) restava `ce08` intero e finiva in `ce08d`.
+Inseguire le parole file per file è la strada che il proprietario ha scartato (2026-10-20).
+
+**La regola** (`importers/dettaglio_dal_modello.py`):
+- il lettore (`_be_reclassify`, `_hier_reconstruct`) mette l'aggregato in `ce08` e dichiara il
+  mastro in `_ce_da_dettagliare` con le sue foglie: si scende in un conto solo quando i suoi figli
+  sommano al suo importo al centesimo, altrimenti resta foglia intera;
+- `pdf_importer`, prima di `finalize_pdf_residuals`, passa le foglie a Qwen col prompt dei conti del
+  percorso snello (`lettura.percorsi_dei_conti`), e il percorso diventa campo con
+  `percorsi.campo_da_percorso`. Il modello vede solo descrizioni, mai importi da scrivere;
+- una foglia si accetta solo se la voce è una sotto-voce dello **stesso** aggregato: «CE.B.7» o un
+  «CE.B.9» senza lettera si respingono e restano non ripartiti. L'aggregato non si tocca mai;
+- ciò che il modello non spiega lo chiude `residual_finalization` in `ce08d`, dichiarato come
+  convenzionale, esattamente come prima. Senza gx10, o con un errore, non cambia nulla: il report
+  `dettaglio_dal_modello` nel `validation_report` lo dice (`modello_non_disponibile`, `errore`).
+
+**Misurato sul corpus il 2026-10-20:** 37 PDF su 283 dichiarano un mastro (21 bilanci distinti),
+una chiamata ciascuno. Con Qwen vero 20 su 21 si ripartiscono per intero; budget_342 lascia in
+`ce08d` formazione e visite mediche (320 €, indicate come servizi e respinte); Pandoro (un mastro
+senza conti sotto) resta com'era. Nessuna massa uscita dal personale.
+
 ## 5. Da dove esce il risultato d'esercizio
 
 Ogni parser lo deriva diversamente, e vale la pena saperlo perché spiega molti sintomi:

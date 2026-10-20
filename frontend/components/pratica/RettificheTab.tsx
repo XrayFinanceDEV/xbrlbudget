@@ -51,6 +51,7 @@ import {
   SOGLIA_CHIUSURA_AUTOMATICA,
   chiusuraSbilancio,
   quadra,
+  risultatoPrecedente,
   scartoQuadratura,
 } from "@/lib/pratica-quadratura";
 import { reconcileSubfields } from "@/lib/pratica-reconcile";
@@ -378,6 +379,32 @@ export function RettificheTab({
       proposedDelta: 0,
       accepted: true,
       explanation: chiusura.explanation,
+    });
+  };
+
+  // Spacchetta l'utile importato: la parte che il CE non spiega va negli utili
+  // portati a nuovo (lib/pratica-quadratura.ts, risultatoPrecedente). Il
+  // risultato del CE si misura sullo stato DOPO la conferma, come per lo scarto:
+  // recalcAggregates riscrive sp13 dal CE.
+  const spacchettaUtile = () =>
+    risultatoPrecedente(
+      corrections["sp13_utile_perdita"] ?? original["sp13_utile_perdita"] ?? 0,
+      recalcAggregates({ ...corrections })["sp13_utile_perdita"],
+    );
+  const openSpacchettaUtile = () => {
+    const s = spacchettaUtile();
+    if (!s) return;
+    setActiveProposal({
+      id: Date.now(),
+      mode: "correggi_import",
+      editedField: s.field,
+      editedLabel: s.label,
+      delta: s.delta,
+      counterpartField: "",
+      counterpartLabel: "",
+      proposedDelta: 0,
+      accepted: true,
+      explanation: s.explanation,
     });
   };
 
@@ -1003,6 +1030,17 @@ export function RettificheTab({
                           ceSpMatch ? "text-green-600 dark:text-green-400" : "text-red-600 dark:text-red-400"
                         )}>
                           {ceSpMatch ? "OK" : `diff: ${formatEuro(Math.abs(netProfit - sp13))}`}
+                          {!ceSpMatch && spacchettaUtile() && (
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              className="ml-3 h-6 text-xs"
+                              title="Porta la parte dell'utile che il conto economico non spiega negli utili (perdite) portati a nuovo"
+                              onClick={openSpacchettaUtile}
+                            >
+                              Spacchetta utile
+                            </Button>
+                          )}
                         </TableCell>
                       </TableRow>
                     </>

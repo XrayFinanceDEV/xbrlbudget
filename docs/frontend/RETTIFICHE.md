@@ -158,6 +158,27 @@ resterà, e correggerlo lascerebbe un residuo pari a `sp13_importato − sp13_CE
 In giornale l'entrata resta riconoscibile: `counterpart_field = "_correzione_import"`, delta della
 contropartita `0`.
 
+### «Spacchetta utile»: il risultato di esercizi precedenti non destinato
+
+Un bilancio di verifica (infrannuale, o al 31/12 prima della chiusura) che non ha ancora girato a
+patrimonio netto il risultato dell'anno prima stampa un solo «utile», la differenza
+attivo − passivo: Unicarton 31/08/2026 chiude lo SP a 241.711,59 col CE a 68.247,80. L'import
+non deduce la parte pregressa (decisione del proprietario su budget_680, 2026-10-06), quindi il
+foglio arriva **quadrato** con uno scarto CE↔SP.
+
+Su quel foglio **ogni** rettifica viene rifiutata: la conferma riporta `sp13` al CE, lo scarto
+CE↔SP diventa sbilancio dello SP, e la guardia relativa di `PUT /adjustments` (che misura le due
+cose separatamente) lo legge come un peggioramento. «Chiudi sbilancio» non compare, perché il
+foglio importato quadra.
+
+La via d'uscita è il pulsante «Spacchetta utile» nella riga «Verifica CE ↔ SP», visibile solo
+quando c'è uno scarto. Apre un «Correggi Import» su `sp12g_utili_perdite_portati` con delta
+`sp13 importato − utile CE` (negativo per una perdita pregressa; `risultatoPrecedente` in
+`lib/pratica-quadratura.ts`): il passivo non cambia, lo scarto CE↔SP si chiude, e la guardia
+accetta (`tests/test_rettifica_spacchetta_utile.py`). La destinazione è **sempre** gli utili
+portati a nuovo (decisione del proprietario, 2026-10-20); la distribuzione fra riserva legale,
+straordinaria e utili a nuovo resta alle riclassifiche SP→SP. Vale su entrambe le tab d'anno.
+
 ## 4. Persistenza, tetto, riconciliazione, ripristino
 
 **Snapshot.** `FinancialYear.original_bs_snapshot` + `original_is_snapshot` (JSON pre-rettifiche)

@@ -4,6 +4,7 @@ import {
   SOGLIA_CHIUSURA_AUTOMATICA,
   chiusuraAutomatica,
   chiusuraSbilancio,
+  risultatoPrecedente,
   quadra,
   scartoQuadratura,
 } from "@/lib/pratica-quadratura";
@@ -80,5 +81,24 @@ describe("chiusuraAutomatica", () => {
   it("su un foglio che già quadra non scrive una rettifica da zero euro", () => {
     expect(chiusuraAutomatica(0)).toBeNull();
     expect(chiusuraAutomatica(-0.01)).toBeNull();
+  });
+});
+
+describe("risultatoPrecedente", () => {
+  it("separa dall'utile importato la parte che il CE non spiega (Unicarton 31/08/2026)", () => {
+    // Lo SP chiude a 241.711,59 perche' l'utile 2025 non e' ancora girato a
+    // riserva; il CE del periodo dice 68.247,80.
+    const r = risultatoPrecedente(241711.59, 68247.8);
+    expect(r?.field).toBe("sp12g_utili_perdite_portati");
+    expect(r?.side).toBe("passivo");
+    expect(r?.delta).toBe(173463.79);
+  });
+
+  it("una perdita pregressa va negli utili portati a nuovo col segno meno", () => {
+    expect(risultatoPrecedente(-50000, 10000)?.delta).toBe(-60000);
+  });
+
+  it("niente da separare quando SP e CE coincidono al centesimo", () => {
+    expect(risultatoPrecedente(68247.8, 68247.81)).toBeNull();
   });
 });

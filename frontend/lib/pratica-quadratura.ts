@@ -95,3 +95,41 @@ export function chiusuraAutomatica(scarto: number): ChiusuraSbilancio | null {
   if (Math.abs(scarto) > SOGLIA_CHIUSURA_AUTOMATICA) return null;
   return chiusuraSbilancio(scarto);
 }
+
+/**
+ * Lo spacchettamento dell'utile importato: la parte del risultato dello SP che il
+ * conto economico non spiega è il risultato di esercizi precedenti non ancora
+ * girato a patrimonio netto, e va negli utili (perdite) portati a nuovo. `null`
+ * quando SP e CE coincidono al centesimo.
+ *
+ * Un bilancio di verifica (infrannuale, o al 31/12 prima della chiusura) stampa
+ * spesso un solo "utile" dato dalla differenza attivo − passivo: Unicarton
+ * 31/08/2026 chiude lo SP a 241.711,59 col CE a 68.247,80, e i 173.463,79 di
+ * differenza sono l'utile 2025 non destinato. L'import non lo deduce (decisione
+ * del proprietario su budget_680, 2026-10-06): lo segnala, e l'utente lo separa
+ * da qui. La distribuzione fra le riserve resta alle riclassifiche SP→SP.
+ *
+ * SEGNO. delta = sp13 importato − utile CE, da sommare agli utili portati a
+ * nuovo: una perdita pregressa dà un delta negativo. Alla conferma
+ * `recalcAggregates` riporta sp13 al risultato del CE, quindi il passivo non
+ * cambia e lo scarto CE↔SP si chiude: la guardia del server lo accetta.
+ */
+export function risultatoPrecedente(
+  sp13Importato: number,
+  utileCe: number,
+): ChiusuraSbilancio | null {
+  const delta = Math.round((sp13Importato - utileCe) * 100) / 100;
+  if (Math.abs(delta) <= TOLLERANZA_QUADRATURA) return null;
+  const field = "sp12g_utili_perdite_portati";
+  const label = labelOf(field);
+  return {
+    field,
+    label,
+    side: "passivo",
+    delta,
+    explanation:
+      `Spacchettamento dell'utile importato: ${formatEuroPreciso(Math.abs(delta))} ` +
+      `di ${delta >= 0 ? "utile" : "perdita"} di esercizi precedenti non ancora ` +
+      `destinato, portato a ${label}`,
+  };
+}

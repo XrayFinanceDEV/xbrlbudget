@@ -30,3 +30,34 @@ export function praticaIndicatoriStatus(input: {
   }
   return "non_generato";
 }
+
+/**
+ * Su un bilancio di 12 mesi non c'e' una Proiezione da generare a mano: il periodo e'
+ * gia' l'anno intero. Gli Indicatori leggono comunque il `ForecastYear` che il motore
+ * persiste, e fino a qui lo generava solo il pulsante «Vai agli Indicatori» del
+ * Confronto (`saveProjection12M`): chi apriva la tab dallo stepper restava su «Genera
+ * prima la proiezione nel passaggio 3», un passo che sui 12 mesi non esiste.
+ *
+ * Vero quando la tab deve generarlo da sola: 12 mesi, Confronto e analisi letti ma senza anno,
+ * niente in corso, e non gia' tentato per questo scenario — un rifiuto del motore si
+ * mostra col suo motivo e si ritenta solo a mano, mai in loop.
+ */
+export function generaAnnualeAutomatica(input: {
+  periodMonths: number;
+  status: PraticaIndicatoriStatus;
+  scenarioId: number | null;
+  tentatoPer: number | null;
+  inCorso: boolean;
+  /** Confronto e analisi gia' letti: senza, la generazione uscirebbe a vuoto
+   *  consumando il tentativo. */
+  datiPronti: boolean;
+}): boolean {
+  return (
+    input.datiPronti &&
+    input.periodMonths === 12 &&
+    input.status === "non_generato" &&
+    input.scenarioId !== null &&
+    input.tentatoPer !== input.scenarioId &&
+    !input.inCorso
+  );
+}

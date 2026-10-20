@@ -214,6 +214,12 @@ ciò che non si può non sapere. Ogni voce dice la regola e **cosa si rompe** a 
   svalutazione di `sp04`. La massa non ripartita va ai materiali (agli immateriali senza `sp03`),
   in `residual_finalization._ce_bucket` e in `pratica-reconcile.ts`; «AMMORTAMENTI E SVALUTAZIONI»
   non è svalutazione crediti. → `docs/import/REGOLE-IMPORT-03-SPACCHETTATURE-NETTING.md` §4-ter
+- **Il personale lo ripartisce il modello, il codice decide**: un mastro di B.9 che le parole
+  chiave non sanno ripartire si dichiara in `_ce_da_dettagliare` con le sue foglie (solo dove i
+  figli sommano al padre), e Qwen ne nomina la voce di legge (`importers/dettaglio_dal_modello.py`).
+  Si accetta solo una sotto-voce dello stesso aggregato, mai un importo: l'aggregato non cambia e
+  il non spiegato resta a `residual_finalization`. Allungare l'elenco delle parole chiave al posto
+  del modello è la strada scartata (2026-10-20). → `docs/import/REGOLE-IMPORT-03-SPACCHETTATURE-NETTING.md` §4-quater
 - **`TIER0_FIELDS` non è mai una destinazione di ripiego** (immobilizzazioni nette, patrimonio
   netto, debiti verso banche, `ce09`): `ce09` è l'unico confine di KPI dentro i costi operativi
   (`EBITDA = EBIT + ce09`), gli altri spostano un totale e rompono PFN, ROI, indipendenza

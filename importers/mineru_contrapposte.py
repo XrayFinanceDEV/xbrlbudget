@@ -54,13 +54,38 @@ _PASSO = 11.0
 _CORPO = 7.0
 
 
-def _sezione(table) -> Optional[str]:
-    titolo = (table.caption or "").upper()
+def _sezione_del_titolo(titolo: str) -> Optional[str]:
+    titolo = titolo.upper()
     if "PATRIMONIAL" in titolo:
         return "sp"
     if "ECONOMIC" in titolo:
         return "ce"
     return None
+
+
+# Quante righe in testa a una tabella senza didascalia si guardano per il titolo.
+_RIGHE_DI_TESTA = 8
+
+
+def _sezione(table) -> tuple[Optional[str], int]:
+    """La sezione della tabella e quante righe d'intestazione saltare.
+
+    Di solito il titolo e' la didascalia di MinerU. Sull'ultima pagina di Unicarton
+    31/08/2026 la didascalia e' vuota: l'intestazione della pagina (azienda, anno,
+    "CONTO ECONOMICO", "Costi | Ricavi") e' finita dentro la tabella, che veniva scartata
+    con le imposte, i totali e l'utile. Allora il titolo si cerca nelle righe di testa,
+    prima del primo conto, e le righe fino al titolo (azienda, anno) non si leggono."""
+    sezione = _sezione_del_titolo(table.caption or "")
+    if sezione or (table.caption or "").strip():
+        return sezione, 0
+    for i, row in enumerate(table.rows[:_RIGHE_DI_TESTA]):
+        celle = [_testo(c) for c in row.cells]
+        if any(_CODICE.match(c) for c in celle if c):
+            break
+        sezione = _sezione_del_titolo(" ".join(celle))
+        if sezione:
+            return sezione, i + 1
+    return None, 0
 
 
 def _testo(cella) -> str:
@@ -130,16 +155,23 @@ class _Ricucitore:
 
 def _coppie_di_piede(celle: list[str]) -> list[tuple[str, str]]:
     """Le coppie (didascalia, importo) di una riga di piede, nell'ordine di stampa.
-    Un importo senza didascalia ripete quella prima ("Totale a quadratura X | X")."""
+    Un importo senza didascalia ripete quella prima solo se e' lo stesso importo
+    ("Totale a quadratura X | X"). Un importo diverso e' un totale di un'altra riga che
+    MinerU ha portato qui ("Utile d'esercizio 68.247,80 | 1.440.337,23", Unicarton
+    31/08/2026): con la didascalia dell'utile diventava un secondo risultato, e si scarta.
+    E' un totale di controllo, non un conto: nessuna massa si perde."""
     testo = " | ".join(c for c in celle if c)
     testo = _VIRGOLA_STACCATA.sub(r"\1,\2", testo)
-    coppie, ultima, pos = [], "", 0
+    coppie, pos = [], 0
     for m in _IMPORTO.finditer(testo):
         didascalia = testo[pos:m.start()].strip(" |:_-")
-        if didascalia:
-            ultima = didascalia
-        coppie.append((didascalia or ultima, m.group(0)))
         pos = m.end()
+        if not didascalia:
+            if not coppie or coppie[-1][1] != m.group(0):
+                logger.info("piede MinerU: importo %s senza didascalia scartato", m.group(0))
+                continue
+            didascalia = coppie[-1][0]
+        coppie.append((didascalia, m.group(0)))
     return coppie
 
 
@@ -166,10 +198,10 @@ def _righe(tables) -> dict[str, list]:
     out: dict[str, list] = {"sp": [], "ce": []}
     ricuci = {"sp": _Ricucitore(), "ce": _Ricucitore()}
     for table in tables:
-        sezione = _sezione(table)
+        sezione, intestazione = _sezione(table)
         if sezione is None:
             continue
-        for row in table.rows:
+        for row in table.rows[intestazione:]:
             celle = [_testo(c) for c in row.cells]
             if not any(celle):
                 continue

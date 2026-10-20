@@ -1,5 +1,5 @@
 import type { AdjustableFinancialYear, RettificaEntry } from "@/types/api";
-import { RETTIFICHE_MAX } from "@/lib/pratica-rettifiche-rules";
+import { RETTIFICHE_MAX, contaNelTetto } from "@/lib/pratica-rettifiche-rules";
 import { chiusuraAutomatica, scartoQuadratura } from "@/lib/pratica-quadratura";
 
 type DatiConferma = Pick<AdjustableFinancialYear, "balance_sheet" | "income_statement" | "rettifiche_log">;
@@ -16,7 +16,7 @@ export function preparaConfermaRettifiche(data: DatiConferma, year: number, peri
   const values = { ...data.balance_sheet, ...data.income_statement };
   const log = data.rettifiche_log ?? [];
   const chiusura = chiusuraAutomatica(scartoQuadratura(values));
-  if (chiusura && log.filter((entry) => entry.entry_type !== "confirm").length >= RETTIFICHE_MAX) {
+  if (chiusura && log.filter(contaNelTetto).length >= RETTIFICHE_MAX) {
     return { kind: "limit" };
   }
   const confirmed = log.some((entry) => entry.entry_type === "confirm");

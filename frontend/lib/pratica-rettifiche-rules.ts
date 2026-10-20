@@ -413,6 +413,9 @@ export interface DoubleEntryProposal {
   proposedDelta: number;
   accepted: boolean;
   explanation: string;
+  // Il tipo della voce di giornale che la proposta scrive (QUADRATURA_INIZIALE
+  // per lo spacchettamento dell'utile); assente per una rettifica.
+  entryType?: string;
   // Optional split: allows distributing the amount between two counterpart fields
   splitAlt?: {
     field: string;
@@ -422,6 +425,23 @@ export interface DoubleEntryProposal {
 }
 
 export const RETTIFICHE_MAX = 20;
+
+/**
+ * Le voci del giornale che sistemano la quadratura INIZIALE del bilancio
+ * importato, non lo correggono: oggi lo spacchettamento dell'utile (il
+ * risultato di esercizi precedenti non destinato portato negli utili a nuovo,
+ * lib/pratica-quadratura.ts, risultatoPrecedente). Stanno nel giornale perché
+ * la riconciliazione del report somma ogni movimento, ma hanno un riquadro
+ * proprio e non contano fra le RETTIFICHE_MAX (decisione del proprietario,
+ * 2026-10-20). Il server applica la stessa regola (_countable_log_entries).
+ */
+export const QUADRATURA_INIZIALE = "quadratura_iniziale";
+
+/** La voce conta fra le RETTIFICHE_MAX e compare nel giornale delle rettifiche:
+ *  né il marker di conferma né una voce di quadratura iniziale. */
+export function contaNelTetto(entry: { entry_type?: string | null }): boolean {
+  return entry.entry_type !== "confirm" && entry.entry_type !== QUADRATURA_INIZIALE;
+}
 
 
 /**

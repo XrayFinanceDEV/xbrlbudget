@@ -51,6 +51,7 @@ import {
   SOGLIA_CHIUSURA_AUTOMATICA,
   chiusuraSbilancio,
   quadra,
+  risultatoPrecedente,
   scartoQuadratura,
 } from "@/lib/pratica-quadratura";
 import { reconcileSubfields } from "@/lib/pratica-reconcile";
@@ -83,6 +84,8 @@ import {
   CE_E,
   CE_IMPOSTE,
   RETTIFICHE_MAX,
+  QUADRATURA_INIZIALE,
+  contaNelTetto,
 } from "@/lib/pratica-rettifiche-rules";
 import type { AdjustableFinancialYear, RettificaEntry } from "@/types/api";
 
@@ -162,7 +165,11 @@ export function RettificheTab({
   // it and the 20-entry cap logic can see it), but it is not a rettifica the
   // user made — hide it from the journal panel, the Riepilogo dialog and the
   // count against RETTIFICHE_MAX.
-  const visibleLog = useMemo(() => log.filter((e) => e.entry_type !== "confirm"), [log]);
+  const visibleLog = useMemo(() => log.filter(contaNelTetto), [log]);
+  // Le voci di quadratura iniziale (lo spacchettamento dell'utile) hanno un
+  // riquadro proprio in testa, fuori dal giornale e dal tetto.
+  const quadraturaLog = useMemo(
+    () => log.filter((e) => e.entry_type === QUADRATURA_INIZIALE), [log]);
 
   useEffect(() => {
     const el = sentinelRef.current;
@@ -381,6 +388,33 @@ export function RettificheTab({
     });
   };
 
+  // Spacchetta l'utile importato: la parte che il CE non spiega va negli utili
+  // portati a nuovo (lib/pratica-quadratura.ts, risultatoPrecedente). Il
+  // risultato del CE si misura sullo stato DOPO la conferma, come per lo scarto:
+  // recalcAggregates riscrive sp13 dal CE.
+  const spacchettaUtile = () =>
+    risultatoPrecedente(
+      corrections["sp13_utile_perdita"] ?? original["sp13_utile_perdita"] ?? 0,
+      recalcAggregates({ ...corrections })["sp13_utile_perdita"],
+    );
+  const openSpacchettaUtile = () => {
+    const s = spacchettaUtile();
+    if (!s) return;
+    setActiveProposal({
+      id: Date.now(),
+      mode: "correggi_import",
+      editedField: s.field,
+      editedLabel: s.label,
+      delta: s.delta,
+      counterpartField: "",
+      counterpartLabel: "",
+      proposedDelta: 0,
+      accepted: true,
+      explanation: s.explanation,
+      entryType: QUADRATURA_INIZIALE,
+    });
+  };
+
   // NOTA (task-13, FIX 4): il log/corrections locali si aggiornano SOLO dopo
   // che onSave ha risolto true. Un save rifiutato dal server (400 — es. la
   // guardia anti-regressione su Attivo/Passivo, CE↔SP o aggregati/dettagli)
@@ -416,10 +450,11 @@ export function RettificheTab({
         counterpart_delta: 0,
         explanation: p.explanation || "Correzione dato importato",
         created_at: new Date().toISOString(),
+        ...(p.entryType ? { entry_type: p.entryType } : {}),
       };
       const final = recalcAggregates(updated);
       const newLog = [...log, newEntry];
-      if (newLog.filter((e) => e.entry_type !== "confirm").length > RETTIFICHE_MAX) {
+      if (newLog.filter(contaNelTetto).length > RETTIFICHE_MAX) {
         toast.error(`Massimo ${RETTIFICHE_MAX} rettifiche`);
         return;
       }
@@ -473,7 +508,7 @@ export function RettificheTab({
     }
     const final = recalcAggregates(updated);
     const newLog = [...log, ...newEntries];
-    if (newLog.filter((e) => e.entry_type !== "confirm").length > RETTIFICHE_MAX) {
+    if (newLog.filter(contaNelTetto).length > RETTIFICHE_MAX) {
       toast.error(`Massimo ${RETTIFICHE_MAX} rettifiche`);
       return;
     }
@@ -711,6 +746,39 @@ export function RettificheTab({
               </div>
             )}
           </div>
+
+          {/* Quadratura iniziale: il risultato di esercizi precedenti non ancora
+              destinato, compreso nell'utile importato. Fuori dal giornale delle
+              rettifiche e dal loro tetto (QUADRATURA_INIZIALE). */}
+          {(() => {
+            const proposta = spacchettaUtile();
+            if (!proposta && quadraturaLog.length === 0) return null;
+            return (
+              <div className={cn(
+                "mb-4 p-3 rounded-lg border text-sm",
+                proposta
+                  ? "bg-amber-50 dark:bg-amber-950/20 border-amber-200 dark:border-amber-800 text-amber-900 dark:text-amber-200"
+                  : "bg-muted/40 border-border text-muted-foreground"
+              )}>
+                <div className="font-medium mb-1">Quadratura iniziale</div>
+                {quadraturaLog.map((e) => (
+                  <div key={e.id} className="text-xs">{e.explanation}</div>
+                ))}
+                {proposta && (
+                  <div className="flex items-center justify-between gap-3">
+                    <span>
+                      L&apos;utile importato ({formatEuro(corrections["sp13_utile_perdita"] ?? original["sp13_utile_perdita"] ?? 0)})
+                      comprende {formatEuroPreciso(Math.abs(proposta.delta))} di {proposta.delta >= 0 ? "utile" : "perdita"} di
+                      esercizi precedenti non ancora destinato, che il conto economico non spiega.
+                    </span>
+                    <Button size="sm" variant="outline" className="shrink-0" onClick={openSpacchettaUtile}>
+                      Spacchetta utile
+                    </Button>
+                  </div>
+                )}
+              </div>
+            );
+          })()}
 
           {/* Sentinel: when this scrolls out of view, show the sticky header */}
           <div ref={sentinelRef} />

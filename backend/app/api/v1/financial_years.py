@@ -357,8 +357,13 @@ def _countable_log_entries(log) -> int:
 
     I marker di conferma (entry_type == "confirm") sono contabilità interna del
     gate Rettifiche, non correzioni dell'utente: non devono rubargli una riga.
+    Nemmeno le voci di quadratura iniziale ("quadratura_iniziale", lo
+    spacchettamento dell'utile importato nel risultato di esercizi precedenti):
+    sistemano la quadratura del bilancio importato, non lo correggono
+    (decisione del proprietario, 2026-10-20; il client usa contaNelTetto).
     """
-    return sum(1 for e in log if getattr(e, "entry_type", None) != "confirm")
+    return sum(1 for e in log
+               if getattr(e, "entry_type", None) not in ("confirm", "quadratura_iniziale"))
 
 
 # Tolerance for the server-side balance check on PUT /adjustments: the legit

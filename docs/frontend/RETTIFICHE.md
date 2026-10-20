@@ -158,6 +158,37 @@ resterà, e correggerlo lascerebbe un residuo pari a `sp13_importato − sp13_CE
 In giornale l'entrata resta riconoscibile: `counterpart_field = "_correzione_import"`, delta della
 contropartita `0`.
 
+### «Spacchetta utile»: il risultato di esercizi precedenti non destinato
+
+Un bilancio di verifica (infrannuale, o al 31/12 prima della chiusura) che non ha ancora girato a
+patrimonio netto il risultato dell'anno prima stampa un solo «utile», la differenza
+attivo − passivo: Unicarton 31/08/2026 chiude lo SP a 241.711,59 col CE a 68.247,80. L'import
+non deduce la parte pregressa (decisione del proprietario su budget_680, 2026-10-06), quindi il
+foglio arriva **quadrato** con uno scarto CE↔SP.
+
+Su quel foglio **ogni** rettifica viene rifiutata: la conferma riporta `sp13` al CE, lo scarto
+CE↔SP diventa sbilancio dello SP, e la guardia relativa di `PUT /adjustments` (che misura le due
+cose separatamente) lo legge come un peggioramento. «Chiudi sbilancio» non compare, perché il
+foglio importato quadra.
+
+La via d'uscita è il riquadro **«Quadratura iniziale»** in testa alla scheda, sotto la verifica di
+quadratura, visibile solo quando c'è uno scarto CE↔SP. Il suo pulsante «Spacchetta utile» apre un
+«Correggi Import» su `sp12g_utili_perdite_portati` con delta
+`sp13 importato − utile CE` (negativo per una perdita pregressa; `risultatoPrecedente` in
+`lib/pratica-quadratura.ts`): il passivo non cambia, lo scarto CE↔SP si chiude, e la guardia
+accetta (`tests/test_rettifica_spacchetta_utile.py`). La destinazione è **sempre** gli utili
+portati a nuovo (decisione del proprietario, 2026-10-20); la distribuzione fra riserva legale,
+straordinaria e utili a nuovo resta alle riclassifiche SP→SP. Vale su entrambe le tab d'anno.
+
+**È separato dalle rettifiche** (decisione del proprietario, 2026-10-20: riguarda solo la quadratura
+iniziale). La voce entra nel giornale con `entry_type = "quadratura_iniziale"`
+(`QUADRATURA_INIZIALE` in `lib/pratica-rettifiche-rules.ts`), perché la riconciliazione del report
+somma ogni movimento; ma non compare nel pannello delle rettifiche, si legge nel riquadro, e **non
+conta fra le 20** — né nel client (`contaNelTetto`, anche per la chiusura automatica alla conferma)
+né nel server (`_countable_log_entries`). Non ha un cestino: togliere lo spacchettamento da solo
+riaprirebbe lo sbilancio e la guardia lo rifiuterebbe; si annulla con «Ripristina originale». Il
+Business plan, invece, la elenca ancora fra le rettifiche registrate, con la sua spiegazione.
+
 ## 4. Persistenza, tetto, riconciliazione, ripristino
 
 **Snapshot.** `FinancialYear.original_bs_snapshot` + `original_is_snapshot` (JSON pre-rettifiche)

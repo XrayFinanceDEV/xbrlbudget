@@ -290,3 +290,52 @@ def test_codice_con_lo_spazio_non_e_un_importo():
     assert _importo_ocr("94.086.46") == "94.086,46"
     assert _importo_ocr("11 396,02") == "11.396,02"
     assert _importo_ocr("7 467 04") == "7.467,04"
+
+
+# L'ultima pagina del conto economico come la restituisce MinerU su Unicarton 31/08/2026
+# (NAPS2, 5 pagine): didascalia vuota, perche' l'intestazione della pagina - azienda, anno,
+# "CONTO ECONOMICO", "Costi | Ricavi" - e' finita DENTRO la tabella. Scartata, si perdevano
+# imposte (276,23), totali e utile: CE a 68.524,03 contro i 68.247,80 stampati.
+CE_PRIMA_PAGINA = _tabella("CONTO ECONOMICO", [
+    ["Costi", "Ricavi"],
+    ["Codice", "Descrizione", "Importo", "Codice", "Descrizione", "Importo"],
+    ["55", "ACQUISTI DI BENI", "230.000,00", "47", "RICAVI DELLE VENDITE", "300.000,00"],
+    ["55.01", "Acquisti materie prime", "230.000,00", "47.01", "Vendite prodotti", "300.000,00"],
+])
+CE_ULTIMA_PAGINA = _tabella("", [
+    ["Unicarton Srl                           "],
+    ["2026"],
+    ["CONTO ECONOMICO", ""],
+    [""],
+    ["Costi", "Ricavi", ""],
+    ["Codice", "Descrizione", "Importo", "Codice", "Descrizione", "Importo", ""],
+    ["84", "IMPOSTE DELL'ESERCIZIO", "10.000,00", "", "", "", ""],
+    ["84.01.25.99", "Altre imposte dell'esercizio", "10.000,00", "", "", "", ""],
+    ["Totale costi                                  240.000,00", "",
+     "Totale ricavi                                   300.000,00"],
+    ["Utile d'esercizio                                 60.000,00", ""],
+])
+
+
+def test_la_pagina_con_l_intestazione_dentro_la_tabella_non_si_perde():
+    percorso = pdf_da_tabelle(SimpleNamespace(tables=(SP, CE_PRIMA_PAGINA, CE_ULTIMA_PAGINA)))
+    try:
+        bs, ce = extract_situazione_contabile(percorso)
+    finally:
+        os.remove(percorso)
+    assert ce["ce20"] == D("10000.00")
+    assert ce["ce05"] == D("230000.00")
+    assert bs["sp13"] == D("60000.00")
+    assert bs["totale_attivo"] == bs["totale_passivo"] == D("900000.00")
+
+
+def test_un_importo_orfano_diverso_non_eredita_la_didascalia_dell_utile():
+    """MinerU (Unicarton 31/08/2026) mette il "Totale a quadratura" di destra sulla riga
+    dell'utile: "Utile d'esercizio 68.247,80 | 1.440.337,23". Ereditando la didascalia, il
+    secondo importo diventava un altro utile e il controllo dei totali dichiarati leggeva
+    un risultato di 1.440.337,23 (QUADRATURA MASCHERATA da 1,2 milioni). La didascalia si
+    ripete solo per lo stesso importo ("Totale a quadratura X | X")."""
+    assert _coppie_di_piede(["Utile d'esercizio                 68.247,80", "1.440.337,23"]) == [
+        ("Utile d'esercizio", "68.247,80")]
+    assert _coppie_di_piede(["Totale a quadratura   1.000.000,00", "1.000.000,00"]) == [
+        ("Totale a quadratura", "1.000.000,00"), ("Totale a quadratura", "1.000.000,00")]

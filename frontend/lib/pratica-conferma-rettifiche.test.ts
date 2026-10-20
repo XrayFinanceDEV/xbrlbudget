@@ -39,3 +39,20 @@ describe("conferma delle rettifiche", () => {
     }, 2026, 6)).toEqual({ kind: "already_confirmed" });
   });
 });
+
+describe("quadratura iniziale e tetto", () => {
+  it("lo spacchettamento dell'utile non conta fra le 20 rettifiche della chiusura automatica", () => {
+    const voce = (i: number, entry_type?: string): RettificaEntry => ({
+      id: `e${i}`, entry_type, edited_field: "sp09_disponibilita_liquide", edited_label: "", edit_delta: 1,
+      counterpart_field: "sp16g_altri_debiti_breve", counterpart_label: "", counterpart_delta: 1,
+      created_at: "2026-10-20T00:00:00Z",
+    });
+    const log = [...Array.from({ length: 19 }, (_, i) => voce(i)), voce(99, "quadratura_iniziale")];
+    const prepared = preparaConfermaRettifiche({
+      balance_sheet: { sp09_disponibilita_liquide: 1000.5, sp16_debiti_breve: 1000, sp16g_altri_debiti_breve: 1000 },
+      income_statement: {},
+      rettifiche_log: log,
+    }, 2026, 8);
+    expect(prepared.kind).toBe("save");
+  });
+});

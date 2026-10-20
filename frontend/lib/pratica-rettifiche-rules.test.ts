@@ -2,7 +2,9 @@ import { describe, it, expect } from "vitest";
 import {
   EDITABLE_RETTIFICHE,
   NON_POSTABLE_FIELDS,
+  QUADRATURA_INIZIALE,
   applicaMovimento,
+  contaNelTetto,
   destinazioneModifica,
   sottovociDaScegliere,
 } from "./pratica-rettifiche-rules";
@@ -86,5 +88,14 @@ describe("sotto-voci delle immobilizzazioni", () => {
       "II - Immobilizzazioni materiali › 2) Impianti e macchinario",
     );
     expect(etichettaSottovoce("sp09_disponibilita_liquide")).toBeNull();
+  });
+});
+
+describe("contaNelTetto", () => {
+  it("la quadratura iniziale e la conferma non rubano righe alle 20 rettifiche", () => {
+    expect(contaNelTetto({ entry_type: undefined })).toBe(true);
+    expect(contaNelTetto({ entry_type: null })).toBe(true);
+    expect(contaNelTetto({ entry_type: "confirm" })).toBe(false);
+    expect(contaNelTetto({ entry_type: QUADRATURA_INIZIALE })).toBe(false);
   });
 });

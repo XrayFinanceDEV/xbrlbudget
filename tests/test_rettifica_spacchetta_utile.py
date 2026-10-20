@@ -73,3 +73,25 @@ def test_riportare_l_utile_al_ce_senza_spacchettare_e_rifiutato(verifica):
         _salva(db, company_id, {"sp13_utile_perdita": D("68247.80")})
     assert esc.value.status_code == 400
     assert "Attivo−Passivo" in esc.value.detail
+
+
+def test_la_quadratura_iniziale_non_conta_fra_le_20_rettifiche(verifica):
+    """Lo spacchettamento sistema la quadratura iniziale, non corregge il bilancio: ha un
+    tipo proprio nel giornale (``quadratura_iniziale``) e non ruba una riga al tetto
+    (decisione del proprietario, 2026-10-20). Stessa regola del client, contaNelTetto."""
+    from backend.app.schemas.adjustments import RettificaEntry
+
+    def voce(i, entry_type=None):
+        return RettificaEntry(
+            id=f"e{i}", entry_type=entry_type, edited_field="sp09_disponibilita_liquide",
+            edited_label="", edit_delta=0, counterpart_field="sp11_capitale",
+            counterpart_label="", counterpart_delta=0, created_at="2026-10-20T00:00:00Z")
+
+    db, company_id = verifica
+    log = [voce(i) for i in range(20)] + [voce(99, "quadratura_iniziale"), voce(98, "confirm")]
+    financial_years.save_adjustments(
+        company_id, 2026,
+        AdjustmentsUpdate(balance_sheet={}, income_statement={}, rettifiche_log=log),
+        period_months=8, user_id=UTENTE, db=db,
+    )
+    assert len(financial_years.json.loads(db.query(FinancialYear).one().rettifiche_log)) == 22

@@ -171,13 +171,23 @@ CE↔SP diventa sbilancio dello SP, e la guardia relativa di `PUT /adjustments` 
 cose separatamente) lo legge come un peggioramento. «Chiudi sbilancio» non compare, perché il
 foglio importato quadra.
 
-La via d'uscita è il pulsante «Spacchetta utile» nella riga «Verifica CE ↔ SP», visibile solo
-quando c'è uno scarto. Apre un «Correggi Import» su `sp12g_utili_perdite_portati` con delta
+La via d'uscita è il riquadro **«Quadratura iniziale»** in testa alla scheda, sotto la verifica di
+quadratura, visibile solo quando c'è uno scarto CE↔SP. Il suo pulsante «Spacchetta utile» apre un
+«Correggi Import» su `sp12g_utili_perdite_portati` con delta
 `sp13 importato − utile CE` (negativo per una perdita pregressa; `risultatoPrecedente` in
 `lib/pratica-quadratura.ts`): il passivo non cambia, lo scarto CE↔SP si chiude, e la guardia
 accetta (`tests/test_rettifica_spacchetta_utile.py`). La destinazione è **sempre** gli utili
 portati a nuovo (decisione del proprietario, 2026-10-20); la distribuzione fra riserva legale,
 straordinaria e utili a nuovo resta alle riclassifiche SP→SP. Vale su entrambe le tab d'anno.
+
+**È separato dalle rettifiche** (decisione del proprietario, 2026-10-20: riguarda solo la quadratura
+iniziale). La voce entra nel giornale con `entry_type = "quadratura_iniziale"`
+(`QUADRATURA_INIZIALE` in `lib/pratica-rettifiche-rules.ts`), perché la riconciliazione del report
+somma ogni movimento; ma non compare nel pannello delle rettifiche, si legge nel riquadro, e **non
+conta fra le 20** — né nel client (`contaNelTetto`, anche per la chiusura automatica alla conferma)
+né nel server (`_countable_log_entries`). Non ha un cestino: togliere lo spacchettamento da solo
+riaprirebbe lo sbilancio e la guardia lo rifiuterebbe; si annulla con «Ripristina originale». Il
+Business plan, invece, la elenca ancora fra le rettifiche registrate, con la sua spiegazione.
 
 ## 4. Persistenza, tetto, riconciliazione, ripristino
 

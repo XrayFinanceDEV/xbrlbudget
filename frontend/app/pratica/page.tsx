@@ -94,7 +94,7 @@ import { StampaContent } from "@/components/pratica/StampaContent";
 import { ImportProgressBar } from "@/components/pratica/ImportProgressBar";
 import { ForecastLoadError } from "@/components/budget/ForecastLoadError";
 import { forecastLoadErrorMessage } from "@/lib/forecast-page-status";
-import { praticaIndicatoriStatus } from "@/lib/pratica-indicatori-status";
+import { generaAnnualeAutomatica, praticaIndicatoriStatus } from "@/lib/pratica-indicatori-status";
 import {
   praticaRehydrationFailure,
   type PraticaRehydrationFailure,
@@ -398,6 +398,10 @@ export default function InfraannualePage() {
   const [analysis, setAnalysis] = useState<ScenarioAnalysis | null>(null);
   const [analysisError, setAnalysisError] = useState<unknown>(null);
   const [loadingAnalysis, setLoadingAnalysis] = useState(false);
+  // 12 mesi: il motivo per cui il motore non ha generato l'anno (null = nessun rifiuto),
+  // e lo scenario per cui la generazione automatica e' gia' stata tentata.
+  const [rifiutoAnnuale, setRifiutoAnnuale] = useState<string | null>(null);
+  const annualeTentatoPer = useRef<number | null>(null);
   const [projectionDiagnostics, setProjectionDiagnostics] = useState<ForecastDiagnostic[]>([]);
   // L'importo del fabbisogno scoperto, se il motore l'ha dichiarato: e' esattamente
   // la differenza che la tabella dello SP proiettato mostra in fondo.
@@ -969,6 +973,7 @@ export default function InfraannualePage() {
   // Auto-save projection with 0% growth for 12M infrannuale (no annualization needed)
   const saveProjection12M = async () => {
     if (!comparison || !importResult || !scenario) return;
+    setRifiutoAnnuale(null);
 
     // Pre-fill overrides from comparison partial values (= full year when 12M)
     const defaults: Record<string, string> = {};
@@ -1044,9 +1049,9 @@ export default function InfraannualePage() {
         // `saveNotice` (giro di correzione 2, rilievo 6): stesso prefisso
         // fisso del backend tradotto in italiano, non un secondo testo
         // scritto a mano che potrebbe divergere da quello del wizard.
-        toast.warning(
-          result?.message ? saveNotice(result.message) : "Ipotesi salvate, ma la proiezione non è stata generata"
-        );
+        const motivo = result?.message ? saveNotice(result.message) : "Ipotesi salvate, ma la proiezione non è stata generata";
+        setRifiutoAnnuale(motivo);
+        toast.warning(motivo);
         return;
       }
       const data = await getScenarioAnalysis(importResult.companyId, scenario.id);
@@ -1058,6 +1063,7 @@ export default function InfraannualePage() {
       setProjectedBS(projItems ? buildBalanceItemsWithTotals(projItems) : null);
     } catch (error: unknown) {
       const msg = error instanceof Error ? error.message : "Errore nel salvataggio proiezione";
+      setRifiutoAnnuale(msg);
       toast.error(msg);
     } finally {
       setCalculatingBS(false);
@@ -1086,6 +1092,29 @@ export default function InfraannualePage() {
       loadAnalysis();
     }
   }, [activeTab, analysis, scenario, loadAnalysis]);
+
+  // 12 mesi: gli Indicatori leggono l'anno che il motore persiste, e senza questo lo
+  // generava solo «Vai agli Indicatori» del Confronto. Aperta dallo stepper, la tab lo
+  // genera da sola, una volta per scenario (lib/pratica-indicatori-status.ts).
+  useEffect(() => {
+    const status = praticaIndicatoriStatus({
+      loading: loadingAnalysis, error: analysisError, analysis, comparison,
+    });
+    if (activeTab === "results" && scenario && generaAnnualeAutomatica({
+      periodMonths,
+      status,
+      scenarioId: scenario.id,
+      tentatoPer: annualeTentatoPer.current,
+      inCorso: calculatingBS,
+      datiPronti: comparison !== null && analysis !== null,
+    })) {
+      annualeTentatoPer.current = scenario.id;
+      void saveProjection12M();
+    }
+    // saveProjection12M non e' memoizzata: il ref sullo scenario impedisce che l'effetto,
+    // che riscrive `analysis`, riparta da se'.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeTab, periodMonths, scenario?.id, loadingAnalysis, analysisError, analysis, comparison, calculatingBS]);
 
   // A load generation is shared by automatic loads and explicit retries. It
   // prevents a stale scenario response from becoming saveable, while the edit
@@ -2168,6 +2197,38 @@ export default function InfraannualePage() {
 
             if (indicatoriStatus === "errore") {
               return <ForecastLoadError error={analysisError} onRetry={loadAnalysis} />;
+            }
+
+            if (indicatoriStatus === "non_generato" && periodMonths === 12) {
+              // Sui 12 mesi non c'e' un passaggio 3 da fare a mano: l'anno si genera da
+              // solo; se il motore lo rifiuta se ne dice il motivo.
+              return (
+                <Card>
+                  <CardContent className="py-12 text-center space-y-3">
+                    {rifiutoAnnuale && !calculatingBS ? (
+                      <>
+                        <p className="text-muted-foreground">
+                          Gli indicatori dell&apos;anno non sono stati calcolati: {rifiutoAnnuale}
+                        </p>
+                        <Button
+                          variant="outline"
+                          onClick={() => {
+                            if (scenario) annualeTentatoPer.current = scenario.id;
+                            void saveProjection12M();
+                          }}
+                        >
+                          Riprova
+                        </Button>
+                      </>
+                    ) : (
+                      <>
+                        <Loader2 className="h-8 w-8 mx-auto animate-spin text-muted-foreground" />
+                        <p className="text-muted-foreground">Calcolo degli indicatori dell&apos;anno...</p>
+                      </>
+                    )}
+                  </CardContent>
+                </Card>
+              );
             }
 
             if (indicatoriStatus === "non_generato") {

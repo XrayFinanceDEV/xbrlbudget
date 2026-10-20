@@ -129,6 +129,14 @@ Workflow **bilancio**:
 Un bilancio già annuale non si proietta a 12 mesi: per questo la Proiezione **manca dall'elenco**
 invece di comparire disabilitata, e la Stampa cambia prerequisito di conseguenza.
 
+Gli Indicatori però leggono comunque il `ForecastYear` che il motore persiste: sui 12 mesi lo genera
+`saveProjection12M`, con il periodo come anno intero. Prima lo chiamava solo «Vai agli Indicatori»
+del Confronto, e chi apriva la tab dallo stepper restava su «Genera prima la proiezione nel passaggio
+3», un passo che sui 12 mesi non esiste (segnalazione utente, 2026-10-20). Ora la tab lo genera da
+sola, una volta per scenario (`generaAnnualeAutomatica` in `lib/pratica-indicatori-status.ts`), e
+un rifiuto del motore (`forecast_generated: false`) si mostra col suo motivo e un «Riprova», non più
+solo in un toast.
+
 Workflow **startup**: nessuna fase ANALISI — non c'è nulla da importare. Un solo step DATI,
 «Anagrafiche», che è il form del business plan **su `/budget`** (`kind: "route"`), poi i sette step
 PREVISIONALE, con Budget sempre abilitato.

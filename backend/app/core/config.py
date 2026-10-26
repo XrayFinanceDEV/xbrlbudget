@@ -52,8 +52,8 @@ class Settings(BaseSettings):
 
     # MinerU OCR import (POST /import/pdf-ocr). Spento di default: si accende con
     # MINERU_OCR_ENABLED=true insieme a MINERU_BASE_URL (sui VPS: il MinerU di gx10,
-    # dalla credenziale Jenkins budget-env-staging). lang_list uses "latin" (MinerU
-    # has no standalone "it").
+    # dalla credenziale Jenkins budget-env-staging). Dal 2026-10-26 gx10 serve MinerU 4
+    # (il VLM): API /v1, tier "advanced", l'unico che fa quadrare le scansioni.
     MINERU_OCR_ENABLED: bool = False
     # Local development reaches the already-running MinerU container through a
     # loopback-only bridge. Docker Compose overrides this with
@@ -62,11 +62,12 @@ class Settings(BaseSettings):
     # Header X-Api-Key del proxy di gx10 (kpsfinanciallab:89); vuoto sul canale LAN
     # e sul container locale, che non hanno autenticazione.
     MINERU_API_KEY: Optional[str] = None
-    MINERU_EXPECTED_VERSION: str = "3.2.0"
-    MINERU_BACKEND: str = "pipeline"
-    MINERU_PARSE_METHOD: str = "ocr"
-    MINERU_LANGUAGE: str = "latin"
+    # Fissa i componenti che scrive: "4" accetta ogni 4.x (mineru_client.versione_compatibile).
+    MINERU_EXPECTED_VERSION: str = "4"
+    MINERU_TIER: str = "advanced"
+    MINERU_PARSE_METHOD: str = "ocr"  # ocr_mode di /v1/file_parse: auto | txt | ocr
     MINERU_TIMEOUT_SECONDS: int = 600
+    MINERU_WAIT_SECONDS: int = 50  # attesa sul server per POST, poi polling
     MINERU_CONNECT_TIMEOUT_SECONDS: int = 10
     MINERU_MAX_RESPONSE_BYTES: int = 209_715_200
 

@@ -1,7 +1,8 @@
-"""Unit tests for the MinerU async client (no Docker required — httpx.MockTransport).
+"""Unit tests for the MinerU async client (no network — httpx.MockTransport).
 
-Contract fixtures under tests/fixtures/mineru/ were captured from the live MinerU
-3.2.0 container.
+The v4 fixtures under tests/fixtures/mineru/ (``v4_*.json``) follow the shape of the live
+MinerU 4.0.12 on gx10, captured 2026-10-26 on a real scan; the amounts are synthetic.
+``v4_openapi.json`` is the server's own contract.
 """
 import asyncio
 import json
@@ -17,6 +18,7 @@ from backend.app.services.mineru_client import (
     MinerUTimeoutError,
     MinerUUnavailableError,
     _safe_filename,
+    versione_compatibile,
 )
 
 FIX = os.path.join(os.path.dirname(__file__), "fixtures", "mineru")
@@ -33,28 +35,39 @@ def _run(coro):
 
 def _client(handler, **kw):
     transport = httpx.MockTransport(handler)
+    kw.setdefault("poll_interval_seconds", 0)
     return MinerUClient(base_url="http://mineru:8000", transport=transport, **kw)
+
+
+def _json(status, payload):
+    body = payload if isinstance(payload, (bytes, str)) else json.dumps(payload)
+    return httpx.Response(status, content=body, headers={"content-type": "application/json"})
 
 
 # --------------------------------------------------------------------------- #
 # health
 # --------------------------------------------------------------------------- #
 def test_health_ok():
-    body = _load("health.json")
-
     def handler(request):
-        assert request.url.path == "/health"
-        return httpx.Response(200, content=body, headers={"content-type": "application/json"})
+        assert request.url.path == "/v1/health"
+        return _json(200, _load("v4_health.json"))
 
-    health = _run(_client(handler).health())
+    health = _run(_client(handler, expected_version="4").health())
     assert health.healthy
-    assert health.version == "3.2.0"
-    assert health.max_concurrent_requests == 3
+    assert health.version == "4.0.12"
 
 
 def test_health_unhealthy_raises():
     def handler(request):
-        return httpx.Response(200, json={"status": "starting"})
+        return _json(200, {"status": "starting", "version": "4.0.12"})
+
+    with pytest.raises(MinerUUnavailableError):
+        _run(_client(handler).health())
+
+
+def test_health_503_unavailable():
+    def handler(request):
+        return _json(503, {"error": "busy"})
 
     with pytest.raises(MinerUUnavailableError):
         _run(_client(handler).health())
@@ -76,38 +89,134 @@ def test_health_timeout():
         _run(_client(handler).health())
 
 
-def test_health_rejects_unpinned_version():
+def test_health_rejects_another_major_version():
     def handler(request):
-        return httpx.Response(200, json={"status": "healthy", "version": "3.3.0"})
+        return _json(200, {"status": "ok", "version": "5.0.0"})
 
     with pytest.raises(MinerUContractError):
-        _run(_client(handler, expected_version="3.2.0").health())
+        _run(_client(handler, expected_version="4").health())
+
+
+def test_version_pin_fixes_only_the_components_it_writes():
+    assert versione_compatibile("4", "4.0.12")
+    assert versione_compatibile("4", "4.1.0")
+    assert not versione_compatibile("4", "3.4.5")
+    assert not versione_compatibile("4", "40.0.0")
+    assert versione_compatibile("4.0.12", "4.0.12")
+    assert not versione_compatibile("4.0.12", "4.0.13")
+    assert versione_compatibile(None, "4.0.12") and versione_compatibile("4", None)
 
 
 # --------------------------------------------------------------------------- #
 # parse_pdf
 # --------------------------------------------------------------------------- #
-def test_parse_ok_real_fixture():
-    body = _load("file_parse_response.json")
+def test_parse_ok_sends_the_v4_request_and_rebuilds_the_blocks():
+    seen = {}
 
     def handler(request):
-        assert request.url.path == "/file_parse"
-        # multipart must carry latin language + pipeline/ocr
-        raw = request.content.decode("latin-1")
-        assert "latin" in raw
-        assert "pipeline" in raw
-        return httpx.Response(200, content=body, headers={"content-type": "application/json"})
+        seen["path"] = request.url.path
+        seen["params"] = request.url.params
+        seen["body"] = request.content.decode("latin-1")
+        return _json(200, _load("v4_file_parse_response.json"))
 
-    result = _run(_client(handler).parse_pdf(content=b"%PDF-1.4 test", filename="sample.pdf"))
-    assert result.version == "3.2.0"
-    assert result.md_content
-    assert result.content_list  # JSON-encoded string
+    result = _run(_client(handler, expected_version="4").parse_pdf(
+        content=b"%PDF-1.4 test", filename="sample.pdf"))
+
+    assert seen["path"] == "/v1/file_parse"
+    assert seen["params"]["tier"] == "advanced"
+    assert seen["params"]["ocr_mode"] == "ocr"
+    assert seen["params"].get_list("output_formats") == ["markdown", "middle_json"]
+    assert seen["params"]["wait_timeout"] == "50"  # sotto il timeout del proxy di gx10
+    assert 'name="files"; filename="sample.pdf"' in seen["body"]
+
+    assert result.version == "4.0.12"
     assert result.status == "completed"
+    assert result.md_content.startswith("## Bilancio di verifica")
+    tables = [b for b in result.content_list if b["type"] == "table"]
+    assert [(t["page_idx"], t["table_caption"]) for t in tables] == [
+        (0, ["STATO PATRIMONIALE"]), (1, ["CONTO ECONOMICO"])]
+    assert tables[0]["table_body"].startswith("<table>")
+    assert tables[1]["table_footnote"] == ["Importi in euro"]
+    title = next(b for b in result.content_list if b.get("text") == "Bilancio di verifica")
+    assert title["type"] == "text" and title["text_level"] == 1
+    header = next(b for b in result.content_list if b["type"] == "header")
+    assert header["text"] == "Esempio Srl" and header["page_idx"] == 0
+
+
+def test_parse_result_feeds_the_adapter_unchanged():
+    """Il client rende i blocchi nella forma che l'adapter legge da sempre: pagine,
+    tabelle con didascalia e righe arrivano senza toccare importers/mineru_adapter."""
+    from importers.mineru_adapter import build_extraction_context
+
+    def handler(request):
+        return _json(200, _load("v4_file_parse_response.json"))
+
+    raw = _run(_client(handler).parse_pdf(content=b"%PDF-1.4", filename="sample.pdf"))
+    ctx = build_extraction_context(raw)
+    assert ctx.page_count == 2
+    assert [(t.page, t.caption) for t in ctx.tables] == [
+        (0, "STATO PATRIMONIALE"), (1, "CONTO ECONOMICO")]
+    assert any("IMMOBILIZZAZIONI MATERIALI" in c.text for r in ctx.rows for c in r.cells)
+    assert ctx.mineru_version == "4.0.12"
+    assert "Bilancio di verifica" in ctx.headings
+
+
+def test_parse_202_polls_the_task_until_the_result():
+    calls = []
+    queued = {"task_id": "job_abc123", "status": "queued"}
+
+    def handler(request):
+        calls.append((request.method, request.url.path))
+        if request.method == "POST":
+            return _json(202, queued)
+        if len(calls) < 4:
+            return _json(202, {**queued, "status": "running"})
+        return _json(200, _load("v4_file_parse_response.json"))
+
+    result = _run(_client(handler).parse_pdf(content=b"%PDF-1.4", filename="sample.pdf"))
+    assert result.status == "completed"
+    assert calls == [("POST", "/v1/file_parse")] + [("GET", "/v1/tasks/job_abc123/result")] * 3
+
+
+def test_parse_202_past_the_deadline_times_out():
+    def handler(request):
+        return _json(202, {"task_id": "job_abc123", "status": "queued"})
+
+    with pytest.raises(MinerUTimeoutError):
+        _run(_client(handler, timeout_seconds=0.01).parse_pdf(content=b"%PDF-1.4", filename="x.pdf"))
+
+
+def test_parse_202_without_task_id_is_a_contract_error():
+    def handler(request):
+        return _json(202, {"status": "queued"})
+
+    with pytest.raises(MinerUContractError):
+        _run(_client(handler).parse_pdf(content=b"%PDF-1.4", filename="x.pdf"))
+
+
+def test_parse_failed_file_is_invalid_output():
+    payload = json.loads(_load("v4_file_parse_response.json"))
+    payload["files"][0]["status"] = "failed"
+    payload["files"][0]["error"] = "ocr failed"
+
+    def handler(request):
+        return _json(200, payload)
+
+    with pytest.raises(MinerUInvalidOutputError):
+        _run(_client(handler).parse_pdf(content=b"%PDF-1.4", filename="sample.pdf"))
+
+
+def test_parse_failed_task_is_invalid_output():
+    def handler(request):
+        return _json(200, {"task_id": "job_x", "status": "failed", "files": []})
+
+    with pytest.raises(MinerUInvalidOutputError):
+        _run(_client(handler).parse_pdf(content=b"%PDF-1.4", filename="x.pdf"))
 
 
 def test_parse_422_invalid_output():
     def handler(request):
-        return httpx.Response(422, json={"detail": "bad"})
+        return _json(422, {"detail": "bad"})
 
     with pytest.raises(MinerUInvalidOutputError):
         _run(_client(handler).parse_pdf(content=b"%PDF-1.4", filename="x.pdf"))
@@ -115,9 +224,17 @@ def test_parse_422_invalid_output():
 
 def test_parse_500_unavailable():
     def handler(request):
-        return httpx.Response(500, json={"detail": "boom"})
+        return _json(500, {"detail": "boom"})
 
     with pytest.raises(MinerUUnavailableError):
+        _run(_client(handler).parse_pdf(content=b"%PDF-1.4", filename="x.pdf"))
+
+
+def test_parse_old_route_404_is_a_contract_error():
+    def handler(request):
+        return _json(404, {"detail": "Not Found"})
+
+    with pytest.raises(MinerUContractError):
         _run(_client(handler).parse_pdf(content=b"%PDF-1.4", filename="x.pdf"))
 
 
@@ -139,33 +256,34 @@ def test_parse_unexpected_content_type():
 
 def test_parse_corrupt_json():
     def handler(request):
-        return httpx.Response(200, content=b"{not json", headers={"content-type": "application/json"})
+        return _json(200, b"{not json")
 
     with pytest.raises(MinerUInvalidOutputError):
         _run(_client(handler).parse_pdf(content=b"%PDF-1.4", filename="x.pdf"))
 
 
-def test_parse_empty_results():
+def test_parse_empty_files():
     def handler(request):
-        return httpx.Response(200, json={"version": "3.2.0", "results": {}})
+        return _json(200, {"task_id": "job_x", "status": "completed", "files": []})
 
     with pytest.raises(MinerUInvalidOutputError):
         _run(_client(handler).parse_pdf(content=b"%PDF-1.4", filename="x.pdf"))
 
 
-def test_parse_reported_error():
+def test_parse_without_pages_is_a_contract_error():
+    payload = json.loads(_load("v4_file_parse_response.json"))
+    payload["files"][0]["content"]["middle_json"] = {"schema": "docvortex.middle"}
+
     def handler(request):
-        return httpx.Response(200, json={"version": "3.2.0", "error": "OCR failed", "results": {}})
+        return _json(200, payload)
 
-    with pytest.raises(MinerUInvalidOutputError):
-        _run(_client(handler).parse_pdf(content=b"%PDF-1.4", filename="x.pdf"))
+    with pytest.raises(MinerUContractError):
+        _run(_client(handler).parse_pdf(content=b"%PDF-1.4", filename="sample.pdf"))
 
 
 def test_parse_oversized_response_capped():
-    big = json.dumps({"version": "3.2.0", "results": {"x": {"md_content": "a" * 100}}}).encode()
-
     def handler(request):
-        return httpx.Response(200, content=big, headers={"content-type": "application/json"})
+        return _json(200, _load("v4_file_parse_response.json"))
 
     client = _client(handler, max_response_bytes=10)  # tiny cap
     with pytest.raises(MinerUInvalidOutputError):
@@ -174,7 +292,7 @@ def test_parse_oversized_response_capped():
 
 def test_parse_empty_content_rejected():
     def handler(request):
-        return httpx.Response(200, json={})
+        return _json(200, {})
 
     with pytest.raises(MinerUInvalidOutputError):
         _run(_client(handler).parse_pdf(content=b"", filename="x.pdf"))
@@ -186,20 +304,16 @@ def test_safe_filename_keeps_pdf_extension_after_truncation():
     assert safe.endswith(".pdf")
 
 
-def test_parse_rejects_response_from_unpinned_version():
-    body = _load("file_parse_response.json")
+def test_parse_rejects_response_from_another_major_version():
+    payload = json.loads(_load("v4_file_parse_response.json"))
+    payload["files"][0]["parse"]["parser_version"] = "5.0.0"
 
     def handler(request):
-        payload = json.loads(body)
-        payload["version"] = "3.3.0"
-        return httpx.Response(200, json=payload)
+        return _json(200, payload)
 
     with pytest.raises(MinerUContractError):
-        _run(
-            _client(handler, expected_version="3.2.0").parse_pdf(
-                content=b"%PDF-1.4", filename="x.pdf"
-            )
-        )
+        _run(_client(handler, expected_version="4").parse_pdf(
+            content=b"%PDF-1.4", filename="sample.pdf"))
 
 
 def test_connect_error_retries_once_then_fails():

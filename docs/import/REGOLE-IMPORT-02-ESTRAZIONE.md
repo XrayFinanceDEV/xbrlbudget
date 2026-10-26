@@ -427,6 +427,61 @@ OCR. Qwen resta solo per tabelle che non hanno quella forma. Il limite è l'OCR:
 una colonna (la copia ripassata da PDF24 di Unicarton perde i ricavi), l'import la dichiara come
 `Utile CE != sp13`, non la inventa.
 
+**Sugli schemi di legge scansionati niente modello** (2026-10-26, con MinerU 4). Una scansione di
+schema di legge non è a sezioni contrapposte: il percorso snello si dichiara `non_applicabile` e in
+`_llm_extract` si provano, in ordine, il lettore col percorso nell'etichetta (`estrai_da_mineru` di
+`schema_etichette_parser`, sotto) e **il lettore dello schema di legge generico sulle stesse
+tabelle** (`schema_legge_generico.estrai_da_mineru`, `_schema_generico_mineru_extract`): le celle
+di MinerU danno le stesse righe grezze che `_grezze_pdf` ricava dalla geometria (didascalia, un
+importo per colonna-esercizio, gli anni dall'intestazione «31-12-2025»), e da lì valgono le stesse
+regole e gli stessi controlli al centesimo del cuore XBRL (`_righe_da_grezze`,
+`xbrl_reso_parser.estrai_da_righe`, adozione con `_adotta_candidato_reso`). Una tabella che si
+intesta da sé con date dopo una didascalia (la nota «Varie altre riserve» in mezzo al prospetto)
+non è il prospetto; il richiamo di nota in coda a un importo («220.159 (1)») si toglie. Prima
+questa famiglia finiva sull'estrattore Anthropic, vietato, cioè su un errore: budget_1322 (schema
+reso da XBRL e poi scansionato) ora si importa in meno di un secondo, coi due esercizi, voce per
+voce uguale all'unità di euro a 1319, lo stesso bilancio al centesimo. Con le tabelle di MinerU
+3.4.5, che sfasavano righe e colonne, lo stesso lettore lo **rifiuta**: un importo letto male
+produce un rifiuto, mai un numero sbagliato.
+
+Le tabelle della nota con le scadenze («Quota scadente entro/oltre l'esercizio») vengono anch'esse
+dalle celle di MinerU (`xbrl_reso_parser.raccogli_tabelle`, parametro `tabelle_nota` di
+`estrai_da_righe`): senza, crediti e debiti di un abbreviato restavano tutti in «altri»
+(budget_173). Su budget_201 la scansione dà un dettaglio **migliore** del testo: `find_tables` di
+PyMuPDF spezza «28.371» in «7 28.371» e la tabella non si applica, MinerU la legge pulita.
+
+Con MinerU 4 **una cella vuota è un esercizio senza importo**: il lettore col percorso
+nell'etichetta legge per posizione quando ogni cella è vuota o un importo intero e la Differenza
+stampata, se c'è, lo conferma (`_ricomponi`). La ricomposizione che salta le celle vuote era per le
+celle sporche della 3.4.5, e su «D.6) Acconti | | 3.000,00» dava all'esercizio i 3.000 dell'anno
+prima (budget_283).
+
+**Il prospetto CEE sintetico a una colonna** si legge dalle celle come dal testo
+(`prospetto_sintetico.estrai_da_mineru`, `_prospetto_sintetico_mineru_extract` dopo lo schema
+generico): stesse verifiche dello snello (`deterministico._esito`), stesso avviso «PROSPETTO
+SINTETICO» (`_approssimazioni_prospetto`), `extraction_method` `prospetto_sintetico` (budget_1405).
+
+**Le contrapposte AGO** (budget_330): il titolo sta in un'altra tabella e la sezione si riconosce
+dall'intestazione dei lati («ATTIVITA' | PASSIVITA'», «COSTI | RICAVI»); codice e descrizione
+stanno in una cella sola («13005000 - Costi di impianto…») e la riga a quattro celle torna a sei,
+col lato della colonna d'origine (`_sei_celle`); i codici a 5-8 cifre e i sottoconti «100045 000»
+sono codici (`_CODICE`). Nel PDF sintetico la descrizione si stampa **per intero**, rimpicciolita se
+serve: troncata a 38 caratteri perdeva la coda, dove AGO stampa la scadenza («Debiti verso soci per
+finanziamenti (OE)»), e 256.050 di finanziamento soci cadevano a breve. I codici a 6 cifre di
+budget_337 ora ricostruiscono la gerarchia: il mastro «FONDI DI AMMORTAMENTO» (62.045,10) si netta
+dai cespiti invece di restare fra gli altri debiti, come fa la lettura dal suo testo OCR. Una tabella
+di righe «voce | importo» **senza codici di conto** non è una situazione contabile
+(`pdf_da_tabelle`): presa per tale, budget_1405 passava 14 secondi su Qwen prima del lettore giusto.
+Punto aperto: su budget_337 il conto «FINANZ. VOLKSBANK» sotto il mastro «FINANZ.TI A MEDIO LUNGO
+TERMINE» va a breve, perché il lettore scende nel conto e la scadenza dichiarata dal mastro si perde
+(lo faceva anche prima).
+
+Sui tre schemi letti dalle tabelle MinerU **la ricerca dei dettagli non gira**
+(`_dettagli_gia_letti`, motivo `dettagli_letti_dallo_schema_mineru`): il lettore ha già
+verificato ogni dettaglio sul suo totale stampato. Col testo pulito di MinerU 4 quella ricerca
+partiva su Qwen e ne respingeva ogni proposta: budget_1319 passava da 6-9 a 70-115 secondi, con
+otto avvisi «DETTAGLI NON APPLICATI» su un foglio già dettagliato.
+
 Il compose **non** dichiara alcuna `MINERU_*` in `environment:`: una voce lì scavalca `.env.docker`,
 e fino al 2026-10-14 inchiodava `MINERU_BASE_URL` a `http://mineru:8000`. Senza variabili l'OCR è
 spento (`MINERU_OCR_ENABLED` vale `False` di default in `config.py`).

@@ -339,3 +339,69 @@ def test_un_importo_orfano_diverso_non_eredita_la_didascalia_dell_utile():
         ("Utile d'esercizio", "68.247,80")]
     assert _coppie_di_piede(["Totale a quadratura   1.000.000,00", "1.000.000,00"]) == [
         ("Totale a quadratura", "1.000.000,00"), ("Totale a quadratura", "1.000.000,00")]
+
+
+# budget_330 (AGO): titolo in un'altra tabella, codice e descrizione nella stessa cella,
+# righe col solo lato destro, la scadenza "(OE)" in coda a una descrizione lunga.
+AGO_SP = _tabella("", [
+    ["ATTIVITA'", "PASSIVITA'"],
+    ["13140000 - Partecipazioni in imp.contr.ate (immob.)", "350.000,00",
+     "31000000 - Capitale", "100.000,00"],
+    ["101530 000 - partecipazione Datagramma srl", "350.000,00",
+     "203780 000 - capitale sociale", "100.000,00"],
+    ["15150000 - Depositi bancari e postali", "10.000,00",
+     "37010005 - Debiti verso soci per finanziamenti (OE)", "250.000,00"],
+    ["103435 001 - banca MPS c/c", "10.000,00",
+     "204635 000 - finanz. infrut. non postergato socio", "250.000,00"],
+    ["", "", "37030000 - Debiti verso fornitori (EE)", "15.000,00"],
+    ["", "", "204845 000 - fornitori ordinari (EE)", "15.000,00"],
+    ["TOTALE ATTIVITA'", "360.000,00", "TOTALE PASSIVITA'", "365.000,00"],
+    ["PERDITA D'ESERCIZIO", "5.000,00", "", ""],
+    ["TOTALE A PAREGGIO", "365.000,00", "TOTALE A PAREGGIO", "365.000,00"],
+])
+AGO_CE = _tabella("", [
+    ["COSTI", "RICAVI"],
+    ["73005000 - Costi per servizi", "5.000,00", "", ""],
+    ["704430 000 - spese legali e notarili", "5.000,00", "", ""],
+    ["TOTALE COSTI", "5.000,00", "TOTALE RICAVI", "0,00"],
+    ["PERDITA D'ESERCIZIO", "5.000,00"],
+    ["TOTALE A PAREGGIO", "5.000,00", "TOTALE A PAREGGIO", "5.000,00"],
+])
+
+
+def test_una_situazione_ago_con_codice_e_descrizione_in_una_cella_si_legge():
+    from importers.mineru_contrapposte import _righe
+    righe = _righe((AGO_SP, AGO_CE))
+    destra = [r[2] for r in righe["sp"] if r[0] == "conto" and r[2]]
+    # la riga col solo lato destro resta a destra
+    assert ("37030000", "Debiti verso fornitori (EE)", "15.000,00") in destra
+    percorso = pdf_da_tabelle(SimpleNamespace(tables=(AGO_SP, AGO_CE)))
+    try:
+        bs, ce = extract_situazione_contabile(percorso)
+    finally:
+        os.remove(percorso)
+    assert bs["totale_attivo"] == bs["totale_passivo"] == D("360000.00")
+    assert bs["sp04a_partecipazioni"] == D("350000.00")
+    # la descrizione si stampa per intero: troncata a 38 caratteri perdeva "(OE)" e il
+    # finanziamento soci cadeva a breve
+    assert bs["sp17b_debiti_altri_finanz_lungo"] == D("250000.00")
+    assert bs["sp16d_debiti_fornitori_breve"] == D("15000.00")
+
+
+def test_un_prospetto_di_legge_senza_codici_non_e_una_situazione_contabile():
+    """budget_1405: righe "voce | importo" senza codice di conto. Prese per contrapposte
+    mandavano il PDF sintetico a Qwen (14 s) prima del lettore giusto."""
+    sp = _tabella("STATO PATRIMONIALE - ATTIVO", [
+        ["Voce", "2025 (€)"],
+        ["B) Immobilizzazioni immateriali", "707.317,45"],
+        ["B) Immobilizzazioni materiali", "318.107,85"],
+        ["C.I) Rimanenze", "1.028.115,10"],
+        ["C.II) Crediti", "3.830.477,21"],
+        ["TOTALE ATTIVO", "5.884.017,61"],
+    ])
+    ce = _tabella("CONTO ECONOMICO", [
+        ["Voce", "2025 (€)"],
+        ["A.1) Ricavi delle vendite e delle prestazioni", "5.363.273,18"],
+        ["B.7) Servizi", "(1.331.075,82)"],
+    ])
+    assert pdf_da_tabelle(SimpleNamespace(tables=(sp, ce))) is None

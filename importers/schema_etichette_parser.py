@@ -466,6 +466,19 @@ def _ricomponi(celle: list[str]) -> tuple[Optional[Decimal], Optional[Decimal]]:
     Differenza stampata. L'OCR sposta talvolta l'ultima cifra di una cella all'inizio della
     successiva ("62.871,92 | 0,0 | 0  62.871,9 | 2  100,000"): unite senza separatore le
     celle tornano "62.871,92 0,00 62.871,92 100,00"."""
+    # MinerU 4: celle pulite e allineate, una per colonna; una cella vuota e' un esercizio
+    # senza importo, non una cella da saltare ("D.6) Acconti | | 3.000,00": i 3.000 sono
+    # dell'anno prima, budget_283). Si legge per posizione solo quando ogni cella e' vuota o un
+    # importo intero, e la Differenza stampata, se c'e', lo conferma (una cella vuota della
+    # 3.4.5 puo' essere un importo perso dall'OCR); le ricomposizioni qui sotto restano per le
+    # celle sporche.
+    pulite = [_cella_ocr(c) for c in celle]
+    if (len(pulite) >= 2 and any(pulite[:2])
+            and all(not c or _IMPORTO.fullmatch(c) for c in pulite[:2])):
+        c, p = (_importo(x) if x else None for x in pulite[:2])
+        diff = _IMPORTO.fullmatch(pulite[2]) if len(pulite) > 2 else None
+        if diff is None or abs((c or 0) - (p or 0) - _importo(diff.group(0))) <= _C:
+            return c, p
     prove = (" ".join(_cella_ocr(c) for c in celle), "".join(celle))
     letture = []
     for testo in prove:

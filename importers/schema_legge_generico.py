@@ -452,6 +452,12 @@ def _e_differenza(valori: list[list[Optional[Decimal]]], k: int, a: int, b: int)
 
 def _leggi(documento: fitz.Document):
     """(righe, numero di colonne-esercizio, anni) oppure solleva ``reso._Rifiuto``."""
+    return _righe_da_grezze(*_grezze_pdf(documento))
+
+
+def _grezze_pdf(documento: fitz.Document):
+    """La geometria della pagina -> righe grezze ``(pagina, didascalia, importi per colonna
+    esercizio)``, numero di colonne-esercizio e ``{colonna: anno}``."""
     grezze: list[tuple[int, str, list[Optional[Decimal]]]] = []
     anni_doc: dict[int, int] = {}
     n_col = 0
@@ -578,6 +584,12 @@ def _leggi(documento: fitz.Document):
             if traboccate & set(ruoli):
                 raise reso._Rifiuto("importo_illeggibile", didascalia=didascalia)
             grezze.append((numero, didascalia, [pc[i] for i in ruoli]))
+    return grezze, n_col, anni_doc
+
+
+def _righe_da_grezze(grezze: list[tuple[int, str, list[Optional[Decimal]]]], n_col: int,
+                     anni_doc: dict[int, int]):
+    """Le regole dello schema di legge sulle righe grezze, da qualunque lettura vengano."""
     if not n_col:
         raise reso._Rifiuto("colonne_non_trovate")
 
@@ -1309,16 +1321,95 @@ def estrai(file_path: str) -> Optional[dict]:
             righe, colonne, anni = _leggi(documento)
         except reso._Rifiuto as exc:
             return reso._rifiutato([], exc.controllo, **exc.dettaglio)
-        primo = reso.estrai_da_righe(documento, righe, colonne, anni, vuote_zero=True,
-                                     eredita_dal_padre=True, tolleranza=_tolleranza(righe))
-        if primo["adottabile"]:
-            return primo
-        variante = _segni_come_contributo(righe)
-        if variante is None:
-            return primo
-        secondo = reso.estrai_da_righe(documento, variante, colonne, anni, vuote_zero=True,
-                                       eredita_dal_padre=True, tolleranza=_tolleranza(variante))
-        return secondo if secondo["adottabile"] else primo
+        return _giudica(documento, righe, colonne, anni)
+
+
+def _giudica(documento: fitz.Document, righe: list[reso._Riga], colonne: int, anni: list[int]):
+    """Il cuore del lettore XBRL sulle righe normalizzate, e la variante coi segni come
+    contributo quando la prima lettura non e' adottabile."""
+    primo = reso.estrai_da_righe(documento, righe, colonne, anni, vuote_zero=True,
+                                 eredita_dal_padre=True, tolleranza=_tolleranza(righe))
+    if primo["adottabile"]:
+        return primo
+    variante = _segni_come_contributo(righe)
+    if variante is None:
+        return primo
+    secondo = reso.estrai_da_righe(documento, variante, colonne, anni, vuote_zero=True,
+                                   eredita_dal_padre=True, tolleranza=_tolleranza(variante))
+    return secondo if secondo["adottabile"] else primo
+
+
+# il richiamo di una nota in coda all'importo: "220.159 (1)", "220.159 (*)", "220.159 *"
+_RICHIAMO_NOTA = re.compile(r"\s*(?:\(\s*(?:\d{1,2}|\*+)\s*\)|\*+)$")
+
+
+def _cella_mineru(cella: str) -> Optional[Decimal]:
+    """L'importo di una cella MinerU, senza il richiamo di nota in coda."""
+    if not cella:
+        return None
+    v = _importo(cella)
+    if v is None:
+        senza = _RICHIAMO_NOTA.sub("", cella)
+        if senza != cella and senza:
+            v = _importo(senza)
+    return v
+
+
+def _grezze_mineru(tables) -> tuple[list[tuple[int, str, list[Optional[Decimal]]]], int, dict[int, int]]:
+    """Le tabelle di MinerU -> le stesse righe grezze che ``_grezze_pdf`` ricava dalla geometria.
+
+    MinerU consegna ogni riga gia' divisa in celle: la didascalia nella prima, poi una cella
+    per colonna. Le colonne-esercizio sono quelle che l'intestazione della tabella data
+    ("31-12-2025", "31-12-2024"); una tabella senza intestazione eredita quelle della tabella
+    prima (il prospetto che continua sulla pagina dopo). Una tabella con un'intestazione che
+    non e' di date (la nota "Varie altre riserve" in mezzo al prospetto) non e' il prospetto."""
+    grezze: list[tuple[int, str, list[Optional[Decimal]]]] = []
+    anni_doc: dict[int, int] = {}
+    n_col = 0
+    for table in tables:
+        dentro = True
+        for indice, row in enumerate(table.rows):
+            celle = [str(c.text or "").strip() for c in row.cells]
+            date = [_DATA.match(c) for c in celle[1:]]
+            if len(celle) > 1 and all(date) and not _norm(celle[0]):
+                # l'intestazione delle colonne: gli anni, nell'ordine stampato
+                n_col = max(n_col, len(date))
+                for pos, m in enumerate(date):
+                    anni_doc.setdefault(pos, _anno(m))
+                dentro = True
+                continue
+            if indice == 0 and len(celle) > 1 and any(date):
+                dentro = False      # una tabella con un'intestazione propria: nota, non prospetto
+            if not dentro:
+                continue
+            valori: list[Optional[Decimal]] = []
+            didascalia = celle[0] if celle else ""
+            for c in celle[1:]:
+                v = _cella_mineru(c)
+                if v is None and c and not valori and not re.search(r"\d", c):
+                    didascalia = f"{didascalia} {c}".strip()   # didascalia spezzata in due celle
+                    continue
+                valori.append(v)
+            grezze.append((table.page, didascalia, valori))
+    if n_col:
+        grezze = [(p, d, (v + [None] * n_col)[:n_col]) for p, d, v in grezze]
+    return grezze, n_col, anni_doc
+
+
+def estrai_da_mineru(context) -> Optional[dict]:
+    """Lo schema di legge di una scansione, dalle tabelle di MinerU: stesse regole e stessi
+    controlli al centesimo di ``estrai``, solo le righe vengono dalle celle e non dalla
+    geometria. None se il documento non e' uno schema di legge."""
+    testo = _norm(getattr(context, "full_text", "") or "").replace(" ", "")
+    if not (("statopatrimoniale" in testo or "attivo" in testo) and "contoeconomico" in testo
+            and "immobilizzazioni" in testo and "valoredellaproduzione" in testo):
+        return None
+    try:
+        righe, colonne, anni = _righe_da_grezze(*_grezze_mineru(getattr(context, "tables", ()) or ()))
+    except reso._Rifiuto as exc:
+        return reso._rifiutato([], exc.controllo, **exc.dettaglio)
+    with fitz.open() as vuoto:      # nessuna pagina: le tabelle di nota non si leggono qui
+        return _giudica(vuoto, righe, colonne, anni)
 
 
 def _negativa(r: reso._Riga) -> bool:

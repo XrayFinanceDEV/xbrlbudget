@@ -745,13 +745,21 @@ def _xbrl_reso_extract(file_path: str):
     perso. Si adotta solo il candidato che il lettore dichiara ``adottabile`` e che passa gli
     stessi cancelli degli altri lettori deterministici."""
     from importers import xbrl_reso_parser
+
+    return _adotta_candidato_reso(xbrl_reso_parser.estrai(file_path), "PDF reso da XBRL")
+
+
+def _adotta_candidato_reso(candidato: Optional[dict], nome: str):
+    """(bs, ce, prior_bs, prior_ce) di un candidato del cuore del lettore XBRL
+    (``xbrl_reso_parser.estrai_da_righe``: il reso XBRL e lo schema di legge generico), oppure
+    None. Si adotta solo il candidato ``adottabile`` che passa ``validate_balance`` e
+    ``check_quadratura``; l'anno precedente solo se li passa anche lui."""
     from importers.iv_cee_hierarchy import check_quadratura
 
-    candidato = xbrl_reso_parser.estrai(file_path)
     if candidato is None:
         return None
     if not candidato.get("adottabile"):
-        logger.info("PDF reso da XBRL riconosciuto ma non adottato: %s", candidato.get("rifiuto"))
+        logger.info("%s riconosciuto ma non adottato: %s", nome, candidato.get("rifiuto"))
         return None
     mapper = IVCEEMapper()
     bs, ce = dict(candidato["bs"]), dict(candidato["ce"])
@@ -775,7 +783,8 @@ def _xbrl_reso_extract(file_path: str):
         if not (mapper.validate_balance(prior_bs)
                 and check_quadratura(prior_bs, prior_ce, tol=Decimal("2")).quadra):
             prior_bs = prior_ce = None
-    logger.info("Using deterministic XBRL-rendered PDF reader (prior=%s)", candidato.get("prior_stato"))
+    logger.info("Using deterministic legal schema reader: %s (prior=%s)", nome,
+                candidato.get("prior_stato"))
     return bs, ce, prior_bs, prior_ce
 
 
@@ -788,26 +797,54 @@ def _schema_etichette_extract(file_path: str, extraction_context: Any = None):
     porta solo se li passa anche lui. Un anno che il lettore rifiuta non si sostituisce:
     si torna None e prosegue la catena di sempre, che lo dichiarera' a modo suo."""
     from importers import schema_etichette_parser as etichette
-    from importers.iv_cee_hierarchy import check_quadratura
 
-    mapper = IVCEEMapper()
     if extraction_context is not None:
         letto = etichette.estrai_da_mineru(extraction_context)
     else:
         letto = etichette.estrai(file_path)
+    return _adotta_schema(letto, extraction_context, "Schema con percorso nell'etichetta")
+
+
+def _schema_generico_mineru_extract(extraction_context: Any):
+    """(bs, ce, prior_bs, prior_ce) dello schema di legge di una scansione senza percorso
+    nell'etichetta, dalle tabelle MinerU, oppure None.
+
+    Le stesse regole e gli stessi controlli al centesimo del lettore dello schema di legge
+    generico (``schema_legge_generico.estrai_da_mineru``): prima di MinerU 4 le tabelle di
+    una scansione non erano abbastanza pulite, e questa famiglia finiva sull'estrattore
+    Anthropic, vietato, cioe' su un errore (budget_1322, 2026-10-26)."""
+    from importers import schema_legge_generico as generico
+
+    adottato = _adotta_candidato_reso(generico.estrai_da_mineru(extraction_context),
+                                      "Schema di legge dalle tabelle MinerU")
+    if adottato is not None:
+        for dati in (adottato[0], adottato[2]):
+            if dati is not None:
+                dati["_mineru_source_detail_fields"] = Decimal(sum(
+                    1 for k, v in dati.items() if not k.startswith("_") and k.startswith("sp")
+                    and len(k.split("_")[0]) > 4 and v))
+    return adottato
+
+
+def _adotta_schema(letto: Optional[dict], extraction_context: Any, nome: str):
+    """I cancelli comuni ai lettori deterministici dello schema di legge: il lettore ha
+    gia' verificato ogni totale stampato; qui ``validate_balance`` e ``check_quadratura``, e
+    l'anno precedente si porta solo se li passa anche lui."""
+    from importers.iv_cee_hierarchy import check_quadratura
+
+    mapper = IVCEEMapper()
     if letto is None:
         return None
     bs, ce = letto.get("bs"), letto.get("ce")
     if bs is None or ce is None:
-        logger.info("Schema con percorso nell'etichetta riconosciuto ma non adottato: %s",
-                    letto.get("rifiuto"))
+        logger.info("%s riconosciuto ma non adottato: %s", nome, letto.get("rifiuto"))
         return None
 
     def _passa(b, c) -> bool:
         return mapper.validate_balance(b) and check_quadratura(b, c, tol=Decimal("2")).quadra
 
     if not _passa(bs, ce):
-        logger.info("Schema con percorso nell'etichetta letto ma non quadrato: catena di sempre")
+        logger.info("%s letto ma non quadrato: catena di sempre", nome)
         return None
     prior_bs, prior_ce = letto.get("prior_bs"), letto.get("prior_ce")
     prior_ok = prior_bs is not None and prior_ce is not None and _passa(prior_bs, prior_ce)
@@ -817,9 +854,31 @@ def _schema_etichette_extract(file_path: str, extraction_context: Any = None):
                 dati["_mineru_source_detail_fields"] = Decimal(sum(
                     1 for k, v in dati.items() if not k.startswith("_") and k.startswith("sp")
                     and len(k.split("_")[0]) > 4 and v))
-    logger.info("Using deterministic legal schema with path labels (prior_valid=%s, anni=%s)",
-                prior_ok, letto.get("anni"))
+    logger.info("Using deterministic legal schema: %s (prior_valid=%s, anni=%s)",
+                nome, prior_ok, letto.get("anni"))
     return bs, ce, (prior_bs if prior_ok else None), (prior_ce if prior_ok else None)
+
+
+def _dettagli_gia_letti(snello_report: Optional[dict], mineru_tabelle: bool,
+                        da_mineru: bool, bs: dict) -> Optional[str]:
+    """Il motivo per non rifare la ricerca dei dettagli, o None se va fatta.
+
+    - Reso XBRL adottato dal percorso snello (Task 25): i dettagli sono gia' quelli del
+      prospetto e delle tabelle di nota, riconciliati al centesimo o dichiarati.
+    - Situazione contabile dalle tabelle MinerU: ogni sottoconto e' gia' una cella letta; sulla
+      scansione la ricerca non ha testo e finiva su Qwen (6 minuti su Unicarton, per nessuna
+      proposta).
+    - Schema di legge letto dalle tabelle MinerU (col percorso nell'etichetta o generico): il
+      lettore ha gia' verificato ogni dettaglio sul suo totale stampato. Col testo pulito di
+      MinerU 4 la ricerca partiva su Qwen e ne respingeva ogni proposta (budget_1319: 70-115 s
+      invece di 6-9, e otto avvisi «DETTAGLI NON APPLICATI» su un foglio gia' dettagliato)."""
+    if snello_report is not None and snello_report.get("fonte") == "deterministico:xbrl_reso_parser":
+        return "dettagli_letti_dal_prospetto_xbrl"
+    if mineru_tabelle:
+        return "dettagli_letti_dalle_tabelle_mineru"
+    if da_mineru and (bs.get("_source_schema_etichette") or bs.get("_source_xbrl_reso")):
+        return "dettagli_letti_dallo_schema_mineru"
+    return None
 
 
 def _extract_route_c_last_resort(llm_extract):
@@ -1380,6 +1439,15 @@ def import_pdf_balance_sheet(
                             type(etichette_err).__name__, etichette_err)
             if adottato is not None:
                 return adottato
+            if extraction_context is not None:
+                try:
+                    adottato = _schema_generico_mineru_extract(extraction_context)
+                except Exception as generico_err:
+                    adottato = None
+                    logger.info("Schema di legge dalle tabelle MinerU non letto (%s: %s)",
+                                type(generico_err).__name__, generico_err)
+                if adottato is not None:
+                    return adottato
             # /import/pdf-ocr supplies structured MinerU table rows.  Build an
             # evidence-only IV-CEE candidate from those rows before touching the
             # original PDF.  It is accepted only through the same structural and
@@ -2074,18 +2142,11 @@ def import_pdf_balance_sheet(
         # may move short/long portions but preserves combined credits/debts.
         # Controls, CE and period results cannot be changed by the LLM.
         from importers.detail_enrichment import enrich_pdf_details
-        if _snello is not None and _snello.report.get("fonte") == "deterministico:xbrl_reso_parser":
-            # Reso XBRL adottato (Task 25): i dettagli sono gia' quelli del prospetto e delle
-            # tabelle di nota (riconciliati al centesimo, o dichiarati non applicati nel report
-            # snello): nessun secondo passaggio, e di sicuro nessuna lettura del modello.
-            _detail_report = {"status": "skipped", "reason": "dettagli_letti_dal_prospetto_xbrl",
-                              "warnings": []}
-        elif _mineru_tabelle:
-            # Situazione contabile letta dalle tabelle MinerU: ogni sottoconto e' gia' una
-            # cella letta. Sulla scansione il passaggio dei dettagli non ha testo e finiva
-            # su Qwen (6 minuti su Unicarton, per nessuna proposta): niente modello.
-            _detail_report = {"status": "skipped", "reason": "dettagli_letti_dalle_tabelle_mineru",
-                              "warnings": []}
+        _salta_dettagli = _dettagli_gia_letti(
+            _snello.report if _snello is not None else None, _mineru_tabelle,
+            extraction_context is not None, balance_sheet_data)
+        if _salta_dettagli:
+            _detail_report = {"status": "skipped", "reason": _salta_dettagli, "warnings": []}
         else:
             balance_sheet_data, prior_bs_data, _detail_report = enrich_pdf_details(
                 file_path, balance_sheet_data, prior_bs_data, fiscal_year=fiscal_year,

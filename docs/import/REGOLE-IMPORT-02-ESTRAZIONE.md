@@ -427,6 +427,29 @@ OCR. Qwen resta solo per tabelle che non hanno quella forma. Il limite è l'OCR:
 una colonna (la copia ripassata da PDF24 di Unicarton perde i ricavi), l'import la dichiara come
 `Utile CE != sp13`, non la inventa.
 
+**Sugli schemi di legge scansionati niente modello** (2026-10-26, con MinerU 4). Una scansione di
+schema di legge non è a sezioni contrapposte: il percorso snello si dichiara `non_applicabile` e in
+`_llm_extract` si provano, in ordine, il lettore col percorso nell'etichetta (`estrai_da_mineru` di
+`schema_etichette_parser`, sotto) e **il lettore dello schema di legge generico sulle stesse
+tabelle** (`schema_legge_generico.estrai_da_mineru`, `_schema_generico_mineru_extract`): le celle
+di MinerU danno le stesse righe grezze che `_grezze_pdf` ricava dalla geometria (didascalia, un
+importo per colonna-esercizio, gli anni dall'intestazione «31-12-2025»), e da lì valgono le stesse
+regole e gli stessi controlli al centesimo del cuore XBRL (`_righe_da_grezze`,
+`xbrl_reso_parser.estrai_da_righe`, adozione con `_adotta_candidato_reso`). Una tabella che si
+intesta da sé con date dopo una didascalia (la nota «Varie altre riserve» in mezzo al prospetto)
+non è il prospetto; il richiamo di nota in coda a un importo («220.159 (1)») si toglie. Prima
+questa famiglia finiva sull'estrattore Anthropic, vietato, cioè su un errore: budget_1322 (schema
+reso da XBRL e poi scansionato) ora si importa in meno di un secondo, coi due esercizi, voce per
+voce uguale all'unità di euro a 1319, lo stesso bilancio al centesimo. Con le tabelle di MinerU
+3.4.5, che sfasavano righe e colonne, lo stesso lettore lo **rifiuta**: un importo letto male
+produce un rifiuto, mai un numero sbagliato.
+
+Sui due schemi letti dalle tabelle MinerU **la ricerca dei dettagli non gira**
+(`_dettagli_gia_letti`, motivo `dettagli_letti_dallo_schema_mineru`): il lettore ha già
+verificato ogni dettaglio sul suo totale stampato. Col testo pulito di MinerU 4 quella ricerca
+partiva su Qwen e ne respingeva ogni proposta: budget_1319 passava da 6-9 a 70-115 secondi, con
+otto avvisi «DETTAGLI NON APPLICATI» su un foglio già dettagliato.
+
 Il compose **non** dichiara alcuna `MINERU_*` in `environment:`: una voce lì scavalca `.env.docker`,
 e fino al 2026-10-14 inchiodava `MINERU_BASE_URL` a `http://mineru:8000`. Senza variabili l'OCR è
 spento (`MINERU_OCR_ENABLED` vale `False` di default in `config.py`).

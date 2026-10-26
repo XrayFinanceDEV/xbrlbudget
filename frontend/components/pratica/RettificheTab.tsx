@@ -89,6 +89,16 @@ import {
 } from "@/lib/pratica-rettifiche-rules";
 import type { AdjustableFinancialYear, RettificaEntry } from "@/types/api";
 
+// A) Valore della produzione come lo somma il backend (calculations/ce_result.py): la A.4
+// sta in ce03_lavori_interni per la maggior parte dei lettori e in
+// ce03a_incrementi_immobilizzazioni per il percorso snello e il reso XBRL. CE_A non ha
+// ce03a (le Rettifiche non la rendono, VOCI_NON_IN_RETTIFICHE): sommare solo CE_A dava un
+// falso squadrato CE <-> SP di tutta la A.4 (budget_1322: 380.713 nel 2025, 314.360 nel
+// 2024). La riga si vede in sola lettura quando ha un importo; sp13 lo ricostruisce gia'
+// recalcAggregates contando anche ce03a.
+const CE_A_RESE = CE_A.flatMap((c) =>
+  c === "ce03_lavori_interni" ? [c, "ce03a_incrementi_immobilizzazioni"] : [c]);
+
 // Intestazioni di raggruppamento dello schema art. 2424, righe di RESA come la
 // fascia di sezione: NON entrano nel catalogo (VOCI) ne' negli elenchi
 // RETTIFICHE_BS_*, che restano l'elenco dei campi che portano un valore.
@@ -1002,9 +1012,9 @@ export function RettificheTab({
 
                   // Compute subtotals
                   const sumF = (keys: string[], fn: (k: string) => number) => keys.reduce((s, k) => s + fn(k), 0);
-                  const vp = sumF(CE_A, ceV);
-                  const origVp = sumF(CE_A, origV);
-                  const refVp = sumF(CE_A, refVal);
+                  const vp = sumF(CE_A_RESE, ceV);
+                  const origVp = sumF(CE_A_RESE, origV);
+                  const refVp = sumF(CE_A_RESE, refVal);
                   const costMainKeys = ["ce05_materie_prime", "ce06_servizi", "ce07_godimento_beni",
                     "ce08_costi_personale", "ce09_ammortamenti", "ce10_var_rimanenze_mat_prime",
                     "ce11_accantonamenti", "ce11b_altri_accantonamenti", "ce12_oneri_diversi"];
@@ -1044,7 +1054,7 @@ export function RettificheTab({
 
                   return (
                     <>
-                      {renderSection("A) VALORE DELLA PRODUZIONE", CE_A, true)}
+                      {renderSection("A) VALORE DELLA PRODUZIONE", CE_A_RESE, true)}
                       {resultRow("Totale valore della produzione", refVp, origVp, vp, false)}
                       {renderSection("B) COSTI DELLA PRODUZIONE", CE_B, true)}
                       {resultRow("Totale costi della produzione", refCosts, origCosts, costs, false)}

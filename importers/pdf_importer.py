@@ -826,6 +826,35 @@ def _schema_generico_mineru_extract(extraction_context: Any):
     return adottato
 
 
+def _prospetto_sintetico_mineru_extract(extraction_context: Any):
+    """(bs, ce, None, None) del prospetto CEE sintetico a una colonna di una scansione, dalle
+    tabelle MinerU (``prospetto_sintetico.estrai_da_mineru``, budget_1405), oppure None. Le
+    stesse verifiche del percorso snello (``deterministico._esito``: ogni totale stampato, la
+    massa non classificata) e gli stessi cancelli degli altri lettori. Le approssimazioni
+    (il totale di una voce senza dettaglio nel suo sotto-campo convenzionale) restano
+    dichiarate in ``_approssimazioni_prospetto``, come le dichiara lo snello."""
+    from importers import prospetto_sintetico
+    from importers.import_snello.deterministico import _esito
+
+    letto = prospetto_sintetico.estrai_da_mineru(extraction_context)
+    if letto is None or letto.get("bs") is None:
+        if letto is not None:
+            logger.info("Prospetto sintetico dalle tabelle MinerU non adottato: %s", letto.get("rifiuto"))
+        return None
+    esito = _esito("prospetto_sintetico", letto["bs"], letto["ce"], letto["stampati"])
+    if not esito.get("adottato") or esito.get("esito") != "ok":
+        logger.info("Prospetto sintetico dalle tabelle MinerU non adottato: %s", esito.get("esito"))
+        return None
+    adottato = _adotta_candidato_reso(
+        {"adottabile": True, "bs": esito["bs"], "ce": esito["ce"], "stampati": letto["stampati"]},
+        "Prospetto sintetico dalle tabelle MinerU")
+    if adottato is not None:
+        adottato[0]["_approssimazioni_prospetto"] = sorted(
+            {x["campo"] for x in letto.get("approssimazioni") or []})
+        adottato[0]["_source_prospetto_sintetico"] = Decimal("1")
+    return adottato
+
+
 def _adotta_schema(letto: Optional[dict], extraction_context: Any, nome: str):
     """I cancelli comuni ai lettori deterministici dello schema di legge: il lettore ha
     gia' verificato ogni totale stampato; qui ``validate_balance`` e ``check_quadratura``, e
@@ -868,15 +897,18 @@ def _dettagli_gia_letti(snello_report: Optional[dict], mineru_tabelle: bool,
     - Situazione contabile dalle tabelle MinerU: ogni sottoconto e' gia' una cella letta; sulla
       scansione la ricerca non ha testo e finiva su Qwen (6 minuti su Unicarton, per nessuna
       proposta).
-    - Schema di legge letto dalle tabelle MinerU (col percorso nell'etichetta o generico): il
-      lettore ha gia' verificato ogni dettaglio sul suo totale stampato. Col testo pulito di
+    - Schema di legge letto dalle tabelle MinerU (col percorso nell'etichetta, generico, o
+      prospetto sintetico): il lettore ha gia' verificato ogni dettaglio sul suo totale
+      stampato, e il prospetto sintetico un dettaglio non lo stampa affatto (le sue voci
+      sono dichiarate nell'avviso PROSPETTO SINTETICO). Col testo pulito di
       MinerU 4 la ricerca partiva su Qwen e ne respingeva ogni proposta (budget_1319: 70-115 s
       invece di 6-9, e otto avvisi «DETTAGLI NON APPLICATI» su un foglio gia' dettagliato)."""
     if snello_report is not None and snello_report.get("fonte") == "deterministico:xbrl_reso_parser":
         return "dettagli_letti_dal_prospetto_xbrl"
     if mineru_tabelle:
         return "dettagli_letti_dalle_tabelle_mineru"
-    if da_mineru and (bs.get("_source_schema_etichette") or bs.get("_source_xbrl_reso")):
+    if da_mineru and (bs.get("_source_schema_etichette") or bs.get("_source_xbrl_reso")
+                      or bs.get("_source_prospetto_sintetico")):
         return "dettagli_letti_dallo_schema_mineru"
     return None
 
@@ -1440,14 +1472,15 @@ def import_pdf_balance_sheet(
             if adottato is not None:
                 return adottato
             if extraction_context is not None:
-                try:
-                    adottato = _schema_generico_mineru_extract(extraction_context)
-                except Exception as generico_err:
-                    adottato = None
-                    logger.info("Schema di legge dalle tabelle MinerU non letto (%s: %s)",
-                                type(generico_err).__name__, generico_err)
-                if adottato is not None:
-                    return adottato
+                for lettore in (_schema_generico_mineru_extract, _prospetto_sintetico_mineru_extract):
+                    try:
+                        adottato = lettore(extraction_context)
+                    except Exception as lettore_err:
+                        adottato = None
+                        logger.info("%s non letto (%s: %s)", lettore.__name__,
+                                    type(lettore_err).__name__, lettore_err)
+                    if adottato is not None:
+                        return adottato
             # /import/pdf-ocr supplies structured MinerU table rows.  Build an
             # evidence-only IV-CEE candidate from those rows before touching the
             # original PDF.  It is accepted only through the same structural and
@@ -2157,13 +2190,17 @@ def import_pdf_balance_sheet(
                 usa_llm=not (_snello is not None and _snello.report.get("modo") == "conti"),
             )
         sc_quadratura_warnings.extend(_detail_report.get('warnings', []))
-        if _snello is not None and _snello.report.get('approssimazioni'):
+        _approssimati = (
+            sorted({x['campo'] for x in _snello.report['approssimazioni']})
+            if _snello is not None and _snello.report.get('approssimazioni')
+            else balance_sheet_data.get('_approssimazioni_prospetto'))
+        if _approssimati:
             # prospetto sintetico (voci appiattite, nessun dettaglio sotto): il totale di ogni voce sta
             # nel sotto-campo convenzionale della famiglia, massa letta e non un plug - si dichiara
             sc_quadratura_warnings.append(
                 'PROSPETTO SINTETICO: il documento stampa le sole voci di legge, senza dettaglio. '
                 'I totali sono stati assegnati ai sotto-campi convenzionali ('
-                + ', '.join(sorted({x['campo'] for x in _snello.report['approssimazioni']}))
+                + ', '.join(_approssimati)
                 + ') - affinare le riclassifiche in Rettifiche.')
 
         # Diagnose the CE/SP result gap for PDF routes. The helper records
@@ -2254,6 +2291,7 @@ def import_pdf_balance_sheet(
                     and not balance_sheet_data.get("_source_standard_ivcee")
                     and not balance_sheet_data.get("_source_schema_etichette")
                     and not balance_sheet_data.get("_source_xbrl_reso")
+                    and not balance_sheet_data.get("_source_prospetto_sintetico")
                     and _is_image_pdf(file_path))
             except Exception:
                 _cifre_da_vision = False
@@ -2529,6 +2567,10 @@ def import_pdf_balance_sheet(
                 _ocr_accounting_method = "ivcee_deterministic"
             elif balance_sheet_data.get("_source_schema_etichette"):
                 _ocr_accounting_method = "schema_etichette"
+            elif balance_sheet_data.get("_source_xbrl_reso"):
+                _ocr_accounting_method = "xbrl_reso"
+            elif balance_sheet_data.get("_source_prospetto_sintetico"):
+                _ocr_accounting_method = "prospetto_sintetico"
             elif balance_sheet_data.get("_source_standard_ivcee"):
                 _ocr_accounting_method = "ivcee_source"
             else:
@@ -2776,6 +2818,8 @@ def import_pdf_balance_sheet(
             extraction_method = "schema_etichette"
         elif balance_sheet_data.get("_source_xbrl_reso"):
             extraction_method = "xbrl_reso"
+        elif balance_sheet_data.get("_source_prospetto_sintetico"):
+            extraction_method = "prospetto_sintetico"
         elif balance_sheet_data.get("_source_standard_ivcee"):
             extraction_method = "ivcee_source"
         else:

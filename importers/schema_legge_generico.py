@@ -1324,18 +1324,21 @@ def estrai(file_path: str) -> Optional[dict]:
         return _giudica(documento, righe, colonne, anni)
 
 
-def _giudica(documento: fitz.Document, righe: list[reso._Riga], colonne: int, anni: list[int]):
+def _giudica(documento: fitz.Document, righe: list[reso._Riga], colonne: int, anni: list[int],
+             tabelle_nota: Optional[list[tuple[int, list]]] = None):
     """Il cuore del lettore XBRL sulle righe normalizzate, e la variante coi segni come
     contributo quando la prima lettura non e' adottabile."""
     primo = reso.estrai_da_righe(documento, righe, colonne, anni, vuote_zero=True,
-                                 eredita_dal_padre=True, tolleranza=_tolleranza(righe))
+                                 eredita_dal_padre=True, tolleranza=_tolleranza(righe),
+                                 tabelle_nota=tabelle_nota)
     if primo["adottabile"]:
         return primo
     variante = _segni_come_contributo(righe)
     if variante is None:
         return primo
     secondo = reso.estrai_da_righe(documento, variante, colonne, anni, vuote_zero=True,
-                                   eredita_dal_padre=True, tolleranza=_tolleranza(variante))
+                                   eredita_dal_padre=True, tolleranza=_tolleranza(variante),
+                                   tabelle_nota=tabelle_nota)
     return secondo if secondo["adottabile"] else primo
 
 
@@ -1404,12 +1407,16 @@ def estrai_da_mineru(context) -> Optional[dict]:
     if not (("statopatrimoniale" in testo or "attivo" in testo) and "contoeconomico" in testo
             and "immobilizzazioni" in testo and "valoredellaproduzione" in testo):
         return None
+    tables = getattr(context, "tables", ()) or ()
     try:
-        righe, colonne, anni = _righe_da_grezze(*_grezze_mineru(getattr(context, "tables", ()) or ()))
+        righe, colonne, anni = _righe_da_grezze(*_grezze_mineru(tables))
     except reso._Rifiuto as exc:
         return reso._rifiutato([], exc.controllo, **exc.dettaglio)
-    with fitz.open() as vuoto:      # nessuna pagina: le tabelle di nota non si leggono qui
-        return _giudica(vuoto, righe, colonne, anni)
+    # le tabelle della nota con le scadenze (crediti e debiti entro/oltre) vengono anch'esse
+    # dalle celle di MinerU: il documento vuoto non ha pagine da cui rileggerle
+    nota = [(t.page, [[str(c.text or "") for c in r.cells] for r in t.rows]) for t in tables]
+    with fitz.open() as vuoto:
+        return _giudica(vuoto, righe, colonne, anni, tabelle_nota=nota)
 
 
 def _negativa(r: reso._Riga) -> bool:

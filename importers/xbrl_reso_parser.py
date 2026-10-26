@@ -934,51 +934,57 @@ def _leggi_tabelle(documento: fitz.Document, dopo: int) -> dict:
     """Le due tabelle di nota con le scadenze (``Quota scadente entro/oltre l'esercizio``), anche
     quando proseguono sulla pagina dopo (l'intestazione si ripete). Solo la colonna di fine
     esercizio e le due quote: nient'altro della nota integrativa entra."""
-    trovate: dict[str, dict] = {}
-    aperta: Optional[dict] = None
+    tabelle: list[tuple[int, list]] = []
     for numero in range(dopo, len(documento)):
         pagina = documento[numero]
         testo = pagina.get_text()
         if "Quota scadente" not in testo:
             continue
         try:
-            tabelle = pagina.find_tables().tables
+            trovate_pag = pagina.find_tables().tables
         except Exception:
             continue
-        for t in tabelle:
-            righe = t.extract()
-            if not righe:
+        tabelle.extend((numero, t.extract()) for t in trovate_pag)
+    return raccogli_tabelle(tabelle)
+
+
+def raccogli_tabelle(tabelle: list[tuple[int, list]]) -> dict:
+    """Le tabelle di nota con le scadenze da righe gia' divise in celle, ``(pagina, righe)``
+    nell'ordine del documento: dal PDF (``_leggi_tabelle``) o dalle tabelle di MinerU."""
+    trovate: dict[str, dict] = {}
+    for numero, righe in tabelle:
+        if not righe:
+            continue
+        intest = [_norm(c or "") for c in righe[0]]
+        i_fine = next((i for i, c in enumerate(intest) if "fine esercizio" in c), None)
+        i_entro = next((i for i, c in enumerate(intest) if "quota scadente entro" in c), None)
+        i_oltre = next((i for i, c in enumerate(intest) if "quota scadente oltre" in c), None)
+        if i_fine is None or i_entro is None:
+            continue
+        dati = righe[1:]
+        etichette = [_norm(r[0] or "") for r in dati]
+        tipo = _tipo_tabella(etichette)
+        if tipo is None:
+            continue
+        if tipo in trovate and trovate[tipo]["finita"]:
+            continue
+        if tipo not in trovate:
+            trovate[tipo] = {"righe": [], "totale": None, "finita": False, "pagine": [],
+                             "errore": None}
+        raccolta = trovate[tipo]
+        raccolta["pagine"].append(numero + 1)
+        for r, e in zip(dati, etichette):
+            try:
+                cella = {"fine": _cella(r[i_fine]), "entro": _cella(r[i_entro]),
+                         "oltre": _cella(r[i_oltre]) if i_oltre is not None else _ZERO}
+            except (ValueError, IndexError) as exc:
+                raccolta["errore"] = f"cella_non_numerica:{exc}"
                 continue
-            intest = [_norm(c or "") for c in righe[0]]
-            i_fine = next((i for i, c in enumerate(intest) if "fine esercizio" in c), None)
-            i_entro = next((i for i, c in enumerate(intest) if "quota scadente entro" in c), None)
-            i_oltre = next((i for i, c in enumerate(intest) if "quota scadente oltre" in c), None)
-            if i_fine is None or i_entro is None:
-                continue
-            dati = righe[1:]
-            etichette = [_norm(r[0] or "") for r in dati]
-            tipo = _tipo_tabella(etichette)
-            if tipo is None:
-                continue
-            if tipo in trovate and trovate[tipo]["finita"]:
-                continue
-            if tipo not in trovate:
-                trovate[tipo] = {"righe": [], "totale": None, "finita": False, "pagine": [],
-                                 "errore": None}
-            raccolta = trovate[tipo]
-            raccolta["pagine"].append(numero + 1)
-            for r, e in zip(dati, etichette):
-                try:
-                    cella = {"fine": _cella(r[i_fine]), "entro": _cella(r[i_entro]),
-                             "oltre": _cella(r[i_oltre]) if i_oltre is not None else _ZERO}
-                except (ValueError, IndexError) as exc:
-                    raccolta["errore"] = f"cella_non_numerica:{exc}"
-                    continue
-                if e.startswith("totale"):
-                    raccolta["totale"] = cella
-                    raccolta["finita"] = True
-                    break
-                raccolta["righe"].append((e, cella))
+            if e.startswith("totale"):
+                raccolta["totale"] = cella
+                raccolta["finita"] = True
+                break
+            raccolta["righe"].append((e, cella))
     for raccolta in trovate.values():
         if not raccolta["finita"]:
             raccolta["errore"] = raccolta["errore"] or "tabella_senza_totale"
@@ -1232,17 +1238,21 @@ def _estrai_con(file_path: str, geometria: bool) -> Optional[dict]:
 
 def estrai_da_righe(documento: fitz.Document, righe: list[_Riga], colonne: int, anni: list[int],
                     *, vuote_zero: bool, eredita_dal_padre: bool = False,
-                    tolleranza: Decimal = Decimal("0")) -> dict:
+                    tolleranza: Decimal = Decimal("0"),
+                    tabelle_nota: Optional[list[tuple[int, list]]] = None) -> dict:
+    """``tabelle_nota``: le tabelle della nota gia' divise in celle (le scansioni lette da
+    MinerU); senza, si leggono dalle pagine del documento dopo il prospetto."""
     token = _TOLLERANZA.set(tolleranza)
     try:
         return _estrai_da_righe(documento, righe, colonne, anni, vuote_zero=vuote_zero,
-                                eredita_dal_padre=eredita_dal_padre)
+                                eredita_dal_padre=eredita_dal_padre, tabelle_nota=tabelle_nota)
     finally:
         _TOLLERANZA.reset(token)
 
 
 def _estrai_da_righe(documento: fitz.Document, righe: list[_Riga], colonne: int, anni: list[int],
-                     *, vuote_zero: bool, eredita_dal_padre: bool) -> dict:
+                     *, vuote_zero: bool, eredita_dal_padre: bool,
+                     tabelle_nota: Optional[list[tuple[int, list]]] = None) -> dict:
     """Albero, traduzione percorso -> campo e controlli al centesimo, da righe gia' lette.
 
     Il cuore comune a ogni lettore dello schema di legge: il PDF reso da XBRL (qui sopra) e lo
@@ -1260,7 +1270,10 @@ def _estrai_da_righe(documento: fitz.Document, righe: list[_Riga], colonne: int,
     except _Rifiuto as exc:
         return _rifiutato(anni, exc.controllo, **exc.dettaglio)
     ultima = max(r.pagina for r in righe)
-    tabelle = _leggi_tabelle(documento, ultima + 1)
+    if tabelle_nota is not None:
+        tabelle = raccogli_tabelle([(n, t) for n, t in tabelle_nota if n > ultima])
+    else:
+        tabelle = _leggi_tabelle(documento, ultima + 1)
 
     stampati = _stampati(totali)
     anomalie: dict[int, list] = {c: [] for c in range(colonne)}

@@ -23,7 +23,10 @@ from typing import Optional
 logger = logging.getLogger(__name__)
 
 _IMPORTO = re.compile(r"-?\d{1,3}(?:\.\d{3})*,\d{2}-?")
-_CODICE = re.compile(r"^\d{1,3}(?:[./]\d{1,4})*$")
+_CODICE = re.compile(r"^\d{1,3}(?:[./]\d{1,4})*$|^\d{5,8}(?: \d{3})?$")
+# AGO e simili stampano codice e descrizione in una cella sola, che MinerU tiene insieme:
+# "13005000 - Costi di impianto e di ampliamento", "100045 000 - costi di impianto" (budget_330)
+_CODICE_E_DESCRIZIONE = re.compile(r"^(\d{5,8}(?: \d{3})?)\s+-\s+(\S.*)$")
 # un importo spezzato fra due celle o da uno spazio: "1.440.337" + ",23"
 _VIRGOLA_STACCATA = re.compile(r"(\d)\s*\|?\s*,(\d{2})(?!\d)")
 # Le grafie OCR di un importo viste sulle scansioni (budget_689): il punto al posto della
@@ -52,6 +55,7 @@ _PAROLA_TOTALE = re.compile(r"(?i)\b(totale|eccedenza|utile|perdita|risultato|di
 _LARGHEZZA = 595.0
 _PASSO = 11.0
 _CORPO = 7.0
+_LARGO_DESCRIZIONE = 165.0    # dalla descrizione all'inizio della colonna degli importi
 
 
 def _sezione_del_titolo(titolo: str) -> Optional[str]:
@@ -59,6 +63,11 @@ def _sezione_del_titolo(titolo: str) -> Optional[str]:
     if "PATRIMONIAL" in titolo:
         return "sp"
     if "ECONOMIC" in titolo:
+        return "ce"
+    # l'intestazione dei due lati, quando il titolo sta in un'altra tabella (budget_330)
+    if "ATTIVIT" in titolo and "PASSIVIT" in titolo:
+        return "sp"
+    if re.search(r"\bCOSTI\b", titolo) and re.search(r"\bRICAVI\b", titolo):
         return "ce"
     return None
 
@@ -192,6 +201,21 @@ def _lato_del_piede(sezione: str, didascalia: str, indice: int, quante: int) -> 
     return "L"
 
 
+def _sei_celle(celle: list[str]) -> list[str]:
+    """Una riga a quattro celle con codice e descrizione insieme ("13005000 - Costi di
+    impianto | 5.555,24 | 13005005 - F.do amm. | 1.111,05") nella forma a sei celle che il
+    ricucitore conosce. Il lato resta quello della colonna d'origine: una riga col solo lato
+    destro ("| | 204850 000 - fatture da ricevere | 32,94") resta a destra. Le altre righe
+    passano com'erano."""
+    if len(celle) != 4 or not any(_CODICE_E_DESCRIZIONE.match(c) for c in celle):
+        return celle
+    out: list[str] = []
+    for c, importo in ((celle[0], celle[1]), (celle[2], celle[3])):
+        m = _CODICE_E_DESCRIZIONE.match(c)
+        out.extend((*m.groups(), importo) if m else ("", c, importo))
+    return out
+
+
 def _righe(tables) -> dict[str, list]:
     """Per sezione, la lista ordinata di righe da stampare: ("conto", L, R) oppure
     ("piede", lato, didascalia, importo)."""
@@ -202,7 +226,7 @@ def _righe(tables) -> dict[str, list]:
         if sezione is None:
             continue
         for row in table.rows[intestazione:]:
-            celle = [_testo(c) for c in row.cells]
+            celle = _sei_celle([_testo(c) for c in row.cells])
             if not any(celle):
                 continue
             unite = " ".join(celle)
@@ -239,7 +263,11 @@ def _stampa_pagina(doc, titolo: str, sinistra: str, destra: str, righe: list) ->
         codice, descrizione, valore = lato
         if codice:
             page.insert_text((x, y), codice, fontsize=_CORPO)
-        page.insert_text((x + 42, y), descrizione[:38], fontsize=_CORPO)
+        # per intero, rimpicciolita se serve: troncata perdeva la coda, dove il gestionale
+        # stampa la scadenza ("Debiti verso soci per finanziamenti (OE)", budget_330)
+        corpo = min(_CORPO, _CORPO * _LARGO_DESCRIZIONE
+                    / max(font.text_length(descrizione, fontsize=_CORPO), 1))
+        page.insert_text((x + 42, y), descrizione, fontsize=corpo)
         importo(x + 270, y, valore)
 
     y = 95.0
@@ -278,7 +306,11 @@ def pdf_da_tabelle(context) -> Optional[str]:
     import fitz
 
     righe = _righe(getattr(context, "tables", ()) or ())
-    conti = {s: sum(1 for r in righe[s] if r[0] == "conto") for s in righe}
+    # un conto ha il suo codice: righe "descrizione | importo" senza codice sono un prospetto
+    # di legge (budget_1405, "B) Immobilizzazioni immateriali | 707.317,45"), che preso per
+    # una situazione contabile mandava il PDF sintetico a Qwen per niente prima del lettore giusto
+    conti = {s: sum(1 for r in righe[s] if r[0] == "conto"
+                    and any(lato and lato[0] for lato in r[1:])) for s in righe}
     if conti["sp"] < 4 or conti["ce"] < 2:
         return None
     doc = fitz.open()

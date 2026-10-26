@@ -140,3 +140,78 @@ def test_la_ricerca_dei_dettagli_non_si_rifa_sullo_schema_letto_da_mineru():
     # sul testo di un PDF (nessun MinerU) la ricerca resta com'era
     assert _dettagli_gia_letti(None, False, False, {"_source_schema_etichette": D(1)}) is None
     assert _dettagli_gia_letti(None, False, True, {}) is None
+
+
+def test_una_cella_vuota_di_mineru_4_e_un_esercizio_senza_importo():
+    """budget_283: "D.6) Acconti | | 3.000,00" - i 3.000 sono dell'anno prima. Ricomporre
+    saltando la cella vuota li dava all'esercizio, e il totale dei debiti non tornava."""
+    from importers.schema_etichette_parser import _ricomponi
+    assert _ricomponi(["", "3.000,00"]) == (None, D("3000.00"))
+    assert _ricomponi(["14.899,00", ""]) == (D("14899.00"), None)
+    # la Differenza stampata smentisce la lettura per posizione: la cella vuota della 3.4.5 e'
+    # un importo perso dall'OCR, e lo si ricava come prima (esercizio - differenza)
+    assert _ricomponi(["25,00", "", "-5,00", "-16,667"]) == (D("25.00"), D("30.00"))
+
+
+def test_le_tabelle_della_nota_con_le_scadenze_vengono_dalle_celle_di_mineru():
+    """budget_173: crediti e debiti entro/oltre stanno nella nota integrativa. Dalle celle di
+    MinerU si leggono con le stesse regole del PDF (budget_201: piu' pulite di find_tables,
+    che spezzava "28.371" in "7 28.371")."""
+    from importers.xbrl_reso_parser import raccogli_tabelle
+    nota = [(17, [
+        ["", "Valore di inizio esercizio", "Variazione nell'esercizio", "Valore di fine esercizio",
+         "Quota scadente entro l'esercizio", "Quota scadente oltre l'esercizio"],
+        ["Crediti verso clienti iscritti nell'attivo circolante", "113.915", "61.106", "175.021",
+         "173.021", "2.000"],
+        ["Crediti tributari iscritti nell'attivo circolante", "435", "331", "766", "724", "42"],
+        ["Totale crediti iscritti nell'attivo circolante", "114.350", "61.437", "175.787",
+         "173.745", "2.042"],
+    ])]
+    t = raccogli_tabelle(nota)["crediti"]
+    assert t["errore"] is None and t["finita"]
+    assert [c["entro"] for _e, c in t["righe"]] == [D("173021"), D("724")]
+    assert t["totale"]["oltre"] == D("2042")
+
+
+def test_il_prospetto_sintetico_si_legge_dalle_celle_di_mineru():
+    """budget_1405 scansionato: lo stesso lettore del testo, sezione dalla didascalia, una
+    tabella senza didascalia continua quella prima."""
+    from importers import prospetto_sintetico as ps
+    voci_attivo = [
+        ("B) Immobilizzazioni immateriali", "100,00"), ("B) Immobilizzazioni materiali", "200,00"),
+        ("B) Immobilizzazioni finanziarie", "50,00"), ("Totale B) Immobilizzazioni", "350,00"),
+        ("C.I) Rimanenze", "100,00"), ("C.II) Crediti", "300,00"),
+        ("C.IV) Disponibilità liquide", "50,00"), ("Totale C) Attivo circolante", "450,00"),
+        ("D) Ratei e risconti", "10,00"), ("TOTALE ATTIVO", "810,00")]
+    voci_passivo = [
+        ("A) Patrimonio netto", "300,00"), ("B) Fondi per rischi e oneri", "10,00"),
+        ("C) Trattamento di fine rapporto", "50,00"),
+        ("D) Debiti entro esercizio successivo", "350,00"),
+        ("D) Debiti oltre esercizio successivo", "90,00"), ("Totale D) Debiti", "440,00"),
+        ("E) Ratei e risconti", "10,00"), ("TOTALE PASSIVO", "810,00")]
+    voci_ce_1 = [("A.1) Ricavi delle vendite e delle prestazioni", "1.000,00"),
+                 ("A.5) Altri ricavi e proventi", "20,00"),
+                 ("Totale A) Valore della produzione", "1.020,00")]
+    voci_ce_2 = [("B.6) Materie prime, sussidiarie, consumo e merci", "(400,00)"),
+                 ("B.7) Servizi", "(300,00)"), ("B.9) Personale", "(200,00)"),
+                 ("B.10) Ammortamenti e svalutazioni", "(50,00)"),
+                 ("Totale B) Costi della produzione", "(950,00)"),
+                 ("Differenza A - B", "70,00"),
+                 ("C.17) Interessi e altri oneri finanziari", "(20,00)"),
+                 ("Totale C) Proventi e oneri finanziari", "(20,00)"),
+                 ("RISULTATO PRIMA DELLE IMPOSTE", "50,00"),
+                 ("20) Imposte sul reddito", "(15,00)"),
+                 ("UTILE DELL’ESERCIZIO", "35,00")]
+
+    def tab(caption, voci, pagina):
+        return _tabella(caption, [["Voce", "2025 (€)"]] + [list(v) for v in voci], pagina)
+
+    contesto = SimpleNamespace(tables=(
+        tab("STATO PATRIMONIALE - ATTIVO", voci_attivo, 0),
+        tab("STATO PATRIMONIALE - PASSIVO", voci_passivo, 0),
+        tab("CONTO ECONOMICO", voci_ce_1, 0), tab("", voci_ce_2, 1)), full_text="")
+    letto = ps.estrai_da_mineru(contesto)
+    assert letto.get("bs") is not None, letto.get("rifiuto")
+    assert letto["bs"]["sp13"] == D("35.00")
+    assert letto["ce"]["ce06"] == D("300.00")
+    assert letto["stampati"]["totale_attivo"] == D("810.00")

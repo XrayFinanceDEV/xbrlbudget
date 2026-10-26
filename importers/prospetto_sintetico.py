@@ -87,12 +87,7 @@ def _righe(doc: fitz.Document) -> Optional[list[tuple[str, str, Decimal]]]:
             n = _norm(testo)
             importi = [w for w in parole if _IMPORTO.match(w[4])]
             if not importi:
-                if n.startswith("stato patrimoniale") and "attivo" in n:
-                    sezione = "SPA"
-                elif n.startswith("stato patrimoniale") and "passivo" in n:
-                    sezione = "SPP"
-                elif n.startswith("conto economico"):
-                    sezione = "CE"
+                sezione = _sezione_del_titolo(n, sezione)
                 continue
             if len(importi) > 1:
                 return None
@@ -100,6 +95,40 @@ def _righe(doc: fitz.Document) -> Optional[list[tuple[str, str, Decimal]]]:
             if sezione is None or not etichetta or etichetta in ("voce", "2025 (eur)"):
                 continue
             out.append((sezione, etichetta, _valore(importi[0][4])))
+    return out
+
+
+def _sezione_del_titolo(n: str, sezione: Optional[str]) -> Optional[str]:
+    """La sezione che un titolo normalizzato apre, altrimenti quella in corso."""
+    if n.startswith("stato patrimoniale") and "attivo" in n:
+        return "SPA"
+    if n.startswith("stato patrimoniale") and "passivo" in n:
+        return "SPP"
+    if n.startswith("conto economico"):
+        return "CE"
+    return sezione
+
+
+def _righe_mineru(tables) -> Optional[list[tuple[str, str, Decimal]]]:
+    """Le stesse terne di ``_righe`` dalle tabelle di MinerU (budget_1405 scansionato): la
+    sezione dalla didascalia della tabella, una tabella senza didascalia continua quella
+    prima; None se una riga porta piu' di un importo."""
+    out: list[tuple[str, str, Decimal]] = []
+    sezione = None
+    for table in tables:
+        sezione = _sezione_del_titolo(_norm(table.caption or ""), sezione)
+        for row in table.rows:
+            celle = [str(c.text or "").strip() for c in row.cells]
+            importi = [c for c in celle if _IMPORTO.match(c)]
+            if not importi:
+                sezione = _sezione_del_titolo(_norm(" ".join(celle)), sezione)
+                continue
+            if len(importi) > 1:
+                return None
+            etichetta = _norm(" ".join(c for c in celle if c and c is not importi[0]))
+            if sezione is None or not etichetta or etichetta in ("voce", "2025 (eur)"):
+                continue
+            out.append((sezione, etichetta, _valore(importi[0])))
     return out
 
 
@@ -113,6 +142,10 @@ def riconosci(file_path: str) -> bool:
             righe = _righe(doc)
     except Exception:
         return False
+    return _riconosci_righe(righe)
+
+
+def _riconosci_righe(righe: Optional[list[tuple[str, str, Decimal]]]) -> bool:
     if not righe:
         return False
     sezioni = {s for s, _, _ in righe}
@@ -148,11 +181,21 @@ def estrai(file_path: str) -> Optional[dict]:
     "approssimazioni"}`` (codici brevi, importi ``Decimal``) o ``{"rifiuto": ...}``."""
     if not riconosci(file_path):
         return None
+    with fitz.open(file_path) as doc:
+        return _estrai_righe(_righe(doc))
+
+
+def estrai_da_mineru(context) -> Optional[dict]:
+    """Come ``estrai``, dalle tabelle di MinerU di una scansione."""
+    righe = _righe_mineru(getattr(context, "tables", ()) or ())
+    if not _riconosci_righe(righe):
+        return None
+    return _estrai_righe(righe)
+
+
+def _estrai_righe(righe: list[tuple[str, str, Decimal]]) -> dict:
     from importers.import_snello.percorsi import NOMI, campo_da_percorso, famiglia
     from importers.schema_etichette_parser import _VALORE_PRODUZIONE
-
-    with fitz.open(file_path) as doc:
-        righe = _righe(doc)
 
     bs: dict[str, Decimal] = {}
     ce: dict[str, Decimal] = {}

@@ -390,8 +390,28 @@ Jenkins `budget-env-staging`:
 MINERU_OCR_ENABLED=true
 MINERU_BASE_URL=https://kpsfinanciallab.w3pro.it:89
 MINERU_API_KEY=<chiave>
-MINERU_EXPECTED_VERSION=3.4.5
+MINERU_EXPECTED_VERSION=4
 ```
+
+**Dal 2026-10-26 gx10 serve MinerU 4 (4.0.12, il VLM)**, con un'API diversa da quella di prima:
+`GET /v1/health` (`status: "ok"`) e `POST /v1/file_parse?tier=advanced&ocr_mode=ocr&output_formats=markdown&output_formats=middle_json&wait_timeout=…`,
+PDF in multipart `files`. `advanced` è il VLM, l'unico che fa quadrare le scansioni (`MINERU_TIER`;
+`flash` legge solo il text layer). Il server tiene aperta la richiesta per `wait_timeout` secondi (50,
+`MINERU_WAIT_SECONDS`: sui VPS la POST passa dal proxy nginx di gx10, e un'attesa oltre il suo
+timeout di lettura tornerebbe 504); un lavoro ancora in coda risponde **202** con `task_id` e il client interroga
+`GET /v1/tasks/{task_id}/result` ogni 3 secondi fino al 200, entro `MINERU_TIMEOUT_SECONDS` in
+tutto. La coda pesa più dell'analisi: su Unicarton 31/08/2026, 3 minuti e mezzo di attesa per 2 di
+lettura. Il risultato porta `files[0].content.markdown` e `files[0].content.middle_json.pages[]`,
+con il numero di pagina sulla pagina e non più su ogni blocco: `mineru_client._blocchi_da_pagine`
+lo riporta alla lista piatta di blocchi con `page_idx` che l'adapter legge da sempre, quindi adapter
+e lettori a valle non sono cambiati. Le rotte vecchie (`/health`, `/file_parse`) rispondono 404, e
+con il client di prima ogni scansione ripiegava in silenzio sull'OCR di riserva («OCR MINERU NON
+DISPONIBILE»).
+
+`MINERU_EXPECTED_VERSION` fissa **solo i componenti che scrive** (`versione_compatibile`): `4`
+accetta ogni 4.x, `4.0.12` solo quella. Un pin esatto faceva ripiegare ogni import a ogni rilascio
+minore di gx10; il contratto cambia col numero maggiore. Il container locale del profile `mineru`
+(immagine 3.2.0, sotto) parla ancora l'API vecchia e **non** risponde più al client.
 
 **Sulle situazioni contabili a sezioni contrapposte niente modello** (decisione del proprietario,
 2026-10-14). Se le tabelle di MinerU hanno quella forma — didascalia stato patrimoniale / conto

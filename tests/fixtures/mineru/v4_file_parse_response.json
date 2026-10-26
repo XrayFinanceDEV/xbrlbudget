@@ -1,0 +1,260 @@
+{
+ "task_id": "job_0123456789abcdef",
+ "status": "completed",
+ "created_at": "2026-10-26T10:34:55Z",
+ "started_at": "2026-10-26T10:38:24Z",
+ "finished_at": "2026-10-26T10:40:25Z",
+ "tier": "advanced",
+ "output_formats": [
+  "markdown",
+  "middle_json"
+ ],
+ "access_level": "anonymous",
+ "progress": {
+  "completed": 1,
+  "failed": 0,
+  "total": 1
+ },
+ "files": [
+  {
+   "file_id": "file-0123456789abcdef01234567",
+   "name": "sample.pdf",
+   "page_range": "1-2",
+   "status": "completed",
+   "parse": {
+    "model_used": null,
+    "duration_ms": 121341,
+    "parser_version": "4.0.12"
+   },
+   "output_files": {
+    "markdown": {
+     "file_id": "file-a",
+     "bytes": 508
+    },
+    "middle_json": {
+     "file_id": "file-b",
+     "bytes": 1
+    },
+    "structured_content": null,
+    "html": null,
+    "latex": null,
+    "docx": null,
+    "zip": null
+   },
+   "error": null,
+   "content": {
+    "markdown": "## Bilancio di verifica\n\nal 31/08/2026\n\n<table><tr><td colspan=\"3\">Attività</td><td colspan=\"3\">Passività</td></tr><tr><td>Conto</td><td>Descrizione</td><td>Importo</td><td>Conto</td><td>Descrizione</td><td>Importo</td></tr><tr><td>05</td><td>IMMOBILIZZAZIONI MATERIALI</td><td>100.000,00</td><td>23</td><td>CAPITALE E RISERVE</td><td>100.000,00</td></tr></table>\n\n<table><tr><td>Codice</td><td>Descrizione</td><td>Importo</td></tr><tr><td>47</td><td>RICAVI DELLE VENDITE</td><td>50.000,00</td></tr></table>\n",
+    "middle_json": {
+     "metadata": {
+      "file_suffix": "pdf",
+      "producer": {
+       "name": "mineru",
+       "version": "4.0.12"
+      }
+     },
+     "extensions": {
+      "mineru": {
+       "tier": "advanced",
+       "parse_mode": "ocr"
+      }
+     },
+     "pages": [
+      {
+       "page_idx": 0,
+       "blocks": [
+        {
+         "type": "header",
+         "index": 0,
+         "bbox": [
+          0.03,
+          0.006,
+          0.1,
+          0.016
+         ],
+         "content": [
+          {
+           "type": "text",
+           "content": "Esempio Srl"
+          }
+         ]
+        },
+        {
+         "type": "paragraph_title",
+         "index": 1,
+         "bbox": [
+          0.4,
+          0.05,
+          0.6,
+          0.06
+         ],
+         "content": [
+          {
+           "type": "text",
+           "content": "Bilancio di verifica"
+          }
+         ]
+        },
+        {
+         "type": "text",
+         "index": 2,
+         "bbox": [
+          0.1,
+          0.06,
+          0.3,
+          0.07
+         ],
+         "content": [
+          {
+           "type": "text",
+           "content": "al 31/08/2026"
+          }
+         ]
+        },
+        {
+         "type": "table",
+         "index": 4,
+         "bbox": [
+          0.02,
+          0.09,
+          0.98,
+          0.9
+         ],
+         "content": [
+          {
+           "type": "table_caption",
+           "index": 3,
+           "bbox": [
+            0.4,
+            0.07,
+            0.6,
+            0.09
+           ],
+           "content": [
+            {
+             "type": "text",
+             "content": "STATO PATRIMONIALE"
+            }
+           ]
+          },
+          {
+           "type": "table_body",
+           "index": 4,
+           "bbox": [
+            0.02,
+            0.09,
+            0.98,
+            0.9
+           ],
+           "content": "<table><tr><td colspan=\"3\">Attività</td><td colspan=\"3\">Passività</td></tr><tr><td>Conto</td><td>Descrizione</td><td>Importo</td><td>Conto</td><td>Descrizione</td><td>Importo</td></tr><tr><td>05</td><td>IMMOBILIZZAZIONI MATERIALI</td><td>100.000,00</td><td>23</td><td>CAPITALE E RISERVE</td><td>100.000,00</td></tr></table>"
+          }
+         ]
+        },
+        {
+         "type": "page_number",
+         "index": 5,
+         "bbox": [
+          0.9,
+          0.95,
+          0.95,
+          0.97
+         ],
+         "content": [
+          {
+           "type": "text",
+           "content": "1"
+          }
+         ]
+        }
+       ]
+      },
+      {
+       "page_idx": 1,
+       "blocks": [
+        {
+         "type": "table",
+         "index": 0,
+         "bbox": [
+          0.02,
+          0.09,
+          0.98,
+          0.9
+         ],
+         "content": [
+          {
+           "type": "table_caption",
+           "index": 0,
+           "bbox": [
+            0.4,
+            0.07,
+            0.6,
+            0.09
+           ],
+           "content": [
+            {
+             "type": "text",
+             "content": "CONTO ECONOMICO"
+            }
+           ]
+          },
+          {
+           "type": "table_body",
+           "index": 1,
+           "bbox": [
+            0.02,
+            0.09,
+            0.98,
+            0.9
+           ],
+           "content": "<table><tr><td>Codice</td><td>Descrizione</td><td>Importo</td></tr><tr><td>47</td><td>RICAVI DELLE VENDITE</td><td>50.000,00</td></tr></table>"
+          },
+          {
+           "type": "table_footnote",
+           "index": 2,
+           "bbox": [
+            0.02,
+            0.9,
+            0.5,
+            0.92
+           ],
+           "content": [
+            {
+             "type": "text",
+             "content": "Importi in euro"
+            }
+           ]
+          }
+         ]
+        },
+        {
+         "type": "footer",
+         "index": 3,
+         "bbox": [
+          0.1,
+          0.96,
+          0.5,
+          0.98
+         ],
+         "content": [
+          {
+           "type": "text",
+           "content": "Stampato con gestionale"
+          }
+         ]
+        }
+       ]
+      }
+     ],
+     "is_full_document": true,
+     "schema": "docvortex.middle",
+     "schema_version": "2.0"
+    }
+   }
+  }
+ ],
+ "links": {
+  "self": "/v1/tasks/job_0123456789abcdef",
+  "cancel": "/v1/tasks/job_0123456789abcdef"
+ },
+ "status_url": "/v1/tasks/job_0123456789abcdef",
+ "result_url": "/v1/tasks/job_0123456789abcdef/result"
+}

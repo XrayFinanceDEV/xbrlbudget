@@ -87,8 +87,8 @@ def _mineru_context(file_path: str):
 
     client = MinerUClient(
         base_url=os.environ.get("MINERU_BASE_URL", "http://127.0.0.1:8002"),
-        expected_version="3.2.0", language="latin",
-        backend="pipeline", parse_method="ocr", timeout_seconds=600.0,
+        api_key=os.environ.get("MINERU_API_KEY"), expected_version="4",
+        tier="advanced", ocr_mode="ocr", timeout_seconds=900.0,
     )
     content = open(file_path, "rb").read()
 

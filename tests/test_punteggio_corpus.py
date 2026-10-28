@@ -79,3 +79,14 @@ def test_un_documento_da_rifiutare_non_ha_confronto_dei_campi():
     d = P.punteggio_documento(vero, [{"importato": False, "errore": "PDFImportError: solo CE", "esercizi": []}])
     assert d["giri"][0]["esito_giusto"] is True
     assert d["giri"][0]["periodi"] == []
+
+
+def test_l_esercizio_salvato_si_abbina_per_anno_non_per_posizione():
+    assert P.anno_del_periodo("2025-12") == 2025
+    assert P.anno_del_periodo(None) is None
+    vero = {"id": "Z", "giudizio_atteso": "importabile",
+            "periodi": [{"fine": "2025-12", "periodo": None, "campi": _vero(sp09=10.0)},
+                        {"fine": "2024-12", "periodo": None, "campi": _vero(sp09=8.0)}]}
+    giro = {"importato": True, "esercizi": [{"anno": 2026, "mesi": None, "campi": {"sp09": 10.0}}]}
+    d = P.punteggio_documento(vero, [giro])
+    assert [p["salvato"] for p in d["giri"][0]["periodi"]] == [False, False]   # l'anno sbagliato non conta

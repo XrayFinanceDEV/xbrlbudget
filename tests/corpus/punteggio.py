@@ -126,7 +126,13 @@ def mesi_del_periodo(periodo: str | None) -> int | None:
 
 # --- import ---------------------------------------------------------------------------------------
 
-def importa(percorso: Path, period_months: int | None) -> dict:
+def anno_del_periodo(fine: str | None) -> int | None:
+    """L'anno di chiusura, quello che l'utente scrive nell'import (`fiscal_year` è obbligatorio
+    sull'endpoint: senza, l'importatore salva l'anno di oggi e non salva l'esercizio precedente)."""
+    return int(fine[:4]) if fine and fine[:4].isdigit() else None
+
+
+def importa(percorso: Path, period_months: int | None, fiscal_year: int | None = None) -> dict:
     """Un giro dell'importatore di produzione: ciò che ha salvato, per esercizio. Non solleva mai."""
     sys.path.insert(0, str(ROOT))
     sys.path.insert(0, str(ROOT / "backend"))
@@ -137,7 +143,7 @@ def importa(percorso: Path, period_months: int | None) -> dict:
     scansione = _e_una_scansione(percorso.read_bytes())
     metodo = "ocr" if scansione and os.environ.get("MINERU_OCR_ENABLED", "").lower() in ("1", "true") else "standard"
     t0 = time.monotonic()
-    rec = probe(str(percorso), metodo, period_months=period_months)
+    rec = probe(str(percorso), metodo, fiscal_year=fiscal_year, period_months=period_months)
     esito = {"metodo": metodo, "scansione": scansione, "secondi": round(time.monotonic() - t0, 1),
              "importato": bool(rec.get("ok")) and not rec.get("error"), "errore": rec.get("error"),
              "estrattore": rec.get("extraction_method"), "quadra": rec.get("quadra"),
@@ -185,7 +191,7 @@ def punteggio_documento(vero: dict, giri: list[dict]) -> dict:
              "quadra": g.get("quadra"), "secondi": g.get("secondi"), "periodi": []}
         if g["importato"] and vero["giudizio_atteso"] != "da rifiutare":
             for i, per in enumerate(vero["periodi"][:2]):
-                letto = g["esercizi"][i]["campi"] if i < len(g["esercizi"]) else None
+                letto = _esercizio_del_periodo(g["esercizi"], per, i)
                 c = confronta_periodo(per["campi"], letto or {})
                 c["fine"] = per["fine"]
                 c["salvato"] = letto is not None
@@ -193,6 +199,14 @@ def punteggio_documento(vero: dict, giri: list[dict]) -> dict:
         risultati.append(r)
     stab = _stabilita(giri)
     return {"id": vero["id"], "giudizio_atteso": vero["giudizio_atteso"], "giri": risultati, "stabilita": stab}
+
+
+def _esercizio_del_periodo(esercizi: list[dict], per: dict, i: int) -> dict | None:
+    """L'esercizio salvato con l'anno del periodo; senza anno nel periodo, quello nella stessa posizione."""
+    anno = anno_del_periodo(per.get("fine"))
+    if anno is None:
+        return esercizi[i]["campi"] if i < len(esercizi) else None
+    return next((e["campi"] for e in esercizi if e["anno"] == anno), None)
 
 
 def _stabilita(giri: list[dict]) -> dict | None:
@@ -301,8 +315,9 @@ def main() -> None:
                     print(f"{id_}: verità assente, saltato", flush=True)
                     continue
                 mesi = mesi_del_periodo(vero["periodi"][0]["periodo"]) if vero["periodi"] else None
+                anno = anno_del_periodo(vero["periodi"][0]["fine"]) if vero["periodi"] else None
                 for n in range(args.ripetizioni):
-                    e = importa(CORPUS / campione[id_]["path"], mesi)
+                    e = importa(CORPUS / campione[id_]["path"], mesi, anno)
                     e.update(id=id_, giro=n + 1)
                     out.write(json.dumps(e, ensure_ascii=False) + "\n")
                     out.flush()

@@ -752,6 +752,13 @@ def _costruisci(righe: list[_Riga], colonne: int, vuote_zero: bool = False,
             padre.figli.append(_Nodo(r.didascalia, padre.livello + 1, "SPA.C.II.5-ter", padre,
                                      valori=r.valori, sezione=sezione))
             continue
+        if sezione == "sp" and padre.percorso == "SPA.C" and _norm(r.didascalia).startswith(
+                "immobilizzazioni materiali destinate alla vendita"):
+            # la voce C.I-bis (OIC 16), stampata senza enumeratore fra le rimanenze e i crediti:
+            # altrimenti finirebbe sul secchio dei crediti e il totale crediti non tornerebbe
+            padre.figli.append(_Nodo(r.didascalia, padre.livello + 1, "SPA.C.I-bis", padre,
+                                     valori=r.valori, sezione=sezione))
+            continue
         aperto = any(padre.percorso == p or padre.percorso.startswith(p + ".")
                      for p in _PADRI_APERTI) or (eredita_dal_padre and _campo(padre.percorso) is not None)
         valori = r.valori
@@ -776,6 +783,10 @@ def _campo(percorso: str) -> Optional[str]:
         # "5) verso imprese sottoposte al controllo delle controllanti": credito vero senza un
         # sotto-campo proprio nella tabella di legge dell'importatore, va fra gli altri crediti.
         return "sp07g" if percorso.endswith(".O") else "sp06g"
+    if campo is None and percorso == "SPA.C.I-bis":
+        # attivo corrente non liquido, senza un campo proprio: con le rimanenze, come nel VBA
+        # legacy (resta fuori dal quick ratio); si dichiara fra gli ignoti
+        return "sp05"
     return campo
 
 
@@ -802,6 +813,7 @@ class _Colonna:
     scadenze_lette: bool = False
     scadenza_assente: bool = False          # debiti
     scadenza_crediti_assente: bool = False
+    destinate_vendita: Decimal = _ZERO      # C.I-bis, dentro sp05 ma fuori dal totale di C.I
 
 
 def _aggiungi(importi: dict[str, Decimal], codice: str, v: Decimal) -> None:
@@ -861,6 +873,10 @@ def _piazza(foglia: _Nodo, v: Decimal, out: _Colonna) -> None:
         out.massa += abs(v)
         out.ignoti.append((foglia.didascalia, secchio, str(v)))
         return
+    if foglia.percorso == "SPA.C.I-bis":
+        out.destinate_vendita += v
+        if v != 0:
+            out.ignoti.append((foglia.didascalia, campo, str(v)))
     if _norm(foglia.didascalia) == "perdita ripianata nell'esercizio" and v != 0:
         out.massa += abs(v)
         out.ignoti.append((foglia.didascalia, campo, str(v)))
@@ -1118,7 +1134,7 @@ _AGGREGATI_DEL_TOTALE = {
 
 
 def _verifica(col: int, bs: dict, ce: dict, stampati: dict, calcolati: dict,
-              totali: list) -> list:
+              totali: list, destinate_vendita: Decimal = _ZERO) -> list:
     """Controlli di campo (dopo la traduzione percorso -> campo): ognuno al centesimo."""
     from calculations.ce_result import calculate_ce_result
     from importers.iv_cee_hierarchy import _ATTIVO_FIELDS, _PASSIVO_FIELDS
@@ -1142,6 +1158,8 @@ def _verifica(col: int, bs: dict, ce: dict, stampati: dict, calcolati: dict,
             continue
         sorgente = ce if nodo.percorso.startswith("CE") else bs
         letto = sum((Decimal(sorgente.get(NOMI[c], 0)) for c in campi), _ZERO)
+        if nodo.percorso == "SPA.C.I":
+            letto -= destinate_vendita      # sp05 porta anche la C.I-bis, il totale di C.I no
         if _diversi(letto, valori[col]):
             errori.append((col, "aggregati_del_totale", {
                 "didascalia": didascalia, "campi": list(campi), "letto": str(letto),
@@ -1290,7 +1308,8 @@ def _estrai_da_righe(documento: fitz.Document, righe: list[_Riga], colonne: int,
             for tipo, raccolta in tabelle.items():
                 dettagli[tipo] = _applica_tabella(importi, tipo, raccolta)
         bs, ce = _chiudi(importi)
-        anomalie[c].extend(_verifica(c, bs, ce, stampati, calcolati, totali))
+        anomalie[c].extend(_verifica(c, bs, ce, stampati, calcolati, totali,
+                                     destinate_vendita=dati.destinate_vendita))
         bs["_unclassified_mass"] = dati.massa.quantize(_C)
         bs["_plug_residual"] = Decimal("0.00")
         # un flag per lato (Task 24, fix round 2): debiti e crediti si dichiarano separatamente

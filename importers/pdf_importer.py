@@ -49,6 +49,52 @@ def _validation_report_payload(q, reliability=None) -> Dict[str, Any]:
     return payload
 
 
+def _avviso_risultato_ricostruito(importo) -> str:
+    return (
+        "RISULTATO ESERCIZIO PRECEDENTE RICOSTRUITO DAI TOTALI: il documento stampa la "
+        "didascalia del risultato dell'esercizio precedente ma l'importo non e' leggibile; "
+        f"€{_euro_it(Decimal(str(importo)))} e' stato ricostruito come differenza dei totali "
+        "dello Stato Patrimoniale meno l'utile del Conto Economico (verificato dai suoi "
+        "totali) e messo negli utili portati a nuovo. Verificarlo in Rettifiche.")
+
+
+def _avvisi_fondi_snello(diag: dict) -> list[str]:
+    """Gli avvisi sui fondi che il percorso snello ha dichiarato nel suo diag."""
+    avvisi = []
+    gia_nettati = diag.get('fondi_gia_nettati')
+    if gia_nettati:
+        # la voce stampava gia' il netto: il fondo letto a parte non si sottrae una seconda volta
+        avvisi.append(
+            'FONDO GIA\' NETTATO: la voce stampa gia\' il valore al netto del fondo, che non e\' '
+            'stato sottratto una seconda volta ('
+            + ', '.join(f'{q[:-2]} {v}' for q, v in gia_nettati) + ').')
+    tagliate = diag.get('immobilizzazioni_negative_tagliate')
+    if tagliate:
+        # budget_1452: i fondi degli immateriali (1.086,25) superano il costo storico (1.000)
+        avvisi.append(
+            'FONDO OLTRE IL COSTO STORICO: il fondo ammortamento supera il valore lordo del '
+            'cespite (' + ', '.join(f'{campo} eccedenza {v}' for campo, v in tagliate)
+            + '). E\' un errore del documento: l\'immobilizzazione netta e\' stata portata a '
+            'zero e l\'eccedenza resta come sbilancio dichiarato - correggere in Rettifiche.')
+    return avvisi
+
+
+def _rifiuta_passivo_non_letto(bs) -> None:
+    """Un attivo letto con il passivo tutto a zero non e' un bilancio sbilanciato: e' una lettura
+    mancante (budget_1423/1418, vLLM che ometteva sp11-sp18 e pydantic che li riempiva a zero).
+    Salvarlo come "squadrato" consegnerebbe all'utente un passivo inventato a zero."""
+    if not bs:
+        return
+    from importers.iv_cee_hierarchy import _ATTIVO_FIELDS, _PASSIVO_FIELDS
+    attivo = sum((abs(Decimal(bs.get(k, 0) or 0)) for k in _ATTIVO_FIELDS), Decimal(0))
+    passivo = sum((abs(Decimal(bs.get(k, 0) or 0)) for k in _PASSIVO_FIELDS), Decimal(0))
+    if attivo > 0 and passivo == 0:
+        raise PDFImportError(
+            "Lettura del passivo mancante: il modello ha restituito l'attivo "
+            f"(€{_euro_it(attivo)}) ma nessuna voce del passivo. Il bilancio non e' stato "
+            "importato; riprovare l'import.")
+
+
 class PDFImportError(Exception):
     """Exception raised when PDF import fails."""
     pass
@@ -1631,6 +1677,7 @@ def import_pdf_balance_sheet(
                     "no prior column detected)"
                 )
                 bs, ce = extract_pdf_with_llm(file_path, force_llm=True)
+                _rifiuta_passivo_non_letto(bs)
                 return bs, ce, None, None
 
             # Da qui in giu' passano SIA il budget annuale SIA l'infrannuale comparato
@@ -1768,6 +1815,8 @@ def import_pdf_balance_sheet(
                         "Deterministic legal IV-CEE fallback declined (%s: %s)",
                         type(source_err).__name__, source_err,
                     )
+            if best is not None:
+                _rifiuta_passivo_non_letto(best[0])
             return best
 
         sc_quadratura_warnings = []
@@ -2202,6 +2251,8 @@ def import_pdf_balance_sheet(
                 'I totali sono stati assegnati ai sotto-campi convenzionali ('
                 + ', '.join(_approssimati)
                 + ') - affinare le riclassifiche in Rettifiche.')
+        if _snello is not None:
+            sc_quadratura_warnings.extend(_avvisi_fondi_snello(_snello.report.get('diag') or {}))
 
         # Diagnose the CE/SP result gap for PDF routes. The helper records
         # differences, including comparisons with a declared result when present,
@@ -2543,8 +2594,13 @@ def import_pdf_balance_sheet(
             **_detail_report.get("periods", {}).get("current", {}),
         }
         _critical_ok = _reliability is None or _reliability.all_critical_ok
+        # Risultato precedente ricostruito dai totali stampati (budget_1410, decisione del
+        # proprietario 2026-10-28): importo non letto, quindi da rivedere prima della proiezione.
+        _ricostruito = balance_sheet_data.get('_prior_result_ricostruito')
+        if _ricostruito:
+            _validation_payload['warnings'].append(_avviso_risultato_ricostruito(_ricostruito))
         _forecastable = (_qd.semantic_valid and _critical_ok and not _source_review
-                         and not _residual_report['requires_review'])
+                         and not _residual_report['requires_review'] and not _ricostruito)
 
         _stored_parser_version = _PDF_PARSER_VERSION
         if extraction_context is not None:

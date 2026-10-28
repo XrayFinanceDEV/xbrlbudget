@@ -13,6 +13,15 @@ def test_importi_con_segni_e_sottolineature():
     assert R.importi("conto 10000001673 c/c 320.100,68") == [(D("320100.68"), "")]
 
 
+def test_una_parentesi_non_chiusa_non_e_un_segno():
+    """budget_1450 (ABCLOG): «...CLIENTI (5.367,37» con la parentesi aperta e mai chiusa sulla
+    riga, una nota della descrizione. Letta come negativo spostava 990.911,70 sul passivo: il
+    segno fra parentesi vale solo se la parentesi si chiude."""
+    assert R.importi("FATTURE DA EMETTERE CLIENTI (5.367,37") == [(D("5367.37"), "")]
+    assert R.importi("Perdite (1.500,00)") == [(D("-1500.00"), "")]
+    assert R.importi("Perdite 1.500,00)") == [(D("1500.00"), "")]
+
+
 def test_etichetta():
     assert R.etichetta("10101 CASSA CONTANTI 839,66 D 2.000,00") == "10101 CASSA CONTANTI"
 
@@ -317,3 +326,110 @@ def test_riga_con_saldo_sporco_dopo_la_descrizione_con_euro_non_si_tocca(monkeyp
     monkeypatch.setattr(DE, "collect_source_rows", lambda *a, **k: fisiche)
     righe = R.righe_da_pdf("x.pdf", None, ["saldo_finale"])
     assert next(r for r in righe if r.id == "rs").valore == D("1461.86")
+
+
+def test_il_capitale_sociale_nella_ragione_sociale_e_testo_della_descrizione(monkeypatch):
+    """budget_1450 (ABCLOG, partitario): «876,48 1410000352 FIMER S.P.A. CAP. SOC. E
+    22.000.000,00». Il saldo sta nella colonna della pagina (x 57,8, a sinistra del codice); il
+    capitale sociale, preceduto dalla valuta, e' nella ragione sociale (x 224). Prendendo l'ultimo
+    importo il fornitore valeva 22 milioni."""
+    from importers import detail_enrichment as DE
+    from importers.import_snello import righe as R
+
+    fisiche = [_riga_fisica(f"r{i}", f"1{i},00 14100003{i} Fornitore {i}", [f"1{i}"], [57.8])
+               for i in range(1, 9)]
+    fisiche.append(_riga_fisica("rf", "876,48 1410000352 FIMER S.P.A. CAP. SOC. E 22.000.000,00",
+                                ["876.48", "22000000.00"], [57.8, 224.2]))
+    monkeypatch.setattr(DE, "collect_source_rows", lambda *a, **k: fisiche)
+    righe = R.righe_da_pdf("x.pdf", None, [])
+    assert next(r for r in righe if r.id == "rf").valore == D("876.48")
+
+
+def test_due_importi_senza_valuta_davanti_restano_come_prima(monkeypatch):
+    """Dare e avere su due colonne vere, o due sezioni affiancate: decide la regola di sempre."""
+    from importers import detail_enrichment as DE
+    from importers.import_snello import righe as R
+
+    fisiche = [_riga_fisica(f"r{i}", f"6{i}00 Conto {i} 1{i},00 2{i},00", [f"1{i}", f"2{i}"], [400.0, 480.0])
+               for i in range(1, 9)]
+    monkeypatch.setattr(DE, "collect_source_rows", lambda *a, **k: fisiche)
+    righe = R.righe_da_pdf("x.pdf", None, [])
+    assert next(r for r in righe if r.id == "r3").valore == D("23.00")
+
+
+def test_la_valuta_davanti_a_ogni_colonna_e_un_prefisso_non_una_descrizione(monkeypatch):
+    """budget_413: «a) esigibili entro € 1.229.007 € 1.095.752», due colonne-anno col simbolo
+    davanti: nessuno dei due importi e' descrizione, decide la regola di colonna di sempre."""
+    from importers import detail_enrichment as DE
+    from importers.import_snello import righe as R
+
+    fisiche = [_riga_fisica(f"r{i}", f"Voce {i} € 1.00{i} € 2.00{i}", [f"100{i}", f"200{i}"], [418.0, 510.0])
+               for i in range(1, 9)]
+    monkeypatch.setattr(DE, "collect_source_rows", lambda *a, **k: fisiche)
+    righe = R.righe_da_pdf("x.pdf", None, [])
+    assert next(r for r in righe if r.id == "r3").valore == D("2003.00")
+
+
+def test_un_partitario_col_totale_dopo_i_figli_si_riconosce_anche_se_il_documento_va_al_contrario():
+    """budget_1450 (ABCLOG): mastri col totale PRIMA dei figli, poi i partitari Clienti e
+    Fornitori (pagine 7-8) col totale DOPO i figli, su una riga senza descrizione. Una sola
+    direzione per tutto il documento lasciava vivi i figli dei partitari: +235.787 e +272.647."""
+    righe = [
+        _r("10", "300.00", testo="10 CREDITI"),
+        _r("1001", "100.00"), _r("1002", "200.00"),
+        _r("20", "50.00", testo="20 CASSA"),
+        _r("2001", "20.00"), _r("2002", "30.00"),
+        _r("c1", "11.00", testo="1410000606 CLIENTE A"),
+        _r("c2", "22.00", testo="1410000343 CLIENTE B"),
+        _r("c3", "33.00", testo="1410000009 CLIENTE C"),
+        _r("ct", "66.00", testo=" "),          # la riga del totale, senza descrizione
+    ]
+    R.marca_totali(righe)
+    assert {r.id for r in righe if r.totale} == {"10", "20", "ct"}
+    # il totale del partitario esce dalle foglie: prima si contavano lui E i suoi figli
+    assert {r.id for r in R.foglie(righe)} == {"1001", "1002", "2001", "2002", "c1", "c2", "c3"}
+
+
+def _rp(i, valore, pagina, lato="L", testo=None, totale=False, mastro=None):
+    return R.Riga(id=str(i), pagina=pagina, lato=lato, testo=testo or f"conto {i}",
+                  valore=D(valore), totale=totale, mastro=mastro)
+
+
+def test_il_partitario_che_ripete_un_conto_del_prospetto_non_si_conta_due_volte():
+    """budget_1450 (ABCLOG): «14 CLIENTI» / «1410 CLIENTI ITALIA 236.663,61» nello SP, e a
+    pagina 7 l'elenco dei clienti col totale 236.663,61. «20 FORNITORI» sta sui due lati
+    (274.834,91 al passivo, 2.187,55 di fornitori esteri all'attivo) e il partitario di pagina 8
+    li elenca insieme: 272.647,36, il saldo netto. Contati, gonfiavano il bilancio di 509.310.
+    Totali e mastri come li marca marca_totali sul documento vero."""
+    righe = [
+        _rp("14", "236663.61", 1, testo="14 CLIENTI", totale=True),
+        _rp("1410", "236663.61", 1, testo="1410 CLIENTI ITALIA", mastro="14 CLIENTI"),
+        _rp("20R", "274834.91", 1, "R", "20 FORNITORI", totale=True),
+        _rp("2010", "274834.91", 1, "R", "2010 FORNITORI ITALIA", mastro="20 FORNITORI"),
+        _rp("20L", "2187.55", 2, "L", "20 FORNITORI", totale=True),
+        _rp("2012", "2187.55", 2, "L", "2012 FORNITORI ESTERO", mastro="20 FORNITORI"),
+        _rp("1501", "600.00", 2, mastro="15 CASSA"), _rp("1502", "400.00", 2, mastro="15 CASSA"),
+        _rp("c1", "136663.61", 7, testo="1410000606 CLIENTE A", mastro=" "),
+        _rp("c2", "90000.00", 7, testo="1410000343 CLIENTE B", mastro=" "),
+        _rp("c3", "10000.00", 7, testo="1410000009 CLIENTE C", mastro=" "),
+        _rp("ct", "236663.61", 7, testo=" ", totale=True),
+        _rp("f1", "-2187.55", 8, testo="2012000010 FORNITORE ESTERO", mastro=" "),
+        _rp("f2", "274000.00", 8, testo="2010000588 FORNITORE ITALIA", mastro=" "),
+        _rp("f3", "834.91", 8, testo="2010000074 FORNITORE ITALIA 2", mastro=" "),
+        _rp("ft", "272647.36", 8, testo=" ", totale=True),
+    ]
+    escluse = R.escludi_partitari(righe)
+    assert {r.id for r in escluse} == {"c1", "c2", "c3", "f1", "f2", "f3"}
+    assert {r.id for r in R.foglie(righe)} == {"1410", "2010", "2012", "1501", "1502"}
+
+
+def test_un_elenco_il_cui_totale_non_ripete_alcun_conto_resta():
+    righe = [
+        _rp("1501", "600.00", 1, mastro="15 CASSA"), _rp("1502", "400.00", 1, mastro="15 CASSA"),
+        _rp("c1", "11.00", 3, testo="1410000606 CLIENTE A", mastro=" "),
+        _rp("c0", "0.00", 3, testo="1410000600 CLIENTE Z", mastro=" "),
+        _rp("c2", "22.50", 3, testo="1410000343 CLIENTE B", mastro=" "),
+        _rp("ct", "33.50", 3, testo=" ", totale=True),
+    ]
+    assert R.escludi_partitari(righe) == []
+    assert {"c1", "c2"} <= {r.id for r in R.foglie(righe)}

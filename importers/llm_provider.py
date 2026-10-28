@@ -181,12 +181,25 @@ def chiama_gx10_testo(system_prompt: str, messaggi: list[dict], *, max_tokens: i
                   transport=transport, schema=None)
 
 
+def schema_tutto_richiesto(output_model: type[pydantic.BaseModel]) -> dict:
+    """Lo schema del modello con ogni proprieta' in ``required``, anche nei modelli annidati.
+
+    Con la decodifica guidata vLLM puo' omettere un campo non richiesto, e pydantic lo riempie
+    col default (0) senza dirlo: sull'estrazione IV-CEE (budget_1423) Qwen saltava sp11-sp18 e il
+    passivo si salvava a zero. Richiesto, il campo va scritto (anche a 0 o null)."""
+    schema = output_model.model_json_schema()
+    for nodo in [schema, *schema.get("$defs", {}).values()]:
+        if isinstance(nodo.get("properties"), dict):
+            nodo["required"] = list(nodo["properties"])
+    return schema
+
+
 def chiama_gx10_strutturato(system_prompt: str, testo_utente: str,
                             output_model: type[pydantic.BaseModel], *, max_tokens: int,
                             timeout: float = 900.0,
                             transport: httpx.BaseTransport | None = None) -> pydantic.BaseModel:
     dati = chiama_gx10_json(system_prompt, [{"role": "user", "content": testo_utente}],
-                            output_model.model_json_schema(), max_tokens=max_tokens,
+                            schema_tutto_richiesto(output_model), max_tokens=max_tokens,
                             timeout=timeout, transport=transport)
     try:
         return output_model.model_validate(dati)

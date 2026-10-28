@@ -915,3 +915,35 @@ def test_provento_da_consolidato_fiscale_riduce_le_imposte(tmp_path):
     assert r["adottabile"] is True and r["rifiuto"] is None
     assert r["ce"]["ce20_imposte"] == D("7490")
     assert r["prior_ce"]["ce20_imposte"] == D("4081")
+
+
+# ---- C.I-bis: immobilizzazioni materiali destinate alla vendita (lotto week-43, 1418) ---------
+
+def _sp_con_destinate_alla_vendita():
+    """C.I con il suo totale, poi la voce C.I-bis senza enumeratore; i crediti scendono della
+    stessa massa, cosi' il totale dell'attivo circolante e il pareggio restano quelli stampati."""
+    sp = list(SP_ABBREVIATO)
+    sp = _sostituisci(sp, "esigibili entro l'esercizio successivo\n1.252.972\n1.185.768",
+                      "esigibili entro l'esercizio successivo\n1.252.822\n1.185.668")
+    sp = _sostituisci(sp, "Totale crediti\n1.252.972\n1.185.768",
+                      "Totale crediti\n1.252.822\n1.185.668")
+    i = sp.index("II - Crediti")
+    sp[i:i] = ["I - Rimanenze", "4) prodotti finiti e merci\n100\n100", "Totale rimanenze\n100\n100",
+               "Immobilizzazioni materiali destinate alla vendita\n50\n-"]
+    return sp
+
+
+def test_le_immobilizzazioni_destinate_alla_vendita_sono_la_voce_c_i_bis(tmp_path):
+    r = X.estrai(_abbreviato(tmp_path, sp=_sp_con_destinate_alla_vendita()))
+    assert r["adottabile"] is True, r["rifiuto"]
+    assert r["bs"]["sp05_rimanenze"] == D("150")                 # attivo corrente non liquido
+    assert r["bs"]["sp06_crediti_breve"] == D("1252822")         # mai fra i crediti
+    assert any("destinate alla vendita" in x[0].lower() for x in r["ignoti"])   # dichiarata
+    assert r["prior_bs"]["sp05_rimanenze"] == D("100")
+
+
+def test_il_totale_delle_rimanenze_si_controlla_ancora_senza_la_c_i_bis(tmp_path):
+    sp = _sostituisci(_sp_con_destinate_alla_vendita(), "Totale rimanenze\n100\n100",
+                      "Totale rimanenze\n101\n100")
+    r = X.estrai(_abbreviato(tmp_path, sp=sp))
+    assert r["adottabile"] is False

@@ -54,7 +54,7 @@ def test_la_richiesta_porta_bearer_schema_temperatura_zero_e_thinking_spento():
     body = json.loads(req.content)
     assert body["temperature"] == 0
     assert body["chat_template_kwargs"] == {"enable_thinking": False}
-    assert body["structured_outputs"] == {"json": Voce.model_json_schema()}
+    assert body["structured_outputs"] == {"json": llm_provider.schema_tutto_richiesto(Voce)}
     assert body["messages"] == [{"role": "system", "content": "SISTEMA"},
                                 {"role": "user", "content": "UTENTE"}]
     assert body["max_tokens"] == 500
@@ -252,3 +252,24 @@ def test_semaforo_limita_le_richieste_in_volo(monkeypatch):
           for _ in range(6)]
     [x.start() for x in th]; [x.join() for x in th]
     assert massimo[0] == 2
+
+
+class _Riga(pydantic.BaseModel):
+    importo: Decimal = Decimal("0")
+
+
+class _ConDefault(pydantic.BaseModel):
+    sp11_capitale: Decimal = Decimal("0")
+    sp16_debiti_breve: Decimal = Decimal("0")
+    righe: list[_Riga] = []
+
+
+def test_lo_schema_inviato_richiede_ogni_campo_anche_quelli_con_default():
+    """Con la decodifica guidata un campo non richiesto si puo' omettere e pydantic lo riempie a
+    zero in silenzio (budget_1423: passivo salvato a zero). Lo schema inviato li richiede tutti."""
+    h = _risposta(content=json.dumps({"sp11_capitale": "1", "sp16_debiti_breve": "2", "righe": []}))
+    chiama_gx10_strutturato("s", "u", _ConDefault, max_tokens=500, transport=httpx.MockTransport(h))
+    schema = json.loads(h.richiesta.content)["structured_outputs"]["json"]
+    assert schema["required"] == ["sp11_capitale", "sp16_debiti_breve", "righe"]
+    assert schema["$defs"]["_Riga"]["required"] == ["importo"]
+    assert "required" not in _ConDefault.model_json_schema()      # il modello resta com'e'

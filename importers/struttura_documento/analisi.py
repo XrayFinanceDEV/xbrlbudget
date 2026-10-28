@@ -169,6 +169,15 @@ def _riclassificato_con_captions_legali(prospetti: list[dict], pdf: str | None) 
     dettaglio_conti, non un piano dei conti piatto)."""
     if not any(m.get("schema") == "riclassificato_con_codici_ivcee" for m in prospetti):
         return False
+    if pdf:
+        # conti su due lati (sezioni contrapposte) non sono uno schema di legge, anche se
+        # qualche didascalia lo ricorda (budget_1432: letto in «legge», lordi e fondi mescolati)
+        from importers.situazione_contabile_parser import is_contrapposte_file
+        try:
+            if is_contrapposte_file(pdf):
+                return False
+        except Exception:
+            pass
     return _porta_captions_legali_con_totali(pdf)
 
 
@@ -213,8 +222,67 @@ def _colonne_di(mappe: list[dict], tipi: set[str]) -> tuple[list[str], list[str]
     for m in mappe:
         if m.get("tipo_pagina") in tipi and m.get("sezioni"):
             col = m["sezioni"][0].get("colonne") or []
-            return [c.get("ruolo", "altro") for c in col], [c.get("intestazione", "") for c in col]
+            ruoli = [c.get("ruolo", "altro") for c in col]
+            intestazioni = [c.get("intestazione", "") for c in col]
+            return _ruoli_dalle_intestazioni(ruoli, intestazioni), intestazioni
     return [], []
+
+
+_DIDASCALIA_DI_RIGA = re.compile(
+    r"^\s*(?:[A-E]|[IVX]+|\d{1,2}(?:-(?:bis|ter|quater))?|[a-e])\s*[\).]\s+\S|^\s*(?:totale|differenza|risultato)\b",
+    re.I)
+
+
+def _sono_didascalie(intestazioni: list[str]) -> bool:
+    """Le «intestazioni» sono in maggioranza didascalie di riga (voci di legge), non colonne."""
+    righe = [i for i in intestazioni if _DIDASCALIA_DI_RIGA.match(i or "")]
+    return len(intestazioni) >= 3 and len(righe) * 2 > len(intestazioni)
+
+
+def _colonne_vere(proprie: tuple[list[str], list[str]],
+                  altre: tuple[list[str], list[str]]) -> tuple[list[str], list[str]]:
+    """Le colonne di una sezione, salvo che la vision abbia dichiarato come colonne le didascalie
+    di riga (budget_1433: «5) Altri ricavi e proventi», «B) Costi della produzione»... come
+    colonne del CE, e il modello saltava i ricavi). Allora valgono quelle dell'altra sezione dello
+    stesso documento, se sono vere; altrimenti nessuna."""
+    if not _sono_didascalie(proprie[1]):
+        return proprie
+    return altre if altre[1] and not _sono_didascalie(altre[1]) else ([], [])
+
+
+_DATA_O_ANNO = re.compile(r"(?:(\d{1,2})[/.\-](\d{1,2})[/.\-])?(20\d{2})")
+
+
+def _ruoli_dalle_intestazioni(ruoli: list[str], intestazioni: list[str]) -> list[str]:
+    """L'intestazione stampata decide il ruolo della colonna, la vision propone soltanto: quando
+    la vision non da' nessuna colonna di saldo e le intestazioni non parlano di dare/avere, i ruoli
+    si leggono da loro (budget_1445: [dare, avere, dare, avere] su «Periodo fino al 30/06/2026 |
+    ... al 30/06/2025 | Diff. % | Diff. Valore»). «Diff», «variaz», «scostam» sono variazioni,
+    «%» una percentuale; fra le colonne datate la piu' recente e' il saldo corrente, le altre il
+    precedente. Senza alcuna colonna datata, nessun verdetto: restano i ruoli della vision."""
+    if (any(r in ("saldo_corrente", "saldo_finale") for r in ruoli)
+            or len(intestazioni) != len(ruoli)
+            or any(re.search(r"\b(dare|avere)\b", i, re.I) for i in intestazioni)):
+        return ruoli
+    nuovi: list[str | None] = []
+    date: dict[int, tuple[int, int, int]] = {}
+    for k, i in enumerate(intestazioni):
+        testo = i.casefold()
+        if re.search(r"\bdiff|variaz|scostam", testo):
+            nuovi.append("percentuale" if "%" in testo else "variazione")
+            continue
+        if "%" in testo:
+            nuovi.append("percentuale")
+            continue
+        m = _DATA_O_ANNO.search(i)
+        if m:
+            date[k] = (int(m.group(3)), int(m.group(2) or 0), int(m.group(1) or 0))
+        nuovi.append(None)
+    if not date:
+        return ruoli
+    corrente = max(date, key=date.get)
+    return [("saldo_corrente" if k == corrente else "saldo_precedente") if k in date
+            else (r if r is not None else ruoli[k]) for k, r in enumerate(nuovi)]
 
 
 def route_da_mappe(mappe: list[dict]) -> str | None:
@@ -284,6 +352,103 @@ def _assorbi_continuazioni_perse(mappe: list[dict], pdf: str) -> list[dict]:
     return out
 
 
+_TITOLO_SEZIONE_SP = re.compile(r"^\s*stato\s+patrimoniale\b", re.I | re.M)
+_TITOLO_SEZIONE_CE = re.compile(r"^\s*conto\s+economico\s*$", re.I | re.M)
+_FINE_PROSPETTI = re.compile(r"(?i)nota\s+integrativa|rendiconto\s+finanziario")
+
+
+def _pagine_dai_titoli(pagine_sp: list[int], pagine_ce: list[int],
+                       testi: dict[int, str]) -> tuple[list[int], list[int]]:
+    """I titoli di sezione stampati decidono le pagine quando la vision li contraddice: una
+    pagina del CE prima del titolo «Conto economico», o una dello SP dopo (budget_1445, 14
+    pagine: SP [3, 5] e CE [1, 6, 9, 12, 13, 14] dalla vision, titoli a p.1, p.6 e p.9). Lo SP
+    va dal primo titolo dello SP fino al titolo del CE (compresa quella pagina se il titolo non
+    sta in testa), il CE dal suo titolo fino all'ultima pagina con importi prima della nota
+    integrativa. Senza contraddizione, o senza titoli con importi, decide la vision."""
+    def importi(n):
+        return len(_IMPORTO.findall(testi.get(n, "")))
+
+    con_titolo = lambda rx: [n for n in sorted(testi) if rx.search(testi[n])
+                             and importi(n) >= _MIN_IMPORTI_PAGINA]
+    titoli_sp, titoli_ce = con_titolo(_TITOLO_SEZIONE_SP), con_titolo(_TITOLO_SEZIONE_CE)
+    if not titoli_sp or not titoli_ce or min(titoli_ce) <= min(titoli_sp):
+        return pagine_sp, pagine_ce
+    a, c = min(titoli_sp), min(titoli_ce)
+    if not (any(p < c for p in pagine_ce) or any(p > c for p in pagine_sp)):
+        return pagine_sp, pagine_ce
+    sp = [n for n in range(a, c) if importi(n) >= _MIN_IMPORTI_PAGINA]
+    righe_c = [r for r in testi[c].splitlines() if r.strip()]
+    if next(i for i, r in enumerate(righe_c) if _TITOLO_SEZIONE_CE.match(r)) > 3:
+        sp.append(c)            # il CE si apre a meta' pagina: sopra c'e' la coda dello SP
+    ce = []
+    for n in range(c, max(testi) + 1):
+        if importi(n) < _MIN_IMPORTI_PAGINA or (n > c and _FINE_PROSPETTI.search(testi[n])):
+            break
+        ce.append(n)
+    return sp, ce
+
+
+_DATA_INTESTAZIONE = re.compile(r"\d{1,2}[/.\-]\d{1,2}[/.\-]20\d{2}")
+
+
+def _ordina_colonne(ruoli: list[str], intestazioni: list[str],
+                    parole: list) -> tuple[list[str], list[str]]:
+    """Le colonne nell'ordine in cui la pagina stampa le loro intestazioni (budget_1445: la
+    vision elencava [Diff. %, Diff. Valore, 2025, 2026] e il saldo corrente finiva sull'ultimo
+    importo della riga, la Diff. Valore). Ogni intestazione si ritrova nella fascia della
+    testata: dalla sua data, se ne ha una, altrimenti dall'ultima parola. Una sola non trovata:
+    resta l'ordine della vision."""
+    if len(ruoli) != len(intestazioni) or len(ruoli) < 2:
+        return ruoli, intestazioni
+    date = [w for w in parole if _DATA_INTESTAZIONE.fullmatch(str(w[4]).strip())]
+    if not date:
+        return ruoli, intestazioni
+    alto, basso = min(w[1] for w in date) - 25, max(w[1] for w in date) + 25
+    fascia = [w for w in parole if alto <= w[1] <= basso]
+    usate, posizioni = set(), []
+    for i in intestazioni:
+        m = _DATA_INTESTAZIONE.search(i)
+        chiave = m.group(0) if m else (i.split() or [""])[-1]
+        trovate = [k for k, w in enumerate(fascia) if k not in usate
+                   and str(w[4]).strip().casefold() == chiave.casefold()]
+        if not chiave or not trovate:
+            return ruoli, intestazioni
+        k = min(trovate, key=lambda k: fascia[k][0])
+        usate.add(k)
+        posizioni.append(fascia[k][0])
+    ordine = sorted(range(len(ruoli)), key=lambda k: posizioni[k])
+    return [ruoli[k] for k in ordine], [intestazioni[k] for k in ordine]
+
+
+_TITOLO_SP = re.compile(r"^\s*stato\s+patrimoniale\s*(?:[-–]?\s*attivo)?\s*$", re.I | re.M)
+
+
+# il titolo del CE a inizio riga, anche col periodo dopo («Conto Economico dal 01/01/2026»)
+_APRE_CE = re.compile(r"^[ \t]*conto\s+economico\b", re.I | re.M)
+
+
+def _pagine_di_apertura(pagine_sp: list[int], pagine_ce: list[int],
+                        testi: dict[int, str]) -> tuple[list[int], list[int]]:
+    """La pagina subito prima della prima pagina di una sezione, assegnata all'altra, che porta su
+    una riga sua il titolo della sezione, e' anche una pagina di quella sezione: la sezione si
+    apre li' (budget_1433/1434: «Conto economico», valore della produzione e ricavi in fondo alla
+    pagina dello SP; la vision dava la pagina solo allo SP e i ricavi non li leggeva nessuno).
+    Ciascuna lettura vede allora la pagina, e ``_per_sezione`` prende ogni lato dalla sua."""
+    sp, ce = list(pagine_sp), list(pagine_ce)
+    prima_ce, prima_sp = (min(ce) - 1, min(sp) - 1) if sp and ce else (None, None)
+    if prima_ce in sp and prima_ce not in ce and _TITOLO_CE.search(testi.get(prima_ce, "")):
+        ce = sorted(ce + [prima_ce])
+    if prima_sp in ce and prima_sp not in sp and _TITOLO_SP.search(testi.get(prima_sp, "")):
+        sp = sorted(sp + [prima_sp])
+    # La prima pagina del CE che porta il titolo a meta' pagina, con righe di importi sopra, e'
+    # anche la coda dello SP (budget_1432: crediti, cassa e debiti sopra «Conto Economico»).
+    if ce and sp and min(ce) not in sp and (min(ce) - 1) in sp:
+        sopra = _APRE_CE.split(testi.get(min(ce), ""), maxsplit=1)
+        if len(sopra) == 2 and len(_IMPORTO.findall(sopra[0])) >= _MIN_IMPORTI_PAGINA:
+            sp = sorted(sp + [min(ce)])
+    return sp, ce
+
+
 def analizza_struttura(pdf: str, *, mappa_pagina_fn=None, route_hint: str | None = None) -> Struttura:
     inizio = time.monotonic()
     if e_xbrl_di_legge(pdf):
@@ -295,6 +460,12 @@ def analizza_struttura(pdf: str, *, mappa_pagina_fn=None, route_hint: str | None
     route = ROUTE_IVCEE if fonte == "xbrl_titoli" else route_da_mappe(mappe)
     pagine_sp = [m["pagina"] for m in mappe if m.get("tipo_pagina") in TIPI_SP]
     pagine_ce = [m["pagina"] for m in mappe if m.get("tipo_pagina") in TIPI_CE]
+    if pagine_sp and pagine_ce:
+        import fitz
+        with fitz.open(pdf) as doc:
+            testi = {n: doc[n - 1].get_text() for n in range(1, doc.page_count + 1)}
+        pagine_sp, pagine_ce = _pagine_dai_titoli(pagine_sp, pagine_ce, testi)
+        pagine_sp, pagine_ce = _pagine_di_apertura(pagine_sp, pagine_ce, testi)
     prospetti = set(pagine_sp) | set(pagine_ce)
     dettaglio = {m["pagina"] for m in mappe if m.get("tipo_pagina") == "dettaglio_conti"}
     dettaglio |= set(pagine_tabelle_nota(pdf))
@@ -314,8 +485,17 @@ def analizza_struttura(pdf: str, *, mappa_pagina_fn=None, route_hint: str | None
     # nel prompt macro, non solo nel recupero dettaglio a valle.
     prospetti_mappe = [m for m in mappe if m.get("tipo_pagina") in TIPI_SP | TIPI_CE]
     macro_include_dettaglio = con_dettaglio or _riclassificato_con_captions_legali(prospetti_mappe, pdf)
-    colonne_sp, intestazioni_sp = _colonne_di(mappe, TIPI_SP)
-    colonne_ce, intestazioni_ce = _colonne_di(mappe, TIPI_CE)
+    sp_col, ce_col = _colonne_di(mappe, TIPI_SP), _colonne_di(mappe, TIPI_CE)
+    colonne_sp, intestazioni_sp = _colonne_vere(sp_col, ce_col)
+    colonne_ce, intestazioni_ce = _colonne_vere(ce_col, sp_col)
+    import fitz
+    with fitz.open(pdf) as doc:
+        def _parole(pagine):
+            return doc[min(pagine) - 1].get_text("words") if pagine else []
+        colonne_sp, intestazioni_sp = _ordina_colonne(colonne_sp, intestazioni_sp,
+                                                      _parole(pagine_sp))
+        colonne_ce, intestazioni_ce = _ordina_colonne(colonne_ce, intestazioni_ce,
+                                                      _parole(pagine_ce))
     import fitz
     with fitz.open(pdf) as doc:
         pagine_senza_testo = [i + 1 for i, p in enumerate(doc) if not p.get_text().strip()]

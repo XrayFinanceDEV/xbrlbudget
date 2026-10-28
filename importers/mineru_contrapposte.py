@@ -97,6 +97,9 @@ def _sezione(table) -> tuple[Optional[str], int]:
     return None, 0
 
 
+from importers.situazione_contabile_parser import _is_prior_result_caption  # noqa: E402
+
+
 def _testo(cella) -> str:
     return (cella.text or "").strip()
 
@@ -234,6 +237,11 @@ def _righe(tables) -> dict[str, list]:
             if (_PAROLA_TOTALE.search(unite) and not codici
                     and not ricuci[sezione].in_attesa()):
                 coppie = _coppie_di_piede(celle)
+                if not coppie and _is_prior_result_caption(unite.upper()):
+                    # «Eccedenza esercizio precedente» senza importo (budget_1410): la cella
+                    # persa dall'OCR. La didascalia resta: dice che il risultato precedente c'e',
+                    # e il lettore lo ricostruisce dai totali stampati
+                    coppie = [(unite.strip(" |"), "")]
                 for i, (didascalia, importo) in enumerate(coppie):
                     lato = _lato_del_piede(sezione, didascalia, i, len(coppie))
                     out[sezione].append(("piede", lato, didascalia, importo))

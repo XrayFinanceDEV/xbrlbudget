@@ -441,6 +441,22 @@ def mappa_pagina(client, png: bytes) -> dict:
     return out
 
 
+def _schema_gx10() -> dict:
+    """Lo schema di uscita con i limiti che la decodifica guidata di vLLM rispetta: al massimo
+    due sezioni, otto colonne per sezione, intestazioni e note brevi. Senza, la vision elencava
+    come colonne decine di didascalie di riga e la risposta si troncava (budget_1445, 1433,
+    1410, 1432: «risposta gx10 troncata», lo snello cadeva sul vecchio importatore)."""
+    import copy
+    schema = copy.deepcopy(_schema_uscita(SCHEMA))
+    sezioni = schema["properties"]["sezioni"]
+    sezioni["maxItems"] = 2
+    colonne = sezioni["items"]["properties"]["colonne"]
+    colonne["maxItems"] = 8
+    colonne["items"]["properties"]["intestazione"]["maxLength"] = 80
+    schema["properties"]["note"]["maxLength"] = 200
+    return schema
+
+
 def mappa_pagina_gx10(_client, png: bytes) -> dict:
     """Come ``mappa_pagina``, sulla vision di gx10 (Qwen, locale): stesso prompt, stesso schema
     vincolato. E' la mappa di default: Anthropic si usa solo con ``ANTHROPIC_CONSENTITO=1``."""
@@ -449,7 +465,7 @@ def mappa_pagina_gx10(_client, png: bytes) -> dict:
                  {"type": "image_url",
                   "image_url": {"url": "data:image/png;base64," + base64.b64encode(png).decode()}}]
     out = dict(llm_provider.chiama_gx10_json("", [{"role": "user", "content": contenuto}],
-                                             _schema_uscita(SCHEMA), max_tokens=3000,
+                                             _schema_gx10(), max_tokens=6000,
                                              timeout=120.0))
     out["_token"] = {"fornitore": "gx10"}
     return out

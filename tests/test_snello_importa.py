@@ -188,6 +188,7 @@ def test_struttura_in_errore_ripiega(tmp_path):
     with pytest.raises(S.SnelloNonRiuscito) as exc:
         S.importa(pdf, analizza=rotta)
     assert exc.value.report["fase"] == "struttura" and exc.value.report["errore"] == "RuntimeError"
+    assert exc.value.report["messaggio"] == "sonnet giu'"       # il perche', non solo la classe
 
 
 def test_pagina_condivisa_sp_e_ce_si_legge_una_sola_volta(tmp_path):
@@ -855,3 +856,39 @@ def test_totali_stampati_uguali_con_passivo_letto_60_euro_sotto_rilegge(tmp_path
 
 def test_coppie_nel_report_non_fa_fallire_un_import_riuscito():
     assert S._coppie_nel_report([("SPA.B", "non numerico")], "ok") == {}
+
+
+def test_letture_sp_e_ce_sovrapposte_ogni_voce_dalla_sua_lettura(tmp_path):
+    """budget_1440 (Ortoteck): pagine SP e CE in parte sovrapposte, due letture separate. La
+    lettura SP riportava anche le imposte (CE.20 = 14.181,01, la colonna comparata), quella CE
+    le leggeva vuote (0,00): concatenate, da_coppie le sommava come voci distinte. Le voci di
+    Stato Patrimoniale vengono dalla lettura SP, quelle di Conto Economico dalla lettura CE."""
+    pdf = _pdf_vuoto(str(tmp_path / "o.pdf"))
+
+    def voci(testo, intestazioni, nota=""):
+        if intestazioni == ["SP"]:
+            corrente = [("SPA.C.IV.1", D("1000")), ("SPP.A.I", D("900")), ("SPP.A.IX", D("100")),
+                        ("CE.20", D("14181.01"))]
+        else:
+            corrente = [("SPA.C.IV.1", D("1000")), ("SPA.C.II.1", D("77")), ("CE.A.1", D("500")),
+                        ("CE.B.7", D("400")), ("CE.20", D("0")), ("CE.21", D("100"))]
+        return {"corrente": corrente, "precedente": [], "totali": {}}
+
+    struttura = _struttura("legge", pagine_sp=[1], pagine_ce=[1], intestazioni_sp=["SP"],
+                           intestazioni_ce=["CE"])
+    r = S.importa(pdf, analizza=lambda p: struttura, leggi_voci=voci)
+    assert r.ce.get("ce20_imposte", D(0)) == D(0)
+    assert r.bs["sp09_disponibilita_liquide"] == D("1000.00")
+    assert r.bs.get("sp06_crediti_breve", D(0)) == D(0)
+    assert r.report["esito"] == "ok"
+
+
+def test_un_lato_che_la_sua_lettura_non_ha_restituito_viene_dall_altra():
+    """budget_1440, secondo giro: la lettura SP restituisce solo il passivo, l'attivo sta nella
+    lettura CE (pagine sovrapposte). Scegliere per sezione intera buttava l'attivo letto e
+    l'import cadeva su «Totale Attivo pari a zero». Il ripiego si decide per lato."""
+    out = S._per_sezione([("SPP.A.I", D("900"))],
+                         [("SPA.C.IV.1", D("1000")), ("SPP.A.I", D("1")), ("CE.A.1", D("5"))])
+    assert ("SPA.C.IV.1", D("1000")) in out
+    assert ("SPP.A.I", D("900")) in out and ("SPP.A.I", D("1")) not in out
+    assert ("CE.A.1", D("5")) in out

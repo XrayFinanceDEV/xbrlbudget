@@ -34,6 +34,8 @@ _FALLBACK = {"att": "SPA.C.II.5-quater", "pas": "SPP.D.14"}
 # figli"); "SPP.D.4" resta figlio di "SPP.D", e "SPP.D.4.E" resta figlio di "SPP.D" (la scadenza
 # e' in coda al codice del FIGLIO, non subito dopo il padre).
 _SUFFISSI_SCADENZA = (".E", ".O")
+# Arrotondamento all'euro di entro e oltre stampati separatamente: 1 euro per gamba.
+_TOLLERANZA_SCADENZA = Decimal("2")
 
 
 def _e_discendente_vero(p: str, q: str) -> bool:
@@ -42,6 +44,29 @@ def _e_discendente_vero(p: str, q: str) -> bool:
     if e_fondo(q):
         return False
     return q[len(p):] not in _SUFFISSI_SCADENZA
+
+
+def _lato_passivo(foglie) -> str | None:
+    """La colonna fisica (L/R) del passivo in un prospetto a sezioni contrapposte: quella dove
+    il modello ha messo la maggioranza delle voci di passivo. None se non si vede."""
+    voti = Counter(f.lato for f in foglie
+                   if f.percorso and f.percorso.startswith("SPP.") and f.lato in ("L", "R"))
+    if not voti or (len(voti) == 2 and voti["L"] == voti["R"]):
+        return None
+    return voti.most_common(1)[0][0]
+
+
+def _segno_pregresso(f, due_lati: bool, lato_passivo: str | None, didascalia: bool = True) -> Decimal:
+    """Il segno di un risultato pregresso. La didascalia lo dice quando nomina UTILE o PERDITA
+    (sign_by_caption). Quando e' neutra ("RISULT. D'ESERCIZIO PROVV. ANNO PRECEDENTE",
+    budget_1439) a sezioni contrapposte decide la colonna, come per ogni voce: nella colonna
+    del passivo e' un utile, nell'altra una perdita. A colonna unica, o senza una colonna del
+    passivo riconoscibile, resta la regola di prima (``didascalia=False``: il valore letto)."""
+    testo = (f.testo or "").upper()
+    neutra = not any(k in testo for k in ("UTIL", "PERDIT", "AVANZ"))
+    if neutra and due_lati and lato_passivo and f.lato in ("L", "R"):
+        return abs(f.valore) if f.lato == lato_passivo else -abs(f.valore)
+    return sign_by_caption(f.testo, f.valore) if didascalia else f.valore
 
 
 def _corsia(f, due_lati: bool):
@@ -461,6 +486,7 @@ def da_foglie(foglie):
     per_famiglia = defaultdict(list)
     ambigue: list = []
     pregresso = Decimal(0)
+    lato_passivo = _lato_passivo(foglie) if due_lati else None
     for f in foglie:
         if f.percorso and f.percorso.startswith("#"):
             # marcatore di riclassifica_ignote: gia' un campo corto valido (mai un percorso di
@@ -492,7 +518,7 @@ def da_foglie(foglie):
 
         # --- risultato d'esercizio: mai dalle righe stampate (regole del vecchio parser) ---
         if prior_caption(f.testo):
-            v = sign_by_caption(f.testo, f.valore)
+            v = _segno_pregresso(f, due_lati, lato_passivo)
             pregresso += v
             _grezzo(f)
             diag["risultato_precedente"].append([f.id, f.percorso, str(v.quantize(_C))])
@@ -584,7 +610,10 @@ def da_foglie(foglie):
             for f, codice, _t in elementi:
                 corsia = _corsia(f, due_lati)
                 atteso = normale.get(famiglia(codice))
-                v = f.valore if (atteso is None or corsia == atteso) else -abs(f.valore)
+                # Fuori colonna l'importo cambia segno UNA volta: una riga gia' negativa nella
+                # colonna opposta (sopravvenienza attiva stampata fra i costi, budget_1429)
+                # torna positiva. -abs() la ribaltava due volte: 2x l'importo sull'utile.
+                v = f.valore if (atteso is None or corsia == atteso) else -f.valore
                 if v != f.valore:
                     diag["ce_segno_forzato"].append(
                         [f.id, codice, str(f.valore.quantize(_C)), str(v.quantize(_C))])
@@ -687,7 +716,8 @@ def da_foglie(foglie):
         return bs, ce, diag
 
     def _foglio_per_assegnazione(precedenti: tuple[bool, ...]) -> dict:
-        somma = sum((sum((f.valore for f in gruppo), Decimal(0))
+        somma = sum((sum((_segno_pregresso(f, due_lati, lato_passivo, didascalia=False)
+                          for f in gruppo), Decimal(0))
                     for gruppo, prec in zip(gruppi_ambigui, precedenti) if prec), Decimal(0))
         candidato = dict(bs)
         if somma:
@@ -789,12 +819,63 @@ def da_coppie(coppie):
             viste.add((p, Decimal(v)))
             uniche.append((p, Decimal(v)))
     tutti = [p for p, _ in uniche]
+    # Una scadenza (.E/.O) sostituisce la sua voce solo se entro + oltre la ricompongono: un
+    # «di cui entro/oltre» stampato sotto il TOTALE della sezione e attaccato dal modello alla
+    # prima voce conterrebbe anche le voci sorelle, contate due volte (budget_1427, -6.439).
+    # Non ricompone: resta la voce, la scadenza si dichiara e non entra.
+    # Il solo «di cui oltre» minore della voce: l'oltre si tiene e il resto, senza scadenza
+    # dichiarata, va a breve (budget_1434, C.II.5-quater 163.809,01 di cui oltre 262,17).
+    diag["scadenza_non_riconciliata"] = []
+    diag["scadenza_completata"] = []
+    scadenze_scartate = set()
+    resti_a_breve: list[tuple[str, Decimal]] = []
+    for p in dict.fromkeys(tutti):
+        if p.endswith(_SUFFISSI_SCADENZA) or e_fondo(p):
+            continue
+        scadenze = [p + s for s in _SUFFISSI_SCADENZA if p + s in tutti]
+        if not scadenze or any(_e_discendente_vero(p, q) for q in tutti):
+            continue
+        voce = sum((v for q, v in uniche if q == p), Decimal(0))
+        parti = sum((v for q, v in uniche if q in scadenze), Decimal(0))
+        if (voce and scadenze == [p + ".O"] and parti and (parti > 0) == (voce > 0)
+                and abs(parti) < abs(voce) - _TOLLERANZA_SCADENZA):
+            resti_a_breve.append((p + ".E", voce - parti))
+            diag["scadenza_completata"].append(
+                [p, str(voce.quantize(_C)), str(parti.quantize(_C))])
+        elif voce and abs(parti - voce) > _TOLLERANZA_SCADENZA:
+            scadenze_scartate.update(scadenze)
+            diag["scadenza_non_riconciliata"].append(
+                [p, str(voce.quantize(_C)), str(parti.quantize(_C))])
+    uniche += resti_a_breve
+    tutti += [p for p, _ in resti_a_breve]
+    # La scadenza di un percorso NON letto come voce ma con sotto-voci lette che la ricompongono
+    # (SPA.C.II.E/.O accanto a C.II.1, C.II.5-quater... con la stessa somma) e' la ripartizione del
+    # totale che le sotto-voci fanno gia': contarla le raddoppierebbe (budget_1427, secondo giro:
+    # +4.560.773). Si scarta e si dichiara. Se le sotto-voci non la ricompongono (budget_1435: la
+    # sola C.II.5-ter a zero) la scadenza e' l'unica lettura del totale e resta.
+    diag["scadenza_del_totale"] = []
+    for base in dict.fromkeys(q[:-2] for q in tutti if q.endswith(_SUFFISSI_SCADENZA)):
+        if "." not in base or base in tutti:
+            continue        # "SPP.E" sono i ratei e risconti, una sezione: non una scadenza
+        figli = {q for q in tutti if _e_discendente_vero(base, q)}
+        # le foglie fra le sotto-voci: un figlio che ha a sua volta sotto-voci lette e' un totale
+        foglie = [q for q in figli if not any(_e_discendente_vero(q, x) for x in figli)]
+        scadenze = [base + s for s in _SUFFISSI_SCADENZA if base + s in tutti]
+        parti = sum((v for q, v in uniche if q in scadenze), Decimal(0))
+        somma_figli = sum((v for q, v in uniche if q in foglie), Decimal(0))
+        if not foglie or abs(somma_figli - parti) > _TOLLERANZA_SCADENZA:
+            continue
+        scadenze_scartate.update(scadenze)
+        diag["scadenza_del_totale"].append([base, str(parti.quantize(_C))])
     voci: list[tuple[str, Decimal, str]] = []
     for p, v in uniche:
         if e_risultato(p):
             diag["risultato_stampato"] = str(v.quantize(_C))
             continue
-        if any(q != p and q.startswith(p + ".") and not e_fondo(q) for q in tutti):
+        if p in scadenze_scartate:
+            continue
+        if any(q != p and q.startswith(p + ".") and not e_fondo(q) and q not in scadenze_scartate
+               for q in tutti):
             continue
         codice = campo_da_percorso(p)
         if codice is None:
@@ -821,3 +902,60 @@ def da_coppie(coppie):
     bs, ce = completa(_netta_fondi_negativi(dict(importi)))
     diag["immobilizzazioni_negative_tagliate"] = _clamp_immobilizzazioni_negative(bs)
     return bs, ce, diag
+
+
+# Oltre questo numero di fondi candidati le combinazioni (2**n) non si provano: nessuna
+# correzione, come per le foglie ambigue (_MAX_AMBIGUE_COMBINATORIE).
+_MAX_FONDI_CANDIDATI = 6
+
+
+def fondi_gia_nettati(coppie, importi_stampati, totale_attivo) -> list[str]:
+    """I fondi (.F) che il modello ha restituito accanto a una voce che li ha GIA' sottratti.
+
+    Uno schema di legge con i conti sotto stampa sulla didascalia il netto e sotto i conti
+    il lordo e i fondi: se il modello prende il netto della didascalia E il fondo dei conti,
+    da_coppie lo sottrae due volte (budget_1443: crediti verso clienti 312.535,86 netti meno
+    277.220,78 di fondi gia' dentro). Un fondo e' candidato solo quando l'importo della sua
+    voce e' una cifra stampata dal documento o manca (un lordo ricostruito sommando i conti no),
+    e si toglie solo se senza di lui l'attivo chiude al centesimo sul Totale Attivo stampato,
+    con UNA sola combinazione di fondi che lo fa: e' massa letta che si smette di contare due
+    volte, non un tappo. Nessun totale stampato, attivo che chiude gia', o piu' combinazioni
+    possibili: nessuna correzione (un controllo che manca non decide)."""
+    from itertools import combinations
+    if totale_attivo is None:
+        return []
+    totale = Decimal(totale_attivo)
+    stampati = {abs(Decimal(v)).quantize(_C) for v in importi_stampati}
+    viste, uniche = set(), []
+    for p, v in coppie:
+        if (p, Decimal(v)) not in viste:
+            viste.add((p, Decimal(v)))
+            uniche.append((p, Decimal(v)))
+
+    def _attivo(cs) -> Decimal:
+        bs, _ce, _diag = da_coppie(cs)
+        return misura(bs, {})["attivo"]
+
+    if abs(_attivo(uniche) - totale) <= _C:
+        return []
+    candidati, locali = [], []
+    for q in dict.fromkeys(p for p, _ in uniche if e_fondo(p) and lato_di(p) == "att"):
+        # Candidato: la voce e' una cifra stampata (gia' netta), oppure manca o vale zero (il
+        # fondo non ha un lordo letto da cui sottrarsi, budget_1440). Un lordo ricostruito dal
+        # modello sommando i conti non e' stampato: quel fondo resta.
+        voce = sum((v for p, v in uniche if p == q[:-2]), Decimal(0))
+        fondo = sum((v for p, v in uniche if p == q), Decimal(0))
+        if voce and abs(voce).quantize(_C) in stampati                 and (abs(voce) + abs(fondo)).quantize(_C) in stampati:
+            # prova locale (budget_1433/1434): netto della voce + fondo = un lordo stampato, la
+            # voce e' gia' netta; si decide senza aspettare che l'attivo chiuda, cosi' un altro
+            # errore indipendente non blocca questa correzione
+            locali.append(q)
+        elif not voce or abs(voce).quantize(_C) in stampati:
+            candidati.append(q)
+    resto = [c for c in uniche if c[0] not in locali]
+    if not candidati or len(candidati) > _MAX_FONDI_CANDIDATI:
+        return locali
+    chiudono = [list(gruppo) for n in range(1, len(candidati) + 1)
+                for gruppo in combinations(candidati, n)
+                if abs(_attivo([c for c in resto if c[0] not in gruppo]) - totale) <= _C]
+    return locali + (chiudono[0] if len(chiudono) == 1 else [])

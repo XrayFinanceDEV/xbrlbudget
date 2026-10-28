@@ -709,3 +709,81 @@ def test_n4_la_dicitura_originale_dei_debiti_resta_byte_per_byte():
     assert ('"SCADENZA DEBITI NON DISTINTA NEL PDF: il totale Debiti e le sue "\n'
             '                "sottovoci sono stati conservati nel breve termine; verificare la "\n'
             '                "quota oltre 12 mesi in Rettifiche se disponibile."') in src
+
+
+# --------------------------------------------------------------------------- codici UE puntati
+# Profilati Brescia (budget_1443, 2026-10-27): il gestionale stampa la voce di legge come codice
+# UE puntato SENZA parentesi ("C.II.1  Crediti verso clienti", "C.II.5-bis  Crediti tributari"),
+# con i conti sotto ("11.03.01  Clienti terzi Italia") e i fondi fra parentesi. La didascalia porta
+# gia' il NETTO: riconoscerla come schema con dettaglio conti e' cio' che tiene i conti (lordi e
+# fondi) fuori dalla lettura delle macro voci, altrimenti il fondo si sottrae due volte.
+_RIGHE_UE_SP = [
+    ("STATO PATRIMONIALE - schema UE con conti (attivo e passivo)", None),
+    ("Codice Voce UE / descrizione conto", ["30/09/2026", "31/12/2025"]),
+    ("B IMMOBILIZZAZIONI", None),
+    ("B.II Immobilizzazioni materiali", None),
+    ("B.II.2 Impianti e macchinario", ["400,00", "500,00"]),
+    ("05.03.51 Altri impianti e macchinari", ["1.000,00", "1.000,00"]),
+    ("41.05.51 F.do ammort. altri impianti", ["(600,00)", "(500,00)"]),
+    ("B.II Totale immobilizzazioni materiali", ["400,00", "500,00"]),
+    ("B TOTALE IMMOBILIZZAZIONI", ["400,00", "500,00"]),
+    ("C ATTIVO CIRCOLANTE", None),
+    ("C.I.4 Prodotti finiti e merci", ["300,00", "300,00"]),
+    ("09.01.01 Rimanenze prodotti finiti", ["300,00", "300,00"]),
+    ("C.I Totale rimanenze", ["300,00", "300,00"]),
+    ("C.II.1 Crediti verso clienti", ["700,00", "600,00"]),
+    ("11.03.01 Clienti terzi Italia", ["1.000,00", "900,00"]),
+    ("43.09.90 Fondo svalutaz. crediti civilistico", ["(300,00)", "(300,00)"]),
+    ("C.II.5-bis Crediti tributari", ["100,00", "100,00"]),
+    ("35.07.07 Erario c/acconti IRAP", ["100,00", "100,00"]),
+    ("C.II Totale crediti", ["800,00", "700,00"]),
+    ("C.IV.1 Depositi bancari e postali", ["500,00", "500,00"]),
+    ("39.01.01 Banca c/c", ["500,00", "500,00"]),
+    ("C.IV Totale disponibilita liquide", ["500,00", "500,00"]),
+    ("C TOTALE ATTIVO CIRCOLANTE", ["1.600,00", "1.500,00"]),
+    ("TOTALE ATTIVO", ["2.000,00", "2.000,00"]),
+    ("A Patrimonio netto", None),
+    ("A.I Capitale", ["1.000,00", "1.000,00"]),
+    ("23.01.01 Capitale sociale", ["1.000,00", "1.000,00"]),
+    ("A.IX Utile (perdita) dell'esercizio", ["200,00", "200,00"]),
+    ("A TOTALE PATRIMONIO NETTO", ["1.200,00", "1.200,00"]),
+    ("C Trattamento di fine rapporto di lavoro subordinato", ["100,00", "100,00"]),
+    ("D.7 Debiti verso fornitori", ["700,00", "700,00"]),
+    ("29.01.01 Fornitori terzi Italia", ["700,00", "700,00"]),
+    ("D TOTALE DEBITI", ["700,00", "700,00"]),
+    ("TOTALE PASSIVO E PATRIMONIO NETTO", ["2.000,00", "2.000,00"]),
+    ("CONTO ECONOMICO in un file a parte", None),
+]
+
+
+def _pdf_ue_codici(path) -> str:
+    doc = fitz.open()
+    page = doc.new_page(width=595, height=1000)
+    y = 40
+    for label, valori in _RIGHE_UE_SP:
+        codice, _, resto = label.partition(" ")
+        if len(codice) <= 2 or "." in codice:     # colonna del codice, poi la descrizione
+            _sx(page, 30, y, codice)
+            _sx(page, 90, y, resto)
+        else:                                      # intestazione o "TOTALE ...": a tutta riga
+            _sx(page, 30, y, label)
+        for x, v in zip((450, 540), valori or []):
+            _dest(page, x, y, v)
+        y += 12
+    doc.save(str(path))
+    return str(path)
+
+
+def test_codici_ue_puntati_senza_parentesi_sono_didascalie_di_legge(tmp_path):
+    r = riconosci_schema_con_dettaglio(_pdf_ue_codici(tmp_path / "ue.pdf"))
+    assert r is not None and r["conti"] >= 5 and r["didascalie"] >= 12
+
+
+def test_un_conto_numerico_puntato_non_e_una_didascalia():
+    from importers.standard_ivcee_parser import _LEGAL_CAPTION
+    for didascalia in ("c.ii.1 crediti verso clienti", "c.ii.5-bis crediti tributari",
+                       "b.iii.2.d crediti immobilizzati verso altri", "a.ix utile (perdita)"):
+        assert _LEGAL_CAPTION.match(didascalia), didascalia
+    for non_didascalia in ("11.03.01 clienti terzi italia", "a capo della sezione", "e. coli",
+                           "b totale", "c attivo circolante"):
+        assert not _LEGAL_CAPTION.match(non_didascalia), non_didascalia

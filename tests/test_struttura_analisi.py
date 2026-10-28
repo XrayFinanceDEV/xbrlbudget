@@ -394,3 +394,146 @@ def test_nota_che_cita_la_perdita_dell_esercizio_in_prosa_non_e_una_continuazion
             "Euro 5.570 mediante impiego della riserva straordinaria 0 0 12"]
     out = _assorbi_continuazioni_perse(_MAPPE_CE_E_NOTA, _pdf_ce_con_coda(tmp_path, coda, "e.pdf"))
     assert out[1]["tipo_pagina"] == "nota_o_testo"
+
+
+def _mappa_colonne(ruoli, intestazioni):
+    return [{"tipo_pagina": "prospetto_sp", "sezioni": [{"colonne": [
+        {"ruolo": r, "intestazione": i} for r, i in zip(ruoli, intestazioni)]}]}]
+
+
+def test_i_ruoli_di_colonna_vengono_dalle_intestazioni_stampate_se_la_vision_non_da_un_saldo():
+    """budget_1445 (Crystal Reports): la vision dichiara [dare, avere, dare, avere] su colonne
+    stampate «Periodo fino al 30/06/2026 | Bilancio infrannuale al 30/06/2025 | Diff. % | Diff.
+    Valore». Senza una colonna di saldo il lettore prendeva l'ultimo importo: la Diff. Valore."""
+    from importers.struttura_documento.analisi import _colonne_di
+    intestazioni = ["Periodo fino al 30/06/2026", "Bilancio infrannuale al 30/06/2025 EXC",
+                    "Diff. %", "Diff. Valore"]
+    ruoli, _ = _colonne_di(_mappa_colonne(["dare", "avere", "dare", "avere"], intestazioni),
+                           {"prospetto_sp"})
+    assert ruoli == ["saldo_corrente", "saldo_precedente", "percentuale", "variazione"]
+
+
+def test_intestazioni_dare_avere_lasciano_i_ruoli_della_vision():
+    from importers.struttura_documento.analisi import _colonne_di
+    ruoli, _ = _colonne_di(_mappa_colonne(["dare", "avere"], ["Dare 2026", "Avere 2026"]),
+                           {"prospetto_sp"})
+    assert ruoli == ["dare", "avere"]
+
+
+def test_una_colonna_di_saldo_della_vision_resta():
+    from importers.struttura_documento.analisi import _colonne_di
+    ruoli, _ = _colonne_di(_mappa_colonne(["saldo_finale", "altro"], ["31/12/2025", "Diff."]),
+                           {"prospetto_sp"})
+    assert ruoli == ["saldo_finale", "altro"]
+
+
+def test_la_pagina_dove_si_apre_il_conto_economico_e_anche_una_pagina_ce():
+    """budget_1433/1434 (Panificio): il CE comincia in fondo a pagina 1 (titolo, valore della
+    produzione, ricavi 892.889,82) e la vision da' pagine_ce=[2]. I ricavi non li leggeva
+    nessuno: utile CE -948.971,67 contro -56.081,85 stampato."""
+    from importers.struttura_documento.analisi import _pagine_di_apertura
+    testi = {1: "Stato patrimoniale\nTOTALE PASSIVO\n1.275.796,13\nConto economico\nA) Valore della produzione",
+             2: "5) Altri ricavi e proventi\nB) Costi della produzione"}
+    assert _pagine_di_apertura([1], [2], testi) == ([1], [1, 2])
+
+
+def test_una_pagina_che_cita_il_conto_economico_nel_testo_non_e_una_pagina_ce():
+    from importers.struttura_documento.analisi import _pagine_di_apertura
+    testi = {1: "Stato patrimoniale\nle voci del conto economico sono in pagina 2", 2: "CONTO ECONOMICO"}
+    assert _pagine_di_apertura([1], [2], testi) == ([1], [2])
+
+
+def test_pagine_non_adiacenti_restano_come_sono():
+    from importers.struttura_documento.analisi import _pagine_di_apertura
+    testi = {5: "Conto economico", 1: "x"}
+    assert _pagine_di_apertura([5, 6], [1, 2], testi) == ([5, 6], [1, 2])
+
+
+def test_didascalie_di_riga_dichiarate_come_colonne_si_sostituiscono_con_le_colonne_dell_altra_sezione():
+    """budget_1433 (Panificio): la vision dichiara come colonne del CE diciassette didascalie di
+    riga («5) Altri ricavi e proventi», «B) Costi della produzione»...). Il modello leggeva i
+    valori «sotto» quelle colonne e saltava i ricavi. Non sono colonne: si usano quelle dello SP."""
+    from importers.struttura_documento.analisi import _colonne_vere
+    sp = (["saldo_corrente"], ["11/09/2026"])
+    ce = (["variazione"] * 5, ["5) Altri ricavi e proventi", "B) Costi della produzione",
+                               "6) Materie prime", "7) Servizi", "Differenza A – B"])
+    assert _colonne_vere(ce, sp) == sp
+    assert _colonne_vere(sp, ce) == sp           # intestazioni vere: restano
+    assert _colonne_vere(ce, ce) == ([], [])     # nessuna alternativa: nessuna intestazione
+
+
+def test_i_titoli_stampati_decidono_le_pagine_se_la_vision_li_contraddice():
+    """budget_1445 (Crystal Reports, 14 pagine): titoli «STATO PATRIMONIALE ATTIVO» a p.1,
+    «... PASSIVO» a p.6, «CONTO ECONOMICO» a p.9. La vision dava SP [3, 5] e CE [1, 6, 9, 12,
+    13, 14]: pagine del CE PRIMA del suo titolo. La contraddizione col testo fa decidere i titoli."""
+    from importers.struttura_documento.analisi import _pagine_dai_titoli
+    testi = {n: "voce 1.000,00\n" * 6 for n in range(1, 15)}
+    testi[1] = "STATO PATRIMONIALE ATTIVO\n" + testi[1]
+    testi[6] = "STATO PATRIMONIALE PASSIVO\n" + testi[6]
+    testi[9] = "CONTO ECONOMICO\n" + testi[9]
+    sp, ce = _pagine_dai_titoli([3, 5], [1, 6, 9, 12, 13, 14], testi)
+    assert sp == [1, 2, 3, 4, 5, 6, 7, 8]
+    assert ce == [9, 10, 11, 12, 13, 14]
+
+
+def test_senza_contraddizione_restano_le_pagine_della_vision():
+    from importers.struttura_documento.analisi import _pagine_dai_titoli
+    testi = {1: "STATO PATRIMONIALE\n" + "x 1.000,00\n" * 6, 2: "CONTO ECONOMICO\n" + "x 1.000,00\n" * 6,
+             3: "x 1.000,00\n" * 6}
+    assert _pagine_dai_titoli([1], [2], testi) == ([1], [2])
+
+
+def test_le_colonne_si_ordinano_come_le_intestazioni_stampate():
+    """budget_1445: la vision elenca [Diff. %, Diff. Valore, 2025, 2026], la stampa va da
+    sinistra 2026, 2025, Diff. %, Diff. Valore. Il saldo corrente e' la prima colonna, non
+    l'ultima (che e' la Diff. Valore)."""
+    from importers.struttura_documento.analisi import _ordina_colonne
+    parole = [(319, 122, 0, 0, "Periodo"), (334, 132, 0, 0, "30/06/2026"),
+              (414, 122, 0, 0, "Biancio"), (390, 141, 0, 0, "30/06/2025"),
+              (465, 122, 0, 0, "Diff."), (481, 122, 0, 0, "%"),
+              (527, 122, 0, 0, "Diff."), (543, 122, 0, 0, "Valore"),
+              (60, 300, 0, 0, "Diff.")]                        # una parola del corpo
+    ruoli = ["variazione", "variazione", "saldo_precedente", "saldo_corrente"]
+    intest = ["Diff. %", "Diff. Valore", "Bilancio infrannuale al 30/06/2025 EXC",
+              "Periodo fino al 30/06/2026"]
+    assert _ordina_colonne(ruoli, intest, parole) == (
+        ["saldo_corrente", "saldo_precedente", "variazione", "variazione"],
+        ["Periodo fino al 30/06/2026", "Bilancio infrannuale al 30/06/2025 EXC", "Diff. %",
+         "Diff. Valore"])
+
+
+def test_intestazioni_non_trovate_lasciano_l_ordine_della_vision():
+    from importers.struttura_documento.analisi import _ordina_colonne
+    assert _ordina_colonne(["saldo_corrente"], ["Importo"], [(10, 10, 0, 0, "Altro")]) == (
+        ["saldo_corrente"], ["Importo"])
+
+
+def test_la_prima_pagina_del_ce_con_la_coda_dello_sp_sopra_il_titolo_e_anche_sp():
+    """budget_1432 (Panificio, situazione contabile): la pagina 2 comincia con crediti, cassa e
+    debiti dello SP e apre «Conto Economico» a meta' pagina. La vision dava SP [1] e CE [2]: la
+    lettura SP non vedeva la coda del passivo (letto 512.231,24 contro 2.056.081,31)."""
+    from importers.struttura_documento.analisi import _pagine_di_apertura
+    testi = {1: "Stato Patrimoniale\n" + "x 1.000,00\n" * 6,
+             2: "11 CREDITI 229.453,67\n15 CASSA 116.868,27\n23 DEBITI 5.408,36\n"
+                "18 PATRIMONIO NETTO 99.239,60\nConto Economico dal 01/01/2026\n" + "y 2,00\n" * 6}
+    assert _pagine_di_apertura([1], [2], testi) == ([1, 2], [2])
+
+
+def test_il_titolo_del_ce_in_testa_alla_pagina_non_la_rende_sp():
+    from importers.struttura_documento.analisi import _pagine_di_apertura
+    testi = {1: "Stato Patrimoniale\n" + "x 1.000,00\n" * 6,
+             2: "Conto Economico\n" + "y 2,00\n" * 6}
+    assert _pagine_di_apertura([1], [2], testi) == ([1], [2])
+
+
+def test_una_situazione_a_sezioni_contrapposte_resta_in_modo_conti(tmp_path, monkeypatch):
+    """budget_1432 (Panificio, situazione contabile a sezioni contrapposte con codici conto): la
+    vision dice «riclassificato con codici IVCEE» (conti) ma l'eccezione AMBIENTA lo rigirava in
+    «legge», e il modello mescolava lordi e fondi (sbilancio 585.819). Conti su due lati non sono
+    uno schema di legge: l'eccezione non vale."""
+    monkeypatch.setattr(
+        "importers.standard_ivcee_parser.has_comparative_ivcee_columns", lambda pdf: True)
+    monkeypatch.setattr(
+        "importers.situazione_contabile_parser.is_contrapposte_file", lambda pdf: True)
+    mappe = [_p(1, "prospetto_sp", "riclassificato_con_codici_ivcee", ["saldo_corrente"], ["x"])]
+    assert modo_da_mappe(mappe, pdf=str(tmp_path / "qualsiasi.pdf")) == "conti"

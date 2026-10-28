@@ -79,6 +79,17 @@ un'azienda: **Zucchetti** (le righe di sottoconto, che in quel layout portano l'
 partitario sotto ogni voce) e il rumore dei separatori **Dylog**. Tolgono righe di dettaglio che
 ripetono massa già totalizzata: lasciarle passare la fa contare due volte.
 
+**Le colonne di differenza** (`_filter_difference_columns`) si tolgono per geometria: tutto ciò
+che sta a destra della prima intestazione di differenza. Valgono come intestazione «Differenza…»
+e «Diff.», solo **a destra** delle colonne-anno (una didascalia del CE come «Differenza tra
+valore e costi» sta a sinistra e non taglia nulla), e servono una colonna percentuale («Scost.»
+o «%») e almeno due colonne-anno, scritte come anno o come data («30/06/2026»). Prima si
+riconoscevano solo «DIFFERENZA» + «SCOST.» con l'anno nudo, e su budget_1445 (Crystal Reports,
+«Diff. %» / «Diff. Valore») il Totale Attivo dichiarato era la Diff. Valore: 2.464.126,25 contro
+27.190.388,86, con attivo e passivo «in pari» sulla differenza. Il testo così ricomposto mette
+l'importo della sezione sulla stessa riga della sua intestazione, quindi `_section_heading_total`
+accetta anche «Stato patrimoniale attivo 1.250.311,33 1.314.938,83» (BILAQ).
+
 ## 3. Route A/B (IV-CEE): il deterministico prima, l'LLM solo se serve
 
 1. **Parser deterministico per primo**, e gratis. Il suo output è accettato **solo se** supera
@@ -527,6 +538,8 @@ Regole di lettura non ovvie:
 - Il recupero geometrico del risultato è accettato **solo** se la riga esprime un unico importo
   e se lo stesso valore compare su almeno due righe; gli "utili portati a nuovo" sono
   deliberatamente esclusi.
+- L'utile e la perdita dichiarati sono **in valore assoluto** (`_largest_after`): il segno non
+  si legge da qui.
 
 ### La riconciliazione al dichiarato non muove massa
 
@@ -896,3 +909,106 @@ lì i dettagli vengono già dalle tabelle di scadenza della nota integrativa. Ne
 (`usa_llm=False`), perché i dettagli sono già usciti dalle foglie classificate in F2-C. La sua
 riclassificazione deterministica di maturità (entro/oltre l'esercizio) può spostare massa fra il
 lato breve e il lato lungo dello stesso aggregato — non tocca mai i totali.
+
+### Regole del lotto week-43 (2026-10-27) sulla lettura
+
+Ognuna ha il suo test; le regressioni sono su 208 PDF diversi (`Test/` più il lotto).
+
+- **L'anno sul titolo di sezione non è un importo** (`schema_legge_generico._righe_da_grezze`):
+  «CONTO ECONOMICO 2025» con l'anno delle colonne letto come importo non apriva la sezione, e il
+  «21) Utile» restava voce IX del netto (Napolitano 1417/1421/1423/1425, rifiutati).
+  `tests/test_schema_legge_generico_anno_e_totali.py`.
+- **Il «Totale» che ripete la voce dopo i suoi conti va via con loro**
+  (`_togli_dettaglio_conti`): stessi importi e nome contenuto nell'altro, altrimenti chiudeva il
+  padre e la voce seguente saliva di livello. Stesso file di test.
+- **C.I-bis, immobilizzazioni materiali destinate alla vendita** (`xbrl_reso_parser`): la riga
+  senza enumeratore sotto C prende `SPA.C.I-bis`, va in `sp05` (attivo corrente non liquido, come
+  il VBA legacy) e si dichiara fra gli ignoti; il controllo sul totale delle rimanenze la toglie.
+  Prima finiva nei crediti e il documento era rifiutato (budget_1418). Decisione del
+  proprietario, 2026-10-28: in `sp05` come nel VBA. `tests/test_xbrl_reso_parser.py`.
+- **Lo schema inviato a gx10 richiede ogni campo** (`llm_provider.schema_tutto_richiesto`): con
+  la decodifica guidata vLLM ometteva sp11–sp18 e pydantic li riempiva a zero; un attivo letto
+  col passivo tutto a zero è una **lettura mancante** e l'importatore classico la rifiuta
+  (`pdf_importer._rifiuta_passivo_non_letto`) invece di salvarla «sbilanciata».
+- **Il report dello snello porta il messaggio dell'eccezione** (`messaggio`), non solo la classe.
+- **Una parentesi è un segno solo se si chiude** (`import_snello.righe._dec`): «CLIENTI
+  (5.367,37» era −5.367,37 (budget_1450).
+- **Il capitale sociale nella ragione sociale non è un saldo**
+  (`righe._senza_importo_in_descrizione`): su una riga con più importi, quello preceduto dalla
+  valuta («euro», «€», la «E» di «CAP. SOC. E»), lontano dalla colonna della pagina mentre un
+  altro importo della riga ci sta, è testo; se la valuta precede ogni importo è il prefisso delle
+  colonne e non si tocca (budget_413). budget_1450: un fornitore valeva 22.000.000,00.
+- **I ruoli di colonna vengono dalle intestazioni stampate** quando la vision non dà una colonna
+  di saldo e le intestazioni non parlano di dare/avere (`analisi._ruoli_dalle_intestazioni`):
+  la colonna datata più recente è il saldo corrente, «Diff.»/«variaz»/«scostam» sono variazioni,
+  «%» percentuale (budget_1445: la vision dichiarava dare/avere su quattro colonne e il saldo
+  ripiegava sull'ultimo importo, la Diff. Valore).
+
+- **Un segno fuori colonna si ribalta una volta sola** (`conti.da_foglie`, CE a due colonne:
+  `-f.valore`, non `-abs(f.valore)`): una riga già negativa nella colonna opposta
+  (sopravvenienze attive −4.626,61 fra i costi) si ribaltava due volte e l'utile si spostava di
+  2× l'importo (budget_1429).
+- **Letture SP e CE sovrapposte: ogni voce dalla sua lettura** (`import_snello._per_sezione`):
+  una voce letta da entrambe viene dalla lettura della sua sezione (le imposte della colonna
+  comparata lette dalla pagina SP si sommavano a quelle della pagina CE, budget_1440). Un lato
+  (attivo, passivo, CE) che la sua lettura non ha restituito si prende dall'altra (budget_1440,
+  secondo giro: attivo a zero). Voce per voce no.
+- **La pagina dove si apre una sezione è anche sua** (`analisi._pagine_di_apertura`): la pagina
+  subito prima della prima pagina CE, assegnata allo SP, che porta su una riga sua il titolo
+  «Conto economico», entra anche fra le pagine CE (e simmetricamente per lo SP). budget_1433/1434:
+  il CE comincia in fondo alla pagina SP e i ricavi non li leggeva nessuno (utile CE −948.971,67
+  contro −56.081,85 stampato).
+- **Le didascalie di riga non sono colonne** (`analisi._colonne_vere`): se la vision dichiara
+  come intestazioni di colonna in maggioranza didascalie di legge («5) Altri ricavi e proventi»,
+  «B) Costi della produzione»), la sezione prende le colonne dell'altra sezione, se vere,
+  altrimenti nessuna. budget_1433: il modello leggeva i valori «sotto» quelle colonne e saltava
+  i ricavi.
+- **Un conto orfano sotto un mastro si adotta solo se chiude al centesimo**
+  (`situazione_contabile_parser._be_adotta_orfani`): un conto né padre né figlio per prefisso,
+  stampato dopo una radice i cui figli non la sommano, diventa suo figlio solo se figli + orfano
+  = radice al centesimo (budget_1478). Il totale stampato decide, non il prefisso.
+- **Il risultato precedente con didascalia neutra prende il segno dalla colonna**
+  (`conti._segno_pregresso`): «RISULT. D'ESERCIZIO PROVV. ANNO PRECEDENTE» senza
+  utile/perdita, a due colonne, è utile nella colonna del passivo e perdita nell'altra
+  (budget_1439); `_is_prior_result_caption` riconosce anche l'abbreviazione «RISULT».
+- **Il risultato precedente con la didascalia ma senza importo si ricostruisce dai totali**
+  (`situazione_contabile_parser._hier_prior_caption_senza_importo`, decisione del proprietario
+  2026-10-28). Su una situazione contrapposta, se sotto il «Totale passività» c'è la didascalia
+  del risultato precedente senza importo (l'OCR ha perso la cella) e il CE è verificato dai suoi
+  totali stampati (ricavi − costi), `sp13` = utile del CE e la differenza dei totali SP meno
+  quell'utile va in `sp12g`. Si dichiara in `_prior_result_ricostruito` e nell'avviso «RISULTATO
+  ESERCIZIO PRECEDENTE RICOSTRUITO DAI TOTALI»; il bilancio si salva in `review_required`
+  (previsionale bloccato finché non lo si verifica). Senza la didascalia non si ricostruisce
+  nulla. Il PDF sintetico di MinerU ora conserva quella didascalia (`mineru_contrapposte._righe`).
+  budget_1410: prima `sp13` = 241.711,59 con un tappo mascherato, ora 68.247,80 + 173.463,79.
+- **La sezione di una riga continua quella della pagina prima** (`detail_enrichment`,
+  `collect_source_rows`): le righe senza titolo sopra di loro (una pagina senza titolo, o la parte
+  sopra il titolo di una pagina) restano nella sezione precedente finché quella non si è chiusa
+  in fondo alla sua pagina (totale a pareggio/quadratura, attività/passività, costi/ricavi,
+  risultato d'esercizio, o una riga di due importi uguali). Le parole del corpo non classificano:
+  «crediti per costi anticipati» portava nel CE la pagina 2 di budget_1450, e la coda dello SP
+  sopra il titolo del CE di budget_1432 finiva nel CE. Una pagina senza titolo che chiude con un
+  totale proprio dell'altra sezione («TOTALE COSTI … TOTALE RICAVI», budget_615) decide da sé.
+  Un riepilogo in testa («Totale Attività: Totale Passività:» sotto il titolo) non chiude nulla.
+- **La prima pagina del CE con la coda dello SP sopra il titolo è anche SP**
+  (`analisi._pagine_di_apertura`): budget_1432, crediti, cassa e debiti sopra «Conto Economico dal
+  …»; la lettura SP non li vedeva.
+- **Un blocco stampato al contrario del documento** (`righe.marca_totali`): dopo il punto fisso
+  nella direzione del documento, una passata k≥2 nella direzione opposta sulle righe ancora vive,
+  con candidati le sole righe di totale (senza descrizione o «Totale …») e la somma al centesimo.
+  budget_1450: i partitari Clienti/Fornitori col totale dopo i figli in un documento coi mastri
+  prima. Sul corpus riconosce 212 righe di totale generale stampate in fondo, nessun valore cambia.
+- **Un partitario che ripete un conto del prospetto non si conta due volte**
+  (`righe.escludi_partitari`): un elenco di almeno 3 voci con il totale su una riga senza
+  descrizione, su una pagina successiva, il cui totale è al centesimo il saldo netto (foglie a
+  sinistra meno foglie a destra) di **un solo** conto già letto, è la scomposizione di quel conto
+  e le sue righe escono dalle foglie (`Riga.ripetuta`). Corrispondenza uno a uno: un solo totale
+  senza descrizione per pagina e un solo elenco per conto, altrimenti nulla si esclude.
+  budget_1450: «1410 CLIENTI ITALIA» e i clienti di pagina 7, «20 FORNITORI» sui due lati e i
+  fornitori di pagina 8 (509.310,97 contati due volte); sul corpus scatta solo lì.
+- **Una situazione a sezioni contrapposte resta in modo «conti»**
+  (`analisi._riclassificato_con_captions_legali`): l'eccezione AMBIENTA, che legge in «legge» un
+  «riclassificato con codici IVCEE» con le colonne comparative dello schema di legge, non vale
+  quando `is_contrapposte_file` riconosce conti su due lati. budget_1432 era letto in «legge» e il
+  modello mescolava lordi e fondi (sbilancio 585.819, ora 15.524,64). Sui 208 PDF la guardia può
+  toccare 9 file; reimportati, 8 verificati e 1432 migliorato.

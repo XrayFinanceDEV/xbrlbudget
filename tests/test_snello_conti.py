@@ -972,3 +972,209 @@ def test_rimanenze_vanno_alla_natura_non_al_percorso_del_modello():
     assert ce["ce04_altri_ricavi"] == D("50.00")
     assert ce.get("ce12_oneri_diversi", D(0)) == 0
     assert [r[3] for r in diag["rimanenze_per_natura"]] == ["ce02", "ce10", "ce02", "ce10"]
+
+
+# --------------------------------------------------------------------------- fondo gia' nettato
+# budget_1443 (Profilati Brescia, 2026-10-27): la voce C.II.1 stampa gia' il NETTO (312.535,86) e
+# sotto i conti stampano lordo e fondi. Il modello ha restituito il netto della voce E il fondo a
+# parte (.F = -277.220,78): il fondo si sottraeva due volte e l'attivo restava corto di
+# esattamente quella cifra contro il Totale Attivo stampato. Numeri ridotti, stessa forma.
+_COPPIE_1443 = [
+    ("SPA.B.II.2", D("1000")), ("SPA.B.II.2.F", D("-600")),       # lordo + fondo: corretto
+    ("SPA.C.II.1", D("700")), ("SPA.C.II.1.F", D("-300")),        # netto + fondo: doppio
+    ("SPA.C.IV.1", D("500")),
+    ("SPP.A.I", D("1000")), ("SPP.A.IX", D("200")), ("SPP.D.7", D("400")),
+]
+# Importi stampati: la didascalia netta di C.II.1 (700) e di B.II.2 (400), i conti lordi (1.000
+# clienti e 1.000 impianti) e i fondi. Il 400 e' anche il "netto del netto" di C.II.1: una
+# coincidenza che il controllo deve reggere, perche' decide il Totale Attivo stampato.
+_STAMPATI_1443 = {D("400"), D("1000"), D("600"), D("700"), D("300"), D("500")}
+
+
+def test_fondo_gia_nettato_nella_voce_si_toglie_se_chiude_il_totale_stampato():
+    from importers.import_snello.conti import fondi_gia_nettati
+    # togliere B.II.2.F (1.900) o entrambi (2.200) non chiude: una combinazione sola, C.II.1.F
+    assert fondi_gia_nettati(_COPPIE_1443, _STAMPATI_1443, D("1600")) == ["SPA.C.II.1.F"]
+
+
+def test_fondo_gia_nettato_resta_se_il_totale_stampato_quadra_gia():
+    from importers.import_snello.conti import fondi_gia_nettati
+    assert fondi_gia_nettati(_COPPIE_1443, _STAMPATI_1443, D("1300")) == []
+
+
+def test_fondo_gia_nettato_senza_totale_stampato_non_decide_nulla():
+    from importers.import_snello.conti import fondi_gia_nettati
+    assert fondi_gia_nettati(_COPPIE_1443, _STAMPATI_1443, None) == []
+
+
+def test_fondo_gia_nettato_resta_se_togliendolo_il_totale_non_chiude_al_centesimo():
+    """Senza il lordo stampato (nessuna prova locale) decide solo il Totale Attivo."""
+    from importers.import_snello.conti import fondi_gia_nettati
+    senza_lordo = {D("400"), D("600"), D("700"), D("300"), D("500")}
+    assert fondi_gia_nettati(_COPPIE_1443, senza_lordo, D("1600.02")) == []
+
+
+def test_fondo_gia_nettato_ambiguo_non_si_toglie():
+    """Due fondi da 300 su due voci stampate: togliere l'uno o l'altro chiude uguale, e il
+    codice non sceglie a caso quale voce e' gia' netta."""
+    from importers.import_snello.conti import fondi_gia_nettati
+    coppie = [("SPA.C.II.1", D("700")), ("SPA.C.II.1.F", D("-300")),
+              ("SPA.C.II.5-quater", D("500")), ("SPA.C.II.5-quater.F", D("-300")), ("SPP.A.I", D("900"))]
+    assert fondi_gia_nettati(coppie, {D("700"), D("500"), D("300")}, D("900")) == []
+
+
+def test_fondo_gia_nettato_resta_se_la_voce_non_e_un_importo_stampato():
+    """Lordo ricostruito dal modello sommando i conti (B.II.2 di 1443): mai una riga stampata."""
+    from importers.import_snello.conti import fondi_gia_nettati
+    coppie = [("SPA.B.II.2", D("1000")), ("SPA.B.II.2.F", D("-600")), ("SPP.A.I", D("400"))]
+    assert fondi_gia_nettati(coppie, {D("400"), D("600")}, D("1000")) == []
+
+
+def test_una_foglia_negativa_fuori_colonna_non_si_ribalta_due_volte():  # modo conti
+    """budget_1429 (MTD luglio 2026): «sopravvenienze attive -4.626,61» stampata nella colonna
+    dei COSTI (una riduzione di costo) e instradata dal modello su un ricavo (CE.A.5). Fuori
+    colonna l'importo cambia segno una volta: -(-4.626,61) = +4.626,61 di ricavo. Con
+    -abs(valore) restava -4.626,61 e l'utile si spostava di 2x l'importo (10.675,70 col secondo
+    conto). La colonna decide l'effetto sull'utile, il segno letto lo conserva."""
+    foglie = [
+        _f(1, "L", "10000", "CE.B.14", sezione="ce"),          # oneri diversi, colonna costi
+        _f(2, "L", "3000", "CE.B.7", sezione="ce"),            # servizi, colonna costi
+        _f(3, "L", "-500", "CE.A.5", testo="SOPRAVV. ATTIVE", sezione="ce"),  # fuori colonna, gia' negativa
+        _f(4, "R", "100000", "CE.A.1", sezione="ce"),          # ricavi, colonna ricavi
+    ]
+    bs, ce, diag = da_foglie(foglie)
+    assert ce["ce04_altri_ricavi"] == D("500.00")
+    from calculations.ce_result import calculate_ce_result
+    assert calculate_ce_result(ce).net_profit == D("87500.00")    # 100.000 + 500 - 10.000 - 3.000
+
+
+def test_una_scadenza_che_non_ricompone_la_voce_non_la_sostituisce():
+    """budget_1427: il «di cui entro / oltre» stampato sotto il TOTALE dei crediti attaccato
+    dal modello a C.II.1 (.E/.O). La scadenza conteneva anche C.II.2/C.II.5: sostituendo la
+    voce, quelle voci si contavano due volte. Una scadenza sostituisce la sua voce solo se
+    entro + oltre la ricompongono; altrimenti resta la voce e la scadenza si dichiara."""
+    coppie = [("SPA.C.II.1", D("100")), ("SPA.C.II.1.E", D("150")), ("SPA.C.II.1.O", D("-10")),
+              ("SPA.C.II.5-quater", D("60")), ("SPP.A.I", D("160"))]
+    bs, ce, diag = da_coppie(coppie)
+    assert bs.get("sp06_crediti_breve", D(0)) + bs.get("sp07_crediti_lungo", D(0)) == D("160.00")
+    assert diag["scadenza_non_riconciliata"] == [["SPA.C.II.1", "100.00", "140.00"]]
+
+
+def test_una_scadenza_che_ricompone_la_voce_la_sostituisce_come_prima():
+    coppie = [("SPA.C.II.1", D("100")), ("SPA.C.II.1.E", D("70")), ("SPA.C.II.1.O", D("30")),
+              ("SPP.A.I", D("100"))]
+    bs, ce, diag = da_coppie(coppie)
+    assert bs["sp06a_crediti_clienti_breve"] == D("70.00") and bs["sp07a_crediti_clienti_lungo"] == D("30.00")
+    assert diag["scadenza_non_riconciliata"] == []
+
+
+def test_fondo_senza_la_sua_voce_si_toglie_se_chiude_il_totale_stampato():
+    """budget_1440 (Ortoteck): il modello legge i netti delle voci E i fondi .F, anche di voci
+    il cui lordo non ha letto (voce assente). Senza voce non c'e' nulla da cui il fondo si
+    possa sottrarre: decide il Totale Attivo stampato, come per gli altri."""
+    from importers.import_snello.conti import fondi_gia_nettati
+    coppie = [("SPA.B.II.2", D("400")), ("SPA.B.II.4.F", D("-200")), ("SPA.C.IV.1", D("600")),
+              ("SPP.A.I", D("1000"))]
+    assert fondi_gia_nettati(coppie, {D("400"), D("600")}, D("1000")) == ["SPA.B.II.4.F"]
+
+
+def test_risultato_precedente_con_didascalia_neutra_prende_il_segno_dalla_colonna():  # modo conti
+    """budget_1439 (Ortoteck, BILAGRA): «RISULT. D'ESERCIZIO PROVV. ANNO PRECEDENTE 15.940,08»
+    stampato sul lato ATTIVITA' a pareggiare (attivo 321.526,61 + 15.940,08 = pareggio): e'
+    una perdita. La didascalia non dice ne' utile ne' perdita: il segno lo decide la colonna,
+    come per ogni altra voce - nella colonna del passivo e' un utile, nell'altra una perdita."""
+    foglie = [
+        _f(1, "L", "900", "SPA.C.IV.1"),
+        _f(2, "L", "100", "R", testo="RISULT. D'ESERCIZIO PROVV. ANNO PRECEDENTE"),
+        _f(3, "R", "700", "SPP.A.I"),
+        _f(4, "R", "300", "SPP.D.7"),
+    ]
+    bs, ce, diag = da_foglie(foglie)
+    assert bs["sp12g_utili_perdite_portati"] == D("-100.00")
+    m = misura(bs, ce)
+    assert m["scarto_sp"] == D("0.00")
+
+
+def test_risultato_precedente_neutro_nella_colonna_del_passivo_resta_un_utile():  # modo conti
+    foglie = [
+        _f(1, "L", "1000", "SPA.C.IV.1"),
+        _f(2, "R", "100", "R", testo="RISULT. D'ESERCIZIO PROVV. ANNO PRECEDENTE"),
+        _f(3, "R", "600", "SPP.A.I"),
+        _f(4, "R", "300", "SPP.D.7"),
+    ]
+    bs, ce, diag = da_foglie(foglie)
+    assert bs["sp12g_utili_perdite_portati"] == D("100.00")
+
+
+def test_un_di_cui_oltre_parziale_tiene_la_scadenza_e_il_resto_va_a_breve():
+    """budget_1434 (Panificio): «C.II.5-quater 163.809,01» con il solo «di cui oltre 262,17».
+    Il resto della voce, senza scadenza dichiarata, e' entro l'esercizio: si tengono l'oltre e il
+    resto a breve, mai la voce intera a breve (split sbagliato) e mai il solo oltre (massa persa)."""
+    coppie = [("SPA.C.II.5-quater", D("163809.01")), ("SPA.C.II.5-quater.O", D("262.17")),
+              ("SPP.A.I", D("163809.01"))]
+    bs, ce, diag = da_coppie(coppie)
+    assert bs["sp06g_crediti_altri_breve"] == D("163546.84")
+    assert bs["sp07g_crediti_altri_lungo"] == D("262.17")
+    assert diag["scadenza_completata"] == [["SPA.C.II.5-quater", "163809.01", "262.17"]]
+    assert diag["scadenza_non_riconciliata"] == []
+
+
+def test_un_di_cui_oltre_maggiore_della_voce_resta_non_riconciliato():
+    coppie = [("SPA.C.II.5-quater", D("100")), ("SPA.C.II.5-quater.O", D("150")),
+              ("SPP.A.I", D("100"))]
+    bs, ce, diag = da_coppie(coppie)
+    assert bs["sp06_crediti_breve"] == D("100.00")
+    assert diag["scadenza_completata"] == []
+    assert diag["scadenza_non_riconciliata"] == [["SPA.C.II.5-quater", "100.00", "150.00"]]
+
+
+def test_fondo_gia_nettato_si_riconosce_dal_lordo_stampato_anche_se_l_attivo_non_chiude():
+    """budget_1433/1434: B.II stampata netta 580.220,35 e il modello aggiunge il fondo 601.226;
+    voce + |fondo| = 1.181.446,35 e' il lordo stampato nei conti. La prova e' locale: il fondo
+    cade anche se un altro errore, indipendente, tiene l'attivo lontano dal totale stampato."""
+    from importers.import_snello.conti import fondi_gia_nettati
+    coppie = [("SPA.B.II", D("580220.35")), ("SPA.B.II.F", D("-601226")),
+              ("SPA.C.IV.1", D("1000")), ("SPA.C.II.1", D("999")),    # errore altrove
+              ("SPP.A.I", D("582220.35"))]
+    stampati = {D("580220.35"), D("601226"), D("1181446.35"), D("1000")}
+    assert fondi_gia_nettati(coppie, stampati, D("582220.35")) == ["SPA.B.II.F"]
+
+
+def test_senza_lordo_stampato_la_prova_locale_non_decide():
+    from importers.import_snello.conti import fondi_gia_nettati
+    coppie = [("SPA.B.II", D("580220.35")), ("SPA.B.II.F", D("-601226")),
+              ("SPA.C.IV.1", D("1000")), ("SPA.C.II.1", D("999")), ("SPP.A.I", D("582220.35"))]
+    assert fondi_gia_nettati(coppie, {D("580220.35"), D("601226"), D("1000")}, D("582220.35")) == []
+
+
+def test_la_scadenza_del_totale_con_le_sotto_voci_lette_non_si_somma_a_loro():
+    """budget_1427 (secondo giro): il «di cui entro/oltre» stampato sotto il TOTALE dei crediti
+    attaccato a C.II stessa (SPA.C.II.E/.O), senza la voce C.II ma con le sotto-voci C.II.1...
+    Le sotto-voci fanno gia' il totale: sommare anche la sua ripartizione lo raddoppiava
+    (sbilancio 4.560.773 = somma delle sotto-voci). Si scarta e si dichiara."""
+    coppie = [("SPA.C.II.1", D("100")), ("SPA.C.II.5-quater", D("60")),
+              ("SPA.C.II.E", D("150")), ("SPA.C.II.O", D("10")), ("SPP.A.I", D("140")),
+              ("SPP.D.7", D("10")), ("SPP.E", D("10"))]       # SPP.E: i ratei, non una scadenza
+    bs, ce, diag = da_coppie(coppie)
+    assert bs.get("sp06_crediti_breve", D(0)) + bs.get("sp07_crediti_lungo", D(0)) == D("160.00")
+    assert bs["sp18_ratei_risconti_passivi"] == D("10.00")
+    assert diag["scadenza_del_totale"] == [["SPA.C.II", "160.00"]]
+
+
+def test_la_scadenza_di_una_voce_senza_sotto_voci_resta_una_voce():
+    """Debiti D.4 letti solo come entro/oltre, senza la voce: e' l'unica lettura, resta."""
+    coppie = [("SPP.D.4.E", D("30")), ("SPP.D.4.O", D("70")), ("SPA.C.IV.1", D("100"))]
+    bs, ce, diag = da_coppie(coppie)
+    assert bs["sp16a_debiti_banche_breve"] == D("30.00") and bs["sp17a_debiti_banche_lungo"] == D("70.00")
+    assert diag["scadenza_del_totale"] == []
+
+
+def test_la_scadenza_del_totale_resta_se_le_sotto_voci_lette_non_la_ricompongono():
+    """budget_1435/1464 (Metaldecor): crediti letti come «entro» del totale (SPA.C.II.E =
+    3.830.477,21) con la sola sotto-voce C.II.5-ter a zero. La sotto-voce non fa il totale: la
+    scadenza e' l'unica lettura dei crediti e resta (scartata, l'attivo perdeva 3,8 milioni)."""
+    coppie = [("SPA.C.II.E", D("3830477.21")), ("SPA.C.II.5-ter", D("0")), ("SPA.C.IV", D("100")),
+              ("SPP.A.I", D("3830577.21"))]
+    bs, ce, diag = da_coppie(coppie)
+    assert bs["sp06_crediti_breve"] == D("3830477.21")
+    assert diag["scadenza_del_totale"] == []

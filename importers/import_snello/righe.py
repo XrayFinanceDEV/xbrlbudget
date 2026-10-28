@@ -11,6 +11,7 @@ from collections import Counter, defaultdict
 from copy import deepcopy
 from dataclasses import dataclass
 from decimal import Decimal
+from types import SimpleNamespace
 
 _AMT = re.compile(r"^\(?-?(\d{1,3}(\.\d{3})+|\d+),\d{2}\)?-?$")
 _MIGLIAIA = re.compile(r"^\(?-?\d{1,3}(\.\d{3})+\)?-?$")
@@ -28,10 +29,14 @@ class Riga:
     mastro: str | None = None
     totale: bool = False
     percorso: str | None = None
+    # riga di un partitario che ripete un conto gia' letto nel prospetto (escludi_partitari)
+    ripetuta: bool = False
 
 
 def _dec(t: str) -> Decimal:
-    negativo = t.startswith("-") or t.endswith("-") or t.startswith("(")
+    # la parentesi e' un segno solo se si chiude: "(5.367,37" aperta e' una nota della
+    # descrizione (budget_1450), non un negativo
+    negativo = t.startswith("-") or t.endswith("-") or (t.startswith("(") and t.endswith(")"))
     v = Decimal(t.strip("()-").replace(".", "").replace(",", "."))
     return -v if negativo else v
 
@@ -329,6 +334,19 @@ def marca_totali(righe: list[Riga]) -> Counter:
                 if n1:
                     trovati_totale += n1
                     cambiato = True
+    # Un blocco stampato al contrario del documento (budget_1450: mastri col totale prima dei
+    # figli, poi i partitari Clienti/Fornitori col totale DOPO, su una riga senza descrizione):
+    # una passata k>=2 nella direzione opposta, sulle sole righe ancora vive e solo se il
+    # documento ha gia' mostrato gruppi veri nella sua. Somma al centesimo come sempre, e solo
+    # una riga di totale puo' esserlo (senza descrizione o «Totale ...»): fra conti qualunque
+    # una somma che torna per caso (11 + 22 = 33) non e' un totale.
+    if gruppo_visto:
+        for lato, seq in per_lato.items():
+            di_totale = [c and (not seq[i].testo.strip()
+                                or seq[i].testo.strip().upper().startswith("TOTALE"))
+                         for i, c in enumerate(candidabile[lato])]
+            trovati_totale += _risolvi_totali(seq, valori[lato], vivo[lato], di_totale,
+                                              -direzione, 2)
     return Counter({direzione: trovati_totale}) if trovati_totale else Counter()
 
 
@@ -372,6 +390,44 @@ def _riferimenti_colonna(rows) -> dict[tuple, float]:
     return out
 
 
+def _valuta_davanti(toks: list[str], i: int) -> bool:
+    """Il token ``i`` e' preceduto da una valuta: «euro», «eur», «€», oppure la «E» del capitale
+    sociale in una ragione sociale («CAP. SOC. E 22.000.000,00»)."""
+    prima = toks[i - 1].lower().strip(".:") if i >= 1 else ""
+    if prima in _VALUTA:
+        return True
+    return prima == "e" and i >= 2 and toks[i - 2].lower().startswith("soc")
+
+
+def _senza_importo_in_descrizione(r, riferimento: float | None) -> str:
+    """Come ``_importo_in_descrizione``, sulle righe con piu' importi: un importo preceduto da una
+    valuta, lontano dalla colonna della pagina, mentre un altro importo della riga sta in colonna,
+    e' testo della descrizione (budget_1450, partitario: «876,48 1410000352 FIMER S.P.A. CAP. SOC.
+    E 22.000.000,00», il saldo a x 57,8 sulla colonna, il capitale sociale a x 224). Restituisce il
+    testo senza quel token; senza riferimento, o senza un importo in colonna, nessun verdetto."""
+    if (riferimento is None or len(importi(r.text)) < 2
+            or len(r.positions) != len(r.amounts)):
+        return r.text
+    vicino = lambda x: abs(x - riferimento) <= _DISTANZA_FUORI_COLONNA
+    toks = r.text.split()
+    con_valuta = [i for i, t in enumerate(toks)
+                  if (_AMT.match(t.replace("_", "")) or _MIGLIAIA.match(t.replace("_", "")))
+                  and _valuta_davanti(toks, i)]
+    if len(con_valuta) >= len(importi(r.text)):
+        return r.text       # «€ 1.229.007 € 1.095.752»: la valuta e' il prefisso di ogni colonna
+    for i, t in enumerate(toks):
+        t = t.replace("_", "")
+        if not (_AMT.match(t) or _MIGLIAIA.match(t)) or not _valuta_davanti(toks, i):
+            continue
+        posizioni = [x for v, x in zip(r.amounts, r.positions) if v == _dec(t)]
+        # gli altri importi veri della riga (non i codici conto), ciascuno con la sua x
+        resto = " ".join(toks[:i] + toks[i + 1:])
+        altre = [x for v, _ in importi(resto) for w, x in zip(r.amounts, r.positions) if w == v]
+        if len(posizioni) == 1 and not vicino(posizioni[0]) and any(vicino(x) for x in altre):
+            return resto
+    return r.text
+
+
 def righe_da_pdf(file_path: str, pagine: set[int] | None, ruoli: list[str],
                  ocr_text: str | None = None) -> list[Riga]:
     from importers.detail_enrichment import collect_source_rows
@@ -389,11 +445,53 @@ def righe_da_pdf(file_path: str, pagine: set[int] | None, ruoli: list[str],
             out.append(Riga(id=r.id, pagina=r.page, lato=r.side, testo=re.sub(r"\s+", " ", r.text).strip(),
                             valore=None, sezione=r.statement))
             continue
+        in_colonna = _senza_importo_in_descrizione(r, riferimenti.get((r.page, r.side)))
         out.append(Riga(id=r.id, pagina=r.page, lato=r.side, testo=etichetta(r.text),
-                        valore=saldo(r, regola), sezione=r.statement))
+                        valore=saldo(SimpleNamespace(text=in_colonna), regola), sezione=r.statement))
     marca_totali(out)
+    escludi_partitari(out)
     return out
 
 
 def foglie(righe: list[Riga]) -> list[Riga]:
-    return [r for r in righe if r.valore is not None and not r.totale and r.testo]
+    return [r for r in righe if r.valore is not None and not r.totale and r.testo
+            and not r.ripetuta]
+
+
+_MIN_VOCI_PARTITARIO = 3
+
+
+def escludi_partitari(righe: list[Riga]) -> list[Riga]:
+    """Un elenco di almeno ``_MIN_VOCI_PARTITARIO`` voci col suo totale stampato su una riga
+    senza descrizione, su una pagina successiva, il cui totale e' al centesimo il saldo netto di UN solo conto gia' letto nel
+    prospetto, e' la scomposizione di quel conto: le sue righe non si contano una seconda
+    volta (budget_1450: «1410 CLIENTI ITALIA 236.663,61» e l'elenco dei clienti di pagina 7;
+    «20 FORNITORI», 274.834,91 al passivo e 2.187,55 all'attivo, e l'elenco di pagina 8 che
+    vale il netto 272.647,36). Il saldo netto di un conto: le sue foglie a sinistra meno quelle
+    a destra. Nessun conto, o piu' d'uno, con quel saldo: l'elenco resta."""
+    # un solo totale senza descrizione per pagina: i figli si riconoscono dal mastro (vuoto),
+    # e due elenchi sulla stessa pagina si mescolerebbero
+    senza_nome = [t for t in righe if t.totale and t.valore is not None and not t.testo.strip()]
+    per_pagina = Counter(t.pagina for t in senza_nome)
+    abbinati: dict[str, list[tuple[Riga, list[Riga]]]] = defaultdict(list)
+    for t in senza_nome:
+        if per_pagina[t.pagina] != 1:
+            continue
+        figli = [r for r in righe if r.mastro == t.testo and r.pagina == t.pagina and not r.totale]
+        if len(figli) < _MIN_VOCI_PARTITARIO:
+            continue
+        netti: dict[str, Decimal] = defaultdict(Decimal)
+        for r in foglie(righe):
+            if r.pagina < t.pagina and r.mastro and r.mastro.strip():
+                netti[r.mastro] += r.valore if r.lato != "R" else -r.valore
+        uguali = [m for m, v in netti.items() if v and abs(v) == abs(t.valore)]
+        if len(uguali) == 1:
+            abbinati[uguali[0]].append((t, figli))
+    escluse: list[Riga] = []
+    for coppie in abbinati.values():
+        if len(coppie) != 1:
+            continue        # due elenchi per lo stesso conto: ambiguo, nessuno si esclude
+        for r in coppie[0][1]:
+            r.ripetuta = True
+            escluse.append(r)
+    return escluse

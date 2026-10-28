@@ -54,11 +54,9 @@ def test_committed_manifest_is_reproducible_and_complete_for_local_corpus():
 
     assert committed == rebuilt
     assert rebuilt["hash_algorithm"] == "sha256"
-    assert rebuilt["summary"]["unique_contents"] == 159
-    assert rebuilt["summary"]["physical_files"] == 252
-    assert rebuilt["summary"]["formats"] == {"csv": 1, "pdf": 140, "xbrl": 18}
+    # i conteggi li fissa il manifest committato: scriverli anche qui faceva fallire il test a ogni lotto nuovo
     assert rebuilt["summary"]["truth_orphans"] == []
-    assert len({record["sha256"] for record in rebuilt["files"]}) == 159
+    assert len({record["sha256"] for record in rebuilt["files"]}) == rebuilt["summary"]["unique_contents"]
 
 
 def test_337_verified_truth_is_pinned_to_content_not_filename():

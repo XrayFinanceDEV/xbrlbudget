@@ -1,5 +1,5 @@
 {
- "descrizione": "Campione unico di 50 documenti del corpus Test/ per la Fase 0 (verità e punteggio). I file restano fuori da git: si trovano per sha256 (tests/corpus/manifest.json). 'verita' indica da dove ricavare le cifre vere; null = da scrivere a mano. Analizzati a vista il 2026-10-28 (5 worker codex, Test/_analisi-campione/): tipologie corrette, 'giudizio_atteso' = importabile | importabile con avviso | da rifiutare. L'XBRL depositato vale da verita' solo dove 'coincide'.",
+ "descrizione": "Campione unico di 53 documenti (50 + 3 bilanci completi aggiunti il 2026-10-28) del corpus Test/ per la Fase 0 (verità e punteggio). I file restano fuori da git: si trovano per sha256 (tests/corpus/manifest.json). 'verita' indica da dove ricavare le cifre vere; null = da scrivere a mano. Analizzati a vista il 2026-10-28 (5 worker codex, Test/_analisi-campione/): tipologie corrette, 'giudizio_atteso' = importabile | importabile con avviso | da rifiutare. L'XBRL depositato vale da verita' solo dove 'coincide'.",
  "creato": "2026-10-28",
  "documenti": [
   {
@@ -844,6 +844,59 @@
     "file": "Test/_analisi-campione/350.json"
    },
    "giudizio_atteso": "da rifiutare"
+  },
+  {
+   "id": "1401",
+   "sha256": "251a7d1580e2d9ea5351efd29d67e7f7b146e5e8f23db7d330cb1a5d0d0f7564",
+   "path": "2026-10-weekend/budget_1401_2025.12.31_BilancioVerifica.pdf",
+   "tipologia": "conti/colonne",
+   "colonne": "saldo",
+   "periodo": "annuale 2025",
+   "nota": "bilancio di verifica a colonna, stesso gestionale di Santini 1325 (Metaldecor)",
+   "pagine": 11,
+   "verita": {
+    "fonte": "lettura a vista (codex), bozza da verificare",
+    "file": "Test/_analisi-campione/1401.json"
+   },
+   "giudizio_atteso": "importabile con avviso"
+  },
+  {
+   "id": "373",
+   "sha256": "cb6b72239184a182118bcded4bc0f8a1d2e2805a0e6150a59038edf7c63dc1b3",
+   "path": "2026-06/june_sample/success/budget_373_AITEC SRL - BILANCINO AL 31 12 2025.pdf",
+   "tipologia": "contrapposte",
+   "colonne": "1 per lato",
+   "periodo": "annuale 2025",
+   "nota": "bilancio di verifica Passepartout a sezioni contrapposte, conti a 5 cifre (AITEC)",
+   "pagine": 7,
+   "verita": {
+    "fonte": "lettura a vista (codex), bozza da verificare",
+    "file": "Test/_analisi-campione/373.json"
+   },
+   "giudizio_atteso": "importabile con avviso"
+  },
+  {
+   "id": "1319",
+   "sha256": "ac3404200ae198c4be0e2502d6c9b0a867ba8888ccb1ee41abfa2f86348853c2",
+   "path": "2026-10-15/budget_1319_bilancio in dettaglio cee def..pdf",
+   "tipologia": "scansione",
+   "colonne": "2025 | 2024 | variazione",
+   "periodo": "annuale 2025",
+   "nota": "CEE con dettaglio conti scansionato, 11 pagine (Santini, stesso bilancio di 1322, 1325, 1337)",
+   "pagine": 11,
+   "verita": {
+    "fonte": "lettura a vista (codex), bozza da verificare",
+    "file": "Test/_analisi-campione/1319.json",
+    "xbrl_depositato": {
+     "file": "2026-10-15/budget_1324_nixbrlesen01631560164.xbrl",
+     "sha256": "a4db25869bde45d740aca4ea652c0cf6d3622cdb3172bbd83a50670039758893",
+     "campi_confrontati": null,
+     "differenze": null,
+     "coincide": true,
+     "nota": "controllati a mano totale attivo e utile dei due anni: coincidono all'unita'; confronto campo per campo non fatto"
+    }
+   },
+   "giudizio_atteso": "importabile con avviso"
   }
  ]
 }

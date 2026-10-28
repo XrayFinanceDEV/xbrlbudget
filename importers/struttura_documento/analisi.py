@@ -343,6 +343,74 @@ def _assorbi_continuazioni_perse(mappe: list[dict], pdf: str) -> list[dict]:
     return out
 
 
+_TITOLO_SEZIONE_SP = re.compile(r"^\s*stato\s+patrimoniale\b", re.I | re.M)
+_TITOLO_SEZIONE_CE = re.compile(r"^\s*conto\s+economico\s*$", re.I | re.M)
+_FINE_PROSPETTI = re.compile(r"(?i)nota\s+integrativa|rendiconto\s+finanziario")
+
+
+def _pagine_dai_titoli(pagine_sp: list[int], pagine_ce: list[int],
+                       testi: dict[int, str]) -> tuple[list[int], list[int]]:
+    """I titoli di sezione stampati decidono le pagine quando la vision li contraddice: una
+    pagina del CE prima del titolo «Conto economico», o una dello SP dopo (budget_1445, 14
+    pagine: SP [3, 5] e CE [1, 6, 9, 12, 13, 14] dalla vision, titoli a p.1, p.6 e p.9). Lo SP
+    va dal primo titolo dello SP fino al titolo del CE (compresa quella pagina se il titolo non
+    sta in testa), il CE dal suo titolo fino all'ultima pagina con importi prima della nota
+    integrativa. Senza contraddizione, o senza titoli con importi, decide la vision."""
+    def importi(n):
+        return len(_IMPORTO.findall(testi.get(n, "")))
+
+    con_titolo = lambda rx: [n for n in sorted(testi) if rx.search(testi[n])
+                             and importi(n) >= _MIN_IMPORTI_PAGINA]
+    titoli_sp, titoli_ce = con_titolo(_TITOLO_SEZIONE_SP), con_titolo(_TITOLO_SEZIONE_CE)
+    if not titoli_sp or not titoli_ce or min(titoli_ce) <= min(titoli_sp):
+        return pagine_sp, pagine_ce
+    a, c = min(titoli_sp), min(titoli_ce)
+    if not (any(p < c for p in pagine_ce) or any(p > c for p in pagine_sp)):
+        return pagine_sp, pagine_ce
+    sp = [n for n in range(a, c) if importi(n) >= _MIN_IMPORTI_PAGINA]
+    righe_c = [r for r in testi[c].splitlines() if r.strip()]
+    if next(i for i, r in enumerate(righe_c) if _TITOLO_SEZIONE_CE.match(r)) > 3:
+        sp.append(c)            # il CE si apre a meta' pagina: sopra c'e' la coda dello SP
+    ce = []
+    for n in range(c, max(testi) + 1):
+        if importi(n) < _MIN_IMPORTI_PAGINA or (n > c and _FINE_PROSPETTI.search(testi[n])):
+            break
+        ce.append(n)
+    return sp, ce
+
+
+_DATA_INTESTAZIONE = re.compile(r"\d{1,2}[/.\-]\d{1,2}[/.\-]20\d{2}")
+
+
+def _ordina_colonne(ruoli: list[str], intestazioni: list[str],
+                    parole: list) -> tuple[list[str], list[str]]:
+    """Le colonne nell'ordine in cui la pagina stampa le loro intestazioni (budget_1445: la
+    vision elencava [Diff. %, Diff. Valore, 2025, 2026] e il saldo corrente finiva sull'ultimo
+    importo della riga, la Diff. Valore). Ogni intestazione si ritrova nella fascia della
+    testata: dalla sua data, se ne ha una, altrimenti dall'ultima parola. Una sola non trovata:
+    resta l'ordine della vision."""
+    if len(ruoli) != len(intestazioni) or len(ruoli) < 2:
+        return ruoli, intestazioni
+    date = [w for w in parole if _DATA_INTESTAZIONE.fullmatch(str(w[4]).strip())]
+    if not date:
+        return ruoli, intestazioni
+    alto, basso = min(w[1] for w in date) - 25, max(w[1] for w in date) + 25
+    fascia = [w for w in parole if alto <= w[1] <= basso]
+    usate, posizioni = set(), []
+    for i in intestazioni:
+        m = _DATA_INTESTAZIONE.search(i)
+        chiave = m.group(0) if m else (i.split() or [""])[-1]
+        trovate = [k for k, w in enumerate(fascia) if k not in usate
+                   and str(w[4]).strip().casefold() == chiave.casefold()]
+        if not chiave or not trovate:
+            return ruoli, intestazioni
+        k = min(trovate, key=lambda k: fascia[k][0])
+        usate.add(k)
+        posizioni.append(fascia[k][0])
+    ordine = sorted(range(len(ruoli)), key=lambda k: posizioni[k])
+    return [ruoli[k] for k in ordine], [intestazioni[k] for k in ordine]
+
+
 _TITOLO_SP = re.compile(r"^\s*stato\s+patrimoniale\s*(?:[-–]?\s*attivo)?\s*$", re.I | re.M)
 
 
@@ -376,8 +444,8 @@ def analizza_struttura(pdf: str, *, mappa_pagina_fn=None, route_hint: str | None
     if pagine_sp and pagine_ce:
         import fitz
         with fitz.open(pdf) as doc:
-            testi = {n: doc[n - 1].get_text() for n in {min(pagine_sp) - 1, min(pagine_ce) - 1}
-                     if 1 <= n <= doc.page_count}
+            testi = {n: doc[n - 1].get_text() for n in range(1, doc.page_count + 1)}
+        pagine_sp, pagine_ce = _pagine_dai_titoli(pagine_sp, pagine_ce, testi)
         pagine_sp, pagine_ce = _pagine_di_apertura(pagine_sp, pagine_ce, testi)
     prospetti = set(pagine_sp) | set(pagine_ce)
     dettaglio = {m["pagina"] for m in mappe if m.get("tipo_pagina") == "dettaglio_conti"}
@@ -401,6 +469,14 @@ def analizza_struttura(pdf: str, *, mappa_pagina_fn=None, route_hint: str | None
     sp_col, ce_col = _colonne_di(mappe, TIPI_SP), _colonne_di(mappe, TIPI_CE)
     colonne_sp, intestazioni_sp = _colonne_vere(sp_col, ce_col)
     colonne_ce, intestazioni_ce = _colonne_vere(ce_col, sp_col)
+    import fitz
+    with fitz.open(pdf) as doc:
+        def _parole(pagine):
+            return doc[min(pagine) - 1].get_text("words") if pagine else []
+        colonne_sp, intestazioni_sp = _ordina_colonne(colonne_sp, intestazioni_sp,
+                                                      _parole(pagine_sp))
+        colonne_ce, intestazioni_ce = _ordina_colonne(colonne_ce, intestazioni_ce,
+                                                      _parole(pagine_ce))
     import fitz
     with fitz.open(pdf) as doc:
         pagine_senza_testo = [i + 1 for i, p in enumerate(doc) if not p.get_text().strip()]

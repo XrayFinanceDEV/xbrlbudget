@@ -362,3 +362,24 @@ def test_apre_sezione_nuova_non_esclude_i_normali_tipi_di_pagina(tmp_path):
     path_ce2 = pdf_titolo_ce_contrapposte_stessa_riga(str(tmp_path / "ce2.pdf"))
     with fitz.open(path_ce2) as doc:
         assert _titolo_pagina(doc[0]) == "conto economico"
+
+
+def test_la_mappa_su_gx10_ha_spazio_e_limiti_sulle_colonne(monkeypatch):
+    """budget_1445/1433/1410/1432: la mappa di gx10 si troncava (max_tokens 3000) quando la
+    vision elencava come «colonne» decine di didascalie di riga; lo snello cadeva sul vecchio
+    importatore. Spazio come sul ramo Anthropic, e uno schema che non ammette quell'elenco."""
+    from importers import llm_provider
+    from importers.struttura_documento import mappa
+    visti = {}
+
+    def finta(system, messaggi, schema, *, max_tokens, timeout):
+        visti.update(schema=schema, max_tokens=max_tokens)
+        return {}
+    monkeypatch.setattr(llm_provider, "chiama_gx10_json", finta)
+    mappa.mappa_pagina_gx10(None, b"png")
+    sezione = visti["schema"]["properties"]["sezioni"]
+    colonne = sezione["items"]["properties"]["colonne"]
+    assert visti["max_tokens"] >= 6000
+    assert colonne["maxItems"] == 8 and sezione["maxItems"] == 2
+    assert colonne["items"]["properties"]["intestazione"]["maxLength"] == 80
+    assert "maxItems" not in mappa.SCHEMA["properties"]["sezioni"]      # SCHEMA resta com'e'

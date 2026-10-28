@@ -460,3 +460,49 @@ def test_didascalie_di_riga_dichiarate_come_colonne_si_sostituiscono_con_le_colo
     assert _colonne_vere(ce, sp) == sp
     assert _colonne_vere(sp, ce) == sp           # intestazioni vere: restano
     assert _colonne_vere(ce, ce) == ([], [])     # nessuna alternativa: nessuna intestazione
+
+
+def test_i_titoli_stampati_decidono_le_pagine_se_la_vision_li_contraddice():
+    """budget_1445 (Crystal Reports, 14 pagine): titoli «STATO PATRIMONIALE ATTIVO» a p.1,
+    «... PASSIVO» a p.6, «CONTO ECONOMICO» a p.9. La vision dava SP [3, 5] e CE [1, 6, 9, 12,
+    13, 14]: pagine del CE PRIMA del suo titolo. La contraddizione col testo fa decidere i titoli."""
+    from importers.struttura_documento.analisi import _pagine_dai_titoli
+    testi = {n: "voce 1.000,00\n" * 6 for n in range(1, 15)}
+    testi[1] = "STATO PATRIMONIALE ATTIVO\n" + testi[1]
+    testi[6] = "STATO PATRIMONIALE PASSIVO\n" + testi[6]
+    testi[9] = "CONTO ECONOMICO\n" + testi[9]
+    sp, ce = _pagine_dai_titoli([3, 5], [1, 6, 9, 12, 13, 14], testi)
+    assert sp == [1, 2, 3, 4, 5, 6, 7, 8]
+    assert ce == [9, 10, 11, 12, 13, 14]
+
+
+def test_senza_contraddizione_restano_le_pagine_della_vision():
+    from importers.struttura_documento.analisi import _pagine_dai_titoli
+    testi = {1: "STATO PATRIMONIALE\n" + "x 1.000,00\n" * 6, 2: "CONTO ECONOMICO\n" + "x 1.000,00\n" * 6,
+             3: "x 1.000,00\n" * 6}
+    assert _pagine_dai_titoli([1], [2], testi) == ([1], [2])
+
+
+def test_le_colonne_si_ordinano_come_le_intestazioni_stampate():
+    """budget_1445: la vision elenca [Diff. %, Diff. Valore, 2025, 2026], la stampa va da
+    sinistra 2026, 2025, Diff. %, Diff. Valore. Il saldo corrente e' la prima colonna, non
+    l'ultima (che e' la Diff. Valore)."""
+    from importers.struttura_documento.analisi import _ordina_colonne
+    parole = [(319, 122, 0, 0, "Periodo"), (334, 132, 0, 0, "30/06/2026"),
+              (414, 122, 0, 0, "Biancio"), (390, 141, 0, 0, "30/06/2025"),
+              (465, 122, 0, 0, "Diff."), (481, 122, 0, 0, "%"),
+              (527, 122, 0, 0, "Diff."), (543, 122, 0, 0, "Valore"),
+              (60, 300, 0, 0, "Diff.")]                        # una parola del corpo
+    ruoli = ["variazione", "variazione", "saldo_precedente", "saldo_corrente"]
+    intest = ["Diff. %", "Diff. Valore", "Bilancio infrannuale al 30/06/2025 EXC",
+              "Periodo fino al 30/06/2026"]
+    assert _ordina_colonne(ruoli, intest, parole) == (
+        ["saldo_corrente", "saldo_precedente", "variazione", "variazione"],
+        ["Periodo fino al 30/06/2026", "Bilancio infrannuale al 30/06/2025 EXC", "Diff. %",
+         "Diff. Valore"])
+
+
+def test_intestazioni_non_trovate_lasciano_l_ordine_della_vision():
+    from importers.struttura_documento.analisi import _ordina_colonne
+    assert _ordina_colonne(["saldo_corrente"], ["Importo"], [(10, 10, 0, 0, "Altro")]) == (
+        ["saldo_corrente"], ["Importo"])

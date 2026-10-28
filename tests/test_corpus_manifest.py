@@ -70,7 +70,8 @@ def test_337_verified_truth_is_pinned_to_content_not_filename():
 
     assert record["status"] == "verified"
     assert record["route_expected"] == "trial_balance"
-    assert len(record["paths"]) == 2
+    # Una sola copia dal 2026-10-28 (copie rimosse): quella che apre test_contra_netting.
+    assert record["paths"] == ["2026-primo-lotto/sez-contrapposte/budget_337_2023.pdf"]
     assert record["truth"]["fixed_assets"] == {
         "intangible_gross": 3239.12,
         "intangible_funds": 0.0,

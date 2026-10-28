@@ -91,6 +91,50 @@ def _amount(token: str) -> Decimal | None:
         return None
 
 
+_TOTALE_DI_CHIUSURA = re.compile(
+    r"TOTALE\s*(?:A\s*PAREGGIO|A\s*QUADRATURA|ATTIVIT|PASSIVIT|ATTIVO|PASSIVO|COSTI|RICAVI)"
+    r"|(?:UTILE|PERDITA)\S*\s+(?:D\W?\s*)?ESERCIZIO|ECCEDENZA")
+
+
+_RIGHE_DI_CHIUSURA = 5        # le ultime righe con importi (il piede «Pag. 8 di 8» ne ha uno)
+_CHIUSURA_PER_SEZIONE = (
+    ('ce', re.compile(r"TOTALE\s*(?:COSTI|RICAVI)")),
+    ('bs', re.compile(r"TOTALE\s*(?:ATTIVIT|PASSIVIT|ATTIVO\b|PASSIVO\b)")),
+)
+
+
+def _sezione_della_chiusura(full_rows) -> str | None:
+    """La sezione che la pagina dichiara chiudendo: un totale di costi/ricavi fra le ultime
+    righe con importi e' il CE, uno di attivita'/passivita' lo SP; un pareggio non dice nulla."""
+    con_importi = [line for line in full_rows
+                   if any(_amount(str(w[4])) is not None for w in line)]
+    for line in con_importi[-_RIGHE_DI_CHIUSURA:]:
+        testo = ' '.join(str(w[4]) for w in line).upper()
+        for sezione, rx in _CHIUSURA_PER_SEZIONE:
+            if rx.search(testo):
+                return sezione
+    return None
+
+
+def _chiude_sezione(full_rows) -> bool:
+    """La pagina chiude la sua sezione: fra le ultime righe con importi c'e' un totale di
+    chiusura, il risultato d'esercizio o il pareggio senza didascalia (due importi uguali e
+    nient'altro: budget_702 «Perdita Esercizio 15.063,40» / «2.329.010,83 2.329.010,83»;
+    budget_1450 «Totale a pareggio» in fondo a pagina 2). Un riepilogo in testa alla pagina
+    («Totale Attivita': Totale Passivita':» sotto il titolo, budget_1432) non chiude."""
+    con_importi = [line for line in full_rows
+                   if any(_amount(str(w[4])) is not None for w in line)]
+    for line in con_importi[-_RIGHE_DI_CHIUSURA:]:
+        testo = [str(w[4]) for w in line]
+        if _TOTALE_DI_CHIUSURA.search(' '.join(testo).upper()):
+            return True
+        importi = [_amount(t) for t in testo]
+        if (len(testo) == 2 and None not in importi and importi[0] == importi[1]
+                and importi[0] != 0):
+            return True
+    return False
+
+
 def collect_source_rows(file_path: str, ocr_text: str | None = None) -> list[SourceRow]:
     """Read ALL pages, including notes, preserving rows, sides and numeric cells.
 
@@ -154,6 +198,7 @@ def collect_source_rows(file_path: str, ocr_text: str | None = None) -> list[Sou
     two_sides = is_contrapposte_file(file_path)
     physical_splits = {}
     last_statement = ''
+    sezione_chiusa = False      # la pagina prima ha stampato in fondo il totale della sua sezione
     with fitz.open(file_path) as document:
         for page in document:
             words = page.get_text("words", sort=True)
@@ -209,6 +254,17 @@ def collect_source_rows(file_path: str, ocr_text: str | None = None) -> list[Sou
             boundaries.sort()
             page_statement = ('bs' if section == (True, False) else
                               'ce' if section == (False, True) else last_statement)
+            # Le righe senza titolo sopra di loro (una pagina senza titolo, o la parte sopra il
+            # titolo di una pagina) continuano la sezione della pagina prima, finche' quella non
+            # si e' chiusa col suo totale: le parole del corpo non classificano («crediti per
+            # costi anticipati», «debiti per ricavi anticipati»: budget_1450 pagina 2 finiva nel
+            # CE; budget_1432 pagina 2, la coda dello SP sopra il titolo del CE).
+            # Una pagina SENZA titolo che chiude con un totale proprio dell'altra sezione
+            # («TOTALE COSTI ... TOTALE RICAVI», budget_615) decide da se'; sopra un titolo
+            # interno la coda e' sempre della sezione prima (budget_1432).
+            if last_statement and not sezione_chiusa and (
+                    boundaries or _sezione_della_chiusura(full_rows) in (None, last_statement)):
+                page_statement = last_statement
             # A damaged text layer (amounts split across several PDF words,
             # e.g. "2.280" / "," / "30") inflates the code-like-token count
             # that _be_split's gutter search relies on: a fragment such as
@@ -322,6 +378,7 @@ def collect_source_rows(file_path: str, ocr_text: str | None = None) -> list[Sou
                     last_statement = boundaries[-1][1]
                 elif page_statement:
                     last_statement = page_statement
+                sezione_chiusa = _chiude_sezione(full_rows)
                 continue
             for side, lo, hi in bands:
                 headings = []
@@ -403,6 +460,7 @@ def collect_source_rows(file_path: str, ocr_text: str | None = None) -> list[Sou
                 last_statement = boundaries[-1][1]
             elif page_statement:
                 last_statement = page_statement
+            sezione_chiusa = _chiude_sezione(full_rows)
     if not any(row.amounts for row in rows) and ocr_text:
         for n, line in enumerate(ocr_text.splitlines(), 1):
             if line.strip():

@@ -368,3 +368,23 @@ def test_la_valuta_davanti_a_ogni_colonna_e_un_prefisso_non_una_descrizione(monk
     monkeypatch.setattr(DE, "collect_source_rows", lambda *a, **k: fisiche)
     righe = R.righe_da_pdf("x.pdf", None, [])
     assert next(r for r in righe if r.id == "r3").valore == D("2003.00")
+
+
+def test_un_partitario_col_totale_dopo_i_figli_si_riconosce_anche_se_il_documento_va_al_contrario():
+    """budget_1450 (ABCLOG): mastri col totale PRIMA dei figli, poi i partitari Clienti e
+    Fornitori (pagine 7-8) col totale DOPO i figli, su una riga senza descrizione. Una sola
+    direzione per tutto il documento lasciava vivi i figli dei partitari: +235.787 e +272.647."""
+    righe = [
+        _r("10", "300.00", testo="10 CREDITI"),
+        _r("1001", "100.00"), _r("1002", "200.00"),
+        _r("20", "50.00", testo="20 CASSA"),
+        _r("2001", "20.00"), _r("2002", "30.00"),
+        _r("c1", "11.00", testo="1410000606 CLIENTE A"),
+        _r("c2", "22.00", testo="1410000343 CLIENTE B"),
+        _r("c3", "33.00", testo="1410000009 CLIENTE C"),
+        _r("ct", "66.00", testo=" "),          # la riga del totale, senza descrizione
+    ]
+    R.marca_totali(righe)
+    assert {r.id for r in righe if r.totale} == {"10", "20", "ct"}
+    # il totale del partitario esce dalle foglie: prima si contavano lui E i suoi figli
+    assert {r.id for r in R.foglie(righe)} == {"1001", "1002", "2001", "2002", "c1", "c2", "c3"}

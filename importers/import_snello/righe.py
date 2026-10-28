@@ -332,6 +332,19 @@ def marca_totali(righe: list[Riga]) -> Counter:
                 if n1:
                     trovati_totale += n1
                     cambiato = True
+    # Un blocco stampato al contrario del documento (budget_1450: mastri col totale prima dei
+    # figli, poi i partitari Clienti/Fornitori col totale DOPO, su una riga senza descrizione):
+    # una passata k>=2 nella direzione opposta, sulle sole righe ancora vive e solo se il
+    # documento ha gia' mostrato gruppi veri nella sua. Somma al centesimo come sempre, e solo
+    # una riga di totale puo' esserlo (senza descrizione o «Totale ...»): fra conti qualunque
+    # una somma che torna per caso (11 + 22 = 33) non e' un totale.
+    if gruppo_visto:
+        for lato, seq in per_lato.items():
+            di_totale = [c and (not seq[i].testo.strip()
+                                or seq[i].testo.strip().upper().startswith("TOTALE"))
+                         for i, c in enumerate(candidabile[lato])]
+            trovati_totale += _risolvi_totali(seq, valori[lato], vivo[lato], di_totale,
+                                              -direzione, 2)
     return Counter({direzione: trovati_totale}) if trovati_totale else Counter()
 
 

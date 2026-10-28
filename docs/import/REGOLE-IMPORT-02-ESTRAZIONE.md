@@ -981,3 +981,20 @@ Ognuna ha il suo test; le regressioni sono su 208 PDF diversi (`Test/` più il l
   (previsionale bloccato finché non lo si verifica). Senza la didascalia non si ricostruisce
   nulla. Il PDF sintetico di MinerU ora conserva quella didascalia (`mineru_contrapposte._righe`).
   budget_1410: prima `sp13` = 241.711,59 con un tappo mascherato, ora 68.247,80 + 173.463,79.
+- **La sezione di una riga continua quella della pagina prima** (`detail_enrichment`,
+  `collect_source_rows`): le righe senza titolo sopra di loro (una pagina senza titolo, o la parte
+  sopra il titolo di una pagina) restano nella sezione precedente finché quella non si è chiusa
+  in fondo alla sua pagina (totale a pareggio/quadratura, attività/passività, costi/ricavi,
+  risultato d'esercizio, o una riga di due importi uguali). Le parole del corpo non classificano:
+  «crediti per costi anticipati» portava nel CE la pagina 2 di budget_1450, e la coda dello SP
+  sopra il titolo del CE di budget_1432 finiva nel CE. Una pagina senza titolo che chiude con un
+  totale proprio dell'altra sezione («TOTALE COSTI … TOTALE RICAVI», budget_615) decide da sé.
+  Un riepilogo in testa («Totale Attività: Totale Passività:» sotto il titolo) non chiude nulla.
+- **La prima pagina del CE con la coda dello SP sopra il titolo è anche SP**
+  (`analisi._pagine_di_apertura`): budget_1432, crediti, cassa e debiti sopra «Conto Economico dal
+  …»; la lettura SP non li vedeva.
+- **Un blocco stampato al contrario del documento** (`righe.marca_totali`): dopo il punto fisso
+  nella direzione del documento, una passata k≥2 nella direzione opposta sulle righe ancora vive,
+  con candidati le sole righe di totale (senza descrizione o «Totale …») e la somma al centesimo.
+  budget_1450: i partitari Clienti/Fornitori col totale dopo i figli in un documento coi mastri
+  prima. Sul corpus riconosce 212 righe di totale generale stampate in fondo, nessun valore cambia.

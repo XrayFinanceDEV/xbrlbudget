@@ -414,6 +414,10 @@ def _ordina_colonne(ruoli: list[str], intestazioni: list[str],
 _TITOLO_SP = re.compile(r"^\s*stato\s+patrimoniale\s*(?:[-–]?\s*attivo)?\s*$", re.I | re.M)
 
 
+# il titolo del CE a inizio riga, anche col periodo dopo («Conto Economico dal 01/01/2026»)
+_APRE_CE = re.compile(r"^[ \t]*conto\s+economico\b", re.I | re.M)
+
+
 def _pagine_di_apertura(pagine_sp: list[int], pagine_ce: list[int],
                         testi: dict[int, str]) -> tuple[list[int], list[int]]:
     """La pagina subito prima della prima pagina di una sezione, assegnata all'altra, che porta su
@@ -427,6 +431,12 @@ def _pagine_di_apertura(pagine_sp: list[int], pagine_ce: list[int],
         ce = sorted(ce + [prima_ce])
     if prima_sp in ce and prima_sp not in sp and _TITOLO_SP.search(testi.get(prima_sp, "")):
         sp = sorted(sp + [prima_sp])
+    # La prima pagina del CE che porta il titolo a meta' pagina, con righe di importi sopra, e'
+    # anche la coda dello SP (budget_1432: crediti, cassa e debiti sopra «Conto Economico»).
+    if ce and sp and min(ce) not in sp and (min(ce) - 1) in sp:
+        sopra = _APRE_CE.split(testi.get(min(ce), ""), maxsplit=1)
+        if len(sopra) == 2 and len(_IMPORTO.findall(sopra[0])) >= _MIN_IMPORTI_PAGINA:
+            sp = sorted(sp + [min(ce)])
     return sp, ce
 
 

@@ -506,3 +506,21 @@ def test_intestazioni_non_trovate_lasciano_l_ordine_della_vision():
     from importers.struttura_documento.analisi import _ordina_colonne
     assert _ordina_colonne(["saldo_corrente"], ["Importo"], [(10, 10, 0, 0, "Altro")]) == (
         ["saldo_corrente"], ["Importo"])
+
+
+def test_la_prima_pagina_del_ce_con_la_coda_dello_sp_sopra_il_titolo_e_anche_sp():
+    """budget_1432 (Panificio, situazione contabile): la pagina 2 comincia con crediti, cassa e
+    debiti dello SP e apre «Conto Economico» a meta' pagina. La vision dava SP [1] e CE [2]: la
+    lettura SP non vedeva la coda del passivo (letto 512.231,24 contro 2.056.081,31)."""
+    from importers.struttura_documento.analisi import _pagine_di_apertura
+    testi = {1: "Stato Patrimoniale\n" + "x 1.000,00\n" * 6,
+             2: "11 CREDITI 229.453,67\n15 CASSA 116.868,27\n23 DEBITI 5.408,36\n"
+                "18 PATRIMONIO NETTO 99.239,60\nConto Economico dal 01/01/2026\n" + "y 2,00\n" * 6}
+    assert _pagine_di_apertura([1], [2], testi) == ([1, 2], [2])
+
+
+def test_il_titolo_del_ce_in_testa_alla_pagina_non_la_rende_sp():
+    from importers.struttura_documento.analisi import _pagine_di_apertura
+    testi = {1: "Stato Patrimoniale\n" + "x 1.000,00\n" * 6,
+             2: "Conto Economico\n" + "y 2,00\n" * 6}
+    assert _pagine_di_apertura([1], [2], testi) == ([1], [2])

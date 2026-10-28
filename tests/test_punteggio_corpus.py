@@ -90,3 +90,14 @@ def test_l_esercizio_salvato_si_abbina_per_anno_non_per_posizione():
     giro = {"importato": True, "esercizi": [{"anno": 2026, "mesi": None, "campi": {"sp09": 10.0}}]}
     d = P.punteggio_documento(vero, [giro])
     assert [p["salvato"] for p in d["giri"][0]["periodi"]] == [False, False]   # l'anno sbagliato non conta
+
+
+def test_un_confronto_infrannuale_salvato_come_anno_intero_si_segnala():
+    vero = {"id": "W", "giudizio_atteso": "importabile",
+            "periodi": [{"fine": "2026-09", "periodo": "2026-01-01..2026-09-30", "campi": _vero(sp09=10.0)},
+                        {"fine": "2025-09", "periodo": "2025-01-01..2025-09-30", "campi": _vero(sp09=8.0)}]}
+    giro = {"importato": True, "esercizi": [{"anno": 2026, "mesi": 9, "campi": {"sp09": 10.0}},
+                                            {"anno": 2025, "mesi": None, "campi": {"sp09": 8.0}}]}
+    d = P.punteggio_documento(vero, [giro])
+    assert [p["periodo_giusto"] for p in d["giri"][0]["periodi"]] == [True, False]
+    assert P.sintesi([d], {"W": {"tipologia": "x"}})["periodo_sbagliato"] == ["W 2025-09"]

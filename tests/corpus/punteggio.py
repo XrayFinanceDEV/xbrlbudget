@@ -191,10 +191,12 @@ def punteggio_documento(vero: dict, giri: list[dict]) -> dict:
              "quadra": g.get("quadra"), "secondi": g.get("secondi"), "periodi": []}
         if g["importato"] and vero["giudizio_atteso"] != "da rifiutare":
             for i, per in enumerate(vero["periodi"][:2]):
-                letto = _esercizio_del_periodo(g["esercizi"], per, i)
-                c = confronta_periodo(per["campi"], letto or {})
+                es = _esercizio_del_periodo(g["esercizi"], per, i)
+                c = confronta_periodo(per["campi"], es["campi"] if es else {})
                 c["fine"] = per["fine"]
-                c["salvato"] = letto is not None
+                c["salvato"] = es is not None
+                # Un confronto di nove mesi salvato come esercizio intero diventa un anno base falso.
+                c["periodo_giusto"] = es is None or es.get("mesi") == mesi_del_periodo(per.get("periodo"))
                 r["periodi"].append(c)
         risultati.append(r)
     stab = _stabilita(giri)
@@ -202,11 +204,11 @@ def punteggio_documento(vero: dict, giri: list[dict]) -> dict:
 
 
 def _esercizio_del_periodo(esercizi: list[dict], per: dict, i: int) -> dict | None:
-    """L'esercizio salvato con l'anno del periodo; senza anno nel periodo, quello nella stessa posizione."""
+    """L'esercizio salvato (anno, mesi, campi) con l'anno del periodo; senza anno nel periodo, quello nella stessa posizione."""
     anno = anno_del_periodo(per.get("fine"))
     if anno is None:
-        return esercizi[i]["campi"] if i < len(esercizi) else None
-    return next((e["campi"] for e in esercizi if e["anno"] == anno), None)
+        return esercizi[i] if i < len(esercizi) else None
+    return next((e for e in esercizi if e["anno"] == anno), None)
 
 
 def _stabilita(giri: list[dict]) -> dict | None:
@@ -226,6 +228,7 @@ def sintesi(documenti: list[dict], campione: dict) -> dict:
     esiti = [0, 0]
     doc_macro_esatti = [0, 0]
     instabili = 0
+    periodo_sbagliato = []
     for d in documenti:
         tipo = campione[d["id"]].get("tipologia", "?")
         for g in d["giri"]:
@@ -242,6 +245,9 @@ def sintesi(documenti: list[dict], campione: dict) -> dict:
                     tot[cat][1] += corr[cat]["totali"]
                     per_tipo[tipo][cat][0] += corr[cat]["giusti"]
                     per_tipo[tipo][cat][1] += corr[cat]["totali"]
+            for per in g["periodi"]:
+                if per.get("periodo_giusto") is False and (d["id"], per["fine"]) not in periodo_sbagliato:
+                    periodo_sbagliato.append((d["id"], per["fine"]))
             if len(g["periodi"]) > 1:
                 prec = g["periodi"][1]
                 tot["precedente_macro"][0] += prec["macro"]["giusti"] if prec["salvato"] else 0
@@ -253,6 +259,7 @@ def sintesi(documenti: list[dict], campione: dict) -> dict:
         "documenti_macro_tutti_esatti": quota(*doc_macro_esatti),
         **{f"{k}_esatti": quota(*v) for k, v in tot.items()},
         "documenti_instabili": instabili,
+        "periodo_sbagliato": [f"{i} {f}" for i, f in periodo_sbagliato],
         "per_tipologia": {t: {k: quota(*v) for k, v in c.items()} for t, c in sorted(per_tipo.items())},
     }
 
@@ -270,7 +277,8 @@ def scrivi_rapporto(cartella: Path, documenti: list[dict], sin: dict, meta: dict
          f"| Dettagli KPI esatti | {pct(sin.get('kpi_esatti'))} |",
          f"| Altri dettagli esatti | {pct(sin.get('dettagli_esatti'))} |",
          f"| Anno precedente, macro esatte | {pct(sin.get('precedente_macro_esatti'))} |",
-         f"| Documenti instabili fra i giri | {sin['documenti_instabili']} |", "",
+         f"| Documenti instabili fra i giri | {sin['documenti_instabili']} |",
+         f"| Esercizi salvati con la durata sbagliata | {', '.join(sin.get('periodo_sbagliato', [])) or 'nessuno'} |", "",
          "## Per tipologia", "", "| Tipologia | Esito | Macro | KPI | Dettagli |", "|---|---|---|---|---|"]
     for t, c in sin["per_tipologia"].items():
         r.append(f"| {t} | {pct(c.get('esito'))} | {pct(c.get('macro'))} | {pct(c.get('kpi'))} | {pct(c.get('dettagli'))} |")

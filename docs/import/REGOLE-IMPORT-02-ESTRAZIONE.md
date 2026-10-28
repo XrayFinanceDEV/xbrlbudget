@@ -1006,3 +1006,9 @@ Ognuna ha il suo test; le regressioni sono su 208 PDF diversi (`Test/` più il l
   senza descrizione per pagina e un solo elenco per conto, altrimenti nulla si esclude.
   budget_1450: «1410 CLIENTI ITALIA» e i clienti di pagina 7, «20 FORNITORI» sui due lati e i
   fornitori di pagina 8 (509.310,97 contati due volte); sul corpus scatta solo lì.
+- **Una situazione a sezioni contrapposte resta in modo «conti»**
+  (`analisi._riclassificato_con_captions_legali`): l'eccezione AMBIENTA, che legge in «legge» un
+  «riclassificato con codici IVCEE» con le colonne comparative dello schema di legge, non vale
+  quando `is_contrapposte_file` riconosce conti su due lati. budget_1432 era letto in «legge» e il
+  modello mescolava lordi e fondi (sbilancio 585.819, ora 15.524,64). Sui 208 PDF la guardia può
+  toccare 9 file; reimportati, 8 verificati e 1432 migliorato.

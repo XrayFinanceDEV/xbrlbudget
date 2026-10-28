@@ -169,6 +169,15 @@ def _riclassificato_con_captions_legali(prospetti: list[dict], pdf: str | None) 
     dettaglio_conti, non un piano dei conti piatto)."""
     if not any(m.get("schema") == "riclassificato_con_codici_ivcee" for m in prospetti):
         return False
+    if pdf:
+        # conti su due lati (sezioni contrapposte) non sono uno schema di legge, anche se
+        # qualche didascalia lo ricorda (budget_1432: letto in «legge», lordi e fondi mescolati)
+        from importers.situazione_contabile_parser import is_contrapposte_file
+        try:
+            if is_contrapposte_file(pdf):
+                return False
+        except Exception:
+            pass
     return _porta_captions_legali_con_totali(pdf)
 
 

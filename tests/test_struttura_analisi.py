@@ -524,3 +524,16 @@ def test_il_titolo_del_ce_in_testa_alla_pagina_non_la_rende_sp():
     testi = {1: "Stato Patrimoniale\n" + "x 1.000,00\n" * 6,
              2: "Conto Economico\n" + "y 2,00\n" * 6}
     assert _pagine_di_apertura([1], [2], testi) == ([1], [2])
+
+
+def test_una_situazione_a_sezioni_contrapposte_resta_in_modo_conti(tmp_path, monkeypatch):
+    """budget_1432 (Panificio, situazione contabile a sezioni contrapposte con codici conto): la
+    vision dice «riclassificato con codici IVCEE» (conti) ma l'eccezione AMBIENTA lo rigirava in
+    «legge», e il modello mescolava lordi e fondi (sbilancio 585.819). Conti su due lati non sono
+    uno schema di legge: l'eccezione non vale."""
+    monkeypatch.setattr(
+        "importers.standard_ivcee_parser.has_comparative_ivcee_columns", lambda pdf: True)
+    monkeypatch.setattr(
+        "importers.situazione_contabile_parser.is_contrapposte_file", lambda pdf: True)
+    mappe = [_p(1, "prospetto_sp", "riclassificato_con_codici_ivcee", ["saldo_corrente"], ["x"])]
+    assert modo_da_mappe(mappe, pdf=str(tmp_path / "qualsiasi.pdf")) == "conti"

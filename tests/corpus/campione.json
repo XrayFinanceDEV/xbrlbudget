@@ -1,0 +1,612 @@
+{
+ "descrizione": "Campione unico di 50 documenti del corpus Test/ per la Fase 0 (verità e punteggio). I file restano fuori da git: si trovano per sha256 (tests/corpus/manifest.json). 'verita' indica da dove ricavare le cifre vere; null = da scrivere a mano.",
+ "creato": "2026-10-28",
+ "documenti": [
+  {
+   "id": "315",
+   "sha256": "d59a05a36b2cbe811631d3ea718a90fbc0f7cd2a9bbf4766d3b9490857657e71",
+   "path": "2026-primo-lotto/success/budget_315_BERTELLI_BilancioCEE_PROVV_2025.pdf",
+   "tipologia": "ivcee/anno-singolo",
+   "colonne": "1",
+   "periodo": "annuale (provvisorio) 2025",
+   "nota": "schema ordinario completo, una colonna",
+   "pagine": 6,
+   "verita": null
+  },
+  {
+   "id": "1407",
+   "sha256": "a9625c4e84183327a873e4d14e7f274553a3779ee50ce3edac6768023a539704",
+   "path": "budget-wk-43/budget_1407_Ignota_IVCEE-sintetico_2025.pdf",
+   "tipologia": "ivcee/anno-singolo",
+   "colonne": "1",
+   "periodo": "annuale 2025",
+   "nota": "IV Direttiva sintetico, ragione sociale non stampata",
+   "pagine": 3,
+   "verita": null
+  },
+  {
+   "id": "1436",
+   "sha256": "b01458a5ae1d8bf47301a945a6933f4a2e28686f1d8012dd9d8d239d8d9805a4",
+   "path": "budget-wk-43/budget_1436_LaC2_IVCEE-abbreviato_2026-09.pdf",
+   "tipologia": "ivcee/anno-singolo",
+   "colonne": "1",
+   "periodo": "infrannuale 01/01-30/09/2026",
+   "nota": "abbreviato",
+   "pagine": 2,
+   "verita": null
+  },
+  {
+   "id": "1473",
+   "sha256": "b82582d7e87a0a19a701ec2a03ec38d1c19a9723b4abe43458fe37bda3faf66c",
+   "path": "budget-wk-43/budget_1473_BPOINT_IVCEE_2025.pdf",
+   "tipologia": "ivcee/anno-singolo",
+   "colonne": "1",
+   "periodo": "annuale 2025",
+   "nota": "B.Point",
+   "pagine": 4,
+   "verita": null
+  },
+  {
+   "id": "328",
+   "sha256": "638b6f36f01b45c42fdc5acafd049f631f88ed3b69a566823f3ab42e08ff5a66",
+   "path": "2026-primo-lotto/successTerzo/success/budget_328_2025- ELLE ERRE BIL.pdf",
+   "tipologia": "ivcee/2-anni",
+   "colonne": "2025 | 2024",
+   "periodo": "annuale 2025",
+   "nota": "ordinario civilistico (Elle erre)",
+   "pagine": 8,
+   "verita": {
+    "fonte": "xbrl_depositato",
+    "file": "2026-06/june_xbrl/budget_351_ISTANZA01516570544-DC.XBRL",
+    "sha256": "b426edc108d964ba81e37619590827968c5cf23b74675bc0516d5bf79e966d83"
+   }
+  },
+  {
+   "id": "161",
+   "sha256": "d07dbfaa4f87ab00f6b6cea2dd288b714278db3cf199581a0cc8c9410c628bc9",
+   "path": "2026-primo-lotto/successSecondo/budget_161_BILANCIO CONA.pdf",
+   "tipologia": "ivcee/2-anni",
+   "colonne": "2025 | 2024 | scostamenti",
+   "periodo": "annuale 2025",
+   "nota": "CEE sintetico riclassificato con scostamenti, TeamSystem (CONA)",
+   "pagine": 2,
+   "verita": {
+    "fonte": "xbrl_depositato",
+    "file": "2026-06/june_xbrl/budget_418_bil25cona.xbrl",
+    "sha256": "f5fb29c0ff27991d8a54eea5bcf1234d94997218e82bbde245b0613b6befbe41"
+   }
+  },
+  {
+   "id": "341",
+   "sha256": "dd0b44f431d3fb9c2f6389d6d09476e627d24272a68c12500cc13b3c9b6520a1",
+   "path": "2026-primo-lotto/successTerzo/success/budget_341_Bilancio cee per previsionale.pdf",
+   "tipologia": "ivcee/2-anni",
+   "colonne": "2025 | 2024 | scostamenti",
+   "periodo": "annuale 2025",
+   "nota": "CEE per previsionale, TeamSystem (Fluiver)",
+   "pagine": 2,
+   "verita": {
+    "fonte": "xbrl_depositato",
+    "file": "2026-06/june_xbrl/budget_349_nixbrlabbn04457150169.xbrl",
+    "sha256": "1bbc0bb40a0dbd631a47e95845de2ab58cda37db9bfdb5639593c76778ed22ef"
+   }
+  },
+  {
+   "id": "257",
+   "sha256": "a300bf77eb952000ee55ace6c789f6d4eb79a7cfb10b23e57d7e7508d6c8c076",
+   "path": "2026-primo-lotto/successSecondo/budget_257_bilancio 31.12.2025 forma abbreviata.pdf",
+   "tipologia": "ivcee/2-anni",
+   "colonne": "2025 | 2024",
+   "periodo": "annuale 2025",
+   "nota": "abbreviato art. 2435-bis",
+   "pagine": 4,
+   "verita": null
+  },
+  {
+   "id": "1474",
+   "sha256": "a009896c20384b60e496b493f5d452a136fefe5aece2776508f76e8d3aba822d",
+   "path": "budget-wk-43/budget_1474_BPOINT_IVCEE_2025-vs-2024.pdf",
+   "tipologia": "ivcee/2-anni",
+   "colonne": "2025 | 2024",
+   "periodo": "annuale 2025",
+   "nota": "B.Point",
+   "pagine": 4,
+   "verita": null
+  },
+  {
+   "id": "1426",
+   "sha256": "d4aa727320626612fe21a7237ae9657b0bc9cc5d2b2dfc00aa542d2311c35077",
+   "path": "budget-wk-43/budget_1426_MTD_schema-rettificato-1pag_2026-07.pdf",
+   "tipologia": "ivcee/2-anni",
+   "colonne": "2026 | rettificato",
+   "periodo": "infrannuale 2026",
+   "nota": "schema informativo rettificato su una pagina (MTD)",
+   "pagine": 1,
+   "verita": null
+  },
+  {
+   "id": "409",
+   "sha256": "a3b01eabb69938a51ceea243761e52062159d514ada412806d4d85b502c1587c",
+   "path": "2026-06/june_sample/success/budget_409_bila2025ok.pdf",
+   "tipologia": "ivcee/facsimile-deposito",
+   "colonne": "2025 | 2024",
+   "periodo": "annuale 2025",
+   "nota": "ordinario + nota integrativa (SGM)",
+   "pagine": 25,
+   "verita": {
+    "fonte": "xbrl_depositato",
+    "file": "2026-06/june_xbrl/budget_407_bila2025sgm.xbrl",
+    "sha256": "3614f5c079f7e209155d949eea917a4d824e17cb058ebbe259cac8a474abc786"
+   }
+  },
+  {
+   "id": "419",
+   "sha256": "de99f0515fc2a4b4b4f9b5b407d62b486f253f678196814db390a149b6cf6919",
+   "path": "2026-06/june_sample/success/budget_419_bil2025cona.pdf",
+   "tipologia": "ivcee/facsimile-deposito",
+   "colonne": "2025 | 2024",
+   "periodo": "annuale 2025",
+   "nota": "CONA",
+   "pagine": 24,
+   "verita": {
+    "fonte": "xbrl_depositato",
+    "file": "2026-06/june_xbrl/budget_418_bil25cona.xbrl",
+    "sha256": "f5fb29c0ff27991d8a54eea5bcf1234d94997218e82bbde245b0613b6befbe41"
+   }
+  },
+  {
+   "id": "428",
+   "sha256": "540c3fa3218a89319ed1d9fcbdbf6af1cbd1a2d5d2ca88a83585045b228e8abe",
+   "path": "2026-06/june_sample/success/budget_428_BIL25HYMALAIA.pdf",
+   "tipologia": "ivcee/facsimile-deposito",
+   "colonne": "2025 | 2024",
+   "periodo": "annuale 2025",
+   "nota": "Hymalaia",
+   "pagine": 23,
+   "verita": {
+    "fonte": "xbrl_depositato",
+    "file": "2026-06/june_sample/success/budget_431_BIL25HYMA.xbrl",
+    "sha256": "770936cfa6988e8c248bf5f5ebcfffbffe2c0c850a5a23fb8707f2796fd31be3"
+   }
+  },
+  {
+   "id": "1406",
+   "sha256": "75fef3d401d04b84bc0826c5ca46dc7a70fe43f11bf7b7bb8d01a3b726e5f852",
+   "path": "budget-wk-43/budget_1406_SGH_bilancio-esercizio_2025.pdf",
+   "tipologia": "ivcee/facsimile-deposito",
+   "colonne": "2025 | 2024",
+   "periodo": "annuale 2025",
+   "nota": "micro (SGH)",
+   "pagine": 9,
+   "verita": {
+    "fonte": "xbrl_depositato",
+    "file": "2026-10-15/budget_1338_micrxbrl03899760791.xbrl",
+    "sha256": "665b92a3b174143c80214a6aaceb5e178f665797812478338caf61efe49bc05b"
+   }
+  },
+  {
+   "id": "1337",
+   "sha256": "7087ffbc8cb60428f63f5e8ef493fe67f09b3d609d3a2e5696182bfadc016d87",
+   "path": "2026-10-15/budget_1337_BG.2060425.WY1408.M26615M5330.615M5330.002.XBRL.pdf",
+   "tipologia": "ivcee/facsimile-deposito",
+   "colonne": "2025 | 2024",
+   "periodo": "annuale 2025",
+   "nota": "ordinario S.p.A. (Santini)",
+   "pagine": 37,
+   "verita": {
+    "fonte": "xbrl_depositato",
+    "file": "2026-10-15/budget_1324_nixbrlesen01631560164.xbrl",
+    "sha256": "a4db25869bde45d740aca4ea652c0cf6d3622cdb3172bbd83a50670039758893"
+   }
+  },
+  {
+   "id": "1470",
+   "sha256": "23bfc7a2b66786bbce44e3ce3c995e92accf112f06b46154a495f83d6a614742",
+   "path": "budget-wk-43/budget_1470_Scaglioni_schema-XBRL_2026-09-vs-2025-09.pdf",
+   "tipologia": "ivcee/facsimile-deposito",
+   "colonne": "30/09/2026 | 30/09/2025",
+   "periodo": "infrannuale 9 mesi",
+   "nota": "schema XBRL da gestionale AGO (Scaglioni)",
+   "pagine": 12,
+   "verita": null
+  },
+  {
+   "id": "302",
+   "sha256": "42918f7226ec5e5233cafd51577302bdc6b824c544ebdd2ffc26a35344742395",
+   "path": "2026-primo-lotto/successTerzo/success/budget_302_Bilancio CEE al 31.12.2025 con dettaglio sottoconti.pdf",
+   "tipologia": "ivcee-dettaglio/codici",
+   "colonne": "2025 | 2024 | variazione",
+   "periodo": "annuale 2025",
+   "nota": "riclassificata dettagliata, conti a 7 cifre (Cawipa)",
+   "pagine": 6,
+   "verita": null
+  },
+  {
+   "id": "313",
+   "sha256": "3545cbd3136e9fd9cda12f4592b82221ada7be4a88cf68979631008d00cbc66a",
+   "path": "2026-primo-lotto/successTerzo/success/budget_313_INQCEED-001.pdf",
+   "tipologia": "ivcee-dettaglio/codici",
+   "colonne": "2025 | 2024 | variazione",
+   "periodo": "annuale 2025",
+   "nota": "IV CEE con sottoconti, TeamSystem",
+   "pagine": 4,
+   "verita": null
+  },
+  {
+   "id": "638",
+   "sha256": "7bf295d489a4091adbb6ec5ca1a50922f3b32a1ec8fafb305a573d962c32b832",
+   "path": "2026-07/prova_tets/budget_638_ellevi cee 31.05.26.pdf",
+   "tipologia": "ivcee-dettaglio/codici",
+   "colonne": "05/2026 | 12/2025 | ...",
+   "periodo": "infrannuale 5 mesi",
+   "nota": "quattro colonne di importi (Ellevi)",
+   "pagine": 7,
+   "verita": null
+  },
+  {
+   "id": "381",
+   "sha256": "555882e7e49c2084ea8f3b096145f9f39c0d15e013eceb99de69d39973f06b23",
+   "path": "2026-06/june_sample/success/budget_381_detail_riclass (54).pdf",
+   "tipologia": "ivcee-dettaglio/codici",
+   "colonne": "1",
+   "periodo": "annuale 2025",
+   "nota": "riclassificata dettagliata, una colonna (DSG Digital)",
+   "pagine": 4,
+   "verita": null
+  },
+  {
+   "id": "208",
+   "sha256": "8deb3a4926ce6ab52a2385c8d38fe50ec61de597b5741d33ecb38804efd9a5e6",
+   "path": "2026-primo-lotto/successSecondo/budget_208_sangae6_bil ue con dettaglio conti da genya 2025.pdf",
+   "tipologia": "ivcee-dettaglio/codici",
+   "colonne": "2025 | 2024",
+   "periodo": "annuale 2025",
+   "nota": "UE abbreviato con dettaglio conti, Genya",
+   "pagine": 6,
+   "verita": null
+  },
+  {
+   "id": "1440",
+   "sha256": "49108a17e5d411fc158ec118190e4dd5787a0b7e0538c2b09a61272260e9ada3",
+   "path": "budget-wk-43/budget_1440_Ortoteck_riclassificato-UE_2025-vs-2024.pdf",
+   "tipologia": "ivcee-dettaglio/descrizioni",
+   "colonne": "2025 | 2024 | variazioni",
+   "periodo": "annuale 2025",
+   "nota": "riclassificato UE, Passepartout (Ortoteck)",
+   "pagine": 6,
+   "verita": null
+  },
+  {
+   "id": "1445",
+   "sha256": "31c962bebe3a3eb6b0c8910b49ea77b167ea87cd31565bc964eb1c26ca847d78",
+   "path": "budget-wk-43/budget_1445_Molina_bilancio-confronto_2026-06.pdf",
+   "tipologia": "ivcee-dettaglio/descrizioni",
+   "colonne": "06/2026 | confronto",
+   "periodo": "infrannuale 6 mesi",
+   "nota": "Crystal Reports (Molina)",
+   "pagine": 14,
+   "verita": null
+  },
+  {
+   "id": "1450",
+   "sha256": "6eb256739b39bf7dea1e7dddc4710937966bae0802b9aebcb55361a3e21a3a99",
+   "path": "budget-wk-43/budget_1450_ABCLOG_bilancio-contabile_2026-08.pdf",
+   "tipologia": "ivcee-dettaglio/descrizioni",
+   "colonne": "saldo progressivo",
+   "periodo": "infrannuale 08/2026",
+   "nota": "bilancio contabile con partitari (ABCLOG)",
+   "pagine": 8,
+   "verita": null
+  },
+  {
+   "id": "353",
+   "sha256": "959c7edaa0214b2da143fa7a4270d4d6fdc9c80b161a2f0cf0ab60c746333fc3",
+   "path": "2026-06/june_sample/success/budget_353_Bilancio 31.12.25.pdf",
+   "tipologia": "ivcee-dettaglio/descrizioni",
+   "colonne": "1",
+   "periodo": "annuale 2025",
+   "nota": "dettaglio per descrizione, una colonna (SI-CA)",
+   "pagine": 10,
+   "verita": null
+  },
+  {
+   "id": "682",
+   "sha256": "62e652ef4b7607fe4b6ace145cea3b8741a64ab8a8d61bb88b605a3d368d3236",
+   "path": "2026-07/july_budget/budget_682_PHARMA HUB SRL BILANCIO CEE CON DETTAGLIO 31.12.2025.pdf",
+   "tipologia": "ivcee-dettaglio/descrizioni",
+   "colonne": "corrente | precedente | ...",
+   "periodo": "annuale 2025",
+   "nota": "CEE con dettaglio (Pharma Hub)",
+   "pagine": 9,
+   "verita": null
+  },
+  {
+   "id": "158",
+   "sha256": "27eec14349d236d397d463e115ea5029d6d41df27bb5f3d485c76953179b689a",
+   "path": "2026-primo-lotto/errori/budget_158_BILANCIO CONA.pdf",
+   "tipologia": "contrapposte",
+   "colonne": "1 per lato",
+   "periodo": "annuale 2025",
+   "nota": "verifica a sezioni contrapposte TeamSystem (CONA)",
+   "pagine": 5,
+   "verita": {
+    "fonte": "xbrl_depositato",
+    "file": "2026-06/june_xbrl/budget_418_bil25cona.xbrl",
+    "sha256": "f5fb29c0ff27991d8a54eea5bcf1234d94997218e82bbde245b0613b6befbe41"
+   }
+  },
+  {
+   "id": "395",
+   "sha256": "a95d7406ce4f362cf67c7d8e7fb14c345b98dd7a2ed7abc13fb33a4fcfb3fca1",
+   "path": "2026-primo-lotto/sez-contrapposte/budget_395_BILANCIO AGRIMIX SAS  31.12.2025 definitivo.pdf",
+   "tipologia": "contrapposte",
+   "colonne": "1 per lato",
+   "periodo": "annuale 2025",
+   "nota": "TeamSystem (Agrimix)",
+   "pagine": 7,
+   "verita": {
+    "fonte": "ground_truth_contrapposte (sp02, sp03, sp13, totale attivo)",
+    "file": "tests/_ground_truth_sez_contrapposte.json"
+   }
+  },
+  {
+   "id": "337",
+   "sha256": "70ea0d5277ec4a0ff4fcfa1e7822c0e371d5e6ebd304734985293ec16d177264",
+   "path": "2026-primo-lotto/sez-contrapposte/budget_337_2023.pdf",
+   "tipologia": "contrapposte",
+   "colonne": "1 per lato",
+   "periodo": "annuale 2023",
+   "nota": "SP+CE contrapposte, testo OCR rumoroso",
+   "pagine": 3,
+   "verita": {
+    "fonte": "truth.json",
+    "file": "tests/corpus/truth.json"
+   }
+  },
+  {
+   "id": "405",
+   "sha256": "67e3cdb3ecc06679a56e72c2e1bbac6d7edb9a7013a9fc7c802e8b1bfc370082",
+   "path": "2026-primo-lotto/sez-contrapposte/budget_405_all. A - PROGETTO DI BILANCIO.pdf",
+   "tipologia": "contrapposte",
+   "colonne": "1 per lato",
+   "periodo": "annuale 2025",
+   "nota": "progetto di bilancio (Vojta)",
+   "pagine": 6,
+   "verita": {
+    "fonte": "ground_truth_contrapposte (sp02, sp03, sp13, totale attivo)",
+    "file": "tests/_ground_truth_sez_contrapposte.json"
+   }
+  },
+  {
+   "id": "246",
+   "sha256": "682e81ad0ff2f219b4108ba64a67b00f5d9b3df8c49493b2de235715e8885be7",
+   "path": "2026-primo-lotto/successSecondo/budget_246_SAMAC APPALTI SRL - BILANCIO AL 31.12.2025.pdf",
+   "tipologia": "contrapposte",
+   "colonne": "mastro | conto",
+   "periodo": "annuale 2025",
+   "nota": "mastri e sottoconti affiancati (Samac)",
+   "pagine": 5,
+   "verita": null
+  },
+  {
+   "id": "188",
+   "sha256": "aa8cf1d0a7c9efeedc1d953d74d7c5c8b7214b3c92a42ada06797db100a90917",
+   "path": "2026-primo-lotto/errori/budget_188_Sezioni_Contrapposte(Bilanci)_7GP0QRV4I.frx 2025.pdf",
+   "tipologia": "contrapposte",
+   "colonne": "1 per lato",
+   "periodo": "annuale 2025",
+   "nota": "FastReport (Troli)",
+   "pagine": 7,
+   "verita": null
+  },
+  {
+   "id": "1432",
+   "sha256": "c2f6088a466e64481860e78940f050a00d574caab9375b72e260a82e330b870c",
+   "path": "budget-wk-43/budget_1432_PanificioTagliabue_situazione_2026-09-11.pdf",
+   "tipologia": "contrapposte",
+   "colonne": "1 per lato",
+   "periodo": "infrannuale al 11/09/2026",
+   "nota": "nome caricato diverso dal contenuto (Panificio Tagliabue)",
+   "pagine": 5,
+   "verita": null
+  },
+  {
+   "id": "1456",
+   "sha256": "e74db0df56daf5d9c9d4146bbc181d1bef61542fa9051effeb1d2662c5fc7d9a",
+   "path": "budget-wk-43/budget_1456_LattoneriaVeneta_situazione_2026-09.pdf",
+   "tipologia": "contrapposte",
+   "colonne": "1 per lato",
+   "periodo": "infrannuale 9 mesi",
+   "nota": "Lattoneria Veneta",
+   "pagine": 6,
+   "verita": null
+  },
+  {
+   "id": "615",
+   "sha256": "911d2c32e30b900e867f4dd6b8288be31b1f4e6122f0e73ce9fff8b0a93b3659",
+   "path": "2026-07/july_budget/budget_615_2024 Lavori di meccanica generale.pdf",
+   "tipologia": "contrapposte",
+   "colonne": "mastro | conto",
+   "periodo": "annuale 2024",
+   "nota": "situazione contabile AGO",
+   "pagine": 8,
+   "verita": null
+  },
+  {
+   "id": "588",
+   "sha256": "eb67fa98c231f4f7725e551ea9c1537e1488df4d81c00b36b7ae931008274a08",
+   "path": "2026-07/july_budget/budget_588_Bilancio analitico 2025.pdf",
+   "tipologia": "contrapposte",
+   "colonne": "saldo non rettificato | saldo finale (per lato)",
+   "periodo": "annuale 2025",
+   "nota": "bilancio a 4 sezioni con rettifiche (Tecnofer)",
+   "pagine": 8,
+   "verita": null
+  },
+  {
+   "id": "1410",
+   "sha256": "c06a1e174756c4579bf9476aae40891711fd2a8da71a9f127a745dc0a393c044",
+   "path": "budget-wk-43/budget_1410_Unicarton_verifica_2026-08.pdf",
+   "tipologia": "contrapposte",
+   "colonne": "1 per lato",
+   "periodo": "infrannuale al 31/08/2026",
+   "nota": "bilancio di verifica (Unicarton)",
+   "pagine": 5,
+   "verita": null
+  },
+  {
+   "id": "1325",
+   "sha256": "f000156cd75946b4cbd52f7b9b810b31d5d4f56a050c3a613824aabf5ae65334",
+   "path": "2026-10-15/budget_1325_Stampa_bilancio_di_verifica.PDF",
+   "tipologia": "conti/colonne",
+   "colonne": "saldo",
+   "periodo": "annuale 2025",
+   "nota": "bilancio di verifica a sezioni in sequenza (Santini)",
+   "pagine": 11,
+   "verita": {
+    "fonte": "xbrl_depositato",
+    "file": "2026-10-15/budget_1324_nixbrlesen01631560164.xbrl",
+    "sha256": "a4db25869bde45d740aca4ea652c0cf6d3622cdb3172bbd83a50670039758893"
+   }
+  },
+  {
+   "id": "COLOMBO",
+   "sha256": "3aeea2ee16fa37df2a4da525931d47e679fbdc17e43c8c16d277817a075d362d",
+   "path": "2026-10-weekend/COLOMBO.pdf",
+   "tipologia": "conti/colonne",
+   "colonne": "saldo",
+   "periodo": "annuale 2025",
+   "nota": "mastro e conto con sezione SEZBIL",
+   "pagine": 10,
+   "verita": null
+  },
+  {
+   "id": "229",
+   "sha256": "8b66fd68374a0d4ff06d78548d9ba8487636d25e11a1c44ed7a50623225e4f6a",
+   "path": "2026-primo-lotto/errori/budget_229_MBS 2025.pdf",
+   "tipologia": "conti/colonne",
+   "colonne": "saldo",
+   "periodo": "annuale 2025",
+   "nota": "situazione contabile a colonna unica (MBS)",
+   "pagine": 4,
+   "verita": null
+  },
+  {
+   "id": "680",
+   "sha256": "94134fd12ee2d63f358b1ed403deadf1aedc77e85adef303c03234cfa38c5298",
+   "path": "2026-07/july_budget/budget_680__bilver-s.pdf",
+   "tipologia": "conti/colonne",
+   "colonne": "dare | avere | saldo periodo | saldo",
+   "periodo": "infrannuale al 31/05/2026",
+   "nota": "bilancio di verifica TeamSystem (FTC)",
+   "pagine": 17,
+   "verita": null
+  },
+  {
+   "id": "281",
+   "sha256": "e8394678452ed3b223ba944f9a60c063b191b66de2a09bf0df6c4b7d78b77434",
+   "path": "2026-primo-lotto/errori/budget_281_MSIT-31 3 2026.pdf",
+   "tipologia": "conti/colonne",
+   "colonne": "dare | avere",
+   "periodo": "infrannuale al 31/03/2026",
+   "nota": "situazione patrimoniale Dare/Avere DEPI (GI.AL)",
+   "pagine": 4,
+   "verita": {
+    "fonte": "ground_truth_contrapposte (sp02, sp03, sp13, totale attivo)",
+    "file": "tests/_ground_truth_sez_contrapposte.json"
+   }
+  },
+  {
+   "id": "330",
+   "sha256": "227e21869e8762507b417f0ee22cdf79b25402faace1907203e2cce0546d4e4e",
+   "path": "2026-primo-lotto/success/budget_330_KG Project Srl situazione contabile al 31-12-2025.pdf",
+   "tipologia": "conti/colonne",
+   "colonne": "saldo",
+   "periodo": "annuale 2025",
+   "nota": "situazione contabile AGO, conti a 8 cifre (KG Project)",
+   "pagine": 2,
+   "verita": null
+  },
+  {
+   "id": "1478",
+   "sha256": "9afcaf70a7513316dea94a0ad6a3f3058870a9ccd3bf4e5c7698d15ed51df05d",
+   "path": "budget-wk-43/budget_1478_ErreciTennis_situazione_2026-08.pdf",
+   "tipologia": "conti/colonne",
+   "colonne": "saldo",
+   "periodo": "infrannuale 01/09/2025-31/08/2026",
+   "nota": "situazione per competenza, esercizio non solare (Erreci Tennis, 2a versione di 1327)",
+   "pagine": 3,
+   "verita": null
+  },
+  {
+   "id": "1419",
+   "sha256": "36259891d49c35e537bbc2055e52cc0d5c1f2cadb3fcda78126d1184dabeef58",
+   "path": "budget-wk-43/budget_1419_Eledis_verifica-scansione_2026-09.pdf",
+   "tipologia": "scansione",
+   "colonne": "dare | avere",
+   "periodo": "infrannuale al 30/09/2026",
+   "nota": "bilancio di verifica scansionato (Eledis)",
+   "pagine": 4,
+   "verita": null
+  },
+  {
+   "id": "1322",
+   "sha256": "340d440f8441fa2e4e4806c0bccae802c10f4204fa902848980eaeb1b6a7abf7",
+   "path": "2026-10-15/budget_1322_BILANCIO 2025 PER PROIEZIONI.pdf",
+   "tipologia": "scansione",
+   "colonne": "2025 | 2024",
+   "periodo": "annuale 2025",
+   "nota": "facsimile XBRL scansionato (Santini)",
+   "pagine": 4,
+   "verita": {
+    "fonte": "xbrl_depositato",
+    "file": "2026-10-15/budget_1324_nixbrlesen01631560164.xbrl",
+    "sha256": "a4db25869bde45d740aca4ea652c0cf6d3622cdb3172bbd83a50670039758893"
+   }
+  },
+  {
+   "id": "Bilancino 31-5-26",
+   "sha256": "2f44398ded277cd7d5a5a3d99bf38ffec51030faa890ddf2b990a219ba0faf6d",
+   "path": "2026-primo-lotto/sez-contrapposte/Bilancino 31-5-26.pdf",
+   "tipologia": "scansione",
+   "colonne": "1 per lato",
+   "periodo": "infrannuale al 31/05/2026",
+   "nota": "contrapposte scansionate (Gerevini, caricamenti 689/690)",
+   "pagine": 4,
+   "verita": null
+  },
+  {
+   "id": "137",
+   "sha256": "c30a1bbd1b0e81a359a17b2a8f5d1c54ab45079efd1e4d17409d0d9800246d5c",
+   "path": "2026-primo-lotto/successSecondo/budget_137_Bilancio_LUGS_2025_DEFINITIVO.pdf",
+   "tipologia": "limite/da-rifiutare",
+   "colonne": "1",
+   "periodo": "annuale 2025",
+   "nota": "riassunto per macro-voci, non un bilancio (LUGS)",
+   "pagine": 1,
+   "verita": null
+  },
+  {
+   "id": "335",
+   "sha256": "f0028696e29459ffd984f5081fc4021b31898fe33753bec6c92a7504f37b7bc8",
+   "path": "2026-primo-lotto/successTerzo/success/budget_335_TEIC ECONOMICO 31.03.26.pdf",
+   "tipologia": "limite/solo-ce",
+   "colonne": "1 per lato",
+   "periodo": "infrannuale al 31/03/2026",
+   "nota": "solo conto economico a sezioni contrapposte (TEIC)",
+   "pagine": 2,
+   "verita": null
+  },
+  {
+   "id": "350",
+   "sha256": "c8ceacc682ba9251189bff63738e3a0ed44675be830c83d32308f34d66428639",
+   "path": "2026-06/june_sample/success/budget_350_T24922-514S0021-2026.PDF",
+   "tipologia": "limite/non-bilancio",
+   "colonne": "-",
+   "periodo": "-",
+   "nota": "distinta di deposito Registro Imprese, nessuna cifra (Elle erre)",
+   "pagine": 3,
+   "verita": null
+  }
+ ]
+}

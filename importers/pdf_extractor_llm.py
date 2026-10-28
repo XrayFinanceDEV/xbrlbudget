@@ -546,17 +546,28 @@ def _filter_difference_columns(page: fitz.Page) -> Optional[str]:
     right of the printed ``DIFFERENZA`` header.
     """
     words = page.get_text('words', sort=True)
+    # le colonne-anno: "2025" o una data "30/06/2026" (budget_1445, Crystal Reports)
+    year_words = [
+        word for word in words
+        if re.fullmatch(r"(?:\d{2}[/.\-]\d{2}[/.\-])?20\d{2}", str(word[4]).strip())
+    ]
+    years = {str(word[4]).strip()[-4:] + str(word[4]).strip() for word in year_words}
+    if len(years) < 2:
+        return None
+    first_year_x = min(float(word[0]) for word in year_words)
+    # un'intestazione di differenza sta a destra delle colonne-anno: "Differenza tra valore e
+    # costi" e' una didascalia del CE, a sinistra, e non taglia la pagina
     difference_headers = [
-        word for word in words if str(word[4]).strip().casefold().startswith('differenza')
+        word for word in words
+        if float(word[0]) > first_year_x
+        and (str(word[4]).strip().casefold().startswith('differenza')
+             or str(word[4]).strip().casefold() in ('diff.', 'diff'))
     ]
     has_deviation = any(
-        str(word[4]).strip().casefold().startswith('scost') for word in words
+        str(word[4]).strip().casefold().startswith('scost') or str(word[4]).strip() == '%'
+        for word in words
     )
-    years = {
-        str(word[4]).strip() for word in words
-        if re.fullmatch(r"20\d{2}", str(word[4]).strip())
-    }
-    if not difference_headers or not has_deviation or len(years) < 2:
+    if not difference_headers or not has_deviation:
         return None
     cutoff_x = min(float(word[0]) for word in difference_headers) - 2
     kept = [word for word in words if float(word[0]) < cutoff_x]
@@ -4160,8 +4171,15 @@ def _declared_control_totals(file_path: str, text: Optional[str] = None,
             rf"(?im)^\s*stato\s+patrimoniale\s+(?:-\s*)?{side}\s*$"
             rf"[ \t]*\r?\n[ \t]*({_DECL_NUM_RE.pattern})[ \t]*$"
         )
+        # la stessa intestazione con i suoi importi sulla STESSA riga, come la ricompone il testo
+        # per posizione senza le colonne di differenza (BILAQ: "2 Stato patrimoniale attivo
+        # 1.250.311,33 1.314.938,83"): solo intestazione (col codice di riga davanti) e importi
+        stessa_riga = re.compile(
+            rf"(?im)^\s*(?:\d+\s+)?stato\s+patrimoniale\s+(?:-\s*)?{side}[ \t]+"
+            rf"({_DECL_NUM_RE.pattern})(?:[ \t]+{_DECL_NUM_RE.pattern})*[ \t]*$"
+        )
         values = []
-        for match in pattern.finditer(low):
+        for match in [*pattern.finditer(low), *stessa_riga.finditer(low)]:
             try:
                 values.append(abs(Decimal(
                     match.group(1).replace(".", "").replace(",", ".")

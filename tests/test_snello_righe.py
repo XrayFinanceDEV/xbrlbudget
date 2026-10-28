@@ -13,6 +13,15 @@ def test_importi_con_segni_e_sottolineature():
     assert R.importi("conto 10000001673 c/c 320.100,68") == [(D("320100.68"), "")]
 
 
+def test_una_parentesi_non_chiusa_non_e_un_segno():
+    """budget_1450 (ABCLOG): «...CLIENTI (5.367,37» con la parentesi aperta e mai chiusa sulla
+    riga, una nota della descrizione. Letta come negativo spostava 990.911,70 sul passivo: il
+    segno fra parentesi vale solo se la parentesi si chiude."""
+    assert R.importi("FATTURE DA EMETTERE CLIENTI (5.367,37") == [(D("5367.37"), "")]
+    assert R.importi("Perdite (1.500,00)") == [(D("-1500.00"), "")]
+    assert R.importi("Perdite 1.500,00)") == [(D("1500.00"), "")]
+
+
 def test_etichetta():
     assert R.etichetta("10101 CASSA CONTANTI 839,66 D 2.000,00") == "10101 CASSA CONTANTI"
 
@@ -317,3 +326,45 @@ def test_riga_con_saldo_sporco_dopo_la_descrizione_con_euro_non_si_tocca(monkeyp
     monkeypatch.setattr(DE, "collect_source_rows", lambda *a, **k: fisiche)
     righe = R.righe_da_pdf("x.pdf", None, ["saldo_finale"])
     assert next(r for r in righe if r.id == "rs").valore == D("1461.86")
+
+
+def test_il_capitale_sociale_nella_ragione_sociale_e_testo_della_descrizione(monkeypatch):
+    """budget_1450 (ABCLOG, partitario): «876,48 1410000352 FIMER S.P.A. CAP. SOC. E
+    22.000.000,00». Il saldo sta nella colonna della pagina (x 57,8, a sinistra del codice); il
+    capitale sociale, preceduto dalla valuta, e' nella ragione sociale (x 224). Prendendo l'ultimo
+    importo il fornitore valeva 22 milioni."""
+    from importers import detail_enrichment as DE
+    from importers.import_snello import righe as R
+
+    fisiche = [_riga_fisica(f"r{i}", f"1{i},00 14100003{i} Fornitore {i}", [f"1{i}"], [57.8])
+               for i in range(1, 9)]
+    fisiche.append(_riga_fisica("rf", "876,48 1410000352 FIMER S.P.A. CAP. SOC. E 22.000.000,00",
+                                ["876.48", "22000000.00"], [57.8, 224.2]))
+    monkeypatch.setattr(DE, "collect_source_rows", lambda *a, **k: fisiche)
+    righe = R.righe_da_pdf("x.pdf", None, [])
+    assert next(r for r in righe if r.id == "rf").valore == D("876.48")
+
+
+def test_due_importi_senza_valuta_davanti_restano_come_prima(monkeypatch):
+    """Dare e avere su due colonne vere, o due sezioni affiancate: decide la regola di sempre."""
+    from importers import detail_enrichment as DE
+    from importers.import_snello import righe as R
+
+    fisiche = [_riga_fisica(f"r{i}", f"6{i}00 Conto {i} 1{i},00 2{i},00", [f"1{i}", f"2{i}"], [400.0, 480.0])
+               for i in range(1, 9)]
+    monkeypatch.setattr(DE, "collect_source_rows", lambda *a, **k: fisiche)
+    righe = R.righe_da_pdf("x.pdf", None, [])
+    assert next(r for r in righe if r.id == "r3").valore == D("23.00")
+
+
+def test_la_valuta_davanti_a_ogni_colonna_e_un_prefisso_non_una_descrizione(monkeypatch):
+    """budget_413: «a) esigibili entro € 1.229.007 € 1.095.752», due colonne-anno col simbolo
+    davanti: nessuno dei due importi e' descrizione, decide la regola di colonna di sempre."""
+    from importers import detail_enrichment as DE
+    from importers.import_snello import righe as R
+
+    fisiche = [_riga_fisica(f"r{i}", f"Voce {i} € 1.00{i} € 2.00{i}", [f"100{i}", f"200{i}"], [418.0, 510.0])
+               for i in range(1, 9)]
+    monkeypatch.setattr(DE, "collect_source_rows", lambda *a, **k: fisiche)
+    righe = R.righe_da_pdf("x.pdf", None, [])
+    assert next(r for r in righe if r.id == "r3").valore == D("2003.00")

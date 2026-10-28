@@ -137,6 +137,39 @@ svalutazione si netta con l'ammortamento **solo se tutte** queste condizioni val
 4. ha un riferimento **positivo** a un'immobilizzazione. Così un "fondo svalutazione" nudo non
    viene mai nettato per sbaglio.
 
+### Il fondo già nettato nella voce (percorso snello, modi di legge)
+
+Regola introdotta il 2026-10-27 (budget_1443, Profilati Brescia). Uno schema di legge con i
+conti sotto stampa sulla didascalia il **netto** (`C.II.1 Crediti verso clienti 312.535,86`) e
+sotto i conti il lordo e i fondi. Se il modello restituisce il netto della didascalia **e** il
+fondo dei conti (`SPA.C.II.1.F`), `da_coppie` lo sottrae una seconda volta: i crediti verso
+clienti scendevano a 35.315,08 e l'attivo restava corto di esattamente 277.220,78.
+
+Due difese, in quest'ordine:
+
+1. **A monte, il riconoscimento.** Quel documento è uno «schema di legge con dettaglio conti»
+   e in modo `legge_con_dettaglio` le righe-conto non arrivano mai al modello. Il riconoscimento
+   (`_LEGAL_CAPTION`) accetta anche il codice UE puntato **senza** parentesi (`c.ii.1 …`,
+   `c.ii.5-bis …`, `b.iii.2.d …`): prima riconosceva solo `b.ii) …` e `1) …`, e il file
+   finiva in modo `legge` con lordi e fondi nel prompt. Sul corpus (206 PDF diversi) il
+   riconoscimento cambia solo per budget_1443 e budget_1430.
+2. **A valle, il controllo sul totale stampato** (`conti.fondi_gia_nettati`). Un fondo `.F`
+   dell'attivo è candidato solo se l'importo letto per la sua voce è una cifra **stampata** dal
+   documento (un lordo ricostruito sommando i conti non lo è), oppure se la voce manca o vale
+   zero (budget_1440: il modello legge i fondi anche di voci di cui non ha letto il lordo, e un
+   fondo senza voce non ha nulla da cui sottrarsi). Si toglie solo se senza di lui
+   l'attivo chiude **al centesimo** sul Totale Attivo stampato (letto dal testo, mai dal
+   modello) e **una sola** combinazione di fondi lo fa chiudere. Totale assente, attivo che
+   chiude già o più combinazioni possibili: nessuna correzione. È massa letta che si smette di
+   contare due volte, non un tappo; si dichiara in `diag["fondi_gia_nettati"]` (sempre
+   presente, anche vuota) e nell'avviso «FONDO GIÀ NETTATO». Vale per l'anno corrente: l'anno
+   precedente non ha un Totale Attivo stampato indipendente su cui chiudere.
+3. **La prova locale** (budget_1433/1434, Panificio). Se la voce è stampata e voce + |fondo|
+   è anch'esso un importo stampato (580.220,35 + 601.226 = 1.181.446,35, il lordo nei conti),
+   la voce è già netta e il fondo cade **senza** aspettare che l'attivo chiuda: un altro
+   errore, indipendente, non deve bloccare questa correzione. Serve comunque un Totale Attivo
+   stampato (senza, nessuna correzione), e tre cifre stampate che si tengono fra loro.
+
 ### Il problema del doppio conteggio padre/figlio
 
 > **Si sommano i mastri oppure le foglie, mai entrambi.**
@@ -235,6 +268,13 @@ valore IV-CEE valido.
 Specularmente, la riduzione dell'ancora è cappata ai lordi presenti: un fondo senza il suo
 asset non deve restringere l'ancora.
 
+Quando è il **documento** a stampare un fondo più grande del costo storico (budget_1452: fondi
+degli immateriali 1.086,25 su un lordo di 1.000), il clamp resta giusto e l'eccedenza resta
+sbilancio dichiarato, mai spostata altrove. Il percorso snello la dichiara in
+`diag["immobilizzazioni_negative_tagliate"]` e l'utente legge l'avviso «FONDO OLTRE IL COSTO
+STORICO», che nomina il campo e l'eccedenza (`pdf_importer._avvisi_fondi_snello`): prima vedeva
+solo un generico «bilancio sbilanciato di 86,25».
+
 ### L'applicazione è atomica
 
 Il netting scrive su più campi (sp02, sp03, i secchi dei debiti). La fase di scrittura fotografa
@@ -302,6 +342,23 @@ Primo match vince, e l'ordine non è negoziabile:
 Dai suffissi `(EE)`/`(OE)` (convenzione AGO) oppure dalle parole ENTRO/OLTRE. **Senza alcun
 marcatore, tutto è a breve.** Il parser a colonna unica usa l'unica regola basata sul codice del
 file: i prefissi `430`/`440`/`442` marcano il lungo termine.
+
+Sul percorso snello, in modo di legge, il modello restituisce le scadenze come percorsi `.E`/`.O`
+accanto alla voce (`conti.da_coppie`). Tre regole, ciascuna dichiarata nel `diag` anche vuota:
+
+- **La scadenza sostituisce la voce solo se la ricompone** (entro + oltre ≈ voce, 2 € di
+  tolleranza). Altrimenti resta la voce e la scadenza si dichiara in
+  `scadenza_non_riconciliata` (budget_1427: il «di cui» del totale crediti attaccato a C.II.1
+  contava due volte le voci sorelle).
+- **Il solo «di cui oltre» minore della voce si completa**: l'oltre resta e il resto della voce
+  va a breve, `scadenza_completata` (budget_1434: C.II.5-quater 163.809,01 di cui oltre 262,17).
+  Un «di cui entro» parziale, o un oltre più grande della voce, ricadono nella regola sopra.
+- **La scadenza di un totale si scarta solo se le sotto-voci lette la ricompongono**,
+  `scadenza_del_totale` (budget_1427, secondo giro: `SPA.C.II.E/.O` senza la voce C.II ma con
+  C.II.1…C.II.5-quater, la stessa somma; contata, raddoppiava i crediti di 4.560.773). Se le
+  sotto-voci non la ricompongono è l'unica lettura del totale e resta (budget_1435/1464:
+  `SPA.C.II.E` 3.830.477,21 con la sola C.II.5-ter a zero; scartata, l'attivo perdeva 3,8
+  milioni). `SPP.E` sono i ratei e risconti, una sezione e non una scadenza.
 
 ### Additività garantita
 

@@ -133,3 +133,32 @@ def test_provider_anthropic_di_default_senza_chiave_solleva_come_oggi(
             company_name="Route AB anthropic senza chiave", create_company=True, sector=1,
             user_id="route-ab-anthropic-senza-chiave",
         )
+
+
+def test_un_attivo_letto_col_passivo_tutto_a_zero_e_una_lettura_mancante_non_si_salva(
+    route_ab_non_risolta_dal_deterministico, monkeypatch,
+):
+    """Lotto week-43 (1423/1418): vLLM ometteva sp11-sp18, pydantic li riempiva a zero e il
+    bilancio si salvava "unbalanced" col passivo a zero. E' una lettura mancante: si rifiuta."""
+    tmp_path = route_ab_non_risolta_dal_deterministico
+    monkeypatch.setenv("PDF_LLM_PROVIDER_IVCEE", "gx10")
+    monkeypatch.setenv("GX10_API_KEY", "x")
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+
+    def finto(client, text, system_prompt, output_model, section_name, tool_name,
+              max_retries=2, provider="anthropic"):
+        if output_model is P.BalanceSheetExtraction:
+            return P.BalanceSheetExtraction(sp05_rimanenze=Decimal("100"),
+                                            sp06_crediti_breve=Decimal("200"),
+                                            totale_attivo=Decimal("300"))
+        return P.IncomeStatementExtraction(ce01_ricavi_vendite=Decimal("50"))
+    monkeypatch.setattr(P, "_extract_with_llm", finto)
+    _db_in_memoria(monkeypatch)
+
+    with pytest.raises(PDFImportError, match="passivo mancante"):
+        importer.import_pdf_balance_sheet(
+            file_path=_pdf(tmp_path), fiscal_year=2026, period_months=6,
+            company_name="Passivo a zero", create_company=True, sector=1,
+            user_id="passivo-a-zero",
+        )
+

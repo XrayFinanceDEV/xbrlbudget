@@ -36,6 +36,12 @@ _NOTA_PAGINA_CONDIVISA = ("Questa pagina contiene sia voci di Stato Patrimoniale
                          "Economico: leggi entrambe, ogni riga stampata una volta sola, mai due.")
 
 
+def _messaggio(e: Exception) -> str:
+    """Il testo dell'eccezione nel report: il solo nome della classe (``LLMProviderError``) non
+    dice se gx10 era giu', ha troncato o ha risposto fuori schema."""
+    return str(e)[:300]
+
+
 class SnelloNonRiuscito(Exception):
     """Il percorso snello non e' arrivato a un risultato utilizzabile: ``report`` dichiara fase ed
     errore, mai un dato inventato al loro posto."""
@@ -66,6 +72,27 @@ def _unisci_totali(a: dict, b: dict) -> dict:
         if out.get(k) is None:
             out[k] = v
     return out
+
+
+def _per_sezione(coppie_sp: list, coppie_ce: list) -> list:
+    """Le due letture separate (SP e CE) possono vedere pagine in comune: ogni voce si prende
+    dalla lettura della SUA sezione, mai dalla somma delle due. Concatenate, la stessa voce con
+    due importi diversi diventava due voci (budget_1440: imposte 14.181,01 della colonna
+    comparata lette dalla lettura SP, 0,00 da quella CE, sommate). Un lato (attivo, passivo,
+    conto economico) che la sua lettura non ha restituito affatto si prende dall'altra: deciso
+    per lato e non per sezione intera, perche' una lettura SP col solo passivo buttava l'attivo
+    letto dall'altra (budget_1440, secondo giro: Totale Attivo pari a zero). Voce per voce no:
+    sulle pagine CE il modello restituisce anche voci SP spurie (budget_1435: +3,8 milioni)."""
+    from importers.import_snello.percorsi import lato_di
+
+    def _di(coppie, lato):
+        return [c for c in coppie if lato_di(c[0]) == lato]
+
+    attivo = _di(coppie_sp, "att") or _di(coppie_ce, "att")
+    passivo = _di(coppie_sp, "pas") or _di(coppie_ce, "pas")
+    conto = _di(coppie_ce, "ce") or _di(coppie_sp, "ce")
+    altre = [c for c in coppie_sp + coppie_ce if lato_di(c[0]) not in ("att", "pas", "ce")]
+    return attivo + passivo + conto + altre
 
 
 def _anomalie(bs: dict, diag: dict) -> list:
@@ -330,7 +357,8 @@ def _importa_modello(file_path: str, _det: dict, t0: float, *, ocr_text, analizz
         # accetta affatto questo parametro (`lambda p: ...`) non deve rompersi (Task lotto-b, fix 9).
         struttura = analizza_fn(file_path, route_hint=route_hint) if route_hint is not None else analizza_fn(file_path)
     except Exception as e:
-        raise SnelloNonRiuscito({"esito": "ripiego", "fase": "struttura", "errore": type(e).__name__}) from e
+        raise SnelloNonRiuscito({"esito": "ripiego", "fase": "struttura", "errore": type(e).__name__,
+                                 "messaggio": _messaggio(e)}) from e
 
     pagine_sp, pagine_ce = struttura.pagine_sp, struttura.pagine_ce
     if not pagine_sp and not pagine_ce:
@@ -477,11 +505,14 @@ def _importa_modello(file_path: str, _det: dict, t0: float, *, ocr_text, analizz
         else:
             from importers.detail_enrichment import collect_source_rows
             from importers.import_snello.lettura import trascrivi_pagine, voci_di_legge
-            from importers.import_snello.conti import da_coppie
+            from importers.import_snello.conti import da_coppie, fondi_gia_nettati
 
             leggi_voci_fn = leggi_voci or voci_di_legge
             trascrivi_fn = trascrivi or trascrivi_pagine
             righe_documento = collect_source_rows(file_path, ocr_text=ocr_text)
+            # Tutti gli importi stampati, righe-conto comprese (prima del filtro qui sotto): il
+            # controllo del fondo gia' nettato chiede se una voce letta e' una cifra del documento.
+            importi_documento = {a for r in righe_documento for a in r.amounts}
             if modo == "legge_con_dettaglio":
                 # Le righe con codice conto non entrano nella lettura delle macro voci: le
                 # didascalie portano gia' il valore netto stampato, i conti sotto il lordo e i
@@ -541,8 +572,8 @@ def _importa_modello(file_path: str, _det: dict, t0: float, *, ocr_text, analizz
                     coppie_precedente = sp_res["precedente"]
                     stampati = sp_res["totali"]
                 else:
-                    coppie_corrente = sp_res["corrente"] + ce_res["corrente"]
-                    coppie_precedente = sp_res["precedente"] + ce_res["precedente"]
+                    coppie_corrente = _per_sezione(sp_res["corrente"], ce_res["corrente"])
+                    coppie_precedente = _per_sezione(sp_res["precedente"], ce_res["precedente"])
                     stampati = _unisci_totali(sp_res["totali"], ce_res["totali"])
                 # I totali dichiarati dal documento (lettura deterministica, nessuna chiamata
                 # modello) vincono su quelli riportati dall'LLM quando esistono entrambi: quelli
@@ -552,7 +583,14 @@ def _importa_modello(file_path: str, _det: dict, t0: float, *, ocr_text, analizz
                     if deterministici.get(chiave) is not None:
                         stampati[chiave] = deterministici[chiave]
                 _coppie_lette[:] = list(coppie_corrente)
-                bs, ce, diag = da_coppie(coppie_corrente)
+                gia_nettati = fondi_gia_nettati(coppie_corrente, importi_documento,
+                                                (deterministici or {}).get("totale_attivo"))
+                bs, ce, diag = da_coppie([c for c in coppie_corrente if c[0] not in gia_nettati])
+                # Sempre dichiarata, anche vuota: a valle una chiave assente vale «nulla da dire».
+                _uniche = {(p, Decimal(v)) for p, v in coppie_corrente}
+                diag["fondi_gia_nettati"] = [
+                    [q, str(sum((v for p, v in _uniche if p == q), Decimal(0)).quantize(Decimal("0.01")))]
+                    for q in gia_nettati]
                 prior = da_coppie(coppie_precedente) if coppie_precedente else None
                 return bs, ce, diag, prior, stampati
 
@@ -653,8 +691,8 @@ def _importa_modello(file_path: str, _det: dict, t0: float, *, ocr_text, analizz
             e.struttura = struttura
         raise
     except Exception as e:
-        raise SnelloNonRiuscito({"esito": "ripiego", "fase": fase, "errore": type(e).__name__},
-                                struttura) from e
+        raise SnelloNonRiuscito({"esito": "ripiego", "fase": fase, "errore": type(e).__name__,
+                                 "messaggio": _messaggio(e)}, struttura) from e
 
     _confronto = None
     if esito == "squadrato" and not contraddizioni and _det.get("lettura"):

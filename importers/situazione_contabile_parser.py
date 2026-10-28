@@ -4549,6 +4549,37 @@ def _be_split_codeless(words) -> Optional[float]:
     return best[1] if best else None
 
 
+def _be_adotta_orfani(rows: List[Tuple[str, str, Decimal]]) -> List[Tuple[str, str, Decimal]]:
+    """Un conto orfano (ne' padre ne' figlio di nessun codice) stampato SOTTO un mastro che i
+    suoi figli diretti non spiegano, mentre figli + orfano lo spiegano al centesimo, e' figlio
+    di quel mastro (budget_1478: «1201036 Carta prepagata» 112,49 sotto «360 Debiti verso
+    banche» 5.128,88 = 5.016,39 + 112,49). Il prefisso del codice non decide la parentela:
+    decide il totale stampato. Il codice dell'orfano si riscrive sotto quello del mastro, cosi'
+    la gerarchia per prefisso di _be_reclassify lo vede figlio e non lo conta due volte."""
+    codici = [c for c, _, _ in rows]
+
+    def discende(o, c):
+        return o != c and len(o) > len(c) and o.startswith(c)
+
+    out = list(rows)
+    for i, (c, d, a) in enumerate(rows):
+        if any(discende(c, o) or discende(o, c) for o in codici):
+            continue
+        for j in range(i - 1, -1, -1):
+            r, _rd, ra = rows[j]
+            if any(discende(r, o) for o in codici):
+                continue                      # non e' una radice: si risale
+            figli = [x for x in rows[j + 1:i] if discende(x[0], r)]
+            if not figli:
+                break
+            diretti = [x for x in figli if not any(discende(x[0], y[0]) for y in figli)]
+            somma = sum((x[2] for x in diretti), Decimal(0))
+            if abs(somma - ra) > Decimal("0.005") and abs(somma + a - ra) <= Decimal("0.005"):
+                out[i] = (r + "~" + c, d, a)
+            break
+    return out
+
+
 def _be_reclassify(items: List[Tuple[str, str, Decimal]], classify,
                    ripiego_rimanenze: Optional[str] = None) -> List[Tuple[str, Decimal]]:
     """Reconcile mastri/subtotali to the IV-CEE reclassification.
@@ -4570,6 +4601,7 @@ def _be_reclassify(items: List[Tuple[str, str, Decimal]], classify,
             continue
         seen.add(key)
         rows.append((c, d, a))
+    rows = _be_adotta_orfani(rows)
 
     info = {}
     for c, d, a in rows:
@@ -4871,7 +4903,9 @@ def _is_prior_result_caption(desc_upper: str) -> bool:
         return False
     # "Eccedenza esercizio precedente" (Unicarton 31/08/2026): la stessa riga col nome
     # che il gestionale da' al saldo, accanto a "Eccedenza (Utile)" del periodo.
-    if not any(k in d for k in ('UTILE', 'UTILI', 'PERDITA', 'PERDITE', 'RISULTATO',
+    # 'RISULT' copre anche l'abbreviazione dei gestionali ("RISULT. D'ESERCIZIO PROVV. ANNO
+    # PRECEDENTE", budget_1439).
+    if not any(k in d for k in ('UTILE', 'UTILI', 'PERDITA', 'PERDITE', 'RISULT',
                                 'ECCEDENZA')):
         return False
     return 'PRECEDENT' in d or 'PORTAT' in d

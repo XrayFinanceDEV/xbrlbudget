@@ -394,3 +394,69 @@ def test_nota_che_cita_la_perdita_dell_esercizio_in_prosa_non_e_una_continuazion
             "Euro 5.570 mediante impiego della riserva straordinaria 0 0 12"]
     out = _assorbi_continuazioni_perse(_MAPPE_CE_E_NOTA, _pdf_ce_con_coda(tmp_path, coda, "e.pdf"))
     assert out[1]["tipo_pagina"] == "nota_o_testo"
+
+
+def _mappa_colonne(ruoli, intestazioni):
+    return [{"tipo_pagina": "prospetto_sp", "sezioni": [{"colonne": [
+        {"ruolo": r, "intestazione": i} for r, i in zip(ruoli, intestazioni)]}]}]
+
+
+def test_i_ruoli_di_colonna_vengono_dalle_intestazioni_stampate_se_la_vision_non_da_un_saldo():
+    """budget_1445 (Crystal Reports): la vision dichiara [dare, avere, dare, avere] su colonne
+    stampate «Periodo fino al 30/06/2026 | Bilancio infrannuale al 30/06/2025 | Diff. % | Diff.
+    Valore». Senza una colonna di saldo il lettore prendeva l'ultimo importo: la Diff. Valore."""
+    from importers.struttura_documento.analisi import _colonne_di
+    intestazioni = ["Periodo fino al 30/06/2026", "Bilancio infrannuale al 30/06/2025 EXC",
+                    "Diff. %", "Diff. Valore"]
+    ruoli, _ = _colonne_di(_mappa_colonne(["dare", "avere", "dare", "avere"], intestazioni),
+                           {"prospetto_sp"})
+    assert ruoli == ["saldo_corrente", "saldo_precedente", "percentuale", "variazione"]
+
+
+def test_intestazioni_dare_avere_lasciano_i_ruoli_della_vision():
+    from importers.struttura_documento.analisi import _colonne_di
+    ruoli, _ = _colonne_di(_mappa_colonne(["dare", "avere"], ["Dare 2026", "Avere 2026"]),
+                           {"prospetto_sp"})
+    assert ruoli == ["dare", "avere"]
+
+
+def test_una_colonna_di_saldo_della_vision_resta():
+    from importers.struttura_documento.analisi import _colonne_di
+    ruoli, _ = _colonne_di(_mappa_colonne(["saldo_finale", "altro"], ["31/12/2025", "Diff."]),
+                           {"prospetto_sp"})
+    assert ruoli == ["saldo_finale", "altro"]
+
+
+def test_la_pagina_dove_si_apre_il_conto_economico_e_anche_una_pagina_ce():
+    """budget_1433/1434 (Panificio): il CE comincia in fondo a pagina 1 (titolo, valore della
+    produzione, ricavi 892.889,82) e la vision da' pagine_ce=[2]. I ricavi non li leggeva
+    nessuno: utile CE -948.971,67 contro -56.081,85 stampato."""
+    from importers.struttura_documento.analisi import _pagine_di_apertura
+    testi = {1: "Stato patrimoniale\nTOTALE PASSIVO\n1.275.796,13\nConto economico\nA) Valore della produzione",
+             2: "5) Altri ricavi e proventi\nB) Costi della produzione"}
+    assert _pagine_di_apertura([1], [2], testi) == ([1], [1, 2])
+
+
+def test_una_pagina_che_cita_il_conto_economico_nel_testo_non_e_una_pagina_ce():
+    from importers.struttura_documento.analisi import _pagine_di_apertura
+    testi = {1: "Stato patrimoniale\nle voci del conto economico sono in pagina 2", 2: "CONTO ECONOMICO"}
+    assert _pagine_di_apertura([1], [2], testi) == ([1], [2])
+
+
+def test_pagine_non_adiacenti_restano_come_sono():
+    from importers.struttura_documento.analisi import _pagine_di_apertura
+    testi = {5: "Conto economico", 1: "x"}
+    assert _pagine_di_apertura([5, 6], [1, 2], testi) == ([5, 6], [1, 2])
+
+
+def test_didascalie_di_riga_dichiarate_come_colonne_si_sostituiscono_con_le_colonne_dell_altra_sezione():
+    """budget_1433 (Panificio): la vision dichiara come colonne del CE diciassette didascalie di
+    riga («5) Altri ricavi e proventi», «B) Costi della produzione»...). Il modello leggeva i
+    valori «sotto» quelle colonne e saltava i ricavi. Non sono colonne: si usano quelle dello SP."""
+    from importers.struttura_documento.analisi import _colonne_vere
+    sp = (["saldo_corrente"], ["11/09/2026"])
+    ce = (["variazione"] * 5, ["5) Altri ricavi e proventi", "B) Costi della produzione",
+                               "6) Materie prime", "7) Servizi", "Differenza A – B"])
+    assert _colonne_vere(ce, sp) == sp
+    assert _colonne_vere(sp, ce) == sp           # intestazioni vere: restano
+    assert _colonne_vere(ce, ce) == ([], [])     # nessuna alternativa: nessuna intestazione

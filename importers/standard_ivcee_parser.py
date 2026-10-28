@@ -2152,6 +2152,10 @@ _LEGAL_CAPTION = re.compile(
     # Task 26 (fix 1): con il ``Cod.`` numerico davanti e la numerazione a punti della
     # "riclassificata dettagliata" ("276 b.ii) ...", "c.ii.5 bis) ...", "d.4.1) ...").
     r"|^(?:\d{1,4}\s+)?[a-e](?:\.(?:[ivx]+|\d+)(?: (?:bis|ter|quater|q))?)*\)\s"
+    # Codice UE puntato senza parentesi ("c.ii.1 crediti verso clienti", "c.ii.5-bis ...",
+    # "b.iii.2.d ...": budget_1443). Almeno un segmento dopo la lettera, cosi' una parola di
+    # una lettera ("a capo") o un conto numerico ("11.03.01") non sono mai didascalie.
+    r"|^[a-e](?:\.(?:[ivx]+|\d+)(?:-(?:bis|ter|quater))?)+(?:\.[a-e])?\s"
 )
 
 

@@ -395,3 +395,50 @@ def test_difference_and_percentage_columns_are_removed_by_geometry(tmp_path):
     assert "TOTALE ATTIVO 0,00 259.152,86" in filtered
     assert "259.152,86-" not in filtered
     assert "100,000-" not in filtered
+
+
+def test_diff_percent_and_diff_valore_columns_with_dates_are_removed(tmp_path):
+    """budget_1445 (A. Molina, Crystal Reports): intestazioni «Diff. %» e «Diff. Valore» e colonne
+    datate «30/06/2026», «30/06/2025». Il primo numero dopo «TOTALE ATTIVO» era la Diff. Valore
+    (2.464.126,25 al posto di 27.190.388,86), e attivo e passivo «quadravano» sulla differenza."""
+    pdf_path = tmp_path / "diff-dates.pdf"
+    doc = fitz.open()
+    page = doc.new_page(width=700)
+    page.insert_text((319, 122), "Periodo fino al")
+    page.insert_text((334, 132), "30/06/2026")
+    page.insert_text((414, 122), "Bilancio infrannuale al")
+    page.insert_text((390, 141), "30/06/2025")
+    page.insert_text((465, 122), "Diff. %")
+    page.insert_text((527, 122), "Diff. Valore")
+    page.insert_text((70, 200), "TOTALE ATTIVO")
+    page.insert_text((320, 200), "27.190.388,86")
+    page.insert_text((400, 200), "24.726.262,61")
+    page.insert_text((470, 200), "9,97")
+    page.insert_text((530, 200), "2.464.126,25")
+    doc.save(pdf_path)
+    doc.close()
+
+    with fitz.open(pdf_path) as reopened:
+        filtered = _filter_difference_columns(reopened[0])
+
+    assert filtered is not None
+    assert "TOTALE ATTIVO 27.190.388,86 24.726.262,61" in filtered
+    assert "2.464.126,25" not in filtered
+
+
+def test_a_differenza_caption_left_of_the_year_columns_is_not_a_column(tmp_path):
+    """«Differenza tra valore e costi della produzione» e' una didascalia del CE, a sinistra
+    delle colonne-anno: non taglia la pagina."""
+    pdf_path = tmp_path / "caption.pdf"
+    doc = fitz.open()
+    page = doc.new_page(width=700)
+    page.insert_text((330, 70), "2025")
+    page.insert_text((400, 70), "2024")
+    page.insert_text((600, 70), "SCOST.")
+    page.insert_text((70, 130), "Differenza tra valore e costi della produzione")
+    page.insert_text((350, 130), "1.000,00")
+    doc.save(pdf_path)
+    doc.close()
+
+    with fitz.open(pdf_path) as reopened:
+        assert _filter_difference_columns(reopened[0]) is None

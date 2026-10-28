@@ -593,6 +593,14 @@ def _righe_da_grezze(grezze: list[tuple[int, str, list[Optional[Decimal]]]], n_c
     if not n_col:
         raise reso._Rifiuto("colonne_non_trovate")
 
+    # "CONTO ECONOMICO  2025": l'anno della colonna stampato sul titolo non e' un importo; con un
+    # importo il titolo non aprirebbe la sezione e il "21) Utile" resterebbe nel patrimonio netto
+    anni_colonne = set(anni_doc.values())
+    grezze = [(p, d, [None] * len(v)) if anni_colonne and _intestazione(d)
+              and any(x is not None for x in v)
+              and all(x is None or (x == x.to_integral() and int(x) in anni_colonne) for x in v)
+              else (p, d, v)
+              for p, d, v in grezze]
     grezze = _unisci_a_capo(grezze)
     righe_out: list[reso._Riga] = []
     radici_viste: set[str] = set()
@@ -1123,8 +1131,32 @@ def _togli_dettaglio_conti(righe: list[reso._Riga], tol: Decimal = _ZERO) -> lis
                 continue
             if _scompone(list(r.valori), _valori_corsa(righe[i:taglio]), tol):
                 i = taglio
+                # "VI - Altre riserve 1", i suoi conti, "Totale altre riserve 1": tolti i conti,
+                # il totale che ripete la voce (stessi importi, stesso nome) va via con loro,
+                # altrimenti chiude il padre della voce e quella dopo sale di un livello
+                if (i < len(righe) and reso._enumeratore(r.didascalia)
+                        and reso._e_totale(righe[i].didascalia)
+                        and righe[i].valori == r.valori
+                        and _stesso_nome(righe[i].didascalia, r.didascalia)):
+                    i += 1
                 break
     return out
+
+
+_PAROLE_VUOTE = {"totale", "di", "da", "dei", "delle", "della", "del", "e", "ed", "nelle", "nel",
+                 "in", "a", "al", "per", "i", "il", "la", "le", "gli", "lo", "l", "verso", "dell"}
+
+
+def _parole_nome(didascalia: str) -> set[str]:
+    testo = re.sub(r"^\S+?\)\s*|^[ivx]+ - ", "", _norm(didascalia))
+    return {w for w in re.findall(r"[a-zà-ù]+", testo) if w not in _PAROLE_VUOTE}
+
+
+def _stesso_nome(totale: str, voce: str) -> bool:
+    """Il nome del totale e quello della voce, senza enumeratore e articoli, stanno l'uno
+    nell'altro ("Totale altre riserve" / "VI - Altre riserve")."""
+    a, b = _parole_nome(totale), _parole_nome(voce)
+    return bool(a and b) and (a <= b or b <= a)
 
 
 def _togli_scadenze_di_testa(righe: list[reso._Riga], tol: Decimal) -> list[reso._Riga]:

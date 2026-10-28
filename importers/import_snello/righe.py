@@ -11,6 +11,7 @@ from collections import Counter, defaultdict
 from copy import deepcopy
 from dataclasses import dataclass
 from decimal import Decimal
+from types import SimpleNamespace
 
 _AMT = re.compile(r"^\(?-?(\d{1,3}(\.\d{3})+|\d+),\d{2}\)?-?$")
 _MIGLIAIA = re.compile(r"^\(?-?\d{1,3}(\.\d{3})+\)?-?$")
@@ -31,7 +32,9 @@ class Riga:
 
 
 def _dec(t: str) -> Decimal:
-    negativo = t.startswith("-") or t.endswith("-") or t.startswith("(")
+    # la parentesi e' un segno solo se si chiude: "(5.367,37" aperta e' una nota della
+    # descrizione (budget_1450), non un negativo
+    negativo = t.startswith("-") or t.endswith("-") or (t.startswith("(") and t.endswith(")"))
     v = Decimal(t.strip("()-").replace(".", "").replace(",", "."))
     return -v if negativo else v
 
@@ -372,6 +375,44 @@ def _riferimenti_colonna(rows) -> dict[tuple, float]:
     return out
 
 
+def _valuta_davanti(toks: list[str], i: int) -> bool:
+    """Il token ``i`` e' preceduto da una valuta: «euro», «eur», «€», oppure la «E» del capitale
+    sociale in una ragione sociale («CAP. SOC. E 22.000.000,00»)."""
+    prima = toks[i - 1].lower().strip(".:") if i >= 1 else ""
+    if prima in _VALUTA:
+        return True
+    return prima == "e" and i >= 2 and toks[i - 2].lower().startswith("soc")
+
+
+def _senza_importo_in_descrizione(r, riferimento: float | None) -> str:
+    """Come ``_importo_in_descrizione``, sulle righe con piu' importi: un importo preceduto da una
+    valuta, lontano dalla colonna della pagina, mentre un altro importo della riga sta in colonna,
+    e' testo della descrizione (budget_1450, partitario: «876,48 1410000352 FIMER S.P.A. CAP. SOC.
+    E 22.000.000,00», il saldo a x 57,8 sulla colonna, il capitale sociale a x 224). Restituisce il
+    testo senza quel token; senza riferimento, o senza un importo in colonna, nessun verdetto."""
+    if (riferimento is None or len(importi(r.text)) < 2
+            or len(r.positions) != len(r.amounts)):
+        return r.text
+    vicino = lambda x: abs(x - riferimento) <= _DISTANZA_FUORI_COLONNA
+    toks = r.text.split()
+    con_valuta = [i for i, t in enumerate(toks)
+                  if (_AMT.match(t.replace("_", "")) or _MIGLIAIA.match(t.replace("_", "")))
+                  and _valuta_davanti(toks, i)]
+    if len(con_valuta) >= len(importi(r.text)):
+        return r.text       # «€ 1.229.007 € 1.095.752»: la valuta e' il prefisso di ogni colonna
+    for i, t in enumerate(toks):
+        t = t.replace("_", "")
+        if not (_AMT.match(t) or _MIGLIAIA.match(t)) or not _valuta_davanti(toks, i):
+            continue
+        posizioni = [x for v, x in zip(r.amounts, r.positions) if v == _dec(t)]
+        # gli altri importi veri della riga (non i codici conto), ciascuno con la sua x
+        resto = " ".join(toks[:i] + toks[i + 1:])
+        altre = [x for v, _ in importi(resto) for w, x in zip(r.amounts, r.positions) if w == v]
+        if len(posizioni) == 1 and not vicino(posizioni[0]) and any(vicino(x) for x in altre):
+            return resto
+    return r.text
+
+
 def righe_da_pdf(file_path: str, pagine: set[int] | None, ruoli: list[str],
                  ocr_text: str | None = None) -> list[Riga]:
     from importers.detail_enrichment import collect_source_rows
@@ -389,8 +430,9 @@ def righe_da_pdf(file_path: str, pagine: set[int] | None, ruoli: list[str],
             out.append(Riga(id=r.id, pagina=r.page, lato=r.side, testo=re.sub(r"\s+", " ", r.text).strip(),
                             valore=None, sezione=r.statement))
             continue
+        in_colonna = _senza_importo_in_descrizione(r, riferimenti.get((r.page, r.side)))
         out.append(Riga(id=r.id, pagina=r.page, lato=r.side, testo=etichetta(r.text),
-                        valore=saldo(r, regola), sezione=r.statement))
+                        valore=saldo(SimpleNamespace(text=in_colonna), regola), sezione=r.statement))
     marca_totali(out)
     return out
 

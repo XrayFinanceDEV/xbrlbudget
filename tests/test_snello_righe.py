@@ -388,3 +388,48 @@ def test_un_partitario_col_totale_dopo_i_figli_si_riconosce_anche_se_il_document
     assert {r.id for r in righe if r.totale} == {"10", "20", "ct"}
     # il totale del partitario esce dalle foglie: prima si contavano lui E i suoi figli
     assert {r.id for r in R.foglie(righe)} == {"1001", "1002", "2001", "2002", "c1", "c2", "c3"}
+
+
+def _rp(i, valore, pagina, lato="L", testo=None, totale=False, mastro=None):
+    return R.Riga(id=str(i), pagina=pagina, lato=lato, testo=testo or f"conto {i}",
+                  valore=D(valore), totale=totale, mastro=mastro)
+
+
+def test_il_partitario_che_ripete_un_conto_del_prospetto_non_si_conta_due_volte():
+    """budget_1450 (ABCLOG): «14 CLIENTI» / «1410 CLIENTI ITALIA 236.663,61» nello SP, e a
+    pagina 7 l'elenco dei clienti col totale 236.663,61. «20 FORNITORI» sta sui due lati
+    (274.834,91 al passivo, 2.187,55 di fornitori esteri all'attivo) e il partitario di pagina 8
+    li elenca insieme: 272.647,36, il saldo netto. Contati, gonfiavano il bilancio di 509.310.
+    Totali e mastri come li marca marca_totali sul documento vero."""
+    righe = [
+        _rp("14", "236663.61", 1, testo="14 CLIENTI", totale=True),
+        _rp("1410", "236663.61", 1, testo="1410 CLIENTI ITALIA", mastro="14 CLIENTI"),
+        _rp("20R", "274834.91", 1, "R", "20 FORNITORI", totale=True),
+        _rp("2010", "274834.91", 1, "R", "2010 FORNITORI ITALIA", mastro="20 FORNITORI"),
+        _rp("20L", "2187.55", 2, "L", "20 FORNITORI", totale=True),
+        _rp("2012", "2187.55", 2, "L", "2012 FORNITORI ESTERO", mastro="20 FORNITORI"),
+        _rp("1501", "600.00", 2, mastro="15 CASSA"), _rp("1502", "400.00", 2, mastro="15 CASSA"),
+        _rp("c1", "136663.61", 7, testo="1410000606 CLIENTE A", mastro=" "),
+        _rp("c2", "90000.00", 7, testo="1410000343 CLIENTE B", mastro=" "),
+        _rp("c3", "10000.00", 7, testo="1410000009 CLIENTE C", mastro=" "),
+        _rp("ct", "236663.61", 7, testo=" ", totale=True),
+        _rp("f1", "-2187.55", 8, testo="2012000010 FORNITORE ESTERO", mastro=" "),
+        _rp("f2", "274000.00", 8, testo="2010000588 FORNITORE ITALIA", mastro=" "),
+        _rp("f3", "834.91", 8, testo="2010000074 FORNITORE ITALIA 2", mastro=" "),
+        _rp("ft", "272647.36", 8, testo=" ", totale=True),
+    ]
+    escluse = R.escludi_partitari(righe)
+    assert {r.id for r in escluse} == {"c1", "c2", "c3", "f1", "f2", "f3"}
+    assert {r.id for r in R.foglie(righe)} == {"1410", "2010", "2012", "1501", "1502"}
+
+
+def test_un_elenco_il_cui_totale_non_ripete_alcun_conto_resta():
+    righe = [
+        _rp("1501", "600.00", 1, mastro="15 CASSA"), _rp("1502", "400.00", 1, mastro="15 CASSA"),
+        _rp("c1", "11.00", 3, testo="1410000606 CLIENTE A", mastro=" "),
+        _rp("c0", "0.00", 3, testo="1410000600 CLIENTE Z", mastro=" "),
+        _rp("c2", "22.50", 3, testo="1410000343 CLIENTE B", mastro=" "),
+        _rp("ct", "33.50", 3, testo=" ", totale=True),
+    ]
+    assert R.escludi_partitari(righe) == []
+    assert {"c1", "c2"} <= {r.id for r in R.foglie(righe)}

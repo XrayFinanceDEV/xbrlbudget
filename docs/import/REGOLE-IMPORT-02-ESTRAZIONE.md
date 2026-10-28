@@ -998,3 +998,11 @@ Ognuna ha il suo test; le regressioni sono su 208 PDF diversi (`Test/` più il l
   con candidati le sole righe di totale (senza descrizione o «Totale …») e la somma al centesimo.
   budget_1450: i partitari Clienti/Fornitori col totale dopo i figli in un documento coi mastri
   prima. Sul corpus riconosce 212 righe di totale generale stampate in fondo, nessun valore cambia.
+- **Un partitario che ripete un conto del prospetto non si conta due volte**
+  (`righe.escludi_partitari`): un elenco di almeno 3 voci con il totale su una riga senza
+  descrizione, su una pagina successiva, il cui totale è al centesimo il saldo netto (foglie a
+  sinistra meno foglie a destra) di **un solo** conto già letto, è la scomposizione di quel conto
+  e le sue righe escono dalle foglie (`Riga.ripetuta`). Corrispondenza uno a uno: un solo totale
+  senza descrizione per pagina e un solo elenco per conto, altrimenti nulla si esclude.
+  budget_1450: «1410 CLIENTI ITALIA» e i clienti di pagina 7, «20 FORNITORI» sui due lati e i
+  fornitori di pagina 8 (509.310,97 contati due volte); sul corpus scatta solo lì.

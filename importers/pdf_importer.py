@@ -49,6 +49,15 @@ def _validation_report_payload(q, reliability=None) -> Dict[str, Any]:
     return payload
 
 
+def _avviso_risultato_ricostruito(importo) -> str:
+    return (
+        "RISULTATO ESERCIZIO PRECEDENTE RICOSTRUITO DAI TOTALI: il documento stampa la "
+        "didascalia del risultato dell'esercizio precedente ma l'importo non e' leggibile; "
+        f"€{_euro_it(Decimal(str(importo)))} e' stato ricostruito come differenza dei totali "
+        "dello Stato Patrimoniale meno l'utile del Conto Economico (verificato dai suoi "
+        "totali) e messo negli utili portati a nuovo. Verificarlo in Rettifiche.")
+
+
 def _avvisi_fondi_snello(diag: dict) -> list[str]:
     """Gli avvisi sui fondi che il percorso snello ha dichiarato nel suo diag."""
     avvisi = []
@@ -2585,8 +2594,13 @@ def import_pdf_balance_sheet(
             **_detail_report.get("periods", {}).get("current", {}),
         }
         _critical_ok = _reliability is None or _reliability.all_critical_ok
+        # Risultato precedente ricostruito dai totali stampati (budget_1410, decisione del
+        # proprietario 2026-10-28): importo non letto, quindi da rivedere prima della proiezione.
+        _ricostruito = balance_sheet_data.get('_prior_result_ricostruito')
+        if _ricostruito:
+            _validation_payload['warnings'].append(_avviso_risultato_ricostruito(_ricostruito))
         _forecastable = (_qd.semantic_valid and _critical_ok and not _source_review
-                         and not _residual_report['requires_review'])
+                         and not _residual_report['requires_review'] and not _ricostruito)
 
         _stored_parser_version = _PDF_PARSER_VERSION
         if extraction_context is not None:

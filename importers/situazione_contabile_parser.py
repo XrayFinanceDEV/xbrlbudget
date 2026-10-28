@@ -4941,6 +4941,21 @@ def _hier_prior_result(words, lo: float, hi: float) -> Decimal:
     return total
 
 
+def _hier_prior_caption_senza_importo(words) -> bool:
+    """Una riga senza codice con la didascalia del risultato precedente e nessun importo
+    (budget_1410: l'OCR ha perso la cella di «Eccedenza esercizio precedente»)."""
+    for row_words in _be_cluster_physical_rows(words, -1e9, 1e9):
+        toks = [w[4].strip().lstrip('_—|') for w in sorted(row_words, key=lambda w: w[0])]
+        toks = [t for t in toks if t]
+        if not toks or any(_BE_AMT_RE.fullmatch(t) for t in toks):
+            continue
+        if re.match(r'^[\d./*]+$', toks[0]):
+            continue
+        if _is_prior_result_caption(' '.join(toks).upper()):
+            return True
+    return False
+
+
 def _is_fondo_amm(desc_upper: str) -> bool:
     """Recognise depreciation/amortisation funds at any aggregation level, incl. the
     aggregate mastro 'FONDI AMMORTAMENTO IMMOBILIZ' the rule table below misses.
@@ -6687,6 +6702,7 @@ def extract_contrapposte_best_effort(file_path: str) -> Tuple[Dict[str, Decimal]
     # toglierlo diventerebbe utile del periodo (sp13 241.711,59 invece di 68.247,80).
     # Solo sotto il totale: una riga sopra e' gia' dentro il totale passivita'.
     prior_footer = Z
+    prior_caption_senza_importo = False
     for page_number, (words, is_sp, is_ce, _up, width) in enumerate(pages_data, 1):
         if not (is_sp and not is_ce):
             continue
@@ -6699,6 +6715,7 @@ def extract_contrapposte_best_effort(file_path: str) -> Tuple[Dict[str, Decimal]
         split = _be_split(words) or width / 2
         prior_footer += _hier_prior_result(below, split, 1e9)
         prior_footer -= _hier_prior_result(below, -1e9, split)
+        prior_caption_senza_importo |= _hier_prior_caption_senza_importo(below)
     if prior_footer:
         add(bs, 'sp12', prior_footer)
         add(bs, 'sp12g_utili_perdite_portati', prior_footer)
@@ -6726,6 +6743,24 @@ def extract_contrapposte_best_effort(file_path: str) -> Tuple[Dict[str, Decimal]
     ce_control_result = (ce_revenue_total - ce_cost_total
                          if ce_cost_total is not None and ce_revenue_total is not None
                          else None)
+
+    # Il risultato precedente con la didascalia stampata ma l'importo perso (budget_1410,
+    # MinerU: «Eccedenza esercizio precedente» senza cella). Decisione del proprietario,
+    # 2026-10-28: l'utile del periodo e' quello del CE verificato dai suoi totali stampati
+    # (ricavi - costi), e il resto della differenza dei totali SP e' il risultato precedente,
+    # ricostruito e dichiarato (_prior_result_ricostruito), mai messo in sp13.
+    if (not prior_footer and prior_caption_senza_importo and total_gap is not None
+            and ce_control_result is not None
+            and abs(total_gap - ce_control_result) > Decimal('0.05')):
+        ricostruito = total_gap - ce_control_result
+        add(bs, 'sp12', ricostruito)
+        add(bs, 'sp12g_utili_perdite_portati', ricostruito)
+        bs['_prior_result_footer'] = ricostruito
+        bs['_prior_result_ricostruito'] = ricostruito
+        prior_footer = ricostruito
+        total_gap = ce_control_result
+        logger.warning(f"contrapposte: risultato esercizi precedenti {ricostruito} "
+                       "ricostruito dai totali stampati (didascalia senza importo)")
 
     independent_results = [v for v in (explicit_result, total_gap, ce_control_result)
                            if v is not None]

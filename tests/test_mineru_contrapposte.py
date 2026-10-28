@@ -405,3 +405,89 @@ def test_un_prospetto_di_legge_senza_codici_non_e_una_situazione_contabile():
         ["B.7) Servizi", "(1.331.075,82)"],
     ])
     assert pdf_da_tabelle(SimpleNamespace(tables=(sp, ce))) is None
+
+
+def test_eccedenza_precedente_senza_importo_si_ricostruisce_dai_totali():
+    """budget_1410 (Unicarton 31/08/2026, scansione 4.0.12): MinerU riporta la riga «Eccedenza
+    esercizio precedente» SENZA importo e legge male quella dell'utile. Decisione del
+    proprietario (2026-10-28): l'utile e' quello del CE, verificato dai suoi totali (ricavi -
+    costi); il resto della differenza dei totali dello SP e' il risultato precedente, perche' la
+    sua didascalia e' stampata. Importo ricostruito e dichiarato, mai messo in sp13."""
+    sp = _tabella("STATO PATRIMONIALE", [
+        [c.text for c in r.cells] for r in SP.rows[:-3]] + [
+        ["", "Eccedenza esercizio precedente"],
+        ["", "Eccedenza (Utile)                                 59.999,02"],
+        ["Totale a quadratura                           1.000.000,00", "1.000.000,00"],
+    ])
+    percorso = pdf_da_tabelle(SimpleNamespace(tables=(sp, CE)))
+    try:
+        bs, ce = extract_situazione_contabile(percorso)
+    finally:
+        os.remove(percorso)
+    assert bs["sp13"] == D("60000.00")                       # dal CE, non 150.000
+    assert bs["sp12g_utili_perdite_portati"] == D("90000.00")
+    assert bs["_prior_result_ricostruito"] == D("90000.00")
+    assert not bs.get("_plug_residual")
+
+
+def test_senza_la_didascalia_dell_eccedenza_precedente_non_si_ricostruisce_nulla():
+    sp = _tabella("STATO PATRIMONIALE", [
+        [c.text for c in r.cells] for r in SP.rows[:-3]] + [
+        ["", "Eccedenza (Utile)                                 150.000,00"],
+        ["Totale a quadratura                           1.000.000,00", "1.000.000,00"],
+    ])
+    percorso = pdf_da_tabelle(SimpleNamespace(tables=(sp, CE)))
+    try:
+        bs, ce = extract_situazione_contabile(percorso)
+    finally:
+        os.remove(percorso)
+    assert "_prior_result_ricostruito" not in bs
+    assert bs.get("sp12g_utili_perdite_portati", D(0)) == D(0)
+
+
+def test_l_import_dichiara_il_risultato_precedente_ricostruito_e_chiede_revisione(tmp_path, monkeypatch):
+    """budget_1410: il risultato ricostruito si salva (le Rettifiche lavorano su un bilancio
+    salvato) con l'avviso che lo dice e lo stato «review_required», mai «verified»."""
+    from sqlalchemy import create_engine
+    from sqlalchemy.orm import sessionmaker
+
+    import fitz
+    from database.db import Base
+    from importers import pdf_extractor_llm, pdf_importer
+    from importers.mineru_adapter import MinerUExtractionContext
+
+    scansione = tmp_path / "scansione.pdf"
+    doc = fitz.open()
+    doc.new_page()
+    doc.save(scansione)
+    doc.close()
+    sp = _tabella("STATO PATRIMONIALE", [
+        [c.text for c in r.cells] for r in SP.rows[:-3]] + [
+        ["", "Eccedenza esercizio precedente"],
+        ["", "Eccedenza (Utile)                                 59.999,02"],
+        ["Totale a quadratura                           1.000.000,00", "1.000.000,00"],
+    ])
+    testo = ("Bilancio di verifica al 31/08/2026\nSTATO PATRIMONIALE\nAttività Passività\n"
+             "Totale attività 1.000.000,00 Totale passività 850.000,00\n"
+             "CONTO ECONOMICO\nCosti Ricavi\nTotale costi 240.000,00 Totale ricavi 300.000,00\n")
+    contesto = MinerUExtractionContext(
+        full_text=testo, page_texts=(testo,), rows=(), tables=(sp, CE), headings=(),
+        current_year=2026, comparative_year=None, raw_format="test", mineru_version="4.0.12")
+
+    engine = create_engine("sqlite:///:memory:")
+    Base.metadata.create_all(engine)
+    monkeypatch.setattr(pdf_importer, "SessionLocal", sessionmaker(bind=engine))
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    monkeypatch.setenv("PDF_LLM_PROVIDER_COGE", "gx10")
+    monkeypatch.setenv("GX10_API_KEY", "finta")
+    monkeypatch.setenv("GX10_BASE_URL", "http://127.0.0.1:9")
+    monkeypatch.setattr(pdf_extractor_llm, "extract_trial_balance_with_llm",
+                        lambda *a, **k: (_ for _ in ()).throw(AssertionError("CoGe chiamato")))
+    risultato = pdf_importer.import_pdf_balance_sheet(
+        file_path=str(scansione), fiscal_year=2026, period_months=8,
+        company_name="SCANSIONE", create_company=True, sector=1,
+        user_id="u-mineru-ric", extraction_context=contesto)
+
+    assert risultato["validation_status"] == "review_required"
+    assert any(w.startswith("RISULTATO ESERCIZIO PRECEDENTE RICOSTRUITO DAI TOTALI")
+               for w in risultato["validation_report"]["warnings"])

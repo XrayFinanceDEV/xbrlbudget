@@ -971,3 +971,13 @@ Ognuna ha il suo test; le regressioni sono su 208 PDF diversi (`Test/` più il l
   (`conti._segno_pregresso`): «RISULT. D'ESERCIZIO PROVV. ANNO PRECEDENTE» senza
   utile/perdita, a due colonne, è utile nella colonna del passivo e perdita nell'altra
   (budget_1439); `_is_prior_result_caption` riconosce anche l'abbreviazione «RISULT».
+- **Il risultato precedente con la didascalia ma senza importo si ricostruisce dai totali**
+  (`situazione_contabile_parser._hier_prior_caption_senza_importo`, decisione del proprietario
+  2026-10-28). Su una situazione contrapposta, se sotto il «Totale passività» c'è la didascalia
+  del risultato precedente senza importo (l'OCR ha perso la cella) e il CE è verificato dai suoi
+  totali stampati (ricavi − costi), `sp13` = utile del CE e la differenza dei totali SP meno
+  quell'utile va in `sp12g`. Si dichiara in `_prior_result_ricostruito` e nell'avviso «RISULTATO
+  ESERCIZIO PRECEDENTE RICOSTRUITO DAI TOTALI»; il bilancio si salva in `review_required`
+  (previsionale bloccato finché non lo si verifica). Senza la didascalia non si ricostruisce
+  nulla. Il PDF sintetico di MinerU ora conserva quella didascalia (`mineru_contrapposte._righe`).
+  budget_1410: prima `sp13` = 241.711,59 con un tappo mascherato, ora 68.247,80 + 173.463,79.

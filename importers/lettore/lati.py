@@ -7,9 +7,10 @@ riga, una per lato, lo confermano (bastano meno righe descritte), non lo decidon
 """
 from __future__ import annotations
 
+import statistics
 import unicodedata
 
-from importers.lettore.colonne import Colonna, colonna_di
+from importers.lettore.colonne import Colonna, _corrente, colonna_di
 from importers.lettore.geometria import Parola, RigaFisica
 from importers.lettore.importi import leggi_importo
 
@@ -31,13 +32,21 @@ def confine_dei_lati(righe: list[RigaFisica], colonne: list[Colonna]) -> float |
     dati = [(r, celle) for r, celle in dati if celle]
     tutte = [p for r in righe for p in r.parole if p.testo.strip()]
     centro = _centro(tutte)
+    inizi: dict[int, list[float]] = {}
+    for _, celle in dati:
+        for p in celle:
+            inizi.setdefault(colonna_di(p.x1, colonne).indice, []).append(p.x0)
     migliori = []
     for a, b in zip(ordinate, ordinate[1:]):
         x = _varco(dati, a, b)
         if x is None:
             continue
-        sx = sum(1 for r, celle in dati if _descritta(r, celle, -1e9, x))
-        dx = sum(1 for r, celle in dati if _descritta(r, celle, x, 1e9))
+        # Dal bordo sinistro tipico degli importi di sinistra fino al varco ci sono solo importi: una parola
+        # di testo li' e' una descrizione che sfora, e la riga non descrive nessuno dei due lati.
+        zona = min(statistics.median(inizi[c.indice]) for c in ordinate if c.x_destra < x)
+        pulite = [(r, celle) for r, celle in dati if not _sfora(r, zona, x)]
+        sx = sum(1 for r, celle in pulite if _descritta(r, celle, -1e9, x))
+        dx = sum(1 for r, celle in pulite if _descritta(r, celle, x, 1e9))
         minimo = _MIN_RIGHE_CONFERMATO if _confermato(righe, colonne, x) else _MIN_RIGHE_LATO
         if sx >= minimo and dx >= minimo:
             migliori.append((min(sx, dx), -abs(x - centro), x))
@@ -45,9 +54,19 @@ def confine_dei_lati(righe: list[RigaFisica], colonne: list[Colonna]) -> float |
 
 
 def assegna_lati(colonne: list[Colonna], confine: float | None) -> list[Colonna]:
-    """Lato "L" a sinistra del confine, "R" a destra; tutte "U" senza confine."""
+    """Lato "L" a sinistra del confine, "R" a destra; tutte "U" senza confine. Modifica le colonne e
+    restituisce la stessa lista.
+
+    Con un confine la colonna corrente si sceglie per lato, con la regola di `colonne._corrente`: sulle
+    contrapposte la stessa data sta sopra entrambi i lati, e scelta sul documento non ne vincerebbe nessuna.
+    Senza confine resta quella del documento."""
     for c in colonne:
         c.lato = "U" if confine is None else ("L" if c.x_destra < confine else "R")
+    if confine is not None:
+        for c in colonne:
+            c.corrente = False
+        for lato in ("L", "R"):
+            _corrente([c for c in colonne if c.lato == lato])
     return colonne
 
 
@@ -77,6 +96,12 @@ def _varco(dati: list[tuple[RigaFisica, list[Parola]]], a: Colonna, b: Colonna) 
             return (cursore + x0) / 2
         cursore = max(cursore, x1)
     return None
+
+
+def _sfora(r: RigaFisica, zona: float, x: float) -> bool:
+    """Una parola che non e' un importo occupa la zona degli importi di sinistra, fra `zona` e il varco."""
+    return any(p.x1 > zona and p.x0 < x and leggi_importo(p.testo) is None and p.testo.strip()
+               for p in r.parole)
 
 
 def _descritta(r: RigaFisica, celle: list[Parola], lo: float, hi: float) -> bool:

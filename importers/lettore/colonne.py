@@ -289,9 +289,11 @@ def _mastri(colonne: list[Colonna], valori: list[list]) -> None:
 
 
 def _corrente(colonne: list[Colonna]) -> None:
-    """La colonna-esercizio piu' recente, ovunque stia (C4). Una sola colonna-esercizio e' la corrente
-    anche senza data; piu' colonne senza date, o la data piu' recente su due colonne, nessuna."""
-    esercizi = [c for c in colonne if c.ruolo == "esercizio"]
+    """La colonna di valori piu' recente, ovunque stia (C4). Valori = esercizio e saldo: in un bilancio di
+    verifica dare e avere sono movimenti, il saldo e' il valore di chiusura del periodo. Una sola colonna di
+    valori e' la corrente anche senza data; piu' colonne senza date, o la data piu' recente su due colonne,
+    nessuna."""
+    esercizi = [c for c in colonne if c.ruolo in ("esercizio", "saldo")]
     if len(esercizi) == 1:
         esercizi[0].corrente = True
         return

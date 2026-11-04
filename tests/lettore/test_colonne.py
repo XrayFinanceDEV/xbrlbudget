@@ -168,6 +168,15 @@ def test_dare_avere_saldo_dalle_intestazioni(tmp_path):
     assert [c.ruolo for c in cols] == ["dare", "avere", "saldo"]
 
 
+def test_saldo_e_la_colonna_corrente(tmp_path):
+    # Dare e avere sono movimenti, il saldo e' il valore di chiusura del periodo.
+    bordi = [400, 470, 540]
+    voci = [_testata(400, 120, "DARE"), _testata(470, 120, "AVERE"), _testata(540, 120, "SALDO")]
+    voci += _righe_dati(bordi, [(a, b, a - b) for a, b in zip(_A, _B)])
+    cols = _colonne(tmp_path, voci)
+    assert [c.corrente for c in cols] == [False, False, True]
+
+
 def test_colonna_di_fuori_tolleranza(tmp_path):
     cols = _colonne(tmp_path, _righe_dati([430, 540], list(zip(_A, _B))))
     assert colonna_di(390, cols) is None

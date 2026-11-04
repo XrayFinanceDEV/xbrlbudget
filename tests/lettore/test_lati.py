@@ -189,3 +189,10 @@ def test_varco_di_un_punto(tmp_path):
     righe, colonne = _leggi(tmp_path, voci)
     confine = confine_dei_lati(righe, colonne)
     assert confine is not None and 296 < confine < 297.5
+
+
+def test_una_colonna_saldo_per_lato_e_corrente(tmp_path):
+    testata = [_testata(280, 120, "SALDO"), _testata(560, 120, "SALDO")]
+    righe, colonne = _leggi(tmp_path, _contrapposte(codici=False, testata=testata))
+    colonne = assegna_lati(colonne, confine_dei_lati(righe, colonne))
+    assert [(c.lato, c.ruolo, c.corrente) for c in colonne] == [("L", "saldo", True), ("R", "saldo", True)]

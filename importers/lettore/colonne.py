@@ -69,7 +69,7 @@ def colonne_documento(righe: list[RigaFisica]) -> list[Colonna]:
 
 def _colonne_dai_bordi(righe: list[RigaFisica]) -> list[Colonna]:
     bordi = sorted(p.x1 for r in righe for p in r.parole
-                   if p.x0 > _X0_MINIMO and _e_importo(p.testo))
+                   if _in_colonna(p) and _e_importo(p.testo))
     gruppi: list[list[float]] = []
     for x in bordi:
         if gruppi and x - gruppi[-1][-1] <= _TOL_COLONNA:
@@ -86,6 +86,11 @@ def _e_importo(testo: str) -> bool:
     return imp is not None and imp.forma != "zero"
 
 
+def _in_colonna(p: Parola) -> bool:
+    """Un importo che comincia nella zona della didascalia non fa colonna e non vi conta."""
+    return p.x0 > _X0_MINIMO
+
+
 def _valori(righe: list[RigaFisica], colonne: list[Colonna]) -> list[list]:
     """Per ogni riga con importi, nell'ordine del documento: [pagina, y, valori per colonna, forme]."""
     out = []
@@ -94,7 +99,7 @@ def _valori(righe: list[RigaFisica], colonne: list[Colonna]) -> list[list]:
         forme: list[str | None] = [None] * len(colonne)
         doppie: set[int] = set()
         for p in r.parole:
-            imp = leggi_importo(p.testo)
+            imp = leggi_importo(p.testo) if _in_colonna(p) else None
             c = colonna_di(p.x1, colonne) if imp is not None else None
             if c is None:
                 continue
@@ -185,36 +190,36 @@ def _periodi_riga(r: RigaFisica, colonne: list[Colonna]) -> dict[int, tuple] | N
 
 
 def _intestazioni(righe: list[RigaFisica], colonne: list[Colonna]):
-    """(colonna -> periodo, colonna -> parole di ruolo) dalle righe senza importi sopra le colonne.
+    """(colonna -> periodo, colonna -> parole di ruolo) dalle righe di testata sopra le colonne.
 
     Un'intestazione vera ha importi sotto di se' (`standard_ivcee_parser._anchors_carry_amounts`): vale
-    solo per una colonna che porta un importo piu' in basso sulla stessa pagina."""
-    sotto: dict[tuple[int, int], float] = {}
+    solo per una colonna che porta un importo piu' in basso sulla stessa pagina. Il periodo si legge solo
+    da una riga di testata («Data stampa 15/03/2026» non lo e'), e fra piu' testate vince la piu' vicina
+    sopra gli importi della colonna, sulla prima pagina che ne ha una."""
+    importi: dict[tuple[int, int], list[float]] = {}
     for r in righe:
         for p in r.parole:
-            if _e_importo(p.testo) and (c := colonna_di(p.x1, colonne)) is not None:
-                chiave = (r.pagina, c.indice)
-                sotto[chiave] = max(sotto.get(chiave, r.y), r.y)
+            if _in_colonna(p) and _e_importo(p.testo) and (c := colonna_di(p.x1, colonne)) is not None:
+                importi.setdefault((r.pagina, c.indice), []).append(r.y)
 
-    def ha_importi_sotto(r: RigaFisica, i: int) -> bool:
-        return sotto.get((r.pagina, i), float("-inf")) > r.y
+    def distanza(r: RigaFisica, i: int) -> float | None:
+        sotto = [y for y in importi.get((r.pagina, i), []) if y > r.y]
+        return min(sotto) - r.y if sotto else None
 
-    periodi: dict[int, tuple] = {}
+    candidati: dict[int, tuple] = {}     # colonna -> ((pagina, distanza), periodo)
     parole: dict[int, set[str]] = {}
     for r in sorted(righe, key=lambda r: (r.pagina, r.y)):
-        if any(_e_importo(p.testo) for p in r.parole):
+        if any(_e_importo(p.testo) for p in r.parole) or not _e_riga_testata(r):
             continue
         for i, periodo in (_periodi_riga(r, colonne) or {}).items():
-            if ha_importi_sotto(r, i):
-                periodi.setdefault(i, periodo)
-        if not _e_riga_testata(r):
-            continue
+            if (d := distanza(r, i)) is not None and (i not in candidati or (r.pagina, d) < candidati[i][0]):
+                candidati[i] = ((r.pagina, d), periodo)
         for p in r.parole:
             n = _norm(p.testo)
             if (n in _ANALISI or n in _RUOLI_TESTATA) and (c := _sopra(p, colonne)) is not None \
-                    and ha_importi_sotto(r, c.indice):
+                    and distanza(r, c.indice) is not None:
                 parole.setdefault(c.indice, set()).add(n)
-    return periodi, parole
+    return {i: v[1] for i, v in candidati.items()}, parole
 
 
 # --------------------------------------------------------------------------------------

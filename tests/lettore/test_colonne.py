@@ -174,3 +174,81 @@ def test_colonna_di_fuori_tolleranza(tmp_path):
     assert colonna_di(500, cols) is None
     assert colonna_di(428, cols) is cols[0]
     assert colonna_di(551, cols) is cols[1]
+
+
+def test_data_di_stampa_non_e_il_periodo(tmp_path):
+    voci = [_testata(540, 60, "Data stampa 15/03/2026"),
+            _testata(430, 120, "31/12/2025"), _testata(540, 120, "31/12/2024")]
+    voci += _righe_dati([430, 540], list(zip(_A, _B)))
+    cols = _colonne(tmp_path, voci)
+    assert [c.fine for c in cols] == [date(2025, 12, 31), date(2024, 12, 31)]
+    assert [c.corrente for c in cols] == [True, False]
+
+
+def test_vince_la_testata_piu_vicina_agli_importi(tmp_path):
+    voci = [_testata(540, 60, "31/12/2023"),
+            _testata(430, 120, "31/12/2025"), _testata(540, 120, "31/12/2024")]
+    voci += _righe_dati([430, 540], list(zip(_A, _B)))
+    cols = _colonne(tmp_path, voci)
+    assert [c.fine for c in cols] == [date(2025, 12, 31), date(2024, 12, 31)]
+
+
+def _tre_colonne_con_testata(tmp_path, parola, terza):
+    voci = [_testata(400, 120, "2025"), _testata(470, 120, "2024"), _testata(540, 120, parola)]
+    voci += _righe_dati([400, 470, 540], [(a, b, t) for a, b, t in zip(_A, _B, terza)])
+    return _colonne(tmp_path, voci)
+
+
+_NON_SOMMANO = [Decimal(v) for v in ("3.00", "77.10", "1.50", "900.00", "12.00", "45.45")]
+
+
+def test_percento_in_testata_con_due_decimali(tmp_path):
+    cols = _tre_colonne_con_testata(tmp_path, "%", _NON_SOMMANO)
+    assert [c.ruolo for c in cols] == ["esercizio", "esercizio", "percentuale"]
+
+
+def test_differenza_in_testata_senza_conferma_dei_numeri(tmp_path):
+    cols = _tre_colonne_con_testata(tmp_path, "DIFFERENZA", _NON_SOMMANO)
+    assert [c.ruolo for c in cols] == ["esercizio", "esercizio", "differenza"]
+
+
+def test_scost_senza_conferma_dei_numeri_e_ignoto(tmp_path):
+    cols = _tre_colonne_con_testata(tmp_path, "SCOST.", _NON_SOMMANO)
+    assert [c.ruolo for c in cols] == ["esercizio", "esercizio", "ignoto"]
+
+
+def test_due_ruoli_di_testata_sulla_stessa_colonna_e_ignoto(tmp_path):
+    voci = [_testata(500, 120, "DARE"), _testata(540, 120, "SALDO")]
+    voci += _righe_dati([400, 540], list(zip(_A, _B)))
+    cols = _colonne(tmp_path, voci)
+    assert [c.ruolo for c in cols] == ["esercizio", "ignoto"]
+
+
+def test_mastri_a_destra_dei_conti(tmp_path):
+    voci = [_testata(450, 110, "31/12/2025")]
+    y = 130
+    conti = [("100.00", "250.50"), ("40.00", "60.00", "0.10"), ("1000.00", "1.00"), ("7.25", "2.75")]
+    for m, figli in enumerate(conti):
+        voci += [(50, y, f"MASTRO {m + 1}"), (540, y, _fmt(sum(Decimal(v) for v in figli)))]
+        y += 14
+        for k, v in enumerate(figli):
+            voci += [(70, y, f"CONTO {m + 1}.{k + 1}"), (450, y, _fmt(Decimal(v)))]
+            y += 14
+    cols = _colonne(tmp_path, voci)
+    assert [c.ruolo for c in cols] == ["esercizio", "mastro"]
+    assert [c.fine for c in cols] == [date(2025, 12, 31)] * 2
+    assert [c.corrente for c in cols] == [True, False]
+
+
+def test_importo_che_comincia_a_sinistra_di_150_non_conta_per_il_ruolo(tmp_path):
+    # quattro percentuali che cominciano oltre 150 fanno la colonna; sei importi lunghi allineati allo
+    # stesso bordo ma che cominciano prima di 150 non la fanno, e non devono deciderne il ruolo
+    voci, y = [], 130
+    for v in ("12,345", "1,500", "33,333", "7,125"):
+        voci += [(20, y, "P"), (200, y, v)]
+        y += 14
+    for k in range(6):
+        voci += [(20, y, "L"), (200, y, "1.234.567.890,00")]
+        y += 14
+    cols = _colonne(tmp_path, voci)
+    assert [c.ruolo for c in cols] == ["percentuale"]

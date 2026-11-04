@@ -132,8 +132,12 @@ def _cerca_membri(serie: _Serie, passo: list[int], i: int, kmin: int) -> list[in
         if pieni and abs(s - valori[i]) <= tol:
             if pieni < kmin:
                 return None
-            if (pieni == 1 and s != valori[i]) or _meno_rientrato(serie, membri, i):
+            if pieni == 1 and (s != valori[i] or _meno_rientrato(serie, membri, i)):
                 return None
+            if _chiusura_piu_esterna(serie, membri, i):
+                return None
+            if not valori[i] and not serie.controllo[i] and pieni != 2:
+                return None     # un totale a zero fuori dal lessico C12: solo la coppia costo/fondo
             return membri
         if valori[j]:
             if s in parziali:
@@ -144,16 +148,34 @@ def _cerca_membri(serie: _Serie, passo: list[int], i: int, kmin: int) -> list[in
 
 
 def _meno_rientrato(serie: _Serie, membri: list[int], i: int) -> bool:
-    """Un figlio stampato sotto e a sinistra del suo totale, di almeno un livello: un conto a 85 non e' il totale
-    della voce a 34 che lo segue (R14), ne' un conto a 48 quello del mastro a 24 e della sua foglia (1.260 + 1.260
-    = 2.520 per coincidenza). Vale solo per un totale stampato prima dei figli: un mastro che chiude i suoi conti
-    sta spesso piu' a destra di loro («8.02» dopo «802002»), e il rientro di una riga di controllo («Totale X:»
-    allineato a destra) non dice nulla."""
+    """R14, per le sole catene: il figlio stampato sotto e a sinistra del suo totale, di almeno un livello, non e'
+    suo figlio (un conto a 85 non e' il totale della voce a 34 che lo segue). Vale solo per un totale stampato prima
+    del figlio: un mastro che chiude i suoi conti sta spesso piu' a destra di loro («8.02» dopo «802002»), e il
+    rientro di una riga di controllo («Totale X:» allineato a destra) non dice nulla. Un gruppo vero non ha questo
+    limite: le foglie col prefisso «Passivo» a 72 sono figlie della voce a 117 (1426)."""
     totale = serie.righe[i]
     if totale.x is None or serie.controllo[i] or membri[0] < i:
         return False
     return any(serie.valori[m] and serie.righe[m].x is not None and serie.righe[m].x < totale.x - _SCALINO
                for m in membri)
+
+
+def _chiusura_piu_esterna(serie: _Serie, membri: list[int], i: int) -> bool:
+    """Un totale stampato prima dei figli non contiene una riga di controllo meno rientrata di lui: «17 TOTALE
+    interessi» a 74 o «21) Utile (perdita) dell'esercizio» a 32 chiudono qualcosa di piu' grande di un conto a 87 o
+    del «Risultato prima delle imposte» a 65 sopra di loro (313, 302), anche quando l'aritmetica torna."""
+    totale = serie.righe[i]
+    if totale.x is None or serie.controllo[i] or membri[0] < i:
+        return False
+    return any(serie.valori[m] and serie.controllo[m] and serie.righe[m].x is not None
+               and serie.righe[m].x < totale.x - _SCALINO for m in membri)
+
+
+def _annidata(serie: _Serie, m: int, sotto: list[int]) -> bool:
+    """Una catena che e' un mastro con la sua foglia rientrata di un livello, non due gemelli allo stesso rientro."""
+    mastro = serie.righe[m]
+    return mastro.x is not None and any(
+        serie.valori[f] and serie.righe[f].x is not None and serie.righe[f].x > mastro.x + _SCALINO for f in sotto)
 
 
 def _marca(serie: _Serie, passo: list[int], i: int, membri: list[int]) -> None:
@@ -187,14 +209,18 @@ def _risolvi(serie: _Serie, ammessi: list[bool], direzione: int, kmin: int) -> i
         # disfano e restano i membri come sono (due gemelli «NOLEGGIO FIAT 600» sono fratelli, non mastro e foglia).
         prima = None
         catene = 0
+        annidata = False
         for m in list(membri):
             if serie.vivo[m] and serie.candidabile[m] and ammessi[m] and valori[m]:
                 sotto = _cerca_membri(serie, passo, m, 1)
-                if sotto is not None and i not in sotto:
+                # solo una catena vera (un importo): un gruppo dentro un membro lo risolve la sua passata, con le sue
+                # regole, non questa scorciatoia
+                if sotto is not None and i not in sotto and sum(1 for f in sotto if valori[f]) == 1:
                     if prima is None:
                         prima = (serie.vivo[:], serie.candidabile[:], dict(serie.figli), passo[:])
                     _marca(serie, passo, m, sotto)
                     catene += 1
+                    annidata = annidata or _annidata(serie, m, sotto)
         if prima is not None:
             nuovi = _cerca_membri(serie, passo, i, kmin)
             if nuovi is not None:
@@ -203,6 +229,9 @@ def _risolvi(serie: _Serie, ammessi: list[bool], direzione: int, kmin: int) -> i
             else:
                 serie.vivo[:], serie.candidabile[:], passo[:] = prima[0], prima[1], prima[3]
                 serie.figli = prima[2]
+                if annidata:
+                    # la somma torna solo contando un mastro e la sua foglia rientrata (1.260 + 1.260 = 2.520, 1561)
+                    continue
         _marca(serie, passo, i, membri)
         marcati += 1
     return marcati
@@ -434,6 +463,21 @@ def _stessa_voce(totale: Riga, titolo: Riga) -> bool:
     return not e_t or bool(e_t & e_h)
 
 
+def _nome_voce(r: Riga) -> set[str]:
+    """Le parole del nome di una voce, coi punti delle sigle tolti e senza il lessico dei totali: «Totale I.V.A.:» e
+    «I.V.A.» si chiamano entrambe {iva}. Il codice non conta."""
+    testo = re.sub(r"(?<=\w)\.(?=\w)|\.(?=\s|$|:)", "", _norm(r.etichetta))
+    return {t for t in re.split(r"[^0-9a-z]+", testo) if t and t not in ("totale", "totali")}
+
+
+# una coppia «Chiave: valore» dei parametri della stampa («Ordine: Conti … Modulo: -BILAUE», «Stato: Confermati»)
+_CHIAVE = re.compile(r"(?:^|\s)[^\W\d_]{3,}\s?:(?=\s|$)")
+
+
+def _parametri(r: Riga) -> bool:
+    return len(_CHIAVE.findall(r.etichetta)) >= 2
+
+
 def _testata(r: Riga) -> bool:
     parole = [t for t in re.split(r"[^0-9a-z%€]+", _norm(f"{r.codice} {r.etichetta}")) if t]
     chiave = sum(t in _TESTATA for t in parole)
@@ -460,6 +504,7 @@ class _Lato:
     saltate: set[str] = field(default_factory=set)            # righe-titolo che non sono il titolo di niente
     di_sezione: set[str] = field(default_factory=set)         # titoli che aprono la sezione: valgono a ogni rientro
     rientro: dict[str, float | None] = field(default_factory=dict)   # rientro di un totale: del titolo o dei figli
+    sezioni: dict[int, str] = field(default_factory=dict)     # dal profilo: pagina -> "SP" | "CE" | …
 
 
 def _lati(doc: Documento) -> list[_Lato]:
@@ -470,10 +515,10 @@ def _lati(doc: Documento) -> list[_Lato]:
     ripetute = _testate_di_pagina(doc)
     lati = []
     for righe in gruppi.values():
-        lato = _Lato(righe, {r.id: k for k, r in enumerate(righe)})
+        lato = _Lato(righe, {r.id: k for k, r in enumerate(righe)}, sezioni=getattr(doc.profilo, "sezioni", {}) or {})
         for k, r in enumerate(righe):
             if r.intestazione and (_testata(r) or r.id in ripetute or _CONTROLLO.search(_norm(r.etichetta))
-                                   or _conto_a_zero(righe, k)):
+                                   or _parametri(r) or _conto_a_zero(righe, k)):
                 lato.saltate.add(r.id)
         for r in righe:
             if r.celle:
@@ -515,8 +560,17 @@ def _conto_a_zero(righe: list[Riga], k: int) -> bool:
         return False
     vicini = [next((r for r in reversed(righe[:k]) if r.celle and r.codice), None),
               next((r for r in righe[k + 1:] if r.celle and r.codice), None)]
-    return any(v is not None and _forma(v.codice) == _forma(h.codice) and v.x is not None
-               and abs(v.x - h.x) <= _TOL_RIENTRO for v in vicini)
+    vicini = [v for v in vicini
+              if v is not None and not v.totale and v.x is not None and abs(v.x - h.x) <= _TOL_RIENTRO]
+    if not vicini:
+        return False
+    # stessa forma di codice, oppure (codice rovinato dall'OCR, «00126 3») etichetta dove stanno quelle dei conti, o
+    # il titolo vero del mastro subito sopra, un livello piu' a sinistra («0225 FORNITORI» a 3, i conti a 51)
+    sopra = next((r for r in reversed(righe[:k]) if r.intestazione and r.codice), None)
+    return any(_forma(v.codice) == _forma(h.codice)
+               or (h.x_etichetta is not None and v.x_etichetta is not None
+                   and abs(v.x_etichetta - h.x_etichetta) <= _TOL_RIENTRO) for v in vicini) \
+        or (sopra is not None and sopra.x is not None and sopra.x < h.x - _SCALINO)
 
 
 def _figli_di(r: Riga, priorita: dict[int, int]) -> tuple[str, ...]:
@@ -591,7 +645,10 @@ def assegna_padri(doc: Documento) -> None:
             if r.padre is not None or r.id in di_titolo:
                 continue
             da = lato.inizio.get(r.id, k)
-            trovato = _intestazione_sopra(lato, da, k, r, stretto=r.intestazione, di_titolo=di_titolo)
+            # un totale, come un titolo, sta dentro solo a cio' che e' rientrato meno di lui (o del suo titolo): un
+            # mastro fratello aperto allo stesso rientro non e' suo padre
+            nodo = r.intestazione or bool(r.figli) or r.id in titoli
+            trovato = _intestazione_sopra(lato, da, k, r, stretto=nodo, di_titolo=di_titolo)
             if trovato is not None:
                 r.padre = trovato.id
     for h, t in di_titolo.items():
@@ -647,6 +704,23 @@ def _titoli_e_gruppi(doc: Documento, lato: _Lato, priorita: dict[int, int], tito
         prima[r.id], ultima[r.id] = a, b
         return a, b
 
+    # «Totale X» con importo ma senza figli stampati (il mastro X non ha conti, o non tornano): chiude comunque il
+    # gruppo dell'intestazione X sopra di se', che altrimenti resterebbe aperta su tutti i mastri fratelli seguenti
+    for k, r in enumerate(righe):
+        etichetta = _norm(r.etichetta)
+        nome = _nome_voce(r)
+        if not r.celle or r.totale or not _CONTROLLO.search(etichetta) or _CHIUSURA.search(etichetta) or not nome:
+            continue
+        j = k - 1
+        while j >= 0 and not (righe[j].celle and _di_controllo(righe[j])):
+            h = righe[j]
+            if h.intestazione and h.id not in lato.saltate and h.id not in di_titolo and nome <= _nome_voce(h):
+                titoli[r.id], di_titolo[h.id] = h, r.id
+                lato.inizio[r.id] = j
+                # il suo gruppo comincia dal titolo: un totale che lo contiene cerca il proprio titolo sopra di questo
+                prima[r.id], ultima[r.id] = j, k
+                break
+            j -= 1
     chiudono = []
     for r in righe:
         if r.totale and _figli_di(r, priorita):
@@ -713,22 +787,6 @@ def _titoli_e_gruppi(doc: Documento, lato: _Lato, priorita: dict[int, int], tito
             titoli[t.id], di_titolo[titolo.id] = titolo, t.id
             lato.inizio[t.id] = pos[titolo.id]
             rientri.clear()
-    # «Totale X» con importo ma senza figli stampati (il mastro X non ha conti, o non tornano): chiude comunque il
-    # gruppo dell'intestazione X sopra di se', che altrimenti resterebbe aperta su tutti i mastri fratelli seguenti
-    for k, r in enumerate(righe):
-        etichetta = _norm(r.etichetta)
-        if not r.celle or r.totale or not _CONTROLLO.search(etichetta) or _CHIUSURA.search(etichetta) \
-                or not _parole(r)[0]:
-            continue
-        j = k - 1
-        while j >= 0 and not (righe[j].celle and _di_controllo(righe[j])):
-            h = righe[j]
-            if h.intestazione and h.id not in lato.saltate and h.id not in di_titolo and _stessa_voce(r, h):
-                titoli[r.id], di_titolo[h.id] = h, r.id
-                lato.inizio[r.id] = j
-                ultima[r.id] = k
-                break
-            j -= 1
     # Un totale stampato prima dei figli con subito sotto un'intestazione d'altro nome, rientrata non piu' di lui:
     # quell'intestazione sta dentro la sua somma. Vince il totale, e si dichiara.
     for r in righe:
@@ -744,7 +802,7 @@ def _titoli_e_gruppi(doc: Documento, lato: _Lato, priorita: dict[int, int], tito
                 doc.avvisi.append(f"«{h.etichetta}» (pagina {h.pagina}) sta sotto {_nome(r)}, che ne somma i conti: "
                                   f"vince il totale")
     for r in righe:
-        if r.id in lato.inizio and (r.x is None or _di_controllo(r)):
+        if r.id in lato.inizio and (r.x is None or _di_controllo(r) or r.id in titoli):
             lato.rientro[r.id] = titoli[r.id].x if r.id in titoli else (rientro_figli(r) if r.figli else None)
     for r in righe:
         if r.id in lato.inizio:
@@ -752,6 +810,21 @@ def _titoli_e_gruppi(doc: Documento, lato: _Lato, priorita: dict[int, int], tito
             inizio = lato.inizio[r.id]
             if inizio < fine:
                 lato.chiusi[fine] = min(lato.chiusi.get(fine, inizio), inizio)
+
+
+_PAROLE_SP = {"patrimoniale", "attivo", "passivo", "attivita", "passivita"}
+_PAROLE_CE = {"economico", "costi", "ricavi", "spese", "perdite", "profitti", "proventi", "oneri"}
+
+
+def _stessa_sezione(lato: _Lato, h: Riga, r: Riga) -> bool:
+    parole = set(re.split(r"[^a-z]+", _norm(h.etichetta)))
+    tipo = "SP" if parole & _PAROLE_SP else "CE" if parole & _PAROLE_CE else ""
+    di_h = lato.sezioni.get(h.pagina, "")
+    for pagina in range(h.pagina, r.pagina + 1):
+        s = lato.sezioni.get(pagina, "")
+        if s in ("SP", "CE") and ((tipo and s != tipo) or (di_h in ("SP", "CE") and s != di_h)):
+            return False
+    return True
 
 
 def _intestazione_sopra(lato: _Lato, da: int, k: int, r: Riga, *, stretto: bool,
@@ -773,8 +846,10 @@ def _intestazione_sopra(lato: _Lato, da: int, k: int, r: Riga, *, stretto: bool,
         if not h.intestazione or h.id in lato.saltate:
             continue
         if h.id in lato.di_sezione and not stretto:
-            # il titolo della sezione vale a ogni rientro per i conti, ma solo se sopra non c'e' niente di meglio
-            sezione = sezione or h
+            # il titolo della sezione vale a ogni rientro per i conti, ma solo se sopra non c'e' niente di meglio, e
+            # mai oltre una pagina di un'altra sezione: «ATTIVITA'» non e' il titolo dei costi di pagina 5
+            if sezione is None and _stessa_sezione(lato, h, r):
+                sezione = h
             continue
         sconosciuto = x is None or h.x is None
         totale = di_titolo.get(h.id)

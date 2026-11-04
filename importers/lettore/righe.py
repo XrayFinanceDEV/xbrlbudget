@@ -83,6 +83,7 @@ class Riga:
     tabella: int | None = None   # per una riga della nota: indice in `profilo.tabelle_nota`, e le chiavi di `celle`
                                  # sono le colonne di quella tabella, non quelle del documento
     x: float | None = None       # bordo sinistro del testo (codice o etichetta), il rientro; None = soli importi
+    x_etichetta: float | None = None   # bordo sinistro dell'etichetta dopo il codice; None = senza codice
 
 
 @dataclass
@@ -531,8 +532,22 @@ def _pezzi_della_riga(r: RigaFisica, sezione: str, lettura: _Lettura, forme: lis
         out.append(_Pezzo(r.pagina, lato, r.y, r.y, min(p.y0 for p in parole), max(p.y1 for p in parole),
                           sezione, codice, etichetta_testo, celle, etichetta, parte=lettura.parte,
                           tabella=lettura.tabella, forma=trovato.forma, x_codice=testo[0].x0 if testo else 0.0,
-                          x_etichetta=trovato.x_etichetta, x_testo=testo[0].x0 if testo else None))
+                          x_etichetta=trovato.x_etichetta, x_testo=_rientro(testo)))
     return out
+
+
+# Le parole che alcuni gestionali stampano davanti a ogni voce per dire il lato («Attivo B.I) Terreni», 1426): non sono
+# il rientro della riga.
+_PREFISSI_DI_LATO = {"attivo", "passivo", "attivita", "passivita", "costi", "ricavi"}
+
+
+def _rientro(testo: list[Parola]) -> float | None:
+    """Il bordo sinistro della riga, dopo un eventuale prefisso di lato staccato dal resto."""
+    if not testo:
+        return None
+    if len(testo) > 1 and _norm(testo[0].testo).strip("'`") in _PREFISSI_DI_LATO:
+        return testo[1].x0
+    return testo[0].x0
 
 
 def _pagine_pdf(file_path: str) -> tuple[list[list[RigaFisica]], list[float], dict[Parola, str]]:
@@ -622,7 +637,7 @@ def leggi_pdf(file_path: str) -> Documento:
                                   celle=dict(sorted(p.celle.items())),
                                   intestazione=not p.celle and bool(p.etichetta) and not p.conto,
                                   parte=p.parte, tabella=p.tabella,
-                                  x=p.x_testo))
+                                  x=p.x_testo, x_etichetta=p.x_etichetta if p.codice else None))
     doc = Documento(righe_doc, profilo.colonne, profilo.contrapposto, avvisi, profilo)
     # la parentela si decide sulle righe finite, dopo ogni passata che le compone (ruling R2)
     marca_totali(doc)

@@ -181,16 +181,19 @@ from importers.lettore.righe import Riga  # noqa: E402
 from importers.lettore.totali import assegna_padri, marca_totali  # noqa: E402
 
 
-def _documento(righe, *, colonne=1, correnti=(), pagina_di=None):
-    """`righe`: (x, codice, etichetta, importi...) con importi None per una cella vuota; nessun importo = titolo."""
+def _documento(righe, *, colonne=1, correnti=(), pagina_di=None, sezione="SP", sezioni=None):
+    """`righe`: (x, codice, etichetta, importi...) con importi None per una cella vuota; nessun importo = titolo.
+    `x` puo' essere una coppia (x del codice, x dell'etichetta)."""
     out = []
     for k, (x, codice, etichetta, *importi) in enumerate(righe, start=1):
         pagina = pagina_di(k) if pagina_di else 1
+        x, x_etichetta = x if isinstance(x, tuple) else (x, None)
         celle = {c: leggi_importo(v) for c, v in enumerate(importi) if v is not None}
-        out.append(Riga(id=f"p{pagina}r{k}U", pagina=pagina, y=100.0 + k, lato="U", sezione="SP", codice=codice,
-                        etichetta=etichetta, celle=celle, intestazione=not celle, x=x))
+        out.append(Riga(id=f"p{pagina}r{k}U", pagina=pagina, y=100.0 + k, lato="U", sezione=sezione, codice=codice,
+                        etichetta=etichetta, celle=celle, intestazione=not celle, x=x, x_etichetta=x_etichetta))
     cols = [Colonna(c, 400.0 + 80 * c, "U", "esercizio", None, None, None, c in correnti) for c in range(colonne)]
-    doc = Documento(out, cols, False, [], SimpleNamespace(decimali={c: True for c in range(colonne)}))
+    doc = Documento(out, cols, False, [], SimpleNamespace(decimali={c: True for c in range(colonne)},
+                                                          sezioni=sezioni or {}))
     marca_totali(doc)
     assegna_padri(doc)
     return doc
@@ -333,3 +336,128 @@ def test_intestazione_dentro_un_totale_stampato_prima():
                       (20, "", "Conto Beta", "50,00")])
     assert _conto(doc, "Conto Alfa").padre == _conto(doc, "DEBITI DIVERSI").id
     assert any("CREDITI" in a and "DEBITI DIVERSI" in a for a in doc.avvisi)
+
+
+# --------------------------------------------------------------------------------------
+# Fix round 2
+# --------------------------------------------------------------------------------------
+
+def test_totale_a_zero_non_assorbe_un_blocco():
+    # 313: «C) TRATTAMENTO FINE RAPPORTO 0,00» non e' il totale della voce sotto e dei debiti stampati negativi
+    doc = _documento([(20, "", "Fornitori", "300,00"), (40, "", "Alfa", "100,00"), (40, "", "Beta", "200,00"),
+                      (20, "", "C) TRATTAMENTO FINE RAPPORTO", "0,00"), (20, "", "1) Esigibili entro", "300,00"),
+                      (40, "", "debito uno", "-100,00"), (40, "", "debito due", "-150,00"),
+                      (40, "", "debito tre", "-50,00")])
+    tfr = _conto(doc, "C) TRATTAMENTO FINE RAPPORTO")
+    assert not tfr.totale
+    assert not any(r.padre == tfr.id for r in doc.righe)
+
+
+def test_totale_a_zero_di_costo_e_fondo_resta():
+    doc = _documento([(20, "", "Fornitori", "300,00"), (40, "", "Alfa", "100,00"), (40, "", "Beta", "200,00"),
+                      (20, "", "7) Altre", "0,00"), (40, "", "Costo altre", "1.000,00"),
+                      (40, "", "Fondo altre", "-1.000,00")])
+    assert _conto(doc, "Costo altre").padre == _conto(doc, "7) Altre").id
+
+
+def test_rientro_vale_solo_per_le_catene():
+    # 1426: le foglie stampate a 72 col prefisso «Passivo» sono figlie vere della voce a 117
+    doc = _documento([(117, "", "A) PATRIMONIO NETTO", "300,00"), (72, "", "Passivo A.I) Capitale", "100,00"),
+                      (72, "", "Passivo A.IV) Riserva legale", "200,00")])
+    voce = _conto(doc, "A) PATRIMONIO NETTO")
+    assert voce.totale
+    assert _conto(doc, "Passivo A.I) Capitale").padre == voce.id
+    assert _conto(doc, "Passivo A.I) Capitale").padre_verificato
+
+
+def test_prefisso_di_lato_non_e_il_rientro(tmp_path):
+    # 1426: «Attivo» a 72 davanti all'etichetta a 117: il rientro della riga e' quello dell'etichetta
+    voci = [(117, 140, "B) IMMOBILIZZAZIONI"), (318, 140, "500,00"), (72, 154, "Attivo"), (117, 154, "B.I) Terreni"),
+            (318, 154, "200,00"), (72, 168, "Attivo"), (117, 168, "B.II) Fabbricati"), (318, 168, "300,00"),
+            (117, 182, "D) RATEI E RISCONTI"), (318, 182, "80,00"), (72, 196, "Attivo"),
+            (117, 196, "D) Altri Ratei"), (318, 196, "80,00")]
+    doc = _leggi(tmp_path, voci)
+    altri = next(r for r in doc.righe if "Altri Ratei" in r.etichetta)
+    ratei = next(r for r in doc.righe if r.etichetta == "D) RATEI E RISCONTI")
+    assert altri.x is not None and abs(altri.x - 117) < 3
+    assert not altri.totale
+    assert altri.padre == ratei.id
+
+
+def test_totale_col_nome_puntato_chiude_il_suo_mastro():
+    # 1325: «Totale I.V.A.:» chiude «0608 I.V.A.» anche se i/v/a sembrano enumeratori
+    doc = _documento([(16, "0608", "I.V.A."), (272, "", "Totale I.V.A.:", "5.000,00"),
+                      (16, "0903", "QUIESCENZA"), (62, "09030001", "F.DO TFR", "100,00"),
+                      (62, "09030002", "F.DO ALTRO", "200,00"), (272, "", "Totale QUIESCENZA:", "300,00")])
+    assert not any("I.V.A." in p for p in _conto(doc, "F.DO TFR").percorso)
+    assert _conto(doc, "Totale QUIESCENZA:").padre != _conto(doc, "I.V.A.").id
+
+
+def test_il_padre_di_un_totale_sta_piu_a_sinistra_del_suo_titolo():
+    # 1325: un mastro fratello aperto allo stesso rientro del titolo non e' il padre del totale
+    doc = _documento([(10, "", "PASSIVITA'"), (16, "0702", "FORNITORI ESTERI"), (16, "0703", "FATTURE"),
+                      (62, "07030001", "FATTURE A", "100,00"), (62, "07030002", "FATTURE B", "250,00"),
+                      (272, "", "Totale FATTURE:", "350,00")])
+    totale = _conto(doc, "Totale FATTURE:")
+    assert totale.padre != _conto(doc, "FORNITORI ESTERI").id
+
+
+def test_mastro_a_saldo_zero_non_e_padre_dei_mastri_fratelli():
+    # 680: «01999 BILANCIO CHIUSURA/APERTURA» senza importi allo stesso rientro di «0201 BANCHE»
+    doc = _documento([(3, "01999", "BILANCIO CHIUSURA/APERTURA"), (3, "0201", "BANCHE", "300,00"),
+                      (51, "20101", "BANCA ALFA", "100,00"), (51, "20102", "BANCA BETA", "200,00")])
+    assert _conto(doc, "BANCHE").padre != _conto(doc, "BILANCIO CHIUSURA/APERTURA").id
+
+
+def test_conto_a_zero_allineato_ai_conti_non_e_un_titolo():
+    # 680: «00126 3 STELLE DI MIRABELLA» ha un codice d'altra forma (OCR) ma sta dove stanno i conti
+    doc = _documento([((10, 40), "0225", "FORNITORI"), ((51, 80), "00125", "ALFA", "10,00"),
+                      ((51, 80), "00126 3", "STELLE DI MIRABELLA"), ((51, 80), "00129", "BETA", "20,00"),
+                      ((51, 80), "00130", "GAMMA", "40,00")])
+    fornitori = _conto(doc, "FORNITORI")
+    assert _conto(doc, "BETA").padre == fornitori.id and _conto(doc, "GAMMA").padre == fornitori.id
+
+
+def test_parametri_della_stampa_non_sono_un_titolo():
+    # 1440: «Ordine: Conti Patrimoniali / Economici Modulo: -BILAUE»
+    doc = _documento([(20, "", "Ordine: Conti Patrimoniali / Economici Modulo: -BILAUE"),
+                      (20, "", "Conto uno", "10,00"), (20, "", "Conto due", "25,00")])
+    assert _conto(doc, "Conto uno").padre is None
+
+
+def test_titolo_di_sezione_non_passa_al_conto_economico():
+    # 615: «ATTIVITA'» di pagina 2 non e' il titolo dei costi di pagina 5
+    doc = _documento([(100, "", "ATTIVITA'"), (20, "1001", "cassa", "10,00"), (20, "6001", "acquisti", "25,00"),
+                      (20, "6002", "servizi", "70,00")],
+                     pagina_di=lambda k: 2 if k <= 2 else 5, sezione="", sezioni={2: "SP", 5: "CE"})
+    titolo = _conto(doc, "ATTIVITA'")
+    assert _conto(doc, "cassa").padre == titolo.id
+    assert _conto(doc, "acquisti").padre is None and _conto(doc, "servizi").padre is None
+
+
+def test_mastro_e_foglia_rientrata_non_sommano_nel_conto_sopra():
+    # 1561: 2.520 = «MACCHINE D'UFFICIO» 1.260 (mastro a 24) + la sua foglia 1.260 (a 48), per coincidenza
+    doc = _documento([(24, "13105005", "F.DO AMM. MOBILI", "4.172,53"), (48, "201240", "f.do mobili", "1.652,53"),
+                      (48, "201245", "f.do dotazioni", "2.520,00"), (24, "13110000", "MACCHINE D'UFFICIO", "1.260,00"),
+                      (48, "101280", "macchine elettroniche", "1.260,00"),
+                      (24, "13110005", "F.DO AMM. MACCHINE", "94,24"), (48, "201300", "f.do macchine", "94,24")])
+    assert _conto(doc, "macchine elettroniche").padre == _conto(doc, "MACCHINE D'UFFICIO").id
+    assert not _conto(doc, "f.do dotazioni").totale
+
+
+def test_riga_di_controllo_meno_rientrata_non_e_figlia_di_un_totale_sopra():
+    # 302: «Risultato prima delle imposte» a 65 non e' il totale di «20) Imposte» e «21) Utile dell'esercizio» a 32
+    doc = _documento([(32, "", "B) COSTI", "300,00"), (60, "", "costo uno", "100,00"), (60, "", "costo due", "200,00"),
+                      (65, "", "Risultato prima delle imposte", "1.000,00"),
+                      (32, "", "20) Imposte sul reddito", "240,00"),
+                      (32, "", "21) Utile (perdita) dell'esercizio", "760,00")])
+    utile = _conto(doc, "21) Utile (perdita) dell'esercizio")
+    assert utile.padre != _conto(doc, "Risultato prima delle imposte").id
+
+
+def test_conto_a_zero_sotto_il_suo_mastro_non_e_un_titolo():
+    # 680: «00126 3 STELLE …» col codice rovinato e l'etichetta spostata, sotto «0225 FORNITORI» a 3: e' un conto
+    doc = _documento([((3, 30), "0225", "FORNITORI"), ((51, 86), "00126 3", "STELLE DI MIRABELLA"),
+                      ((51, 79), "00129", "BETA", "20,00"), ((51, 79), "00130", "GAMMA", "40,00")])
+    fornitori = _conto(doc, "FORNITORI")
+    assert _conto(doc, "BETA").padre == fornitori.id and _conto(doc, "GAMMA").padre == fornitori.id

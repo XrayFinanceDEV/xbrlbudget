@@ -457,3 +457,18 @@ def test_fine_di_una_frase_sul_prospetto_non_e_un_titolo(tmp_path):
         ["Saldo iniziale", "Incrementi", "Decrementi", "Saldo finale"], y0=200)
     prof = profilo_documento(_righe(tmp_path, [pagina1, nota]))
     assert prof.parti == {1: "prospetto", 2: "nota"}
+
+
+def test_decisioni_per_riga_nel_profilo(tmp_path):
+    # Task 5-ter: il lettore di righe consuma margini, sezioni e parti senza rifarle; la chiave e' (pagina, y)
+    pagina1 = [(50, 120, "STATO PATRIMONIALE")] + _tabella(_SCHEMA) + [(50, 800, "Pagina 1 di 2")]
+    pagina2 = [(50, 120, "NOTA INTEGRATIVA")] + _movimentazione() + [(50, 800, "Pagina 2 di 2")]
+    righe = _righe(tmp_path, [pagina1, pagina2])
+    prof = profilo_documento(righe)
+    piedi = {(r.pagina, r.y) for r in righe if "Pagina" in " ".join(p.testo for p in r.parole)}
+    assert piedi and piedi <= prof.scartate
+    assert set(prof.parti_righe) == {(r.pagina, r.y) for r in righe}
+    assert set(prof.sezioni_righe) == {(r.pagina, r.y) for r in righe} - prof.scartate
+    voce = next(r for r in righe if r.pagina == 1 and r.parole[0].testo == "A)")
+    assert prof.sezioni_righe[(1, voce.y)] == "SP" and prof.parti_righe[(1, voce.y)] == "prospetto"
+    assert {prof.parti_righe[(r.pagina, r.y)] for r in righe if r.pagina == 2} == {"nota"}

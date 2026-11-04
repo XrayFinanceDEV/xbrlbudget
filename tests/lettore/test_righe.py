@@ -113,10 +113,14 @@ def test_sezione_dai_titoli_e_continuazione(tmp_path):
 
 
 def test_codice_conto_separato(tmp_path):
+    # il codice ha la forma dei codici del documento (Task 5-ter: le forme vengono dal profilo)
     voci = _riempi(140) + [(40, 240, "102355"), (80, 240, "151"), (100, 240, "-"),
                            (110, 240, "banche c/ricevute all'incasso"), (560, 240, "(113.340,54)")]
+    for k, sotto in enumerate(("152", "153", "154")):
+        voci += [(40, 254 + k * 14, "102355"), (80, 254 + k * 14, sotto), (100, 254 + k * 14, "-"),
+                 (110, 254 + k * 14, f"banca {sotto}"), (560, 254 + k * 14, _VALORI[k])]
     doc = _leggi(tmp_path, [voci])
-    riga = _riga(doc, "banche")
+    riga = _riga(doc, "banche c/")
     assert riga.codice == "102355 151"
     assert riga.etichetta == "banche c/ricevute all'incasso"
     assert [c.valore for c in riga.celle.values()] == [Decimal("-113340.54")]
@@ -318,7 +322,8 @@ def test_pagina_senza_sezione_dopo_la_chiusura_e_dichiarata(tmp_path):
     chiusa = [(50, 100, "STATO PATRIMONIALE")] + _riempi(140) + [(50, 240, "TOTALE PASSIVO"), (560, 240, "1.000,00")]
     doc = _leggi(tmp_path, [chiusa, _riempi(140, prefisso="Seguito")])
     assert {r.sezione for r in doc.righe if r.pagina == 2} == {""}
-    assert [a for a in doc.avvisi if "pagina 2" in a and "sezione" in a]
+    # Task 5-ter: le sezioni sono del profilo, e il loro avviso sta con gli avvisi del documento
+    assert [a for a in doc.profilo.avvisi if "pagina 2" in a and "sezione" in a]
 
 
 def test_mastro_con_importo_e_forma_dei_conti_tiene_il_codice(tmp_path):
@@ -478,3 +483,130 @@ def test_zero_tra_parentesi_dopo_un_importo_e_una_cella(tmp_path):
     doc = _leggi(tmp_path, [voci])
     assert {i: c.valore for i, c in _riga(doc, "IVA conto erario").celle.items()} == {0: Decimal("4316"),
                                                                                       1: Decimal("0")}
+
+
+# --- Task 5-ter: le righe si leggono sul profilo -----------------------------------------
+
+def test_intero_nudo_solo_dove_la_colonna_stampa_interi(tmp_path):
+    # la colonna 480 stampa «10.000», la 560 «1.234,56»: un «5» e' un importo solo nella prima
+    voci = []
+    for k in range(6):
+        y = 140 + k * 14
+        voci += [(50, y, f"Voce {k + 1}"), (480, y, _INTERI[k % len(_INTERI)]), (560, y, _VALORI[k])]
+    voci += [(50, 240, "Nella colonna a interi"), _a_destra(480, 240, "5"),
+             (50, 254, "Nella colonna coi decimali"), _a_destra(560, 254, "5")]
+    doc = _leggi(tmp_path, [voci])
+    assert doc.profilo.decimali == {0: False, 1: True}
+    assert {i: c.valore for i, c in _riga(doc, "colonna a interi").celle.items()} == {0: Decimal("5")}
+    decimali = _riga(doc, "colonna coi decimali")
+    assert decimali.celle == {} and decimali.etichetta.endswith("5")
+
+
+def test_conto_a_zero_non_e_titolo(tmp_path):
+    # budget_680 p1: «10501 IVA C/VENDITE» a saldo zero, sotto il mastro col suo totale e ultimo della pagina; la
+    # forma «99999» nel documento e' quella delle righe con importi, quindi e' un conto, non un titolo
+    voci = _conti(140, ["10201", "10202", "10203", "10204", "10205"]) + [
+        (40, 210, "0105"), (110, 210, "CREDITI DIVERSI"), (560, 210, "2.000,00"),
+        (40, 224, "10501"), (110, 224, "IVA C/VENDITE")]
+    doc = _leggi(tmp_path, [voci])
+    forme = {f.forma: f for f in doc.profilo.codici}
+    assert forme["99999"].con_importi > forme["99999"].senza_importi
+    riga = _riga(doc, "IVA C/VENDITE")
+    assert riga.codice == "10501" and riga.etichetta == "IVA C/VENDITE"
+    assert riga.celle == {} and not riga.intestazione
+
+
+def test_codice_fuori_dalle_forme_del_profilo_resta_nell_etichetta(tmp_path):
+    # un numero in testa che non ha la forma dei codici del documento non e' un codice
+    voci = _conti(140, ["10201", "10202", "10203", "10204"]) + [
+        (40, 210, "2023/45"), (110, 210, "rimborso"), (560, 210, "12,00")]
+    doc = _leggi(tmp_path, [voci])
+    riga = _riga(doc, "rimborso")
+    assert riga.codice == "" and riga.etichetta.startswith("2023/45")
+    assert _riga(doc, "conto 10203").codice == "10203"
+
+
+def test_segno_fuori_profilo_dichiarato(tmp_path):
+    # il documento stampa i negativi tra parentesi; un «500,00-» si legge, ma si dichiara
+    voci = _riempi(140) + [(50, 240, "Rettifica uno"), (560, 240, "(1.000,00)"),
+                           (50, 254, "Rettifica due"), (560, 254, "(2.000,00)"),
+                           (50, 268, "Rettifica tre"), (560, 268, "500,00-")]
+    doc = _leggi(tmp_path, [voci])
+    assert doc.profilo.negativi == frozenset({"parentesi"})
+    assert list(_riga(doc, "Rettifica tre").celle.values())[0].valore == Decimal("-500.00")
+    fuori = [a for a in doc.avvisi if "500,00-" in a]
+    assert len(fuori) == 1 and "parentesi" in fuori[0]
+    assert not [a for a in doc.avvisi if "1.000,00" in a]
+
+
+def _prospetto_e_nota(tabella):
+    prospetto = [(50, 100, "STATO PATRIMONIALE")] + _riempi(140, n=8)
+    nota = [(50, 100, "NOTA INTEGRATIVA"), (50, 124, "Patrimonio netto"),
+            (268, 140, "Importo"), (304, 140, "Possibilita' di utilizzazione")] + tabella
+    return [prospetto, nota]
+
+
+def test_trattino_in_colonna_seguito_da_lettere_e_cella_zero(tmp_path):
+    # R9, budget_1315 p17: «Riserve statutarie - A,B,C,D», il trattino allineato a destra con «70.000» della
+    # colonna Importo, la lettera nella colonna «Possibilita' di utilizzazione»
+    righe = [("Capitale", "70.000", "B"), ("Riserva da soprapprezzo", "43.898", "A,B,C,D"),
+             ("Riserve di rivalutazione", "-", "A,B"), ("Riserva legale", "14.000", "A,B"),
+             ("Riserve statutarie", "-", "A,B,C,D"), ("Altre riserve", "-", "A,B,C,D"),
+             ("Totale", "127.898", None)]
+    tabella = []
+    for k, (etichetta, importo, uso) in enumerate(righe):
+        y = 156 + k * 16
+        tabella += [(45, y, etichetta), (294.6, y, importo)] + ([(304.4, y, uso)] if uso else [])
+    doc = _leggi(tmp_path, _prospetto_e_nota(tabella))
+    statutarie = _riga(doc, "Riserve statutarie")
+    assert statutarie.parte == "nota"
+    assert {i: (c.valore, c.forma) for i, c in statutarie.celle.items()} == {0: (Decimal("0"), "zero")}
+    assert "A,B,C,D" in statutarie.etichetta
+    assert {i: c.valore for i, c in _riga(doc, "Riserva legale").celle.items()} == {0: Decimal("14000")}
+
+
+def test_righe_della_nota_marcate_e_lette_sulle_colonne_della_tabella(tmp_path):
+    # R11: una tabella della nota resta fra le righe, marcata, e le sue celle non vanno sulle colonne dei prospetti
+    tabella = []
+    for k in range(4):
+        y = 156 + k * 16
+        tabella += [(45, y, f"Riserva {k + 1}"), (294.6, y, _INTERI[k]), (420, y, _INTERI[k + 1])]
+    doc = _leggi(tmp_path, _prospetto_e_nota(tabella))
+    assert [round(c.x_destra) for c in doc.colonne] == [480, 560]
+    prospetto = [r for r in doc.righe if r.pagina == 1 and r.celle]
+    assert prospetto and all(r.parte == "prospetto" and r.tabella is None for r in prospetto)
+    riserva = _riga(doc, "Riserva 2")
+    assert riserva.parte == "nota" and riserva.tabella is not None
+    tab = doc.profilo.tabelle_nota[riserva.tabella]
+    assert [round(x) for x in tab.colonne] == [295, 420]
+    assert {i: c.valore for i, c in riserva.celle.items()} == {0: Decimal(_INTERI[1].replace(".", "")),
+                                                               1: Decimal(_INTERI[2].replace(".", ""))}
+    assert _riga(doc, "NOTA INTEGRATIVA").parte == "nota"
+
+
+def test_contrapposto_e_il_verdetto_del_profilo(tmp_path):
+    # R10: due prospetti di legge affiancati hanno lati fisici, ma non sono sezioni contrapposte
+    sinistra = ["A) Crediti verso soci", "B) Immobilizzazioni", "I - Immateriali", "II - Materiali",
+                "III - Finanziarie", "C) Attivo circolante", "I - Rimanenze", "II - Crediti"]
+    destra = ["A) Patrimonio netto", "I - Capitale", "II - Riserve", "B) Fondi rischi", "C) TFR", "D) Debiti",
+              "E) Ratei", "IX - Utile"]
+    voci = []
+    for k, (a, b) in enumerate(zip(sinistra, destra)):
+        y = 140 + k * 14
+        voci += [(40, y, a), (280, y, _VALORI[k]), (310, y, b), (560, y, _VALORI[-1 - k])]
+    doc = _leggi(tmp_path, [voci])
+    assert doc.profilo.confine is not None
+    assert not doc.contrapposto and doc.contrapposto == doc.profilo.contrapposto
+    assert {r.lato for r in doc.righe if r.celle} == {"L", "R"}
+
+
+def test_percorso_di_legge_in_testa_non_e_un_codice(tmp_path):
+    # budget_1540: «1.B.2.1 Materie prime» accanto ai conti «101.01.01.01»; il percorso e' la voce, non un conto
+    voci = _conti(140, ["101.01.01.01", "101.01.01.02", "101.01.01.03", "101.01.01.04"]) + [
+        (40, 210 + k * 14, f"1.B.2.{k + 1}") for k in range(3)] + [
+        (110, 210 + k * 14, f"Voce {k + 1} di legge") for k in range(3)] + [
+        (560, 210 + k * 14, _VALORI[k]) for k in range(3)]
+    doc = _leggi(tmp_path, [voci])
+    riga = _riga(doc, "Voce 2 di legge")
+    assert riga.codice == "" and riga.etichetta.startswith("1.B.2.2")
+    assert _riga(doc, "conto 101.01.01.02").codice == "101.01.01.02"

@@ -3,7 +3,7 @@
 Tipo (schema, schema con dettaglio, sezioni contrapposte, verifica), colonne e lati, forma dei negativi,
 decimali per colonna, forme dei codici del piano dei conti, sezione di ogni pagina, righe di margine: fatti del
 documento intero, che una riga da sola non vede (decisione del proprietario, 2026-11-04). Qui stanno anche le
-regole di livello documento che il passo 5 aveva scritto in `righe.py`; `righe.py` le importa da qui.
+regole di livello documento che il passo 5 aveva scritto in `righe.py`; `righe.py` le legge dal profilo.
 
 Le forme dei codici dicono che cos'e' un codice, mai chi e' figlio di chi: la parentela la decide il totale
 stampato (Task 6).
@@ -16,7 +16,6 @@ import unicodedata
 from collections import Counter
 from dataclasses import dataclass, field
 from decimal import Decimal
-from typing import TYPE_CHECKING
 
 from importers.bilancio_classifier import classify_bilancio
 from importers.detail_enrichment import _chiude_sezione, _sezione_della_chiusura
@@ -27,9 +26,6 @@ from importers.lettore.lati import assegna_lati, confine_ammesso
 from importers.schema_legge_generico import _PIEDE, _intestazione
 from importers.standard_ivcee_parser import _AMOUNT_LIKE, _DATE_RE
 from importers.xbrl_reso_parser import _FASCIA_MARGINE, _chiave_ripetuta
-
-if TYPE_CHECKING:       # solo per le annotazioni: `righe` importa da qui
-    from importers.lettore.righe import _Pezzo
 
 _X0_MINIMO = 150.0          # come `colonne._in_colonna`
 _ALTEZZA_PAGINA = 842.0     # A4 verticale, se chi chiama non da' l'altezza della pagina
@@ -51,13 +47,9 @@ _SEGUITO_CODICE = re.compile(r"^(?:bis|ter|quater|quinquies)\)?$", re.I)
 _SEPARATORE = re.compile(r"^[-–:.]+$")
 _SEPARATORE_CODICE = re.compile(r"^[/.\-]$")
 
-# Un codice senza importi si riconosce dalla forma dei codici gia' separati sulle righe con importi:
-# stessa famiglia (le cifre e gli asterischi come gruppi, i separatori come sono), stesso lato, x0 entro
-# qualche punto (o, per un mastro stampato piu' a sinistra, l'etichetta allineata a quella dei conti), e
-# almeno due esempi.
-_TOKEN_CODICE = re.compile(r"[\d*]+(?:[/.\-][\d*]+)*")
+# Un codice e' allineato a una forma del profilo se il suo x0, o quello dell'etichetta che lo segue (un mastro
+# stampato piu' a sinistra dei conti), e' entro tanto dalla mediana della forma.
 _TOL_X_CODICE = 4.0
-_MIN_ESEMPI_CODICE = 2
 
 # Forme di codice del profilo: un token con almeno una cifra, lettere e asterischi ammessi («CII1A», «03/05/***»).
 _TOKEN_FORMA = re.compile(r"[A-Za-z\d*]*\d[A-Za-z\d*]*(?:[/.\-][A-Za-z\d*]+)*")
@@ -107,6 +99,10 @@ class Profilo:
     parti: dict[int, str] = field(default_factory=dict)   # pagina -> "prospetto" | "nota" | "altro", la prevalente
     bande: list[tuple[int, float, str]] = field(default_factory=list)   # (pagina, y da cui comincia, parte), in ordine
     tabelle_nota: list["TabellaNota"] = field(default_factory=list)
+    # Per riga fisica, con chiave (pagina, y del centro): le decisioni che il lettore di righe consuma senza rifarle.
+    scartate: frozenset[tuple[int, float]] = frozenset()             # margini, piedi, testate di colonna
+    sezioni_righe: dict[tuple[int, float], str] = field(default_factory=dict)   # righe non scartate -> sezione
+    parti_righe: dict[tuple[int, float], str] = field(default_factory=dict)     # ogni riga -> parte
 
 
 @dataclass(frozen=True)
@@ -202,88 +198,6 @@ def _capitale_in_anagrafica(parole: list[Parola], colonne: list[Colonna]) -> boo
         return True
     return any(_valuta_davanti(parole, i) and leggi_importo(p.testo) is not None and _in_colonna(p, colonne) is None
                for i, p in enumerate(parole))
-
-
-# --------------------------------------------------------------------------------------
-# Codici senza importi (regola del passo 5 sulle righe di `righe`)
-# --------------------------------------------------------------------------------------
-
-def _famiglia(codice: str) -> str:
-    """«707245 000» -> «9 9», «03/05/***» -> «9/9/9»: la forma senza le lunghezze."""
-    return re.sub(r"[\d*]+", "9", codice)
-
-
-def _forma_codice(codice: str) -> str:
-    """«707245 000» -> «999999 999»: la forma con le lunghezze."""
-    return re.sub(r"\d", "9", codice)
-
-
-def _token_codice(t: str) -> bool:
-    return bool(_TOKEN_CODICE.fullmatch(t) and re.search(r"\d", t)
-                and not _AMOUNT_LIKE.match(t) and not _DATE_RE.fullmatch(t))
-
-
-def _codice_spaziato(parole: list[str]) -> int:
-    """Quanti token fa un codice stampato con gli spazi attorno ai separatori («4 / 5 / 1»); 0 se non lo e'."""
-    n = 1
-    while (n + 1 < len(parole) and _token_codice(parole[n - 1]) and _SEPARATORE_CODICE.match(parole[n])
-           and _token_codice(parole[n + 1])):
-        n += 2
-    return n if n > 1 else 0
-
-
-def _x_etichetta(x_token: list[float], parole: list[str], n: int) -> float | None:
-    """x0 della prima parola dopo `n` token di codice e i separatori; None se non si sa."""
-    k = n
-    while k < len(parole) and _SEPARATORE.match(parole[k]):
-        k += 1
-    return x_token[k] if k < len(parole) and len(x_token) == len(parole) else None
-
-
-def _codici_senza_importi(sequenze: list[list["_Pezzo"]]) -> None:
-    """Il codice in testa a una riga che `riga_conto` non separa, dalla forma dei codici del documento: un
-    conto a saldo zero o senza importo stampato, il titolo di un mastro, o un mastro con importi che il
-    predicato non riconosce («0103 PORTAFOGLIO ...», «03/05/*** COSTI ...»). Stessa forma e lunghezza di un conto vicino
-    (il precedente o il successivo con importi) = conto con la cella vuota; forma o lunghezza diverse =
-    titolo. Solo i codici: la parentela la decidono le somme."""
-    esempi: dict[tuple[str, str, int], list[tuple[float, float | None]]] = {}
-    for seq in sequenze:
-        for p in seq:
-            if p.celle and p.codice:
-                n = len(p.codice.split())
-                esempi.setdefault((p.lato, _famiglia(p.codice), n), []).append(
-                    (p.x0, _x_etichetta(p.x_token, p.tutti, n)))
-    for seq in sequenze:
-        for k, p in enumerate(seq):
-            if p.codice:
-                continue
-            spaziato = _codice_spaziato(p.parole)
-            for n in ((spaziato,) if spaziato else (2, 1)):
-                if len(p.parole) <= n or not all(_token_codice(t) or (spaziato and _SEPARATORE_CODICE.match(t))
-                                                 for t in p.parole[:n]):
-                    continue
-                # un codice non si tronca: «5 bis)» e' una voce, «4 / 5 / 1» non e' «4»
-                seguito = p.parole[n]
-                if _SEGUITO_CODICE.match(seguito) or seguito in ("/", ".") or (
-                        seguito == "-" and n + 1 < len(p.parole) and _token_codice(p.parole[n + 1])):
-                    continue
-                codice = " ".join(p.parole[:n])
-                chiave = "".join(p.parole[:n]) if spaziato else codice
-                xs = esempi.get((p.lato, _famiglia(chiave), 1 if spaziato else n), [])
-                x_et = _x_etichetta(p.x_token, p.tutti, n)
-                if len(xs) >= _MIN_ESEMPI_CODICE and any(
-                        abs(x - p.x0) <= _TOL_X_CODICE
-                        or (x_et is not None and e is not None and abs(e - x_et) <= _TOL_X_CODICE)
-                        for x, e in xs):
-                    resto = p.parole[n:]
-                    while resto and _SEPARATORE.match(resto[0]):
-                        resto = resto[1:]
-                    p.codice, p.parole, p.etichetta = codice, resto, " ".join(resto)
-                    vicini = [next((q for q in reversed(seq[:k]) if q.celle and q.codice), None),
-                              next((q for q in seq[k + 1:] if q.celle and q.codice), None)]
-                    p.conto = not p.celle and any(q is not None and _forma_codice(q.codice) == _forma_codice(codice)
-                                                  for q in vicini)
-                    break
 
 
 # --------------------------------------------------------------------------------------
@@ -581,9 +495,16 @@ def _parti_pagina(pagine: list[list[RigaFisica]], parti: dict[int, str]) -> tupl
     return per_pagina, bande
 
 
+def _riga_di_tabella(r: RigaFisica) -> bool:
+    """Una riga con importi, o con un trattino nella zona degli importi: la riserva a zero «Riserve statutarie -
+    A,B,C,D» (budget_1315 p17) e' una riga della tabella, e una serie di righe cosi' non la spezza in due."""
+    return bool(_importi_grezzi(r)) or any(p.x0 > _X0_MINIMO and p.testo in ("-", "\u2013") for p in r.parole)
+
+
 def _tabelle_nota(pagine: list[list[RigaFisica]], parti: dict[int, str]) -> list[TabellaNota]:
-    """Le tabelle della nota: per pagina, i blocchi di righe con importi separati da almeno due righe di testo;
-    titolo la riga di testo appena sopra, o l'ultimo titolo della nota."""
+    """Le tabelle della nota: per pagina, i blocchi di righe della tabella (`_riga_di_tabella`) separati da almeno
+    due righe di testo; titolo la riga di testo appena sopra, o l'ultimo titolo della nota. Le colonne sono i bordi
+    destri dei suoi importi."""
     out = []
     titolo_nota = ""
     for righe in pagine:
@@ -603,7 +524,7 @@ def _tabelle_nota(pagine: list[list[RigaFisica]], parti: dict[int, str]) -> list
                 continue
             if _titolo_parte(r) == "nota":
                 titolo_nota = _testo(r)
-            if _importi_grezzi(r):
+            if _riga_di_tabella(r):
                 if testo_fra >= 2:
                     chiudi()
                     blocco = []
@@ -646,10 +567,12 @@ def _gruppi(r: RigaFisica, confine: float | None) -> dict[str, list[Parola]]:
             "R": [p for p in r.parole if (p.x0 + p.x1) / 2 >= confine]}
 
 
-def _codice_in_testa(parole: list[Parola]) -> tuple[str, int] | None:
+def _codice_in_testa(parole: list[Parola], cifre_min: int = _CIFRE_MIN_CODICE) -> tuple[str, int] | None:
     """(sagoma, token di codice) del codice che apre `parole`, o None. Il codice e' il primo token con
     una cifra e quelli di sole cifre che lo seguono («707245 000», «CII1A 208.00121»), o un codice spaziato
-    («4 / 5 / 1»); un codice seguito da «bis)», «ter)» e' una voce («5 bis)»)."""
+    («4 / 5 / 1»); un codice seguito da «bis)», «ter)» e' una voce («5 bis)»). Con meno di `cifre_min` cifre non e'
+    un codice («1.1 roe»): le forme del profilo ne vogliono tre; il lettore di righe ne accetta meno solo per la
+    famiglia di una forma, allineata (il mastro «48»)."""
     testi = [p.testo for p in parole]
     if not testi or not _e_token_forma(testi[0], primo=True):
         return None
@@ -664,7 +587,7 @@ def _codice_in_testa(parole: list[Parola]) -> tuple[str, int] | None:
             break
     if n < len(testi) and _SEGUITO_CODICE.match(testi[n]):
         return None
-    if sum(ch.isdigit() for t in testi[:n] for ch in t) < _CIFRE_MIN_CODICE:
+    if sum(ch.isdigit() for t in testi[:n] for ch in t) < cifre_min:
         return None
     return " ".join(_sagoma(t) for t in testi[:n]), n
 
@@ -823,7 +746,10 @@ def profilo_documento(righe: list[RigaFisica], *, altezze: dict[int, float] | No
     colonne = colonne_documento([r for p in pagine for r in p if parti[id(r)] == "prospetto"])
     parti_pagina, bande = _parti_pagina(pagine, parti)
     tabelle = _tabelle_nota(pagine, parti)
-    pagine = [[r for r in rr if not _scartata(r, altezze_l[n], colonne, margini)] for n, rr in enumerate(pagine)]
+    parti_righe = {(r.pagina, r.y): parti[id(r)] for rr in pagine for r in rr}
+    scartate = frozenset((r.pagina, r.y) for n, rr in enumerate(pagine) for r in rr
+                         if _scartata(r, altezze_l[n], colonne, margini))
+    pagine = [[r for r in rr if (r.pagina, r.y) not in scartate] for rr in pagine]
     tutte = [r for rr in pagine for r in rr]
     prospetto = [r for r in tutte if parti[id(r)] == "prospetto"]
     decimali = _decimali(prospetto, colonne)
@@ -854,7 +780,9 @@ def profilo_documento(righe: list[RigaFisica], *, altezze: dict[int, float] | No
     elif indizio.split()[1] not in _MACRO_ATTESA[tipo]:
         avvisi.append(f"tipo {tipo}, ma il {indizio} (solo un indizio)")
 
-    sezioni = _sezioni_pagina(pagine, _sezioni(pagine, colonne, avvisi))
+    per_riga = _sezioni(pagine, colonne, avvisi)
+    sezioni_righe = {(r.pagina, r.y): s for rr, ss in zip(pagine, per_riga) for r, s in zip(rr, ss)}
     return Profilo(tipo, tipo_perche, colonne, confine, _negativi(prospetto, colonne, intere), decimali,
-                   _forme(_candidati(prospetto, colonne, confine)), sezioni, frozenset(margini), avvisi,
-                   contrapposto, parti_pagina, bande, tabelle)
+                   _forme(_candidati(prospetto, colonne, confine)), _sezioni_pagina(pagine, per_riga),
+                   frozenset(margini), avvisi, contrapposto, parti_pagina, bande, tabelle, scartate, sezioni_righe,
+                   parti_righe)

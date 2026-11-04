@@ -14,15 +14,15 @@ from dataclasses import dataclass, field
 
 import fitz
 
-from importers.lettore.colonne import Colonna
+from importers.lettore.colonne import Colonna, colonna_di
 from importers.lettore.geometria import Parola, RigaFisica, parole_pagina, righe_fisiche
 from importers.lettore.importi import Importo, leggi_importo
-# Le regole di livello documento stanno nel profilo (Task 5-bis); il Task 5-ter le fara' leggere dal Profilo.
+# Le regole di livello documento stanno nel profilo (Task 5-bis): qui si leggono dal Profilo, calcolato prima.
 from importers.lettore.profilo import (
-    _SEPARATORE, _VALUTA, Profilo, _capitale_in_anagrafica, _codici_senza_importi, _in_colonna, _norm,
-    _rimando_di_nota, _scartata, _sezioni, _valuta_davanti, profilo_documento)
+    _PERCORSO_LEGGE, _RUOLI_ANALISI, _SEPARATORE, _SEPARATORE_CODICE, _TOL_X_CODICE, _VALUTA, _VOCE_NUMERATA,
+    FormaCodice, Profilo, TabellaNota, _capitale_in_anagrafica, _codice_in_testa, _in_colonna, _norm, _rimando_di_nota,
+    _valuta_davanti, _voce_di_legge, profilo_documento)
 from importers.schema_legge_generico import _forma_strutturale, _intestazione
-from importers.standard_ivcee_parser import riga_conto
 from importers.xbrl_reso_parser import _frase_aperta
 
 _X0_MINIMO = 150.0          # come `colonne._in_colonna`
@@ -49,8 +49,13 @@ _RIFERIMENTO = {"art.", "art", "artt.", "n.", "n", "nr.", "nr", "n°", "num.", "
                 "p.i.", "iva", "c.f.", "cf", "cap", "cap.", "c.a.p.", "ateco", "codice", "cod.", "tel.", "fax",
                 "prot.", "comma", "lett.", "mutuo", "contratto"}
 _ANNO = re.compile(r"^(?:19|20)\d{2}$")
-_CODICE_AGO = (re.compile(r"^\d{6}$"), re.compile(r"^\d{3}$"))
+# La voce IV-CEE senza cifre davanti al conto («AI 301.00001», «D 230.00011», budget_1548): fa parte del codice.
 _TAG_IVCEE = re.compile(r"^[a-e](?:[ivx]+\d*[a-z]?|\d+[a-z]?)?$")
+# Una colonna di testo di una tabella («Possibilita' di utilizzazione»): il testo che segue una cella comincia
+# allo stesso x0 (entro tanto) su almeno tante righe.
+_TOL_COLONNA_TESTO = 2.0
+_MIN_COLONNA_TESTO = 3
+_FORME_SEGNO = {"parentesi": "tra parentesi", "meno": "col meno davanti", "meno-finale": "col meno in coda"}
 
 
 @dataclass
@@ -69,14 +74,18 @@ class Riga:
     padre: str | None = None     # id della riga madre (Task 6)
     padre_verificato: bool = False   # True se i figli del padre sommano al suo totale stampato
     percorso: tuple[str, ...] = ()   # etichette degli antenati, dalla sezione al padre (Task 6)
+    parte: str = "prospetto"     # "prospetto" | "nota" | "altro", dal profilo; i Task 6-8 leggono solo il prospetto
+    tabella: int | None = None   # per una riga della nota: indice in `profilo.tabelle_nota`, e le chiavi di `celle`
+                                 # sono le colonne di quella tabella, non quelle del documento
 
 
 @dataclass
 class Documento:
     righe: list[Riga]
     colonne: list[Colonna]
-    contrapposto: bool
-    avvisi: list[str]
+    contrapposto: bool           # il verdetto del profilo; il lato delle righe resta fisico
+    avvisi: list[str]            # della lettura delle righe; quelli del documento stanno in `profilo.avvisi`
+    profilo: Profilo
 
 
 @dataclass
@@ -92,11 +101,10 @@ class _Pezzo:
     codice: str
     etichetta: str
     celle: dict[int, Importo]
-    parole: list[str] = field(default_factory=list)   # etichetta in token, codice compreso se non separato
-    x0: float = 0.0                                   # bordo sinistro del primo token (codice o etichetta)
+    parole: list[str] = field(default_factory=list)   # etichetta in token, senza il codice
     conto: bool = False                               # conto senza importo: non un titolo
-    tutti: list[str] = field(default_factory=list)      # i token della riga fisica, codice e separatori compresi
-    x_token: list[float] = field(default_factory=list)  # e i loro x0
+    parte: str = "prospetto"
+    tabella: int | None = None
 
 
 # --------------------------------------------------------------------------------------
@@ -149,8 +157,8 @@ def _riferimento_davanti(parole: list[Parola], i: int) -> bool:
 
 
 def _celle_del_lato(parole: list[Parola], colonne: list[Colonna], lato: str, pagina: int,
-                    avvisi: list[str], stampati: dict[Parola, str],
-                    intere: frozenset[int] = frozenset()) -> tuple[dict[int, Importo], list[Parola]]:
+                    avvisi: list[str], stampati: dict[Parola, str], intere: frozenset[int] = frozenset(),
+                    colonne_testo: tuple[float, ...] = ()) -> tuple[dict[int, Importo], list[Parola]]:
     """(celle per colonna, parole dell'etichetta). Un importo e' una cella solo nella sua colonna e sul suo
     lato; fuori colonna, seguito da una durata («12 mesi») o dentro una frase dopo una valuta («euro 516,46
     di valore unitario», o in un'anagrafica col capitale sociale) torna nell'etichetta. Un anno nudo su una
@@ -166,11 +174,14 @@ def _celle_del_lato(parole: list[Parola], colonne: list[Colonna], lato: str, pag
                for i, (p, t) in enumerate(zip(parole, trovati))]
     # un trattino seguito da una parola e' un separatore («PRESTAZ. - IMPRESE»), e un intero nudo davanti a quel
     # separatore o a una parola e' un codice («Codice attivita' 255100 - LAVORAZ.»): si legge da destra, perche'
-    # il trattino decide per l'intero. Davanti a un importo il trattino resta una cella zero.
+    # il trattino decide per l'intero. Davanti a un importo, o a una parola che sta in una colonna di testo della
+    # tabella («Riserve statutarie - A,B,C,D», R9), il trattino resta una cella zero.
     separatori: set[int] = set()
     for i in range(len(parole) - 2, -1, -1):
         dopo = parole[i + 1].testo
-        segue_testo = any(ch.isalpha() for ch in dopo) or (i + 1 in separatori and dopo == "-")
+        in_colonna = parole[i].testo == "-" and any(abs(parole[i + 1].x0 - x) <= _TOL_COLONNA_TESTO
+                                                    for x in colonne_testo)
+        segue_testo = (any(ch.isalpha() for ch in dopo) and not in_colonna) or (i + 1 in separatori and dopo == "-")
         if trovati[i] is not None and segue_testo and (
                 parole[i].testo == "-" or leggi_importo(parole[i].testo) is None):
             trovati[i] = None
@@ -218,21 +229,112 @@ def _celle_del_lato(parole: list[Parola], colonne: list[Colonna], lato: str, pag
     return celle, etichetta
 
 
-def _codice(parole: list[str], ha_importo: bool) -> tuple[str, list[str]]:
-    """(codice conto, parole dell'etichetta) col predicato unico `standard_ivcee_parser.riga_conto`. Il
-    sottoconto a tre cifre dopo un mastro a sei («102355 151») e il conto dopo la voce IV-CEE («CII1A
-    208.00121») fanno parte del codice."""
-    if not parole or not riga_conto(" ".join(parole), ha_importo):
-        return "", parole
-    n = 1
-    if _TAG_IVCEE.match(parole[0].lower()) and not re.match(r"^[\d/.]+$", parole[0]):
-        n = 2
-    elif len(parole) > 2 and _CODICE_AGO[0].match(parole[0]) and _CODICE_AGO[1].match(parole[1]):
-        n = 2
-    resto = parole[n:]
-    while resto and _SEPARATORE.match(resto[0]):
-        resto = resto[1:]
-    return " ".join(parole[:n]), resto
+def _compatta(forma: str) -> str:
+    """«9 / 9 / 9» -> «9/9/9»: un codice spaziato ha la forma di quello compatto."""
+    return re.sub(r"\s*([/.\-])\s*", r"\1", forma)
+
+
+def _famiglia(forma: str) -> str:
+    """«99/99/***» -> «9/9/9»: la forma senza le lunghezze."""
+    return re.sub(r"[9*]+", "9", _compatta(forma))
+
+
+def _codice(testo: list[Parola], forme: list[FormaCodice], ha_celle: bool) -> tuple[str, list[str], bool]:
+    """(codice conto, parole dell'etichetta, conto a zero) dalle forme di codice del profilo. Il codice in testa
+    (`profilo._codice_in_testa`) e' un codice solo se ha una forma del documento, e allora una riga senza celle e' un
+    conto a zero se nel documento quella forma porta soprattutto importi; o se e' della famiglia di una forma con
+    altre lunghezze e allineato a lei sul codice o sull'etichetta (il mastro «0103», «48», «03/05/***» sopra i
+    conti), e allora senza celle e' un titolo. Senza, resta nell'etichetta. Un codice piu' lungo di ogni forma si
+    accorcia fino a una che c'e' («70110 1000 FOGLI»), mai dentro un codice («4 / 5 / 1», «6 / x»). La voce IV-CEE
+    senza cifre davanti al conto («AI 301.00001») conta come la voce con le cifre delle forme («A9 999.99999»); il
+    percorso di una voce di legge stampato in testa («1.B.2.1») non e' un codice."""
+    parole = [p.testo for p in testo]
+    if not forme or not testo:
+        return "", parole, False
+    voce = 1 if (len(testo) > 1 and _TAG_IVCEE.match(parole[0].lower()) and not re.search(r"\d", parole[0])) else 0
+    if _PERCORSO_LEGGE.match(parole[voce]):
+        return "", parole, False        # il percorso della voce di legge («1.B.2.1»), non un conto
+    trovato = _codice_in_testa(testo[voce:], cifre_min=1)
+    if trovato is None:
+        return "", parole, False
+    sagome, n = trovato[0].split(" "), trovato[1] + voce
+    for m in range(n, voce, -1):
+        if _SEPARATORE_CODICE.match(parole[m - 1]) or (m < len(parole) and parole[m] in ("/", ".")) or (
+                m < n and _SEPARATORE_CODICE.match(parole[m])):
+            continue
+        forma = _compatta(" ".join(sagome[:m - voce]))
+        k = m
+        while k < len(parole) and _SEPARATORE.match(parole[k]):
+            k += 1
+        x_etichetta = testo[k].x0 if k < len(testo) else None
+        if voce:
+            # la forma della voce con le cifre, senza la voce
+            stessa = next((f for f in forme if " " in f.forma and re.search(r"[A-Za-z]", f.forma.split(" ")[0])
+                           and _compatta(f.forma.split(" ", 1)[1]) == forma), None)
+            famiglia = False
+        else:
+            stessa = next((f for f in forme if _compatta(f.forma) == forma), None)
+            famiglia = any(_famiglia(f.forma) == _famiglia(forma) and (
+                abs(f.x0 - testo[0].x0) <= _TOL_X_CODICE
+                or (x_etichetta is not None and abs(f.x_etichetta - x_etichetta) <= _TOL_X_CODICE)) for f in forme)
+        if k >= len(parole) and not ha_celle:
+            return "", parole, False    # un numero da solo, senza etichetta ne' importi, non e' un conto
+        if stessa is not None or famiglia:
+            # la voce di legge col codice del gestionale («AD000000 D) RATEI E RISCONTI», «PD000700 07) Debiti verso
+            # fornitori», budget_672) resta un titolo
+            etichetta = " ".join(parole[k:])
+            conto = (stessa is not None and not ha_celle and stessa.con_importi > stessa.senza_importi
+                     and not _voce_di_legge(etichetta) and not _VOCE_NUMERATA.match(_norm(etichetta)))
+            return " ".join(parole[:m]), parole[k:], conto
+    return "", parole, False
+
+
+def _forma_negativo(testo: str) -> str | None:
+    """La forma in cui e' stampato un importo negativo (come `profilo._negativi`); None per il marcatore D/A."""
+    t = _normalizza(testo).replace("€", "").strip()
+    if re.search(r"\s[DA]$", t):
+        return None
+    if t.startswith("(") and t.endswith(")"):
+        return "parentesi"
+    if t.startswith("-"):
+        return "meno"
+    if t.rstrip(")").endswith("-"):
+        return "meno-finale"
+    return None
+
+
+def _segni_fuori_profilo(celle: dict[int, Importo], colonne: list[Colonna], negativi: frozenset[str],
+                         pagina: int, avvisi: list[str]) -> None:
+    """Un negativo stampato in una forma che il documento non usa («123-» dove i negativi sono tra parentesi) si
+    legge come negativo, ma si dichiara. Le colonne di differenza e di percentuale non contano."""
+    viste = negativi & set(_FORME_SEGNO)
+    if not viste:
+        return
+    ruoli = {c.indice: c.ruolo for c in colonne}
+    for indice, imp in celle.items():
+        if imp.valore >= 0 or ruoli.get(indice) in _RUOLI_ANALISI:
+            continue
+        forma = _forma_negativo(imp.testo)
+        if forma is not None and forma not in viste:
+            avvisi.append(f"pagina {pagina}: negativo «{imp.testo}» stampato {_FORME_SEGNO[forma]}, ma il documento "
+                          f"stampa i negativi {' o '.join(_FORME_SEGNO[v] for v in sorted(viste))}: letto come "
+                          f"negativo, da verificare")
+
+
+def _colonne_di_testo(righe: list[RigaFisica], colonne: list[Colonna]) -> tuple[float, ...]:
+    """Gli x0 delle colonne di testo di una tabella: il testo che segue una cella (un importo o un trattino nella
+    sua colonna) e comincia allo stesso x0 su almeno tre righe («B», «A,B», «A,B,C,D» della colonna «Possibilita'
+    di utilizzazione»)."""
+    xs = sorted(r.parole[i + 1].x0 for r in righe for i, p in enumerate(r.parole[:-1])
+                if p.x0 > _X0_MINIMO and leggi_importo(p.testo) is not None and colonna_di(p.x1, colonne) is not None
+                and any(ch.isalpha() for ch in r.parole[i + 1].testo))
+    gruppi: list[list[float]] = []
+    for x in xs:
+        if gruppi and x - gruppi[-1][-1] <= _TOL_COLONNA_TESTO:
+            gruppi[-1].append(x)
+        else:
+            gruppi.append([x])
+    return tuple(statistics.median(g) for g in gruppi if len(g) >= _MIN_COLONNA_TESTO)
 
 
 # --------------------------------------------------------------------------------------
@@ -255,7 +357,13 @@ def _unisci(sopra: _Pezzo, sotto: _Pezzo, *, sillaba: bool = False) -> _Pezzo:
     return _Pezzo(sopra.pagina, sopra.lato, sopra.y, max(sopra.y_ultima, sotto.y_ultima),
                   min(sopra.y0, sotto.y0), max(sopra.y1, sotto.y1), sopra.sezione,
                   sopra.codice or sotto.codice, etichetta, {**sopra.celle, **sotto.celle},
-                  sopra.parole + sotto.parole, sopra.x0, sopra.conto or sotto.conto, sopra.tutti, sopra.x_token)
+                  sopra.parole + sotto.parole, sopra.conto or sotto.conto, sopra.parte, sopra.tabella)
+
+
+def _stessa_parte(a: _Pezzo, b: _Pezzo) -> bool:
+    """Due pezzi si uniscono solo nella stessa parte e nella stessa tabella: le chiavi delle celle sono colonne di
+    tabelle diverse."""
+    return a.parte == b.parte and a.tabella == b.tabella
 
 
 def _solo_importi(p: _Pezzo) -> bool:
@@ -275,6 +383,7 @@ def _riattacca_orfani(pezzi: list[_Pezzo]) -> list[_Pezzo]:
         p = out[i]
         if _solo_importi(p):
             vicine = [j for j in (i - 1, i + 1) if 0 <= j < len(out) and _didascalia_nuda(out[j])
+                      and _stessa_parte(p, out[j])
                       and (abs(out[j].y_ultima - p.y) <= _DISTANZA_ORFANO
                            or _sovrapposizione(p, out[j]) >= _SOVRAPPOSIZIONE_ORFANO)]
             if vicine:
@@ -300,7 +409,7 @@ def _a_capo(pezzi: list[_Pezzo]) -> list[_Pezzo]:
     passo = _passo(pezzi)
     out: list[_Pezzo] = []
     for p in pezzi:
-        if out:
+        if out and _stessa_parte(out[-1], p):
             sopra = out[-1]
             nuda = not p.celle and not p.codice and p.etichetta and not _strutturale(p.etichetta)
             salto = p.y - sopra.y_ultima
@@ -327,21 +436,34 @@ def _a_capo(pezzi: list[_Pezzo]) -> list[_Pezzo]:
 # Lettura
 # --------------------------------------------------------------------------------------
 
-def _pezzi_della_riga(r: RigaFisica, sezione: str, colonne: list[Colonna], confine: float | None,
-                      avvisi: list[str], stampati: dict[Parola, str],
-                      intere: frozenset[int] = frozenset()) -> list[_Pezzo]:
+@dataclass
+class _Lettura:
+    """Come si legge una riga fisica: le colonne su cui stanno le sue celle e le regole del profilo che valgono li'."""
+    parte: str
+    tabella: int | None
+    colonne: list[Colonna]
+    confine: float | None
+    intere: frozenset[int] = frozenset()
+    negativi: frozenset[str] = frozenset()
+    colonne_testo: tuple[float, ...] = ()
+
+
+def _pezzi_della_riga(r: RigaFisica, sezione: str, lettura: _Lettura, forme: list[FormaCodice],
+                      avvisi: list[str], stampati: dict[Parola, str]) -> list[_Pezzo]:
     """Una riga fisica -> un pezzo per lato (uno solo senza confine)."""
-    if confine is None:
+    if lettura.confine is None:
         gruppi = {"U": r.parole}
     else:
-        gruppi = {"L": [p for p in r.parole if (p.x0 + p.x1) / 2 < confine],
-                  "R": [p for p in r.parole if (p.x0 + p.x1) / 2 >= confine]}
+        gruppi = {"L": [p for p in r.parole if (p.x0 + p.x1) / 2 < lettura.confine],
+                  "R": [p for p in r.parole if (p.x0 + p.x1) / 2 >= lettura.confine]}
     out = []
     for lato, parole in gruppi.items():
         if not parole:
             continue
-        celle, testo = _celle_del_lato(parole, colonne, lato, r.pagina, avvisi, stampati, intere)
-        codice, etichetta = _codice([p.testo for p in testo], bool(celle))
+        celle, testo = _celle_del_lato(parole, lettura.colonne, lato, r.pagina, avvisi, stampati, lettura.intere,
+                                       lettura.colonne_testo)
+        _segni_fuori_profilo(celle, lettura.colonne, lettura.negativi, r.pagina, avvisi)
+        codice, etichetta, conto = _codice(testo, forme, bool(celle))
         etichetta_testo = " ".join(etichetta).strip()
         controllo = (codice + " " + etichetta_testo).upper()
         if _ANAGRAFICA.search(etichetta_testo.upper()) or _RIPORTO.search(controllo) \
@@ -350,9 +472,7 @@ def _pezzi_della_riga(r: RigaFisica, sezione: str, colonne: list[Colonna], confi
         if not celle and not codice and not etichetta_testo:
             continue
         out.append(_Pezzo(r.pagina, lato, r.y, r.y, min(p.y0 for p in parole), max(p.y1 for p in parole),
-                          sezione, codice, etichetta_testo, celle, etichetta,
-                          testo[0].x0 if testo else parole[0].x0, False, [p.testo for p in testo],
-                          [p.x0 for p in testo]))
+                          sezione, codice, etichetta_testo, celle, etichetta, conto, lettura.parte, lettura.tabella))
     return out
 
 
@@ -379,32 +499,56 @@ def profilo_pdf(file_path: str) -> Profilo:
                              altezze={n: h for n, h in enumerate(altezze, start=1)})
 
 
+def _tabella_di(r: RigaFisica, tabelle: list[TabellaNota]) -> int | None:
+    return next((k for k, t in enumerate(tabelle) if t.pagina == r.pagina and t.y0 <= r.y <= t.y1), None)
+
+
+def _letture(righe: list[RigaFisica], profilo: Profilo, colonne_tabelle: list[list[Colonna]]) -> list[_Lettura]:
+    """Per ogni riga fisica di una pagina, come si legge: una riga del prospetto sulle colonne del documento, coi
+    lati, gli interi in colonna e i negativi del profilo; una riga della nota sulle colonne della sua tabella, a
+    lato unico (R11); una riga della nota fuori da ogni tabella, o di un'altra parte, senza colonne."""
+    chiavi = []
+    for r in righe:
+        parte = profilo.parti_righe.get((r.pagina, r.y), "prospetto")
+        chiavi.append((parte, None if parte == "prospetto" else _tabella_di(r, profilo.tabelle_nota)))
+    letture: dict[tuple[str, int | None], _Lettura] = {}
+    for chiave in dict.fromkeys(chiavi):
+        parte, tabella = chiave
+        if parte == "prospetto":
+            colonne = profilo.colonne
+            lettura = _Lettura(parte, None, colonne, profilo.confine,
+                               frozenset(i for i, d in profilo.decimali.items() if d is False), profilo.negativi)
+        else:
+            colonne = colonne_tabelle[tabella] if tabella is not None else []
+            lettura = _Lettura(parte, tabella, colonne, None)
+        lettura.colonne_testo = _colonne_di_testo([r for r, c in zip(righe, chiavi) if c == chiave], colonne)
+        letture[chiave] = lettura
+    return [letture[c] for c in chiavi]
+
+
 def leggi_pdf(file_path: str) -> Documento:
-    """Le righe logiche di un PDF dal suo text layer; senza testo, un documento vuoto con l'avviso."""
-    avvisi: list[str] = []
+    """Le righe logiche di un PDF dal suo text layer, lette sul profilo del documento (calcolato prima: prima la
+    struttura, poi le righe); senza testo, un documento vuoto con l'avviso."""
     pagine, altezze, stampati = _pagine_pdf(file_path)
-    if not any(pagine):
-        return Documento([], [], False, ["nessun testo: serve l'OCR"])
-    # colonne, margini, lati e interi in colonna dal profilo; il resto delle regole di documento il Task 5-ter
     profilo = profilo_documento([r for righe in pagine for r in righe],
                                 altezze={n: h for n, h in enumerate(altezze, start=1)})
-    colonne, confine = profilo.colonne, profilo.confine
-    if not colonne:
+    if not any(pagine):
+        return Documento([], [], False, ["nessun testo: serve l'OCR"], profilo)
+    avvisi: list[str] = []
+    if not profilo.colonne:
         avvisi.append("nessuna colonna di importi riconosciuta")
-    ripetute = set(profilo.margini)
-    pagine = [[r for r in righe if not _scartata(r, altezze[n], colonne, ripetute)]
-              for n, righe in enumerate(pagine)]
-    sezioni = _sezioni(pagine, colonne, avvisi)
-    intere = frozenset(i for i, d in profilo.decimali.items() if d is False)
+    colonne_tabelle = [[Colonna(k, x, "U", "ignoto", None, None, None, False) for k, x in enumerate(t.colonne)]
+                       for t in profilo.tabelle_nota]
 
     sequenze: list[list[_Pezzo]] = []
-    for righe, sezioni_pag in zip(pagine, sezioni):
+    for righe in pagine:
+        tenute = [r for r in righe if (r.pagina, r.y) not in profilo.scartate]
         per_lato: dict[str, list[_Pezzo]] = {}
-        for r, sezione in zip(righe, sezioni_pag):
-            for pezzo in _pezzi_della_riga(r, sezione, colonne, confine, avvisi, stampati, intere):
+        for r, lettura in zip(tenute, _letture(tenute, profilo, colonne_tabelle)):
+            for pezzo in _pezzi_della_riga(r, profilo.sezioni_righe.get((r.pagina, r.y), ""), lettura,
+                                           profilo.codici, avvisi, stampati):
                 per_lato.setdefault(pezzo.lato, []).append(pezzo)
         sequenze += [per_lato[lato] for lato in sorted(per_lato, key=_ORDINE_LATI.get)]
-    _codici_senza_importi(sequenze)
 
     righe_doc: list[Riga] = []
     for seq in sequenze:
@@ -413,5 +557,6 @@ def leggi_pdf(file_path: str) -> Documento:
             righe_doc.append(Riga(id=f"p{p.pagina}r{k}{p.lato}", pagina=p.pagina, y=p.y, lato=p.lato,
                                   sezione=p.sezione, codice=p.codice, etichetta=p.etichetta,
                                   celle=dict(sorted(p.celle.items())),
-                                  intestazione=not p.celle and bool(p.etichetta) and not p.conto))
-    return Documento(righe_doc, colonne, confine is not None, avvisi)
+                                  intestazione=not p.celle and bool(p.etichetta) and not p.conto,
+                                  parte=p.parte, tabella=p.tabella))
+    return Documento(righe_doc, profilo.colonne, profilo.contrapposto, avvisi, profilo)

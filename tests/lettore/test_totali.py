@@ -166,3 +166,170 @@ def test_totale_vince_sull_intestazione(tmp_path):
         assert _riga(doc, e).percorso[-1] == "DEBITI DIVERSI"
     avvisi = [a for a in doc.avvisi if "CREDITI" in a and "DEBITI DIVERSI" in a]
     assert len(avvisi) == 1
+
+
+# --------------------------------------------------------------------------------------
+# Fix round 1: documenti costruiti a mano, per fissare una regola sola
+# --------------------------------------------------------------------------------------
+
+from decimal import Decimal  # noqa: E402
+from types import SimpleNamespace  # noqa: E402
+
+from importers.lettore import leggi_importo  # noqa: E402
+from importers.lettore.colonne import Colonna  # noqa: E402
+from importers.lettore.righe import Riga  # noqa: E402
+from importers.lettore.totali import assegna_padri, marca_totali  # noqa: E402
+
+
+def _documento(righe, *, colonne=1, correnti=(), pagina_di=None):
+    """`righe`: (x, codice, etichetta, importi...) con importi None per una cella vuota; nessun importo = titolo."""
+    out = []
+    for k, (x, codice, etichetta, *importi) in enumerate(righe, start=1):
+        pagina = pagina_di(k) if pagina_di else 1
+        celle = {c: leggi_importo(v) for c, v in enumerate(importi) if v is not None}
+        out.append(Riga(id=f"p{pagina}r{k}U", pagina=pagina, y=100.0 + k, lato="U", sezione="SP", codice=codice,
+                        etichetta=etichetta, celle=celle, intestazione=not celle, x=x))
+    cols = [Colonna(c, 400.0 + 80 * c, "U", "esercizio", None, None, None, c in correnti) for c in range(colonne)]
+    doc = Documento(out, cols, False, [], SimpleNamespace(decimali={c: True for c in range(colonne)}))
+    marca_totali(doc)
+    assegna_padri(doc)
+    return doc
+
+
+def _un_totale_per_colonna(doc):
+    visti = {}
+    for t in doc.righe:
+        for c, figli in t.figli.items():
+            for f in figli:
+                assert (c, f) not in visti, (f, c, visti[(c, f)], t.id)
+                visti[(c, f)] = t.id
+
+
+def _conto(doc, etichetta):
+    return _riga(doc, etichetta)
+
+
+def test_costo_e_fondo_sotto_una_voce(tmp_path):
+    # 1440/1445: «7) Altre» vale costo meno fondo, 0; il totale sopra non si prende la coppia grezza
+    doc = _leggi(tmp_path, _righe(140, [("1) Costi di impianto", "300,00"), ("Costo impianto", "500,00"),
+                                        ("Fondo impianto", "-200,00"), ("7) Altre", "0,00"),
+                                        ("Costo altre", "1.000,00"), ("Fondo altre", "-1.000,00"),
+                                        ("Totale I", "300,00")]))
+    _un_totale_per_colonna(doc)
+    altre = _riga(doc, "7) Altre")
+    assert _riga(doc, "Costo altre").padre == altre.id and _riga(doc, "Fondo altre").padre == altre.id
+    assert _riga(doc, "Costo altre").id not in _riga(doc, "Totale I").figli.get(0, ())
+
+
+def test_mastro_e_foglia_non_fanno_un_totale():
+    # 302: sulla precedente 2.999 + 2.999 = 5.998 per coincidenza, ma la seconda riga e' la foglia della prima
+    doc = _documento([(34, "", "GRUPPO", "25,00", "25,00"), (90, "", "g uno", "10,00", "10,00"),
+                      (90, "", "g due", "15,00", "15,00"), (34, "", "AUTOCARRI", "70,00", "60,00"),
+                      (34, "", "Fondi", "30,00", "30,00"), (34, "", "F/AMM", "30,00", "30,00")], colonne=2)
+    _un_totale_per_colonna(doc)
+    assert 1 not in _conto(doc, "AUTOCARRI").figli
+    assert _conto(doc, "F/AMM").padre == _conto(doc, "Fondi").id
+    assert any("mastro e la sua foglia" in a for a in doc.avvisi)
+
+
+def test_gemelli_non_sono_verificati():
+    # R14, 373: due conti uguali uno sotto l'altro sono fratelli; la catena resta un'ipotesi
+    doc = _documento([(20, "", "Fornitori", "300,00"), (20, "", "Alfa", "100,00"), (20, "", "Beta", "200,00"),
+                      (20, "", "NOLEGGIO FIAT 600 A", "340,79"), (20, "", "NOLEGGIO FIAT 600 B", "340,79")])
+    assert not _conto(doc, "NOLEGGIO FIAT 600 B").padre_verificato
+    assert _conto(doc, "Alfa").padre_verificato
+
+
+def test_catena_solo_all_uguaglianza_esatta():
+    # R14, 405: 19,99 non e' il totale di 19,98, anche se la tolleranza delle somme e' un centesimo
+    doc = _documento([(20, "", "Fornitori", "300,00"), (20, "", "Alfa", "100,00"), (20, "", "Beta", "200,00"),
+                      (20, "", "SELL ERR OU", "19,99"), (20, "", "conto vicino", "19,98")])
+    assert not _conto(doc, "SELL ERR OU").totale
+    assert _conto(doc, "conto vicino").padre != _conto(doc, "SELL ERR OU").id
+
+
+def test_figlio_meno_rientrato_rifiutato():
+    # R14, 302: un conto a 85 non e' il totale della voce a 34 che lo segue
+    doc = _documento([(34, "", "Fornitori", "300,00"), (85, "", "Alfa", "100,00"), (85, "", "Beta", "200,00"),
+                      (85, "", "Conto foglia", "500,00"), (34, "", "B) VOCE", "500,00")])
+    assert not _conto(doc, "Conto foglia").totale
+    assert _conto(doc, "B) VOCE").padre != _conto(doc, "Conto foglia").id
+
+
+def test_mastro_senza_foglie_chiude_il_suo_gruppo():
+    # 1325: «Totale FORNITORI ESTERI» non ha conti stampati, ma chiude comunque il mastro 0702
+    doc = _documento([(16, "0702", "FORNITORI ESTERI"), (272, "", "Totale FORNITORI ESTERI:", "1.793.155,12"),
+                      (16, "0703", "FATTURE DA RICEVERE"), (62, "07030001", "FATTURE A", "100,00"),
+                      (62, "07030002", "FATTURE B", "250,00"), (272, "", "Totale FATTURE DA RICEVERE:", "350,00"),
+                      (16, "0704", "NOTE DI CREDITO"), (62, "07040001", "NOTA A", "70,00"),
+                      (62, "07040002", "NOTA B", "30,00"), (272, "", "Totale NOTE DI CREDITO:", "100,00")])
+    fornitori = _conto(doc, "FORNITORI ESTERI")
+    assert _conto(doc, "Totale FATTURE DA RICEVERE:").padre != fornitori.id
+    assert _conto(doc, "Totale NOTE DI CREDITO:").padre != fornitori.id
+    assert not any("FORNITORI ESTERI" in p for p in _conto(doc, "NOTA A").percorso)
+    assert "FATTURE DA RICEVERE" in _conto(doc, "FATTURE A").percorso[-1]
+    assert _conto(doc, "Totale FORNITORI ESTERI:").padre is None or \
+        _conto(doc, "Totale FORNITORI ESTERI:").padre != _conto(doc, "FATTURE DA RICEVERE").id
+
+
+def test_testata_di_pagina_non_e_un_titolo():
+    # 395, 1325: la riga di testa ripetuta su ogni pagina (a meno delle cifre) non e' il mastro dei conti sotto
+    righe = [(20, "", "Ditta ALFA S.R.L. pag. 1"), (20, "", "Conto uno", "10,00"), (20, "", "Conto due", "20,00"),
+             (20, "", "Ditta ALFA S.R.L. pag. 2"), (20, "", "Conto tre", "40,00"), (20, "", "Conto quattro", "80,00")]
+    doc = _documento(righe, pagina_di=lambda k: 1 if k <= 3 else 2)
+    assert all(_conto(doc, e).padre is None for e in ("Conto uno", "Conto tre", "Conto quattro"))
+
+
+def test_conto_a_saldo_zero_non_e_un_titolo():
+    # 680: «10405 STELLE DI MIRABELLA» senza celle fra conti della stessa forma e allo stesso rientro
+    doc = _documento([(10, "0104", "CREDITI"), (51, "10403", "ALFA", "10,00"), (51, "10405", "STELLE DI MIRABELLA"),
+                      (51, "10406", "BETA", "20,00"), (51, "10407", "GAMMA", "40,00")])
+    crediti = _conto(doc, "CREDITI")
+    assert _conto(doc, "BETA").padre == crediti.id
+    assert _conto(doc, "GAMMA").padre == crediti.id
+
+
+def test_totale_costi_oltre_ottanta_conti():
+    # R15, 1555: centoventi conti di costo sommano esattamente al «Totale Costi»; il tetto di 80 non vale per lui
+    importi = [Decimal(100000 + k) + Decimal(k) / 100 for k in range(1, 121)]
+    righe = [(20, f"{700000 + k}", f"costo {k}", f"{v:.2f}".replace(".", ",")) for k, v in enumerate(importi, 1)]
+    righe.append((20, "", "Totale Costi", f"{sum(importi):.2f}".replace(".", ",")))
+    doc = _documento(righe)
+    totale = _conto(doc, "Totale Costi")
+    assert len(totale.figli[0]) == 120
+    assert all(_conto(doc, f"costo {k}").padre == totale.id for k in range(1, 121))
+
+
+def test_titolo_di_sezione_centrato_vale_per_tutta_la_sezione():
+    # 1531: «COSTI, SPESE E PERDITE» centrato a 100, i conti a 20 e nessun totale
+    doc = _documento([(100, "", "COSTI, SPESE E PERDITE"), (20, "6001", "acquisti", "10,00"),
+                      (20, "6002", "servizi", "25,00"), (20, "6003", "godimento", "70,00")])
+    titolo = _conto(doc, "COSTI, SPESE E PERDITE")
+    assert all(_conto(doc, e).padre == titolo.id for e in ("acquisti", "servizi", "godimento"))
+
+
+def test_colonna_non_corrente_non_sposta_il_padre():
+    # Important 4: una catena sulla colonna precedente (100 = 100) non porta via Beta dal totale della corrente
+    doc = _documento([(20, "", "Crediti", "300,00", "200,00"), (20, "", "Alfa", "100,00", "100,00"),
+                      (20, "", "Beta", "200,00", "100,00")], colonne=2, correnti=(0,))
+    assert _conto(doc, "Beta").padre == _conto(doc, "Crediti").id
+    assert _conto(doc, "Beta").padre_verificato
+
+
+def test_scarti_dichiarati_una_volta_per_colonna():
+    doc = _documento([(20, "", "Crediti", "300,00", "250,00"), (20, "", "Alfa", "100,00", "90,00"),
+                      (20, "", "Beta", "200,00", "80,00"), (20, "", "Gamma", "20,00", "11,00"),
+                      (20, "", "Delta", "30,00", "12,00"), (20, "", "", "50,00", "45,00")], colonne=2,
+                     correnti=(0,))
+    scarti = [a for a in doc.avvisi if "non chiude" in a]
+    assert len(scarti) == 1
+    assert "in 2 voci" in scarti[0]
+    assert "senza descrizione di pagina 1 da 50,00" in scarti[0]
+
+
+def test_intestazione_dentro_un_totale_stampato_prima():
+    # minore: un totale stampato prima dei conti, con subito sotto un titolo d'altro nome allo stesso rientro
+    doc = _documento([(20, "", "DEBITI DIVERSI", "150,00"), (20, "", "CREDITI"), (20, "", "Conto Alfa", "100,00"),
+                      (20, "", "Conto Beta", "50,00")])
+    assert _conto(doc, "Conto Alfa").padre == _conto(doc, "DEBITI DIVERSI").id
+    assert any("CREDITI" in a and "DEBITI DIVERSI" in a for a in doc.avvisi)

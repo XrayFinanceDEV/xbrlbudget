@@ -35,6 +35,12 @@ _UNITA = Decimal("1")
 _CONTROLLO = re.compile(r"\btotal[ei]\b|\bpareggio\b|\bsaldo (?:finale|generale)\b|\beccedenza\b"
                         r"|\b(?:utile|perdita|perdite|risultato)\b.*\besercizio\b")
 _TOL_RIENTRO = 2.0
+_RIGHE_DI_TESTA = 4
+# un livello di rientro: piu' dei pochi punti di un codice allineato a destra («3960.01» a 27, «3940» a 32)
+_SCALINO = 10.0
+# le parole di un titolo che apre una sezione («COSTI, SPESE E PERDITE», «STATO PATRIMONIALE ATTIVO»)
+_APRE_SEZIONE = {"patrimoniale", "economico", "attivo", "passivo", "attivita", "passivita", "costi", "ricavi", "spese",
+                 "perdite", "profitti", "proventi", "oneri"}
 _PAROLE_VUOTE = {"di", "del", "dello", "della", "delle", "dei", "degli", "e", "ed", "in", "a", "al", "alla", "per",
                  "su", "con", "da", "verso", "v", "totale", "totali", "voce", "voci"}
 _ROMANO = re.compile(r"^[ivxlc]+$")
@@ -106,21 +112,48 @@ def _serie(doc: Documento) -> list[_Serie]:
     return out
 
 
-def _cerca_membri(valori: list[Decimal], passo: list[int], i: int, kmin: int, tol: Decimal) -> list[int] | None:
+def _cerca_membri(serie: _Serie, passo: list[int], i: int, kmin: int) -> list[int] | None:
     """Come `import_snello/righe.py:_cerca_membri`, con la tolleranza della colonna: i membri vivi da `passo[i]` la
     cui somma torna a `valori[i]` con almeno `kmin` importi diversi da zero (uno zero non fa un gruppo: 100 = 100 +
     0 e' una catena). Una somma che ha gia' toccato il totale con meno membri e poi ci ritorna aggiunge solo righe
-    che si annullano: non e' un gruppo, e la catena la trova la passata k = 1."""
+    che si annullano: non e' un gruppo. Lo stesso per un tratto che si annulla da solo (somme parziali che si
+    ripetono): un mastro e la sua foglia, +x e -x, finirebbero contati due volte. Una catena (un solo importo) vale
+    solo all'uguaglianza esatta e mai con un figlio meno rientrato del totale (R14). Il tetto di 80 membri non vale
+    per una riga di controllo (R15): «Totale costi» chiude anche centocinquanta conti."""
+    valori, tol = serie.valori, serie.tolleranza
     n = len(valori)
+    tetto = n if serie.controllo[i] else _TETTO_MEMBRI
     s, j, membri, pieni = Decimal(0), passo[i], [], 0
-    while j != -1 and j != n and len(membri) < _TETTO_MEMBRI:
+    parziali = {Decimal(0)}
+    while j != -1 and j != n and len(membri) < tetto:
         s += valori[j]
         membri.append(j)
         pieni += valori[j] != 0
         if pieni and abs(s - valori[i]) <= tol:
-            return membri if pieni >= kmin else None
+            if pieni < kmin:
+                return None
+            if (pieni == 1 and s != valori[i]) or _meno_rientrato(serie, membri, i):
+                return None
+            return membri
+        if valori[j]:
+            if s in parziali:
+                return None
+            parziali.add(s)
         j = passo[j]
     return None
+
+
+def _meno_rientrato(serie: _Serie, membri: list[int], i: int) -> bool:
+    """Un figlio stampato sotto e a sinistra del suo totale, di almeno un livello: un conto a 85 non e' il totale
+    della voce a 34 che lo segue (R14), ne' un conto a 48 quello del mastro a 24 e della sua foglia (1.260 + 1.260
+    = 2.520 per coincidenza). Vale solo per un totale stampato prima dei figli: un mastro che chiude i suoi conti
+    sta spesso piu' a destra di loro («8.02» dopo «802002»), e il rientro di una riga di controllo («Totale X:»
+    allineato a destra) non dice nulla."""
+    totale = serie.righe[i]
+    if totale.x is None or serie.controllo[i] or membri[0] < i:
+        return False
+    return any(serie.valori[m] and serie.righe[m].x is not None and serie.righe[m].x < totale.x - _SCALINO
+               for m in membri)
 
 
 def _marca(serie: _Serie, passo: list[int], i: int, membri: list[int]) -> None:
@@ -134,7 +167,8 @@ def _marca(serie: _Serie, passo: list[int], i: int, membri: list[int]) -> None:
 
 def _risolvi(serie: _Serie, ammessi: list[bool], direzione: int, kmin: int) -> int:
     """Una passata nella direzione data (-1: i figli stanno sopra il totale), sui soli candidati `ammessi`: come
-    `import_snello/righe.py:_risolvi_totali`, compreso il membro a figlio unico risolto prima di essere consumato."""
+    `import_snello/righe.py:_risolvi_totali`, compreso il membro a figlio unico risolto prima di essere consumato,
+    con la somma rifatta dopo (vedi sotto)."""
     valori, vivo = serie.valori, serie.vivo
     n = len(valori)
     nxt, prv = _lista_concatenata(vivo)
@@ -142,18 +176,33 @@ def _risolvi(serie: _Serie, ammessi: list[bool], direzione: int, kmin: int) -> i
     ordine = range(n) if direzione == -1 else range(n - 1, -1, -1)
     marcati = 0
     for i in ordine:
-        # un totale a zero (a - b = 0) solo su una riga di controllo, e con due importi veri
-        if not vivo[i] or not serie.candidabile[i] or not ammessi[i] or (not valori[i] and not serie.controllo[i]):
+        # un totale a zero (a - b = 0, il costo e il suo fondo) vale con due importi veri, come ogni gruppo
+        if not vivo[i] or not serie.candidabile[i] or not ammessi[i] or (not valori[i] and kmin < 2):
             continue
-        membri = _cerca_membri(valori, passo, i, kmin, serie.tolleranza)
+        membri = _cerca_membri(serie, passo, i, kmin)
         if membri is None:
             continue
-        for m in membri:
-            if serie.candidabile[m] and ammessi[m] and valori[m]:
-                sotto = _cerca_membri(valori, passo, m, 1, serie.tolleranza)
-                if sotto is not None:
+        # Un membro mastro a figlio unico si risolve prima (TM 589/590): i suoi figli escono dal cammino e la somma
+        # del totale si rifa'. Se con le catene risolte la somma torna, vale quella lettura; se no le catene si
+        # disfano e restano i membri come sono (due gemelli «NOLEGGIO FIAT 600» sono fratelli, non mastro e foglia).
+        prima = None
+        catene = 0
+        for m in list(membri):
+            if serie.vivo[m] and serie.candidabile[m] and ammessi[m] and valori[m]:
+                sotto = _cerca_membri(serie, passo, m, 1)
+                if sotto is not None and i not in sotto:
+                    if prima is None:
+                        prima = (serie.vivo[:], serie.candidabile[:], dict(serie.figli), passo[:])
                     _marca(serie, passo, m, sotto)
-                    marcati += 1
+                    catene += 1
+        if prima is not None:
+            nuovi = _cerca_membri(serie, passo, i, kmin)
+            if nuovi is not None:
+                membri = nuovi
+                marcati += catene
+            else:
+                serie.vivo[:], serie.candidabile[:], passo[:] = prima[0], prima[1], prima[3]
+                serie.figli = prima[2]
         _marca(serie, passo, i, membri)
         marcati += 1
     return marcati
@@ -224,7 +273,71 @@ def marca_totali(doc: Documento) -> None:
     for r in doc.righe:
         if r.totale:
             r.figli = dict(sorted(r.figli.items()))
+    _mastro_e_foglia(doc)
     _confronta_colonne(doc)
+    _un_totale_per_colonna(doc)
+
+
+def _mastro_e_foglia(doc: Documento) -> None:
+    """Un gruppo che conta due righe di cui una e' figlia dell'altra (su qualunque colonna) somma un mastro e la
+    sua foglia: torna per coincidenza (2.999 + 2.999 = 5.998), non e' un totale. Le righe a zero su quella colonna
+    non contano: non spostano la somma."""
+    per_id = {r.id: r for r in doc.righe}
+    for t in doc.righe:
+        for c in list(t.figli):
+            pieni = {f for f in t.figli[c] if c in per_id[f].celle and per_id[f].celle[c].valore}
+            if any(set(g) & pieni for f in pieni for g in per_id[f].figli.values()):
+                del t.figli[c]
+                doc.avvisi.append(f"{_nome(t)}: sulla colonna {c + 1} i figli contano un mastro e la sua foglia, "
+                                  f"somma scartata")
+        t.totale = bool(t.figli)
+
+
+def _nome(t: Riga) -> str:
+    """Come si chiama una riga in un avviso: la sua etichetta, il codice, o la pagina e l'importo."""
+    if t.etichetta or t.codice:
+        return f"«{t.etichetta or t.codice}» (pagina {t.pagina})"
+    importo = next(iter(t.celle.values())).valore if t.celle else None
+    return f"la riga senza descrizione di pagina {t.pagina}" + (f" da {_euro(importo)}" if importo is not None else "")
+
+
+def _un_totale_per_colonna(doc: Documento) -> None:
+    """Invariante: su una colonna una riga e' figlia di un totale solo. Se due la contano, resta nel piu' interno
+    (quello che sta dentro l'altro, o il piu' vicino) ed esce dall'altro, e si dichiara."""
+    per_id = {r.id: r for r in doc.righe}
+    pos = {r.id: k for k, r in enumerate(doc.righe)}
+    colonne = {c for r in doc.righe for c in r.figli}
+    for c in sorted(colonne):
+        padri: dict[str, list[Riga]] = defaultdict(list)
+        for t in doc.righe:
+            for f in t.figli.get(c, ()):
+                padri[f].append(t)
+        for f, totali in padri.items():
+            if len(totali) < 2:
+                continue
+
+            def dentro(a: Riga, b: Riga) -> bool:
+                da_vedere, visti = list(b.figli.get(c, ())), set()
+                while da_vedere:
+                    x = da_vedere.pop()
+                    if x == a.id:
+                        return True
+                    if x not in visti:
+                        visti.add(x)
+                        da_vedere += per_id[x].figli.get(c, ())
+                return False
+
+            interno = min(totali, key=lambda t: (-sum(dentro(t, o) for o in totali if o is not t),
+                                                 abs(pos[t.id] - pos[f])))
+            for t in totali:
+                if t is interno:
+                    continue
+                t.figli[c] = tuple(x for x in t.figli[c] if x != f)
+                if not t.figli[c]:
+                    del t.figli[c]
+                t.totale = bool(t.figli)
+                doc.avvisi.append(f"{_nome(per_id[f])} era figlia di due totali sulla colonna {c + 1}: resta in "
+                                  f"{_nome(interno)}, esce da {_nome(t)}")
 
 
 def _priorita(doc: Documento) -> dict[int, int]:
@@ -239,6 +352,18 @@ def _priorita(doc: Documento) -> dict[int, int]:
     return {c.indice: k for k, c in enumerate(ordinate)}
 
 
+def _colonne_affidabili(doc: Documento) -> set[int]:
+    """Le colonne su cui il documento chiude davvero: almeno la meta' dei gruppi veri della colonna che ne ha di piu'.
+    Una colonna di percentuali o di rettifiche letta come esercizio ne ha pochi o nessuno."""
+    per_id = {r.id: r for r in doc.righe}
+    gruppi: dict[int, int] = defaultdict(int)
+    for t in doc.righe:
+        for c, figli in t.figli.items():
+            gruppi[c] += sum(1 for f in figli if c in per_id[f].celle and per_id[f].celle[c].valore) >= 2
+    massimo = max(gruppi.values(), default=0)
+    return {c for c, n in gruppi.items() if massimo and n * 2 >= massimo}
+
+
 def _nome_colonna(c: Colonna) -> str:
     return f"colonna {c.indice + 1}" + (f" ({c.fine:%d/%m/%Y})" if c.fine else "")
 
@@ -250,6 +375,7 @@ def _confronta_colonne(doc: Documento) -> None:
     per_id = {r.id: r for r in doc.righe}
     colonne = {c.indice: c for c in doc.colonne if c.ruolo in _RUOLI_VALORE}
     presi: dict[int, set[str]] = defaultdict(set)
+    non_chiude: dict[int, list[str]] = defaultdict(list)
     for r in doc.righe:
         for c, figli in r.figli.items():
             presi[c].update(figli)
@@ -270,11 +396,13 @@ def _confronta_colonne(doc: Documento) -> None:
                     t.figli[c] = t.figli[riferimento]
                     presi[c].update(t.figli[c])
                 continue
-            doc.avvisi.append(
-                f"«{t.etichetta or t.codice or t.id}» (pagina {t.pagina}): i figli tornano sulla "
-                f"{_nome_colonna(colonne[riferimento])} e non sulla {_nome_colonna(colonne[c])}, "
-                f"scarto {_euro(scarto)}")
+            non_chiude[c].append(f"{_nome(t)} scarto {_euro(scarto)}")
         t.figli = dict(sorted(t.figli.items()))
+    # un avviso per colonna, non uno per voce: la colonna che non chiude e' un fatto del documento
+    for c, voci in sorted(non_chiude.items()):
+        doc.avvisi.append(f"la {_nome_colonna(colonne[c])} non chiude in {len(voci)} "
+                          f"{'voce' if len(voci) == 1 else 'voci'} i cui figli tornano su un'altra colonna "
+                          f"(prime: {'; '.join(voci[:3])})")
 
 
 # --------------------------------------------------------------------------------------
@@ -329,6 +457,9 @@ class _Lato:
     pos: dict[str, int]
     inizio: dict[str, int] = field(default_factory=dict)      # id totale -> prima riga del suo gruppo (titoli compresi)
     chiusi: dict[int, int] = field(default_factory=dict)      # ultima riga di un gruppo -> la sua prima
+    saltate: set[str] = field(default_factory=set)            # righe-titolo che non sono il titolo di niente
+    di_sezione: set[str] = field(default_factory=set)         # titoli che aprono la sezione: valgono a ogni rientro
+    rientro: dict[str, float | None] = field(default_factory=dict)   # rientro di un totale: del titolo o dei figli
 
 
 def _lati(doc: Documento) -> list[_Lato]:
@@ -336,7 +467,56 @@ def _lati(doc: Documento) -> list[_Lato]:
     for r in doc.righe:
         if r.parte == "prospetto":
             gruppi[(r.lato, r.sezione)].append(r)
-    return [_Lato(righe, {r.id: k for k, r in enumerate(righe)}) for righe in gruppi.values()]
+    ripetute = _testate_di_pagina(doc)
+    lati = []
+    for righe in gruppi.values():
+        lato = _Lato(righe, {r.id: k for k, r in enumerate(righe)})
+        for k, r in enumerate(righe):
+            if r.intestazione and (_testata(r) or r.id in ripetute or _CONTROLLO.search(_norm(r.etichetta))
+                                   or _conto_a_zero(righe, k)):
+                lato.saltate.add(r.id)
+        for r in righe:
+            if r.celle:
+                break
+            if r.intestazione and r.id not in lato.saltate and not r.codice and r.etichetta.upper() == r.etichetta \
+                    and set(re.split(r"[^a-z]+", _norm(r.etichetta))) & _APRE_SEZIONE and not _parole(r)[1]:
+                lato.di_sezione.add(r.id)
+        lati.append(lato)
+    return lati
+
+
+def _testate_di_pagina(doc: Documento) -> set[str]:
+    """Le righe-titolo senza codice che si ripetono in testa a piu' pagine, a meno delle cifre («Ditta ALFA …
+    pag. 2», «Compresi i saldi esercizio prec. Stato: Confermati»): sono la testata della stampa, non un mastro."""
+    in_testa: dict[tuple[int, str], list[Riga]] = defaultdict(list)
+    for r in doc.righe:
+        if r.parte == "prospetto":
+            in_testa[(r.pagina, r.lato)].append(r)
+    pagine: dict[str, set[int]] = defaultdict(set)
+    candidate: dict[str, list[Riga]] = defaultdict(list)
+    for (pagina, _), righe in in_testa.items():
+        for r in righe[:_RIGHE_DI_TESTA]:
+            if r.intestazione and not r.codice:
+                chiave = re.sub(r"\d+", "#", _norm(r.etichetta))
+                pagine[chiave].add(pagina)
+                candidate[chiave].append(r)
+    return {r.id for chiave, righe in candidate.items() if len(pagine[chiave]) >= 2 for r in righe}
+
+
+def _forma(codice: str) -> str:
+    return re.sub(r"\d", "9", codice)
+
+
+def _conto_a_zero(righe: list[Riga], k: int) -> bool:
+    """Una riga-titolo col codice nella forma dei conti vicini, allo stesso rientro: e' un conto a saldo zero
+    («10405 STELLE DI MIRABELLA» fra «10404 …» e «10406 …»), non il titolo dei conti che la seguono."""
+    h = righe[k]
+    if not h.codice or h.x is None:
+        return False
+    vicini = [next((r for r in reversed(righe[:k]) if r.celle and r.codice), None),
+              next((r for r in righe[k + 1:] if r.celle and r.codice), None)]
+    return any(v is not None and _forma(v.codice) == _forma(h.codice) and v.x is not None
+               and abs(v.x - h.x) <= _TOL_RIENTRO for v in vicini)
 
 
 def _figli_di(r: Riga, priorita: dict[int, int]) -> tuple[str, ...]:
@@ -356,20 +536,29 @@ def assegna_padri(doc: Documento) -> None:
     for r in prospetto:
         r.padre, r.padre_verificato, r.percorso = None, False, ()
 
-    # 1. dalla somma: la colonna con priorita' piu' alta vince su un'altra che indica un altro totale
-    scelta: dict[str, tuple[int, str]] = {}
-    pretendenti: dict[str, set[str]] = defaultdict(set)
+    # 1. dalla somma. Una pretesa e' «vera» quando il gruppo ha almeno due importi diversi da zero su quella colonna:
+    # una catena (un solo importo uguale) e' un'ipotesi, non una prova (R14), e da' un padre non verificato. Una
+    # colonna che non e' la corrente non sposta un padre se il suo gruppo non e' vero: una colonna di percentuali o
+    # di rettifiche letta come esercizio fa catene senza senso.
+    correnti = {c.indice for c in doc.colonne if c.corrente}
+    affidabili = _colonne_affidabili(doc)
+    pretese: dict[str, list[tuple[tuple[int, int], str, bool]]] = defaultdict(list)
     for t in prospetto:
         for c, figli in t.figli.items():
+            pieni = {f for f in figli if c in per_id[f].celle and per_id[f].celle[c].valore}
             for f in figli:
-                pretendenti[f].add(t.id)
-                voto = (priorita.get(c, len(priorita)), t.id)
-                if f not in scelta or voto < scelta[f]:
-                    scelta[f] = voto
-    for f, (_, t) in scelta.items():
-        per_id[f].padre, per_id[f].padre_verificato = t, True
-    # Due colonne che danno alla stessa riga due totali diversi, uno dentro l'altro: vince il piu' interno. Una riga a
-    # zero sulla corrente («- esigibili oltre 0,00») la prende il totale di sopra, la precedente la mette al suo posto.
+                # la somma prova solo i figli che la fanno: una riga a zero su quella colonna ci sta per posizione
+                vero = len(pieni) >= 2 and f in pieni
+                pretese[f].append(((0 if vero else 1, priorita.get(c, len(priorita))), t.id,
+                                   vero or c in correnti or c in affidabili))
+    for f, lista in pretese.items():
+        forti = [p for p in lista if p[2]] or lista
+        (rango, _), t, _ = min(forti)
+        per_id[f].padre, per_id[f].padre_verificato = t, rango == 0
+
+    # Due colonne che danno alla stessa riga due totali diversi, uno dentro l'altro: vince il piu' interno, se la
+    # sua somma e' vera. Una riga a zero sulla corrente («- esigibili oltre 0,00») la prende il totale di sopra, la
+    # precedente la mette al suo posto.
     def antenati(t: str | None) -> list[str]:
         catena: list[str] = []
         while t and t not in catena:
@@ -377,14 +566,18 @@ def assegna_padri(doc: Documento) -> None:
             t = per_id[t].padre
         return catena
 
-    for f, alternative in pretendenti.items():
-        if len(alternative) < 2:
-            continue
+    for f, lista in pretese.items():
         scelto = per_id[f].padre
-        dentro = [t for t in alternative
-                  if t not in (scelto, f) and scelto in antenati(t)[1:] and f not in antenati(t)]
+        verificato = per_id[f].padre_verificato
+        # un padre verificato si cambia solo per un altro verificato; uno non verificato anche per un'ipotesi di una
+        # colonna affidabile
+        dentro = {t for (rango, _), t, forte in lista
+                  if (rango == 0 or (not verificato and forte)) and t not in (scelto, f)
+                  and scelto in antenati(t)[1:] and f not in antenati(t)}
         if dentro:
-            per_id[f].padre = max(dentro, key=lambda t: len(antenati(t)))
+            nuovo = max(dentro, key=lambda t: len(antenati(t)))
+            per_id[f].padre = nuovo
+            per_id[f].padre_verificato = any(t == nuovo and rango == 0 for (rango, _), t, _ in lista)
 
     titoli: dict[str, Riga] = {}        # id totale -> la sua intestazione
     di_titolo: dict[str, str] = {}      # id intestazione -> id totale
@@ -490,7 +683,7 @@ def _titoli_e_gruppi(doc: Documento, lato: _Lato, priorita: dict[int, int], tito
         while j >= 0 and righe[j].intestazione:
             sopra.append(righe[j])
             j -= 1
-        sopra = [h for h in sopra if not _testata(h)]
+        sopra = [h for h in sopra if h.id not in lato.saltate]
         liberi = [h for h in sopra if h.id not in di_titolo]
         x_figli = rientro_figli(t)
 
@@ -520,6 +713,39 @@ def _titoli_e_gruppi(doc: Documento, lato: _Lato, priorita: dict[int, int], tito
             titoli[t.id], di_titolo[titolo.id] = titolo, t.id
             lato.inizio[t.id] = pos[titolo.id]
             rientri.clear()
+    # «Totale X» con importo ma senza figli stampati (il mastro X non ha conti, o non tornano): chiude comunque il
+    # gruppo dell'intestazione X sopra di se', che altrimenti resterebbe aperta su tutti i mastri fratelli seguenti
+    for k, r in enumerate(righe):
+        etichetta = _norm(r.etichetta)
+        if not r.celle or r.totale or not _CONTROLLO.search(etichetta) or _CHIUSURA.search(etichetta) \
+                or not _parole(r)[0]:
+            continue
+        j = k - 1
+        while j >= 0 and not (righe[j].celle and _di_controllo(righe[j])):
+            h = righe[j]
+            if h.intestazione and h.id not in lato.saltate and h.id not in di_titolo and _stessa_voce(r, h):
+                titoli[r.id], di_titolo[h.id] = h, r.id
+                lato.inizio[r.id] = j
+                ultima[r.id] = k
+                break
+            j -= 1
+    # Un totale stampato prima dei figli con subito sotto un'intestazione d'altro nome, rientrata non piu' di lui:
+    # quell'intestazione sta dentro la sua somma. Vince il totale, e si dichiara.
+    for r in righe:
+        if not r.totale or not _figli_di(r, priorita) or not _parole(r)[0]:
+            continue
+        a, b = estremi(r)
+        k = pos[r.id]
+        if a == k and b > k + 1:
+            h = righe[k + 1]
+            if h.intestazione and h.id not in lato.saltate and _parole(h)[0] and not _di_sezione(h) \
+                    and not _stessa_voce(r, h) and h.x is not None and r.x is not None \
+                    and h.x <= r.x + _TOL_RIENTRO and not (h.codice and r.codice):
+                doc.avvisi.append(f"«{h.etichetta}» (pagina {h.pagina}) sta sotto {_nome(r)}, che ne somma i conti: "
+                                  f"vince il totale")
+    for r in righe:
+        if r.id in lato.inizio and (r.x is None or _di_controllo(r)):
+            lato.rientro[r.id] = titoli[r.id].x if r.id in titoli else (rientro_figli(r) if r.figli else None)
     for r in righe:
         if r.id in lato.inizio:
             fine = ultima.get(r.id, pos[r.id])
@@ -534,18 +760,30 @@ def _intestazione_sopra(lato: _Lato, da: int, k: int, r: Riga, *, stretto: bool,
     un'intestazione); un gruppo gia' chiuso sopra si salta intero, e il titolo di un totale ancora aperto vale quel
     totale."""
     righe = lato.righe
+    # il rientro di «Totale X:» allineato a destra non dice nulla: vale quello del suo titolo o dei suoi figli
+    x = lato.rientro[r.id] if r.id in lato.rientro else r.x
+    sezione: Riga | None = None
     j = da - 1
     while j >= 0:
         if j in lato.chiusi and j < k:
             j = lato.chiusi[j] - 1
             continue
         h = righe[j]
-        if h.intestazione and not _testata(h) and (r.x is None or h.x is None
-                               or (h.x < r.x - _TOL_RIENTRO if stretto else h.x <= r.x + _TOL_RIENTRO)):
-            totale = di_titolo.get(h.id)
-            if totale is None:
-                return h
-            if lato.pos[totale] > k:
-                return righe[lato.pos[totale]]
         j -= 1
-    return None
+        if not h.intestazione or h.id in lato.saltate:
+            continue
+        if h.id in lato.di_sezione and not stretto:
+            # il titolo della sezione vale a ogni rientro per i conti, ma solo se sopra non c'e' niente di meglio
+            sezione = sezione or h
+            continue
+        sconosciuto = x is None or h.x is None
+        totale = di_titolo.get(h.id)
+        if totale is not None:
+            # il titolo di un totale ancora aperto vale quel totale, ma solo per le righe rientrate piu' di lui: un
+            # mastro fratello allo stesso rientro non ci sta dentro
+            if lato.pos[totale] > k and (sconosciuto or h.x < x - _TOL_RIENTRO):
+                return righe[lato.pos[totale]]
+            continue
+        if sconosciuto or (h.x < x - _TOL_RIENTRO if stretto else h.x <= x + _TOL_RIENTRO):
+            return h
+    return sezione

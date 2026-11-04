@@ -18,6 +18,7 @@ import fitz
 from importers.lettore.colonne import Colonna, colonna_di
 from importers.lettore.geometria import Parola, RigaFisica, parole_pagina, righe_fisiche
 from importers.lettore.importi import Importo, leggi_importo
+from importers.lettore.totali import assegna_padri, marca_totali
 # Le regole di livello documento stanno nel profilo (Task 5-bis): qui si leggono dal Profilo, calcolato prima.
 from importers.lettore.profilo import (
     _PERCORSO_LEGGE, _RUOLI_ANALISI, _SEPARATORE, _STACCO_SEPARATORE, _SEPARATORE_CODICE, _TOL_X_CODICE, _VALUTA, _VOCE_NUMERATA,
@@ -81,6 +82,7 @@ class Riga:
     parte: str = "prospetto"     # "prospetto" | "nota" | "altro", dal profilo; i Task 6-8 leggono solo il prospetto
     tabella: int | None = None   # per una riga della nota: indice in `profilo.tabelle_nota`, e le chiavi di `celle`
                                  # sono le colonne di quella tabella, non quelle del documento
+    x: float | None = None       # bordo sinistro del testo (codice o etichetta), il rientro; None = soli importi
 
 
 @dataclass
@@ -112,6 +114,7 @@ class _Pezzo:
     x_etichetta: float | None = None
     parte: str = "prospetto"
     tabella: int | None = None
+    x_testo: float | None = None                      # bordo sinistro del primo token di testo: il rientro della riga
 
 
 # --------------------------------------------------------------------------------------
@@ -408,7 +411,8 @@ def _unisci(sopra: _Pezzo, sotto: _Pezzo, *, sillaba: bool = False) -> _Pezzo:
                   sopra.codice or sotto.codice, etichetta, {**sopra.celle, **sotto.celle},
                   sopra.parole + sotto.parole, sopra.conto or sotto.conto, parte=sopra.parte, tabella=sopra.tabella,
                   forma=sopra.forma or sotto.forma, x_codice=sopra.x_codice if sopra.codice else sotto.x_codice,
-                  x_etichetta=sopra.x_etichetta if sopra.codice else sotto.x_etichetta)
+                  x_etichetta=sopra.x_etichetta if sopra.codice else sotto.x_etichetta,
+                  x_testo=sopra.x_testo if sopra.x_testo is not None else sotto.x_testo)
 
 
 def _stessa_parte(a: _Pezzo, b: _Pezzo) -> bool:
@@ -527,7 +531,7 @@ def _pezzi_della_riga(r: RigaFisica, sezione: str, lettura: _Lettura, forme: lis
         out.append(_Pezzo(r.pagina, lato, r.y, r.y, min(p.y0 for p in parole), max(p.y1 for p in parole),
                           sezione, codice, etichetta_testo, celle, etichetta, parte=lettura.parte,
                           tabella=lettura.tabella, forma=trovato.forma, x_codice=testo[0].x0 if testo else 0.0,
-                          x_etichetta=trovato.x_etichetta))
+                          x_etichetta=trovato.x_etichetta, x_testo=testo[0].x0 if testo else None))
     return out
 
 
@@ -617,5 +621,10 @@ def leggi_pdf(file_path: str) -> Documento:
                                   sezione=p.sezione, codice=p.codice, etichetta=p.etichetta,
                                   celle=dict(sorted(p.celle.items())),
                                   intestazione=not p.celle and bool(p.etichetta) and not p.conto,
-                                  parte=p.parte, tabella=p.tabella))
-    return Documento(righe_doc, profilo.colonne, profilo.contrapposto, avvisi, profilo)
+                                  parte=p.parte, tabella=p.tabella,
+                                  x=p.x_testo))
+    doc = Documento(righe_doc, profilo.colonne, profilo.contrapposto, avvisi, profilo)
+    # la parentela si decide sulle righe finite, dopo ogni passata che le compone (ruling R2)
+    marca_totali(doc)
+    assegna_padri(doc)
+    return doc

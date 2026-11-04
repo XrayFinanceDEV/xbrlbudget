@@ -579,3 +579,33 @@ def test_riga_di_controllo_non_ha_per_padre_una_sua_voce():
          "Totale attivo circolante": {0: ["esigibili entro", "Disponibilita"], 1: ["Totale crediti", "Disponibilita"]}})
     assegna_padri(doc)
     assert per["Totale crediti"].padre != per["esigibili entro"].id
+
+
+def test_r18_simmetrica_fra_le_colonne_coi_loro_gruppi():
+    """409: le colonne scelgono gruppi diversi per lo stesso totale; il disaccordo declassa ENTRAMBI, anche se una
+    delle due colonne non e' fra quelle di prova (nessuna corrente, una sola affidabile)."""
+    from importers.lettore.totali import _gruppi_incoerenti
+    doc, per = _doc_a_mano(
+        [("Rimanenze", {0: "10", 1: "10"}), ("esigibili entro", {0: "40", 1: "40"}),
+         ("Totale crediti", {0: "40", 1: "40"}), ("IV - Disponibilita", {0: "5", 1: "5"}),
+         ("Totale attivo circolante", {0: "55", 1: "55"})],
+        {"Totale attivo circolante": {0: ["Rimanenze", "Totale crediti", "IV - Disponibilita"],
+                                      1: ["Rimanenze", "esigibili entro", "IV - Disponibilita"]}})
+    incoerenti = _gruppi_incoerenti(doc, {1})
+    t = per["Totale attivo circolante"].id
+    assert (t, 0) in incoerenti and (t, 1) in incoerenti
+
+
+def test_riga_di_controllo_senza_gruppo_non_e_voce_di_una_riga_sopra():
+    """1407: «TOTALE C) PROVENTI E ONERI FINANZIARI» non ha un gruppo suo; «C.16.d» (3,48) = C.17 + TOTALE C e'
+    un'identita' per caso, non una somma di figli."""
+    from importers.lettore.totali import assegna_padri
+    doc, per = _doc_a_mano(
+        [("C.16.d Proventi diversi dai precedenti", {0: "3.48", 1: "5.00"}),
+         ("C.17 Interessi e altri oneri finanziari", {0: "46.32", 1: "50.00"}),
+         ("TOTALE C) PROVENTI E ONERI FINANZIARI", {0: "-42.84", 1: "-45.00"})],
+        {"C.16.d Proventi diversi dai precedenti": {
+            c: ["C.17 Interessi e altri oneri finanziari", "TOTALE C) PROVENTI E ONERI FINANZIARI"] for c in (0, 1)}})
+    assegna_padri(doc)
+    assert not per["C.17 Interessi e altri oneri finanziari"].padre_verificato
+    assert per["TOTALE C) PROVENTI E ONERI FINANZIARI"].padre != per["C.16.d Proventi diversi dai precedenti"].id

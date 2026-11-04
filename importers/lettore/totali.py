@@ -591,32 +591,31 @@ _RISULTATO_ESERCIZIO = re.compile(r"\b(?:utile|perdita|perdite|risultato)\b.*\be
 _DI_RISULTATO = re.compile(r"\b(?:risultato|utile|perdita|perdite|differenza)\b")
 
 
-def _dentro_il_gruppo(t: Riga, m: Riga, per_id: dict[str, Riga], pos: dict[str, int]) -> bool:
-    """`t` sta dentro il gruppo di `m`: e' uno dei suoi figli o sta fra il primo di loro e `m` («esigibili entro»
-    sopra «Totale crediti» che lo somma). Un totale stampato sopra tutte le voci di `m` («2 PASSIVO» sopra le voci
-    di «A.14 TOTALE PATRIMONIO NETTO») non ci sta."""
+def _voce_impossibile(t: Riga, m: Riga, pos: dict[str, int]) -> bool:
+    """Una riga di controllo `m` stampata sotto la riga non di controllo `t` non puo' esserne voce: chiude cio' che le
+    sta sopra. Se ha un gruppo suo, l'eccezione e' un totale stampato sopra tutte le voci di lei (1540: «2 PASSIVO»
+    sopra le voci di «A.14 TOTALE PATRIMONIO NETTO»); senza un gruppo suo, nessuna eccezione (1407: «C.16.d» = C.17 +
+    «TOTALE C)» e' un'identita' per caso; 409: «Totale crediti» non e' voce di «esigibili entro»)."""
+    if pos[m.id] < pos[t.id] or not (m.etichetta or m.codice) or not _di_controllo(m) or _di_controllo(t):
+        return False
     figli = [f for fs in m.figli.values() for f in fs if f in pos]
-    return bool(figli) and min(pos[f] for f in figli) <= pos[t.id] < pos[m.id]
+    return not figli or min(pos[f] for f in figli) <= pos[t.id]
 
 
-def _controllo_sotto(t: Riga, membri: list[Riga], pos: dict[str, int], per_id: dict[str, Riga] | None = None) -> bool:
-    """Un membro stampato sotto `t` che non puo' esserne figlio: una riga di controllo il cui gruppo contiene `t`
-    («Totale crediti» sotto «esigibili entro», che e' una sua voce), se `t` non e' a sua volta di controllo; il
+def _controllo_sotto(t: Riga, membri: list[Riga], pos: dict[str, int]) -> bool:
+    """Un membro stampato sotto `t` che non puo' esserne figlio: una riga di controllo (`_voce_impossibile`); il
     risultato d'esercizio, sotto una riga del conto economico o di risultato («Risultato prima delle imposte» =
-    imposte + utile e' un'identita' del conto). Un totale stampato sopra tutte le sue voci conta per davvero le righe
-    di controllo che le chiudono (1540: «2 PASSIVO» sopra «A.14 TOTALE PATRIMONIO NETTO», B, C, D, E), e sullo SP il
-    patrimonio netto stampato prima delle sue voci conta l'utile."""
-    per_id = per_id or {m.id: m for m in membri}
-    for m in membri:
-        if pos[m.id] < pos[t.id] or not (m.etichetta or m.codice):
-            continue
-        nome = _norm(m.etichetta)
-        if _RISULTATO_ESERCIZIO.search(nome):
-            if t.sezione == "CE" or _DI_RISULTATO.search(_norm(t.etichetta)):
-                return True
-        elif _di_controllo(m) and not _di_controllo(t) and _dentro_il_gruppo(t, m, per_id, pos):
-            return True
-    return False
+    imposte + utile e' un'identita' del conto). Sullo SP il patrimonio netto stampato prima delle sue voci conta
+    l'utile."""
+    return any(_membro_impossibile(t, m, pos) for m in membri)
+
+
+def _membro_impossibile(t: Riga, m: Riga, pos: dict[str, int]) -> bool:
+    if pos[m.id] < pos[t.id] or not (m.etichetta or m.codice):
+        return False
+    if _RISULTATO_ESERCIZIO.search(_norm(m.etichetta)):
+        return t.sezione == "CE" or bool(_DI_RISULTATO.search(_norm(t.etichetta)))
+    return _voce_impossibile(t, m, pos)
 
 
 def _gruppi_incoerenti(doc: Documento, colonne_prova: set[int]) -> set[tuple[str, int]]:
@@ -635,27 +634,32 @@ def _gruppi_incoerenti(doc: Documento, colonne_prova: set[int]) -> set[tuple[str
             continue
         for c, figli in t.figli.items():
             membri = [per_id[f] for f in figli]
-            if _controllo_sotto(t, membri, pos, per_id):
+            if _controllo_sotto(t, membri, pos):
                 out.add((t.id, c))
                 doc.avvisi.append(f"{_nome(t)}: sulla colonna {c + 1} somma una riga di controllo stampata sotto di "
                                   f"lui, padre non verificato")
                 continue
-            for c2 in sorted(colonne_prova & set(colonne)):
-                if c2 == c or c2 not in t.celle or not any(c2 in m.celle for m in membri):
+            # R18 simmetrica: con ogni altra colonna che ha un gruppo suo per questo totale, gli stessi membri fra le
+            # righe con un importo non nullo su entrambe (un conto che c'e' su una colonna sola, «12) Accantonamenti»
+            # solo nel corrente, o che vi vale zero non sposta l'altra somma); un disaccordo declassa entrambi
+            for c2 in sorted(t.figli):
+                if c2 == c:
                     continue
-                if c2 in t.figli:
-                    # la colonna c2 ha un gruppo suo: devono essere gli stessi membri fra le righe con un importo non
-                    # nullo su entrambe le colonne; un conto che c'e' su una colonna sola («12) Accantonamenti» solo
-                    # nel corrente, «11) Variazioni» solo nel precedente) o vi vale zero non sposta l'altra somma
-                    def comuni(ids: tuple[str, ...]) -> set[str]:
-                        return {f for f in ids if c in per_id[f].celle and c2 in per_id[f].celle
-                                and per_id[f].celle[c].valore and per_id[f].celle[c2].valore}
-                    if comuni(figli) == comuni(t.figli[c2]):
-                        continue
-                    out.add((t.id, c))
-                    doc.avvisi.append(f"{_nome(t)}: le colonne {c + 1} e {c2 + 1} chiudono con figli diversi, padre "
-                                      f"non verificato (R18)")
-                    break
+
+                def comuni(ids: tuple[str, ...]) -> set[str]:
+                    return {f for f in ids if c in per_id[f].celle and c2 in per_id[f].celle
+                            and per_id[f].celle[c].valore and per_id[f].celle[c2].valore}
+                if comuni(figli) != comuni(t.figli[c2]):
+                    if (t.id, c) not in out and (t.id, c2) not in out:
+                        doc.avvisi.append(f"{_nome(t)}: le colonne {c + 1} e {c2 + 1} chiudono con figli diversi, "
+                                          f"padre non verificato (R18)")
+                    out.update({(t.id, c), (t.id, c2)})
+            if (t.id, c) in out:
+                continue
+            # con una colonna affidabile senza gruppo suo, i membri ci devono sommare al totale
+            for c2 in sorted(colonne_prova & set(colonne)):
+                if c2 == c or c2 in t.figli or c2 not in t.celle or not any(c2 in m.celle for m in membri):
+                    continue
                 somma = sum((m.celle[c2].valore for m in membri if c2 in m.celle), Decimal(0))
                 if abs(somma - t.celle[c2].valore) > _tolleranza(doc, colonne[c2]):
                     out.add((t.id, c))
@@ -690,9 +694,10 @@ def assegna_padri(doc: Documento) -> None:
             pieni = {f for f in figli if c in per_id[f].celle and per_id[f].celle[c].valore}
             for f in figli:
                 m = per_id[f]
-                if (pos[f] > pos[t.id] and (m.etichetta or m.codice) and _di_controllo(m) and not _di_controllo(t)
-                        and _dentro_il_gruppo(t, m, per_id, pos)):
-                    continue    # una riga di controllo non ha per padre una sua voce stampata sopra di lei (201)
+                if not _RISULTATO_ESERCIZIO.search(_norm(m.etichetta)) and _voce_impossibile(t, m, pos):
+                    # una riga di controllo non ha per padre una riga stampata sopra di lei (201, 409); il risultato
+                    # d'esercizio resta un'ipotesi (non verificata nel CE, `_controllo_sotto`)
+                    continue
                 # la somma prova solo i figli che la fanno: una riga a zero su quella colonna ci sta per posizione; e
                 # solo se gli stessi figli chiudono il totale anche sulle altre colonne (R18)
                 vero = len(pieni) >= 2 and f in pieni and (t.id, c) not in incoerenti

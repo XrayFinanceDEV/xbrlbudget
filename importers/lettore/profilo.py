@@ -302,7 +302,9 @@ _TITOLO_NOTA = re.compile(
     r"^(?:nota integrativa|relazione (?:sulla gestione|del collegio|della societa di revisione|del revisore|unitaria)"
     r"|rendiconto finanziario|(?:prospetto (?:di |della )?)?movimentazion|variazioni nell|informativa\b"
     r"|informazioni (?:sull|sui\b|sul\b|sugli|relative|in calce|ex art|ai sensi)|analisi delle variazioni"
-    r"|rideterminazione (?:del )?risultato)")
+    r"|rideterminazione (?:del )?risultato"
+    # i titoli delle tabelle della nota che le tabelle OCR stampano, e la stampa a se' dei ratei (R21: budget_210)
+    r"|(?:composizione|dettaglio|movimenti|indicatori|indici|flussi finanziari)\b)")
 # «Informazioni …» senza le parole della nota («Informazioni generali sull'impresa» dei micro XBRL) e' un titolo
 # debole: apre la nota solo se sotto non ci sono le prove di un prospetto (R12).
 _TITOLO_NOTA_DEBOLE = re.compile(r"^informazioni\b")

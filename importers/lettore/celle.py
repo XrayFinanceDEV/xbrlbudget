@@ -59,13 +59,11 @@ _MIN_VOCI_PROSPETTO = 3    # come `profilo._MIN_VOCI_PROVA`
 _SPOSTAMENTO_MAX = 1
 # Il lessico di testata: quello del passo 3, quello del passo 6 e le parole della descrizione delle tabelle OCR
 _LESSICO_TESTATA = _PAROLE_RIGA_TESTATA | _TESTATA | _TESTATA_ANCHE | _PAROLE_DESCRIZIONE
-# I titoli della nota che `profilo._TITOLO_NOTA` non elenca perche' nel PDF stanno sopra tabelle gia' riconosciute
-# dalla geometria; sulle tabelle OCR sono il solo segnale («Indici di struttura», «Composizione dei ricavi»)
-_TITOLO_NOTA_TABELLA = re.compile(r"^(?:composizione|dettaglio|movimenti|indicatori|indici|flussi finanziari)\b")
 # Il totale che chiude una sezione: dopo di lui una tabella datata senza titolo proprio non riprende il prospetto
-_CHIUSURA_SEZIONE = re.compile(
-    r"^(?:totale (?:attivo|passivo|attivita|passivita|generale)\b|totale a pareggio"
-    r"|(?:\d{1,2}\s?\)\s*)?(?:utile|perdita)\b.*\besercizio)")
+_CHIUSURA_SEZIONE = re.compile(r"^(?:totale (?:attivo|passivo|attivita|passivita|generale)\b|totale a pareggio)")
+# Il risultato d'esercizio chiude solo il conto economico (o un lato delle contrapposte): nel PN dello SP
+# «Utile (perdita) dell'esercizio» e' una voce in mezzo, con o senza numerazione
+_CHIUSURA_RISULTATO = re.compile(r"^(?:\d{1,2}\s?\)\s*)?(?:utile|perdita)\b.*\besercizio")
 _PERIODO_ANAGRAFICA = re.compile(r"\bdal\s+(\d{1,2}/\d{1,2}/\d{4})\s+al\s+(\d{1,2}/\d{1,2}/\d{4})", re.I)
 _ANAGRAFICA_PAROLE = re.compile(r"\bDITTA\b|\bSEDE\b|\bREGIME CONTABILE\b|\bTIPO REDDITO\b|\bDATI ANAGRAFICI\b")
 
@@ -403,12 +401,8 @@ def _riga_di_testo(testo: str) -> RigaFisica:
 
 
 def _tipo_titolo(testo: str) -> str | None:
-    """«nota», «nota-debole», «prospetto» o None: `profilo._titolo_parte` (R12) piu' i titoli delle tabelle della nota
-    che solo le tabelle OCR stampano."""
-    tipo = _titolo_parte(_riga_di_testo(testo))
-    if tipo is None and _TITOLO_NOTA_TABELLA.match(_norm(testo).replace("'", "")):
-        return "nota"
-    return tipo
+    """«nota», «nota-debole», «prospetto» o None: `profilo._titolo_parte` (R12)."""
+    return _titolo_parte(_riga_di_testo(testo))
 
 
 def _sezione_titolo(testo: str) -> str | None:
@@ -594,6 +588,7 @@ def _grezze(tabelle: list[str], pagine: list[int], titoli: list[str | None], avv
     nota_larghezza: int | None = None       # la larghezza dell'ultima tabella, se era della nota
     blocco, letta_prima = 0, False
     chiusa = False                          # l'ultima riga letta chiude una sezione («Totale passivo»)
+    sezione_corrente = ""                   # l'ultima sezione aperta da un titolo o dal contenuto
     for k, (pagina, piene, didascalia) in enumerate(zip(pagine, tutte, titoli)):
         if not piene:
             continue
@@ -661,6 +656,7 @@ def _grezze(tabelle: list[str], pagine: list[int], titoli: list[str | None], avv
         letta_prima = True
         if sezione is not None:
             out.titoli_sezione.append((pagina, len(out.grezze), sezione))
+            sezione_corrente = sezione
         dentro = True
         for j, celle in enumerate(piene):
             nuova = vere.get((k, j))
@@ -706,9 +702,12 @@ def _grezze(tabelle: list[str], pagine: list[int], titoli: list[str | None], avv
                     if g.celle and _tipo_titolo(etichetta) == "prospetto" and (s_riga := _sezione_titolo(etichetta)):
                         # «Stato patrimoniale attivo 21.045.280,10»: il titolo del prospetto stampato col suo totale
                         out.titoli_sezione.append((pagina, len(out.grezze), s_riga))
+                        sezione_corrente = s_riga
                     out.grezze.append(g)
                     if g.celle:
-                        chiusa = bool(_CHIUSURA_SEZIONE.match(_norm(" ".join(g.testi))))
+                        nome = _norm(" ".join(g.testi))
+                        chiusa = bool(_CHIUSURA_SEZIONE.match(nome) or (
+                            _CHIUSURA_RISULTATO.match(nome) and (sezione_corrente == "CE" or len(segmenti) == 2)))
     return out
 
 

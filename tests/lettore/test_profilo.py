@@ -486,3 +486,13 @@ def test_colonna_destra_delle_contrapposte_su_poche_pagine_resta_del_prospetto(t
     prof = profilo_documento(_righe(tmp_path, [pagina1, pagina2] + economico))
     assert prof.parti[2] == "prospetto"
     assert all(prof.parti_righe[k] == "prospetto" for k in prof.parti_righe if k[0] == 2)
+
+
+def test_titoli_della_nota_delle_tabelle():
+    """R21: «Dettaglio ratei, risconti e competenze» (budget_210 pp. 6-7, una stampa a se'), «Indici di struttura»,
+    «Composizione dei ricavi» aprono la nota."""
+    from importers.lettore.geometria import Parola, RigaFisica
+    from importers.lettore.profilo import _titolo_parte
+    for titolo in ("Dettaglio ratei, risconti e competenze (valuta di gestione)", "Indici di struttura",
+                   "Composizione dei ricavi", "Movimenti delle immobilizzazioni"):
+        assert _titolo_parte(RigaFisica(1, 10.0, [Parola(10, 6, 200, 14, titolo)])) == "nota", titolo

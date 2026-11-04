@@ -480,3 +480,19 @@ def test_utile_nel_patrimonio_netto_non_chiude_la_sezione():
     seguito = _tabella(["", "31/12/2025"], ["Fondo TFR", "30,00"], ["Debiti verso banche", "60,00"])
     doc = leggi_celle([sp, seguito], [1, 2], ["STATO PATRIMONIALE", None])
     assert _riga(doc, "Debiti verso banche").sezione == "SP"
+
+
+def test_utile_senza_numero_nello_sp_non_chiude():
+    """Lo SP stampa «Utile (perdita) dell'esercizio» senza numerazione nel PN: dopo di lui il passivo continua, con o
+    senza lettere di legge; nel CE la stessa riga chiude ancora."""
+    sp = _tabella(["", "31/12/2025"], ["Capitale", "100,00"], ["Utile (perdita) dell'esercizio", "10,00"])
+    con_lettere = _tabella(["", "31/12/2025"], ["D) Debiti", "60,00"], ["E) Ratei e risconti", "30,00"])
+    senza = _tabella(["", "31/12/2025"], ["Fondo TFR", "30,00"], ["Debiti verso banche", "60,00"])
+    doc = leggi_celle([sp, con_lettere], [1, 2], ["STATO PATRIMONIALE", None])
+    assert _riga(doc, "D) Debiti").sezione == "SP"
+    doc = leggi_celle([sp, senza], [1, 2], ["STATO PATRIMONIALE", None])
+    assert _riga(doc, "Debiti verso banche").sezione == "SP"
+    ce = _tabella(["", "31/12/2025"], ["Ricavi delle vendite", "100,00"], ["Utile (perdita) dell'esercizio", "10,00"])
+    dopo = _tabella(["", "31/12/2025"], ["Depositi bancari", "60,00"], ["Cassa", "40,00"])
+    doc = leggi_celle([ce, dopo], [1, 2], ["CONTO ECONOMICO", None])
+    assert all(r.pagina == 1 for r in doc.righe)

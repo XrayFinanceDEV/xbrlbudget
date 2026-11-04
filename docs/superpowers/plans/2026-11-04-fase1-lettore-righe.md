@@ -180,7 +180,7 @@ rotazioni come `detail_enrichment.collect_source_rows` 205-207. Sostituisce le 1
       indice: int                  # 0.. nell'ordine x
       x_destra: float              # bordo destro mediano
       lato: str                    # "U" (unico) | "L" | "R" (Task 4 lo raffina)
-      ruolo: str                   # "esercizio" | "differenza" | "percentuale" | "dare" | "avere" | "saldo" | "ignoto"
+      ruolo: str                   # "esercizio" | "mastro" | "differenza" | "percentuale" | "dare" | "avere" | "saldo" | "ignoto"
       fine: date | None            # data di chiusura stampata sopra la colonna
       inizio: date | None
       mesi: int | None             # da inizio..fine, o da gennaio se l'inizio non è stampato
@@ -208,6 +208,10 @@ diversi si tengono entrambe. Risolve C3, C4, C5, C10.
     6 e 6, come budget_1445);
   - `test_infrannuale_con_anno_intero` («dal 01/01/2026 al 31/05/2026 | dal 01/01/2025 al 31/12/2025» → 5 e 12);
   - `test_corrente_a_destra` («2024 | 2025» → `corrente` è la seconda);
+  - `test_mastri_e_conti_su_colonne_diverse` (importi dei mastri allineati a un bordo, dei conti a un altro,
+    una sola data in testa → due colonne dello stesso periodo, la prima `mastro`, la seconda `esercizio`;
+    il ruolo `mastro` si riconosce perché ogni suo importo è la somma dei conti che lo seguono nell'altra
+    colonna, non dalla posizione);
   - `test_colonna_di_fuori_tolleranza` (un importo 40 pt a sinistra di ogni bordo → `None`).
 - [ ] **Step 2: Lancia** `backend/venv/bin/python -m pytest tests/lettore/test_colonne.py -q`. Expected: FAIL
 - [ ] **Step 3: Implementa** `colonne_documento` e `colonna_di` (tolleranza 14 pt sul bordo destro).
@@ -265,6 +269,10 @@ la colonna di sinistra non ha descrizioni proprie a sinistra di sé.
       celle: dict[int, Importo]    # indice di Colonna -> importo; una colonna assente = cella vuota
       totale: bool = False         # Task 6
       figli: dict[int, tuple[str, ...]] = field(default_factory=dict)   # per colonna, id dei figli (Task 6)
+      intestazione: bool = False   # riga-titolo senza importi (mastro o gruppo stampato come titolo)
+      padre: str | None = None     # id della riga madre (Task 6)
+      padre_verificato: bool = False   # True se i figli del padre sommano al suo totale stampato
+      percorso: tuple[str, ...] = ()   # etichette degli antenati, dalla sezione al padre (Task 6)
   @dataclass
   class Documento:
       righe: list[Riga]
@@ -311,7 +319,7 @@ continuazione di pagina (`collect_source_rows` 240-267, `_sezione_della_chiusura
 
 **Files:**
 - Create: `importers/lettore/totali.py`, `tests/lettore/test_totali.py`
-- Modify: `importers/lettore/righe.py` (`leggi_pdf` chiama `marca_totali` in fondo)
+- Modify: `importers/lettore/righe.py` (`leggi_pdf` chiama `marca_totali` e poi `assegna_padri` in fondo)
 
 **Interfaces:**
 - Consumes: `Documento`, `Riga`
@@ -320,7 +328,22 @@ continuazione di pagina (`collect_source_rows` 240-267, `_sezione_della_chiusura
   def marca_totali(doc: Documento) -> None
   # imposta Riga.totale e Riga.figli[indice_colonna]; aggiunge a doc.avvisi le voci che chiudono su una
   # colonna e non sull'altra
+  def assegna_padri(doc: Documento) -> None
+  # imposta Riga.padre, Riga.padre_verificato e Riga.percorso per ogni riga
   ```
+
+**Mastri e percorso dei conti.** Un conto si classifica dal suo contesto: «Altri», «c/anticipi», «diversi»
+non dicono nulla da soli. `assegna_padri` dà a ogni riga il padre e il percorso delle etichette dei suoi
+antenati, in quest'ordine di prova:
+1. **dalla somma** (verificato): il padre è il totale (mastro, sotto-totale, voce di legge) i cui `figli`
+   contengono la riga su almeno una colonna; `padre_verificato = True`;
+2. **dall'intestazione** (non verificato): senza un totale che la contenga, il padre è l'ultima riga
+   `intestazione` sopra di lei nello stesso lato e sezione, alla stessa profondità di rientro o meno rientrata;
+   `padre_verificato = False`. Un mastro stampato solo come titolo («10 IMMOBILIZZAZIONI» senza importo) resta
+   così nel percorso dei suoi conti;
+3. mai dal codice conto: né prefisso né lunghezza (CLAUDE.md). Il codice resta un dato della riga.
+Le due fonti non si mescolano in silenzio: se l'intestazione sopra un conto è diversa dal totale che lo
+contiene, vince il totale e la differenza va in `doc.avvisi`.
 
 Algoritmo: quello di `import_snello/righe.py:marca_totali` (somma al centesimo di righe adiacenti dello
 stesso lato e sezione, k >= 2, poi k = 1 solo se il documento ha mostrato un gruppo vero; scelta della
@@ -342,7 +365,15 @@ colonna che torna, e la differenza sull'altra va in `doc.avvisi` col nome della 
     per figlio il mastro, non le foglie);
   - `test_prefisso_del_codice_non_decide` (codici `10000001`/`100000010` come AGO, nessuno prefisso dell'altro:
     la parentela viene dalla somma);
-  - `test_stampa_all_unita_tollera_un_euro` (voci intere, scarto di 1 → totale).
+  - `test_stampa_all_unita_tollera_un_euro` (voci intere, scarto di 1 → totale);
+  - `test_stessa_descrizione_in_due_mastri` (mastro «FORNITORI» con «Altri» 100 e mastro «CLIENTI» con «Altri» 50,
+    ciascuno col suo totale → i due «Altri» hanno `percorso` che finisce rispettivamente in FORNITORI e CLIENTI,
+    `padre_verificato` vero);
+  - `test_mastro_solo_intestazione` («10 IMMOBILIZZAZIONI» senza importo, poi tre conti senza totale → padre è
+    l'intestazione, `padre_verificato` falso);
+  - `test_percorso_fino_alla_sezione` (SP › DEBITI › FORNITORI › c/anticipi: tre livelli di totali annidati);
+  - `test_totale_vince_sull_intestazione` (intestazione «CREDITI» sopra un conto che somma nel totale
+    «DEBITI DIVERSI» → padre DEBITI DIVERSI, un avviso).
 - [ ] **Step 2: Lancia** `backend/venv/bin/python -m pytest tests/lettore/test_totali.py -q`. Expected: FAIL
 - [ ] **Step 3: Implementa** `marca_totali`; dove possibile **importa** gli helper puri di
   `import_snello/righe.py` (`_trova_totali`, `_cerca_membri`) invece di copiarli; se la loro firma lega a
@@ -399,7 +430,11 @@ acceso, fuori da questa misura):
   (1 € se il documento stampa all'unità);
 - **totali chiusi**: fra i ritrovati, quelli marcati `totale` con `figli` non vuoti sulla stessa colonna;
 - **periodi giusti**: per ogni periodo della verità, esiste una colonna-esercizio con la stessa `fine`
-  (anno e mese) e gli stessi `mesi`; per un documento a una colonna basta la `fine`.
+  (anno e mese) e gli stessi `mesi`; per un documento a una colonna basta la `fine`;
+- **mastri giusti**: per i documenti con l'elenco `conti` nella prima lettura (campi `codice`, `descrizione`,
+  `importo`, `pagina`, `padre`), ogni conto non totale ritrovato (stessa pagina e importo) ha come padre una
+  riga la cui etichetta o il cui codice coincide col `padre` annotato; quota di conti con padre giusto, e quota
+  con padre verificato dalla somma.
 Il rapporto dà le tre percentuali in totale e per tipologia, e per documento l'elenco dei totali non ritrovati
 o non chiusi (pagina, valore, voce).
 
@@ -424,6 +459,7 @@ o non chiusi (pagina, valore, voce).
 
 - Sui documenti del campione con text layer, **>= 95% dei totali stampati ritrovati** e **>= 90% chiusi**,
   in totale e in ogni tipologia con almeno 4 documenti; i documenti sotto soglia elencati con il motivo.
+- **>= 95% dei conti con il mastro giusto** sui documenti con elenco dei conti, e i casi sbagliati elencati.
 - **Periodi giusti su tutti** i documenti a due colonne (1470 settembre su settembre, 1540 giugno su giugno,
   1548 settembre sull'anno, 638 maggio sull'anno, 313 ad anni nudi).
 - Le contraddizioni C1-C12 dell'inventario hanno ciascuna un test che fissa la scelta del lettore nuovo.

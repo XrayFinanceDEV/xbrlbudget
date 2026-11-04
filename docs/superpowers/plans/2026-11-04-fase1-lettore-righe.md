@@ -62,6 +62,7 @@ i riferimenti `§` e `C1`…`C12` qui sotto sono a quel file). Leggere entrambi 
 | `importers/lettore/geometria.py` | Parole nel riferimento visualizzato e raggruppamento in righe fisiche |
 | `importers/lettore/colonne.py` | Colonne di importi dai bordi destri, ruolo e periodo di ogni colonna |
 | `importers/lettore/lati.py` | Se il documento è a sezioni contrapposte e dove passa il confine fra i lati |
+| `importers/lettore/profilo.py` | Come è fatto il documento: tipo, colonne e lati, negativi, decimali, forme di codice, sezioni, margini |
 | `importers/lettore/righe.py` | Assemblaggio: celle per colonna, a capo, importi orfani, margini, sezioni SP/CE |
 | `importers/lettore/totali.py` | Righe di totale e parentela, colonna per colonna |
 | `importers/lettore/celle.py` | Ingresso dalle tabelle MinerU verso lo stesso `Documento` |
@@ -315,6 +316,128 @@ continuazione di pagina (`collect_source_rows` 240-267, `_sezione_della_chiusura
 - [ ] **Step 4: Lancia** lo stesso comando. Expected: PASS
 - [ ] **Step 5: Commit** `git commit -m "feat(lettore): righe con celle per colonna, a capo, margini e sezioni"`
 
+### Task 5-bis: Profilo del documento
+
+Decisione del proprietario (2026-11-04): prima si capisce **come è fatto** il bilancio, poi si leggono le righe. Come
+stampa i negativi, se le colonne sono anni, dare/avere/saldo o differenze, che forma hanno i codici del piano dei conti,
+se ha due sezioni affiancate: sono fatti del documento intero, e una riga da sola non li vede. Le regole che i passi 3-5
+hanno ricavato documento per documento (forma dei codici, interi in colonna, capitale sociale in anagrafica, righe di
+margine, sezioni per pagina) si raccolgono qui, in un oggetto solo calcolato **prima** delle righe.
+
+**Files:**
+- Create: `importers/lettore/profilo.py`, `tests/lettore/test_profilo.py`, `tests/corpus/profili_campione.py`
+- Modify: `importers/lettore/lati.py` (il confine si cerca solo se il profilo lo ammette), `importers/lettore/__init__.py`
+
+**Interfaces:**
+- Consumes: `RigaFisica`, `Colonna`, `colonne_documento`, `confine_dei_lati`, `assegna_lati`, `leggi_importo`;
+  `importers/bilancio_classifier.py:classify_bilancio(text=...)` e `compute_signals` (solo lettura, come indizio).
+- Produces:
+  ```python
+  @dataclass(frozen=True)
+  class FormaCodice:
+      forma: str              # la sagoma: cifre -> "9", lettere -> "A", separatori tali e quali ("999999 999", "9999", "99/99/***")
+      x0: float               # x0 mediano del codice
+      x_etichetta: float      # x0 mediano della descrizione che lo segue
+      con_importi: int        # righe di questa forma con almeno una cella
+      senza_importi: int      # righe di questa forma senza celle (titoli o conti a zero)
+
+  @dataclass
+  class Profilo:
+      tipo: str               # "schema" | "schema-dettaglio" | "contrapposte" | "verifica" | "ignoto"
+      tipo_perche: str        # che cosa l'ha deciso (geometria, parole, indizio del classificatore)
+      colonne: list[Colonna]  # da colonne_documento, con lato assegnato
+      confine: float | None   # x del confine fra i lati; None = una sezione
+      negativi: frozenset[str]    # forme viste: "meno" (-123), "parentesi" ((123)), "meno-finale" (123-), "marcatore" (123 D/A), "colonne-dare-avere"
+      decimali: dict[int, bool | None]   # per colonna: True = stampa i centesimi, False = interi (schemi resi da XBRL), None = non visto
+      codici: list[FormaCodice]          # le forme di codice del piano dei conti, piu' frequenti prima
+      sezioni: dict[int, str]            # pagina -> "SP" | "CE" | "SP+CE" | "" (sconosciuta)
+      margini: frozenset[str]            # testi normalizzati delle righe ripetute in testa o in piede
+      avvisi: list[str]
+
+  def profilo_documento(righe: list[RigaFisica]) -> Profilo   # righe fisiche di tutte le pagine
+  ```
+
+Regole:
+- **Tipo.** Decide la geometria, confermano le parole, il classificatore esistente è solo un indizio (chiamato col testo
+  delle righe, nessuna lettura di file): due gruppi di colonne-valore affiancati con descrizioni proprie → `contrapposte`;
+  colonne dare/avere/saldo → `verifica`; codici conto in testa alle righe con importi su almeno un terzo delle righe →
+  `schema-dettaglio` se ci sono anche voci di legge («A)», «B) II», «Totale immobilizzazioni»), altrimenti `verifica`;
+  voci di legge senza codici → `schema`. Nessuna regola decide → `ignoto` con avviso, mai un tipo indovinato.
+- **Lati.** `confine_dei_lati` si chiama solo se il tipo è `contrapposte` o `verifica`, e il confine si accetta solo se i
+  due lati hanno **lo stesso numero di colonne-valore** («esercizio»/«saldo», e dare/avere se ci sono): un lato con
+  colonne di differenza o percentuale che l'altro non ha è una tabella unica (budget_594, 680, 700 e i 25 casi asimmetrici
+  del revisore del Task 5).
+- **Negativi.** Si contano sulle celle: una forma vista almeno due volte entra in `negativi`. Una colonna di differenza
+  non conta (un negativo lì è una variazione, D12).
+- **Decimali per colonna.** Una colonna in cui nessun importo con separatori ha la parte decimale stampa interi
+  (`False`); è la condizione della ruling R6 per leggere un intero nudo come importo.
+- **Forme di codice.** Il primo token di una riga, se ha almeno 3 cifre o è una sagoma con separatori ripetuta su più
+  righe allineate (stesso x0 entro 3 pt), è un candidato; una forma entra in `codici` se compare su almeno 3 righe con
+  importi. Codici spaziati («4 / 5 / 1») formano una sagoma sola; «5 bis)», «173/2008 di …», «1.1 roe» no. **Le forme
+  dicono che cos'è un codice, mai chi è figlio di chi**: la parentela resta al Task 6 e al totale stampato.
+- **Sezioni e margini.** Le regole già scritte in `righe.py` (`_sezioni`, `_ripetute`, piedi) si spostano qui senza
+  cambiare comportamento; una pagina senza sezione è `""` con l'avviso che c'è già.
+
+- [ ] **Step 1: Scrivi i test** con PDF sintetici:
+  - `test_negativi_tra_parentesi` (celle «(1.234,56)» e «(12,00)» → `"parentesi" in negativi`);
+  - `test_negativi_col_meno_finale` («1.234,56-» → `"meno-finale"`);
+  - `test_negativi_in_differenza_non_contano` (solo la colonna «DIFFERENZA» ha negativi → `negativi` vuoto);
+  - `test_tipo_verifica_da_dare_avere_saldo`;
+  - `test_tipo_schema_senza_codici` (voci «A) …», «B) …», due colonne-esercizio → `schema`, `confine is None`);
+  - `test_tipo_schema_dettaglio` (voci di legge e conti con codice a 6+3 cifre);
+  - `test_tipo_contrapposte` (due lati simmetrici con codici → `contrapposte`, confine trovato);
+  - `test_lati_asimmetrici_sono_una_tabella` (a destra corrente, precedente, differenza, percentuale con etichette
+    corte; a sinistra niente → `confine is None`);
+  - `test_decimali_per_colonna` (una colonna «10.000», «0», «-1» → `False`; una con «1.234,56» → `True`);
+  - `test_forme_di_codice` («707245 000», «707250 000», «707275 000» con importi e «7072» senza → due forme,
+    `999999 999` con `con_importi == 3`);
+  - `test_codice_spaziato_e_una_forma` («4 / 5 / 1 Terreni» su tre righe → forma `9 / 9 / 9`);
+  - `test_bis_non_e_un_codice` («5 bis) Crediti tributari» → nessuna forma);
+  - `test_tipo_ignoto_dichiarato` (poche righe senza segnali → `ignoto` e un avviso).
+- [ ] **Step 2: Lancia** `backend/venv/bin/python -m pytest tests/lettore/test_profilo.py -q`. Expected: FAIL
+- [ ] **Step 3: Implementa** `profilo_documento`; sposta in `profilo.py` le funzioni di livello documento di
+  `righe.py` lasciando in `righe.py` un import (il Task 5-ter le farà consumare dal profilo).
+- [ ] **Step 4: Scrivi la misura** `tests/corpus/profili_campione.py` (stesso stile di `punteggio.py`, nessuna rete):
+  per i 78 documenti di `Test/_analisi-campione/campione.json` e `wk44/campione.json` stampa e salva in
+  `Test/_analisi-campione/profili/<etichetta>.json` tipo, confine, numero di colonne per ruolo, negativi, decimali,
+  forme di codice; confronta il tipo con la `tipologia` annotata (`ivcee` → `schema`, `ivcee-dettaglio` →
+  `schema-dettaglio`, `contrapposte` → `contrapposte`, `conti` → `verifica`; `scansione` e `limite` si contano a parte)
+  e le colonne-esercizio con i periodi di `verita/<id>.json`.
+  Run: `IMPORT_CORPUS_ROOT=$PWD/Test backend/venv/bin/python tests/corpus/profili_campione.py --etichetta profilo`
+  Expected: nessuna eccezione; **contrapposto giusto su tutti i 22 documenti `contrapposte` e su nessun altro**, tipo
+  giusto su almeno il 90% degli altri; ogni documento sbagliato elencato con il motivo. Se la soglia non si raggiunge,
+  correggi la regola (con un test sintetico nuovo) e rilancia; un caso che chiede una decisione del proprietario si
+  riporta, non si indovina.
+- [ ] **Step 5: Lancia** tutta `tests/lettore`. Expected: PASS
+- [ ] **Step 6: Commit** `git commit -m "feat(lettore): profilo del documento prima delle righe"`
+
+### Task 5-ter: Le righe si leggono sul profilo
+
+**Files:**
+- Modify: `importers/lettore/righe.py`, `tests/lettore/test_righe.py`
+
+**Interfaces:**
+- Consumes: `Profilo`, `profilo_documento` (Task 5-bis)
+- Produces: `Documento` acquista il campo `profilo: Profilo`; `Documento.colonne` e `Documento.contrapposto` restano
+  (dal profilo), così i Task 6-8 non cambiano.
+
+`leggi_pdf` calcola il profilo **prima** di assemblare le righe, e ogni decisione di livello documento che oggi
+`righe.py` prende da sé la legge dal profilo: intero nudo in colonna solo dove `decimali[colonna] is False` (R6),
+codice in testa solo se ha una delle `codici` del profilo, margini e sezioni dal profilo, il segno di un importo nella
+forma che il profilo ha visto (un «123-» in un documento che stampa i negativi tra parentesi si dichiara in avviso).
+Un conto senza importi con una forma che nel profilo è soprattutto `con_importi` è un conto a zero, non un titolo.
+
+- [ ] **Step 1: Prima di toccare il codice** salva il dump del corpus (`leggi_pdf` su tutti i PDF di `Test/`,
+  etichetta `prima`) con lo script di confronto del Task 5 (o uno equivalente in `tests/corpus/`).
+- [ ] **Step 2: Scrivi i test** `test_intero_nudo_solo_dove_la_colonna_stampa_interi`,
+  `test_conto_a_zero_non_e_titolo` (la forma del conto è quella delle righe con importi),
+  `test_segno_fuori_profilo_dichiarato`.
+- [ ] **Step 3: Lancia** `backend/venv/bin/python -m pytest tests/lettore -q`. Expected: FAIL sui tre test nuovi
+- [ ] **Step 4: Implementa** il passaggio al profilo.
+- [ ] **Step 5: Lancia** tutta `tests/lettore` (PASS) e rifai il dump (`dopo`); nel rapporto: righe cambiate per tipo
+  di cambiamento, con 5 esempi per tipo. Ogni cambiamento che non viene dal profilo è una regressione da spiegare.
+- [ ] **Step 6: Commit** `git commit -m "feat(lettore): le righe si leggono sul profilo del documento"`
+
 ### Task 6: Righe di totale e parentela, colonna per colonna
 
 **Files:**
@@ -460,6 +583,8 @@ o non chiusi (pagina, valore, voce).
 - Sui documenti del campione con text layer, **>= 95% dei totali stampati ritrovati** e **>= 90% chiusi**,
   in totale e in ogni tipologia con almeno 4 documenti; i documenti sotto soglia elencati con il motivo.
 - **>= 95% dei conti con il mastro giusto** sui documenti con elenco dei conti, e i casi sbagliati elencati.
+- **Profilo**: contrapposto giusto su tutti i 22 documenti a sezioni contrapposte e su nessun altro; tipo giusto su
+  almeno il 90% degli altri.
 - **Periodi giusti su tutti** i documenti a due colonne (1470 settembre su settembre, 1540 giugno su giugno,
   1548 settembre sull'anno, 638 maggio sull'anno, 313 ad anni nudi).
 - Le contraddizioni C1-C12 dell'inventario hanno ciascuna un test che fissa la scelta del lettore nuovo.

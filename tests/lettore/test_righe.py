@@ -221,8 +221,22 @@ def test_capitale_sociale_di_uno_schema_resta_in_colonna(tmp_path):
     assert riga.etichetta == "I. Capitale Sociale"
 
 
+_INTERI = ("10.000", "2.000", "113.452", "421.290", "1.500", "9.876", "12.345", "7.000")
+
+
+def _riempi_interi(y0, n=6, colonne=(480, 560), passo=14, prefisso="Voce"):
+    """Come `_riempi`, ma con gli importi senza decimali dei prospetti resi da XBRL («10.000»)."""
+    voci = []
+    for k in range(n):
+        y = y0 + k * passo
+        voci.append((50, y, f"{prefisso} {k + 1}"))
+        for j, x in enumerate(colonne):
+            voci.append((x, y, _INTERI[(k + j) % len(_INTERI)]))
+    return voci
+
+
 def test_valuta_davanti_a_una_cella_non_resta_nell_etichetta(tmp_path):
-    voci = _riempi(140) + [(50, 240, "IV. Riserva legale"), (440, 240, "Euro"), (520, 240, "Euro"),
+    voci = _riempi_interi(140) + [(50, 240, "IV. Riserva legale"), (440, 240, "Euro"), (520, 240, "Euro"),
                            _a_destra(560, 240, "0")]
     doc = _leggi(tmp_path, [voci])
     riga = _riga(doc, "Riserva legale")
@@ -231,7 +245,7 @@ def test_valuta_davanti_a_una_cella_non_resta_nell_etichetta(tmp_path):
 
 
 def test_intero_nudo_in_colonna_e_un_importo(tmp_path):
-    voci = _riempi(140) + [(50, 240, "Altri ricavi"), _a_destra(560, 240, "-1"),
+    voci = _riempi_interi(140) + [(50, 240, "Altri ricavi"), _a_destra(560, 240, "-1"),
                            (50, 254, "Anno di riferimento"), _a_destra(560, 254, "2025")]
     doc = _leggi(tmp_path, [voci])
     riga = _riga(doc, "Altri ricavi")
@@ -339,3 +353,109 @@ def test_intero_nudo_seguito_da_testo_e_un_codice(tmp_path):
     riga = _riga(doc, "LAVORAZ.")
     assert riga.celle == {} and "255100" in riga.etichetta
     assert not doc.avvisi
+
+
+# --- Fix round 2 ---------------------------------------------------------------------
+
+def test_numero_del_mutuo_in_un_bilancio_coi_decimali_resta_etichetta(tmp_path):
+    # budget_1325: il numero del finanziamento sotto la colonna Dare di un bilancio coi centesimi
+    voci = _riempi(140) + [(50, 240, "Mutuo chirografario"), _a_destra(480, 240, "5538870"),
+                           (560, 240, "1.000,00")]
+    doc = _leggi(tmp_path, [voci])
+    riga = _riga(doc, "Mutuo chirografario")
+    assert set(riga.celle) == {1} and "5538870" in riga.etichetta
+    assert not doc.avvisi
+
+
+@pytest.mark.parametrize("prima,numero", [("ai sensi dell'art.", "2423"), ("iscritta al REA n.", "1234567"),
+                                          ("P.IVA", "9265580960"), ("di cui alla voce", "0123")])
+def test_numero_di_riferimento_in_colonna_resta_etichetta(tmp_path, prima, numero):
+    # budget_1532 «art. 2423», le anagrafiche delle copertine; uno zero in testa non e' un importo
+    voci = _riempi_interi(140) + [(50, 240, f"Bilancio redatto {prima}"), _a_destra(560, 240, numero)]
+    doc = _leggi(tmp_path, [voci])
+    riga = _riga(doc, "Bilancio redatto")
+    assert riga.celle == {} and riga.etichetta.endswith(numero)
+
+
+def test_trattino_prima_di_importi_e_una_cella_zero(tmp_path):
+    # budget_1438 «Totale variazioni - 14.227 (646)», budget_162 «Diritti vari - 245 245»
+    voci = _riempi_interi(140, colonne=(400, 480, 560)) + [
+        (50, 240, "Totale variazioni"), (400, 240, "-"), (480, 240, "14.227"), _a_destra(560, 240, "(646)"),
+        (50, 254, "Diritti vari"), (400, 254, "-"), _a_destra(480, 254, "245"), _a_destra(560, 254, "245")]
+    doc = _leggi(tmp_path, [voci])
+    assert {i: c.valore for i, c in _riga(doc, "Totale variazioni").celle.items()} == {
+        0: Decimal("0"), 1: Decimal("14227"), 2: Decimal("-646")}
+    assert {i: c.valore for i, c in _riga(doc, "Diritti vari").celle.items()} == {
+        0: Decimal("0"), 1: Decimal("245"), 2: Decimal("245")}
+
+
+def test_trattino_fra_due_parole_e_un_separatore(tmp_path):
+    voci = _riempi_interi(140) + [(50, 240, "RICAVI DELLE PRESTAZ."), (480, 240, "-"), (484, 240, "IMPRESE"),
+                                  (560, 240, "1.500")]
+    doc = _leggi(tmp_path, [voci])
+    riga = _riga(doc, "RICAVI DELLE PRESTAZ.")
+    assert riga.etichetta == "RICAVI DELLE PRESTAZ. - IMPRESE"
+    assert {i: c.valore for i, c in riga.celle.items()} == {1: Decimal("1500")}
+
+
+def test_piede_generato_automaticamente(tmp_path):
+    voci = _riempi(140) + [(50, 400, "Generato automaticamente - Conforme alla tassonomia")]
+    doc = _leggi(tmp_path, [voci])
+    assert not [r for r in doc.righe if "Generato" in r.etichetta]
+
+
+def test_codice_spaziato_non_si_tronca(tmp_path):
+    # budget_405 «4 / 5 / 1 Terreni»: il codice intero se ha la forma dei codici del documento, mai «4»
+    voci = _conti(140, ["4/5/2", "4/5/3", "4/5/4", "4/6/1"]) + _conti(196, ["10201", "10202", "10203"]) + [
+        (40, 238, "4"), (50, 238, "/"), (56, 238, "5"), (64, 238, "/"), (70, 238, "1"), (110, 238, "Terreni"),
+        (560, 238, "1.234,00"),
+        (40, 252, "6"), (50, 252, "/"), (56, 252, "x"), (110, 252, "Varie"), (560, 252, "2,00")]
+    doc = _leggi(tmp_path, [voci])
+    terreni = _riga(doc, "Terreni")
+    assert terreni.codice == "4 / 5 / 1" and terreni.etichetta == "Terreni"
+    varie = _riga(doc, "Varie")
+    assert varie.codice == "" and varie.etichetta.startswith("6 /")
+
+
+def test_voce_bis_non_e_un_codice(tmp_path):
+    # budget_1445 «5 bis) Crediti tributari»
+    voci = _conti(140, ["10201", "10202", "10203", "10204"]) + [(40, 200, "5"), (50, 200, "bis)"), (80, 200, "Crediti tributari"),
+                                                 (560, 200, "3,00")]
+    doc = _leggi(tmp_path, [voci])
+    riga = _riga(doc, "Crediti tributari")
+    assert riga.codice == "" and riga.etichetta == "5 bis) Crediti tributari"
+
+
+def test_intero_nudo_vicino_a_un_importo_nella_stessa_colonna_cede(tmp_path):
+    # budget_1438 p9: una tabella della nota con colonne sue; «0» e «302.507» cadono sulla stessa colonna
+    voci = _riempi_interi(140) + [(50, 240, "CLIENTI ITALIA"), (470, 240, "302.507"), _a_destra(490, 240, "0"),
+                                  (560, 240, "122.138")]
+    doc = _leggi(tmp_path, [voci])
+    riga = _riga(doc, "CLIENTI ITALIA")
+    assert {i: c.valore for i, c in riga.celle.items()} == {0: Decimal("302507"), 1: Decimal("122138")}
+    assert not doc.avvisi
+
+
+@pytest.mark.parametrize("etichetta,numero", [("Numero Rea MB", "1904217"), ("Sede in VIA Roma 1 (MB)", "20813"),
+                                              ("Settore di attivita' prevalente (ATECO)", "619090")])
+def test_intero_di_quattro_cifre_senza_separatore_non_e_un_importo(tmp_path, etichetta, numero):
+    # le copertine dei prospetti resi da XBRL: la colonna stampa «10.000», un «1904217» non e' suo
+    voci = _riempi_interi(140) + [(50, 240, etichetta), _a_destra(560, 240, numero)]
+    doc = _leggi(tmp_path, [voci])
+    riga = _riga(doc, etichetta.split()[0])
+    assert riga.celle == {} and riga.etichetta.endswith(numero)
+
+
+def test_piede_generato_automaticamente_con_trattino_in_colonna(tmp_path):
+    voci = _riempi(140) + [(300, 400, "Generato automaticamente"), (480, 400, "-"), (484, 400, "Conforme")]
+    doc = _leggi(tmp_path, [voci])
+    assert not [r for r in doc.righe if "Generato" in r.etichetta]
+
+
+def test_due_interi_nudi_nella_stessa_colonna_restano_testo(tmp_path):
+    # budget_173 p16: «0 0» di una tabella della nota sulla stessa colonna del documento
+    voci = _riempi_interi(140) + [(50, 240, "Altre partecipazioni"), _a_destra(474, 240, "0"), _a_destra(488, 240, "0"),
+                                  (560, 240, "1.500")]
+    doc = _leggi(tmp_path, [voci])
+    riga = _riga(doc, "Altre partecipazioni")
+    assert set(riga.celle) == {1} and not doc.avvisi

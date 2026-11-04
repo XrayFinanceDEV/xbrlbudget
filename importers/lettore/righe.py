@@ -54,7 +54,14 @@ _CAPITALE = re.compile(r"\bCAP(?:ITALE|\.)?\s*SOC(?:IALE|\.)?", re.I)
 _MARCA_ANAGRAFICA = re.compile(
     r"REGISTRO\s+(?:DELLE\s+)?IMPRESE|\bI\.\s?V\.|\bVERSATO\b|\bC\.\s?F\.|\bP\.\s?IVA\b"
     r"|\bS\.?\s?(?:P\.?\s?A|R\.?\s?L|A\.?\s?S|N\.?\s?C)\b\.?", re.I)
-_INTERO = re.compile(r"^-?\d+$")
+# Un intero nudo senza zeri in testa (uno «0» da solo va bene), col segno o tra parentesi.
+_INTERO = re.compile(r"^(?:-?(?:0|[1-9]\d*)|\((?:0|[1-9]\d*)\))$")
+# Il token davanti a un numero che lo fa un riferimento, non un importo («art. 2423», «REA n. 1234567»).
+_RIFERIMENTO = {"art.", "art", "artt.", "n.", "n", "nr.", "nr", "n°", "num.", "numero", "rea", "p.iva", "piva",
+                "p.i.", "iva", "c.f.", "cf", "cap", "cap.", "c.a.p.", "ateco", "codice", "cod.", "tel.", "fax",
+                "prot.", "comma", "lett.", "mutuo", "contratto"}
+_SEGUITO_CODICE = re.compile(r"^(?:bis|ter|quater|quinquies)\)?$", re.I)
+_GENERATO = re.compile(r"\bgenerato automaticamente\b")
 _ANNO = re.compile(r"^(?:19|20)\d{2}$")
 # Un codice senza importi si riconosce dalla forma dei codici gia' separati sulle righe con importi:
 # stessa famiglia (le cifre e gli asterischi come gruppi, i separatori come sono), stesso lato, x0 entro
@@ -161,17 +168,45 @@ def _norm(testo: str) -> str:
 # Celle
 # --------------------------------------------------------------------------------------
 
-def _in_colonna(p: Parola, colonne: list[Colonna], interi: bool = False) -> tuple[Importo, Colonna] | None:
-    """L'importo e la sua colonna. Con `interi`, anche un intero nudo («0», «-1» dei prospetti resi da XBRL,
-    decisione R6) conta quando il suo bordo destro cade in una colonna; fuori colonna resta testo."""
+def _in_colonna(p: Parola, colonne: list[Colonna], intere: frozenset[int] = frozenset()
+                ) -> tuple[Importo, Colonna] | None:
+    """L'importo e la sua colonna. Un intero nudo («0», «-1», «(646)» dei prospetti resi da XBRL, decisione R6
+    rivista) conta solo in una colonna di `intere`; fuori resta testo."""
     if p.x0 <= _X0_MINIMO:
         return None
     imp = leggi_importo(p.testo)
-    if imp is None and interi and _INTERO.match(p.testo):
-        v = Decimal(p.testo)
-        imp = Importo(v, "zero" if v == 0 else "importo", p.testo)
-    c = colonna_di(p.x1, colonne) if imp is not None else None
-    return (imp, c) if c is not None else None
+    if imp is not None:
+        c = colonna_di(p.x1, colonne)
+        return (imp, c) if c is not None else None
+    # una colonna che stampa le migliaia col punto non stampa «1904217»: solo fino a tre cifre
+    if not intere or not _INTERO.match(p.testo) or len(p.testo.strip("()-")) > 3:
+        return None
+    c = colonna_di(p.x1, colonne)
+    if c is None or c.indice not in intere:
+        return None
+    v = Decimal(p.testo.strip("()"))
+    v = -v if p.testo.startswith("(") else v
+    return Importo(v, "zero" if v == 0 else "importo", p.testo), c
+
+
+def _colonne_intere(righe: list[RigaFisica], colonne: list[Colonna]) -> frozenset[int]:
+    """Le colonne i cui importi (quelli che `leggi_importo` legge, cioe' a gruppi o coi decimali) sono tutti
+    senza decimali, come nei prospetti resi da XBRL («10.000»): solo li' un intero nudo e' un importo."""
+    con_decimali: dict[int, bool] = {}
+    for r in righe:
+        for p in r.parole:
+            trovato = _in_colonna(p, colonne)
+            if trovato is not None and trovato[0].forma != "zero":
+                i = trovato[1].indice
+                con_decimali[i] = con_decimali.get(i, False) or "," in p.testo
+    return frozenset(i for i, dec in con_decimali.items() if not dec)
+
+
+def _riferimento_davanti(parole: list[Parola], i: int) -> bool:
+    if i == 0:
+        return False
+    prima = re.split(r"['\u2019]", parole[i - 1].testo.lower().strip(":"))[-1]
+    return prima in _RIFERIMENTO
 
 
 def _ha_celle(r: RigaFisica, colonne: list[Colonna]) -> bool:
@@ -187,20 +222,28 @@ def _valuta_davanti(parole: list[Parola], i: int) -> bool:
 
 
 def _celle_del_lato(parole: list[Parola], colonne: list[Colonna], lato: str, pagina: int,
-                    avvisi: list[str], stampati: dict[Parola, str]) -> tuple[dict[int, Importo], list[Parola]]:
+                    avvisi: list[str], stampati: dict[Parola, str],
+                    intere: frozenset[int] = frozenset()) -> tuple[dict[int, Importo], list[Parola]]:
     """(celle per colonna, parole dell'etichetta). Un importo e' una cella solo nella sua colonna e sul suo
     lato; fuori colonna, seguito da una durata («12 mesi») o dentro una frase dopo una valuta («euro 516,46
     di valore unitario», o in un'anagrafica col capitale sociale) torna nell'etichetta. Un anno nudo su una
     riga senza altri importi resta testo. Due importi nella stessa colonna: la cella non si legge. La valuta
     davanti a una cella, o in coda all'etichetta, si toglie."""
-    trovati = [_in_colonna(p, colonne, interi=True) for p in parole]
-    trovati = [t if t is not None and t[1].lato == lato else None for t in trovati]
-    # un intero nudo o un trattino seguiti da testo sono un codice e il suo separatore («Codice attivita'
-    # 255100 - LAVORAZ.»), non celle: si legge da destra, perche' il trattino decide per l'intero
+    trovati = [_in_colonna(p, colonne, intere) for p in parole]
+    trovati = [None if t is None or t[1].lato != lato
+               or (leggi_importo(p.testo) is None and _riferimento_davanti(parole, i)) else t
+               for i, (p, t) in enumerate(zip(parole, trovati))]
+    # un trattino seguito da una parola e' un separatore («PRESTAZ. - IMPRESE»), e un intero nudo davanti a quel
+    # separatore o a una parola e' un codice («Codice attivita' 255100 - LAVORAZ.»): si legge da destra, perche'
+    # il trattino decide per l'intero. Davanti a un importo il trattino resta una cella zero.
+    separatori: set[int] = set()
     for i in range(len(parole) - 2, -1, -1):
-        if trovati[i] is not None and trovati[i + 1] is None and (
-                _INTERO.match(parole[i].testo) or parole[i].testo == "-"):
+        dopo = parole[i + 1].testo
+        segue_testo = any(ch.isalpha() for ch in dopo) or (i + 1 in separatori and dopo == "-")
+        if trovati[i] is not None and segue_testo and (
+                parole[i].testo == "-" or leggi_importo(parole[i].testo) is None):
             trovati[i] = None
+            separatori.add(i)
     anni = {i for i, (p, t) in enumerate(zip(parole, trovati)) if t is not None and _ANNO.match(p.testo)}
     if anni and all(t is None or i in anni for i, t in enumerate(trovati)):
         trovati = [None if i in anni else t for i, t in enumerate(trovati)]
@@ -219,6 +262,18 @@ def _celle_del_lato(parole: list[Parola], colonne: list[Colonna], lato: str, pag
         sedi.setdefault(c.indice, []).append(p)
         celle[c.indice] = Importo(imp.valore, imp.forma, stampati.get(p, p.testo))
     for indice, ps in sedi.items():
+        # davanti a un importo vero, l'intero nudo nella stessa colonna cede (budget_1438, colonne della nota)
+        nudi = [p for p in ps if leggi_importo(p.testo) is None]
+        if len(ps) > 1 and len(nudi) < len(ps):
+            testo.extend(parole.index(p) for p in nudi)
+            ps = [p for p in ps if p not in nudi]
+            celle[indice] = next(Importo(t[0].valore, t[0].forma, stampati.get(q, q.testo))
+                                 for q, t in zip(parole, trovati) if q is ps[-1])
+        if len(ps) > 1 and not any(leggi_importo(p.testo) is not None for p in ps):
+            # solo interi nudi: le colonne di una tabella della nota, non quelle del documento; restano testo
+            del celle[indice]
+            testo.extend(parole.index(p) for p in ps)
+            continue
         if len(ps) > 1:
             del celle[indice]
             testo.extend(parole.index(p) for p in ps)
@@ -276,6 +331,18 @@ def _token_codice(t: str) -> bool:
                 and not _AMOUNT_LIKE.match(t) and not _DATE_RE.fullmatch(t))
 
 
+_SEPARATORE_CODICE = re.compile(r"^[/.\-]$")
+
+
+def _codice_spaziato(parole: list[str]) -> int:
+    """Quanti token fa un codice stampato con gli spazi attorno ai separatori («4 / 5 / 1»); 0 se non lo e'."""
+    n = 1
+    while (n + 1 < len(parole) and _token_codice(parole[n - 1]) and _SEPARATORE_CODICE.match(parole[n])
+           and _token_codice(parole[n + 1])):
+        n += 2
+    return n if n > 1 else 0
+
+
 def _x_etichetta(x_token: list[float], parole: list[str], n: int) -> float | None:
     """x0 della prima parola dopo `n` token di codice e i separatori; None se non si sa."""
     k = n
@@ -301,11 +368,19 @@ def _codici_senza_importi(sequenze: list[list[_Pezzo]]) -> None:
         for k, p in enumerate(seq):
             if p.codice:
                 continue
-            for n in (2, 1):
-                if len(p.parole) <= n or not all(_token_codice(t) for t in p.parole[:n]):
+            spaziato = _codice_spaziato(p.parole)
+            for n in ((spaziato,) if spaziato else (2, 1)):
+                if len(p.parole) <= n or not all(_token_codice(t) or (spaziato and _SEPARATORE_CODICE.match(t))
+                                                 for t in p.parole[:n]):
+                    continue
+                # un codice non si tronca: «5 bis)» e' una voce, «4 / 5 / 1» non e' «4»
+                seguito = p.parole[n]
+                if _SEGUITO_CODICE.match(seguito) or seguito in ("/", ".") or (
+                        seguito == "-" and n + 1 < len(p.parole) and _token_codice(p.parole[n + 1])):
                     continue
                 codice = " ".join(p.parole[:n])
-                xs = esempi.get((p.lato, _famiglia(codice), n), [])
+                chiave = "".join(p.parole[:n]) if spaziato else codice
+                xs = esempi.get((p.lato, _famiglia(chiave), 1 if spaziato else n), [])
                 x_et = _x_etichetta(p.x_token, p.tutti, n)
                 if len(xs) >= _MIN_ESEMPI_CODICE and any(
                         abs(x - p.x0) <= _TOL_X_CODICE
@@ -349,9 +424,11 @@ def _ripetute(pagine: list[list[RigaFisica]], altezze: list[float], colonne: lis
 def _scartata(r: RigaFisica, altezza: float, colonne: list[Colonna], ripetute: set[str]) -> bool:
     """Righe che non sono del prospetto: margini ripetuti, piedi «Pagina N di M», «Pag. N», «Utente:», il
     numero di pagina nudo, le intestazioni di colonna («ESERCIZIO 2025 ESERCIZIO 2024»)."""
+    testo = _testo(r)
+    if _GENERATO.search(_norm(testo)):
+        return True     # «Generato automaticamente - Conforme alla tassonomia»: il trattino cade in colonna
     if _ha_celle(r, colonne):
         return False
-    testo = _testo(r)
     if _nel_margine(r, altezza) and _chiave_ripetuta(testo) in ripetute and not _intestazione(testo):
         return True
     return bool(_PIEDE.search(_norm(testo)) or re.fullmatch(r"\d{1,3}", testo.strip())
@@ -503,7 +580,8 @@ def _a_capo(pezzi: list[_Pezzo]) -> list[_Pezzo]:
 # --------------------------------------------------------------------------------------
 
 def _pezzi_della_riga(r: RigaFisica, sezione: str, colonne: list[Colonna], confine: float | None,
-                      avvisi: list[str], stampati: dict[Parola, str]) -> list[_Pezzo]:
+                      avvisi: list[str], stampati: dict[Parola, str],
+                      intere: frozenset[int] = frozenset()) -> list[_Pezzo]:
     """Una riga fisica -> un pezzo per lato (uno solo senza confine)."""
     if confine is None:
         gruppi = {"U": r.parole}
@@ -514,7 +592,7 @@ def _pezzi_della_riga(r: RigaFisica, sezione: str, colonne: list[Colonna], confi
     for lato, parole in gruppi.items():
         if not parole:
             continue
-        celle, testo = _celle_del_lato(parole, colonne, lato, r.pagina, avvisi, stampati)
+        celle, testo = _celle_del_lato(parole, colonne, lato, r.pagina, avvisi, stampati, intere)
         codice, etichetta = _codice([p.testo for p in testo], bool(celle))
         etichetta_testo = " ".join(etichetta).strip()
         controllo = (codice + " " + etichetta_testo).upper()
@@ -555,12 +633,13 @@ def leggi_pdf(file_path: str) -> Documento:
     confine = confine_dei_lati(tutte, colonne)
     assegna_lati(colonne, confine)
     sezioni = _sezioni(pagine, colonne, avvisi)
+    intere = _colonne_intere(tutte, colonne)
 
     sequenze: list[list[_Pezzo]] = []
     for righe, sezioni_pag in zip(pagine, sezioni):
         per_lato: dict[str, list[_Pezzo]] = {}
         for r, sezione in zip(righe, sezioni_pag):
-            for pezzo in _pezzi_della_riga(r, sezione, colonne, confine, avvisi, stampati):
+            for pezzo in _pezzi_della_riga(r, sezione, colonne, confine, avvisi, stampati, intere):
                 per_lato.setdefault(pezzo.lato, []).append(pezzo)
         sequenze += [per_lato[lato] for lato in sorted(per_lato, key=_ORDINE_LATI.get)]
     _codici_senza_importi(sequenze)

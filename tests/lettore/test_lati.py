@@ -196,3 +196,16 @@ def test_una_colonna_saldo_per_lato_e_corrente(tmp_path):
     righe, colonne = _leggi(tmp_path, _contrapposte(codici=False, testata=testata))
     colonne = assegna_lati(colonne, confine_dei_lati(righe, colonne))
     assert [(c.lato, c.ruolo, c.corrente) for c in colonne] == [("L", "saldo", True), ("R", "saldo", True)]
+
+
+def test_marcatori_dare_avere_non_fanno_un_lato(tmp_path):
+    # «4.219,95 D | 4.219,95 D»: due esercizi con il marcatore del segno dopo ogni importo (budget_682, 1533,
+    # 1540). La «D» della prima colonna non e' la descrizione di un lato destro.
+    voci = []
+    for k, (a, b) in enumerate(zip(_SINISTRA, _DESTRA)):
+        y = 140 + k * 14
+        voci += [(85, y, f"0{k + 1}05013"), (127, y, f"SOFTWARE {k + 1}"), (440, y, _fmt(a)), (480, y, "D"),
+                 (512, y, _fmt(b)), (551, y, "D")]
+    righe, colonne = _leggi(tmp_path, voci)
+    assert len(colonne) == 2
+    assert confine_dei_lati(righe, colonne) is None

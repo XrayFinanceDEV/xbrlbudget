@@ -3,7 +3,8 @@
 Principio di `situazione_contabile_parser._be_split`/`_be_split_codeless`: il confine e' un varco verticale
 fra due gruppi di colonne, ciascuno con le proprie descrizioni, su piu' righe; vince il taglio piu'
 equilibrato, a parita' il piu' vicino al centro. Le parole ATTIVITA'/PASSIVITA', COSTI/RICAVI sulla stessa
-riga, una per lato, lo confermano (bastano meno righe descritte), non lo decidono (C11).
+riga, una per lato, lo confermano (bastano meno righe descritte), non lo decidono (C11). Il profilo del
+documento accetta il confine solo con i due lati simmetrici (`confine_ammesso`).
 """
 from __future__ import annotations
 
@@ -21,6 +22,16 @@ _MIN_RIGHE_CONFERMATO = 2
 _VARCO_MIN = 0.5
 _X0_MINIMO = 150.0      # come `colonne._in_colonna`
 _COPPIE_TESTATA = ((("attivit", "attivo"), ("passivit", "passivo")), (("costi",), ("ricavi",)))
+# «D»/«A» dopo un importo ne sono il segno (dare/avere), non la descrizione di un lato (budget_682, 1533, 1540).
+_MARCATORI = {"D", "A"}
+# Tipi del profilo che le parole dicono a sezione unica: li' un confine vale solo con l'intestazione dei lati.
+TIPI_SENZA_LATI = frozenset({"schema", "schema-dettaglio"})
+# Ruoli che si confrontano fra i lati: i valori di periodo insieme, gli altri ciascuno per se'.
+_GRUPPO_RUOLO = {"esercizio": "valori", "saldo": "valori", "mastro": "valori", "dare": "dare", "avere": "avere",
+                 "differenza": "differenza", "percentuale": "percentuale"}
+# Una colonna conta in un lato se porta almeno questa quota degli importi della colonna piu' piena del lato:
+# una tabella di poche righe su una pagina sola (la nota in fondo) non e' una colonna del prospetto.
+_QUOTA_PRINCIPALE = 0.4
 
 
 def confine_dei_lati(righe: list[RigaFisica], colonne: list[Colonna]) -> float | None:
@@ -51,6 +62,44 @@ def confine_dei_lati(righe: list[RigaFisica], colonne: list[Colonna]) -> float |
         if sx >= minimo and dx >= minimo:
             migliori.append((min(sx, dx), -abs(x - centro), x))
     return max(migliori)[2] if migliori else None
+
+
+def confine_ammesso(righe: list[RigaFisica], colonne: list[Colonna], tipo: str | None) -> float | None:
+    """Il confine del profilo: vale solo se i due lati sono simmetrici (`lati_simmetrici`). Dove le parole dicono
+    gia' uno schema di legge (`tipo` in `TIPI_SENZA_LATI`) serve anche l'intestazione dei lati sulla stessa riga
+    («ATTIVITA' … PASSIVITA'»): una situazione riclassificata a sezioni contrapposte la stampa (budget_1430),
+    lo stato patrimoniale con il conto economico accanto sulla stessa pagina no (budget_1426)."""
+    x = confine_dei_lati(righe, colonne)
+    if x is None or not lati_simmetrici(righe, colonne, x):
+        return None
+    if tipo in TIPI_SENZA_LATI and not _confermato(righe, colonne, x):
+        return None
+    return x
+
+
+def lati_simmetrici(righe: list[RigaFisica], colonne: list[Colonna], confine: float) -> bool:
+    """Le sezioni contrapposte ripetono la stessa tabella sui due lati: tante colonne di valori a sinistra quante
+    a destra, e dare/avere, differenza o percentuale su entrambi o su nessuno. Un lato con colonne che l'altro
+    non ha e' una tabella unica, con le descrizioni corte di una colonna in mezzo (budget_594, 680, 1566). Contano
+    le colonne principali di ciascun lato (`_QUOTA_PRINCIPALE`)."""
+    conteggi: dict[int, int] = {}
+    for r in righe:
+        for p in r.parole:
+            imp = leggi_importo(p.testo) if p.x0 > _X0_MINIMO else None
+            if imp is not None and imp.forma != "zero" and (c := colonna_di(p.x1, colonne)) is not None:
+                conteggi[c.indice] = conteggi.get(c.indice, 0) + 1
+    profili = []
+    for sinistra in (True, False):
+        lato = [c for c in colonne if (c.x_destra < confine) == sinistra]
+        massimo = max((conteggi.get(c.indice, 0) for c in lato), default=0)
+        principali = [c for c in lato if massimo and conteggi.get(c.indice, 0) >= _QUOTA_PRINCIPALE * massimo]
+        gruppi: dict[str, int] = {}
+        for c in principali:
+            g = _GRUPPO_RUOLO.get(c.ruolo)
+            if g is not None:
+                gruppi[g] = gruppi.get(g, 0) + 1
+        profili.append(gruppi)
+    return bool(profili[0].get("valori")) and profili[0] == profili[1]
 
 
 def assegna_lati(colonne: list[Colonna], confine: float | None) -> list[Colonna]:
@@ -105,14 +154,14 @@ def _sfora(r: RigaFisica, zona: float, x: float) -> bool:
 
 
 def _descritta(r: RigaFisica, celle: list[Parola], lo: float, hi: float) -> bool:
-    """La riga ha, fra lo e hi, un importo in colonna e una descrizione (una parola con lettere) alla sua
-    sinistra."""
+    """La riga ha, fra lo e hi, un importo in colonna e una descrizione (una parola con lettere, non il marcatore
+    D/A di un importo) alla sua sinistra."""
     importi = [p for p in celle if lo < p.x0 and p.x1 < hi]
     if not importi:
         return False
     primo = min(p.x0 for p in importi)
     return any(lo < p.x0 and p.x1 <= primo and any(ch.isalpha() for ch in p.testo)
-               and leggi_importo(p.testo) is None for p in r.parole)
+               and leggi_importo(p.testo) is None and p.testo not in _MARCATORI for p in r.parole)
 
 
 def _piega(testo: str) -> str:

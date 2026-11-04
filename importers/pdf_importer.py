@@ -2699,6 +2699,7 @@ def import_pdf_balance_sheet(
         # Step 7: Save prior year if dual-year extraction was used
         prior_year_imported = False
         prior_fiscal_year = fiscal_year - 1 if fiscal_year else None
+        prior_mesi = None                               # None: anno intero
         if prior_bs_data and prior_ce_data and fiscal_year:
             # Check if prior year data is meaningful (not all zeros from single-column PDF)
             prior_sp_fields = [v for k, v in prior_bs_data.items()
@@ -2713,17 +2714,39 @@ def import_pdf_balance_sheet(
                     prior_bs_data, prior_ce_data, tol=Decimal('2')
                 )
                 fresh_prior_balances = mapper.validate_balance(prior_bs_data) and _prior_q.quadra
+                # Di un infrannuale la colonna di confronto puo' essere lo stesso periodo dell'anno
+                # prima (budget_1540 giugno su giugno) o l'anno intero (budget_638): lo dice la data
+                # di chiusura stampata. Un semestre salvato come anno intero diventa un anno base
+                # falso e sostituisce l'anno vero gia' importato.
+                durata_ignota = False
+                if period_months is not None:
+                    from importers.durata_comparato import mesi_del_comparato, testo_di_testa
+                    _mesi = mesi_del_comparato(testo_di_testa(file_path), fiscal_year)
+                    if _mesi is None:
+                        durata_ignota = True
+                    elif _mesi < 12:
+                        prior_mesi = _mesi
                 existing_prior = db.query(FinancialYear).filter(
                     FinancialYear.company_id == company.id,
                     FinancialYear.year == prior_fiscal_year,
-                    (FinancialYear.period_months == None) | (FinancialYear.period_months == 12),
+                    (FinancialYear.period_months == prior_mesi) if prior_mesi is not None
+                    else (FinancialYear.period_months == None) | (FinancialYear.period_months == 12),
                 ).first()
 
                 _prior_ok = _should_import_prior(
                     fresh_prior_balances and not _prior_residual_report.get('requires_review'), _prior_q.is_empty,
                     has_existing=existing_prior is not None,
                 )
-                if not _prior_ok:
+                if _prior_ok and durata_ignota and existing_prior is not None:
+                    # senza la data non si sa se e' l'anno intero: un anno intero gia' presente non
+                    # si sostituisce con una colonna che potrebbe essere un semestre
+                    prior_year_imported = True
+                    warnings.append(
+                        f"ANNO PRECEDENTE NON SOSTITUITO [{prior_fiscal_year}]: il documento non stampa "
+                        f"la data di chiusura della colonna di confronto, quindi non si sa se copre l'anno "
+                        f"intero o lo stesso periodo dell'anno prima; resta il {prior_fiscal_year} gia' importato."
+                    )
+                elif not _prior_ok:
                     logger.info(
                         f"Prior year {prior_fiscal_year} extraction is not accounting-valid — "
                         f"{'keeping existing record' if existing_prior else 'not importing it'}"
@@ -2739,6 +2762,20 @@ def import_pdf_balance_sheet(
                             f"{_UNBALANCED_WARNING_PREFIX} [ANNO PRECEDENTE "
                             f"{prior_fiscal_year}]: " + "; ".join(_prior_q.warnings)
                             + f". {_UNBALANCED_WARNING_SUFFIX}"
+                        )
+                    if prior_mesi is not None:
+                        warnings.append(
+                            f"ANNO PRECEDENTE PARZIALE [{prior_fiscal_year}, {prior_mesi} mesi]: la colonna di "
+                            f"confronto e' lo stesso periodo dell'anno prima e si salva come periodo di "
+                            f"{prior_mesi} mesi, non come anno intero. Come anno di riferimento "
+                            f"dell'infrannuale importa il bilancio {prior_fiscal_year} completo."
+                        )
+                    elif durata_ignota:
+                        warnings.append(
+                            f"ANNO PRECEDENTE COME ANNO INTERO [{prior_fiscal_year}]: il documento non stampa "
+                            f"la data di chiusura della colonna di confronto; e' stata salvata come anno intero. "
+                            f"Se copre lo stesso periodo dell'anno prima, importa il bilancio {prior_fiscal_year} "
+                            f"completo al suo posto."
                         )
                     # Import (or, on re-import, REPLACE) the prior year. Replacing a stale record with
                     # a freshly extracted one that BALANCES lets a re-import pick up extractor fixes
@@ -2800,7 +2837,7 @@ def import_pdf_balance_sheet(
                     prior_fy = FinancialYear(
                         company_id=company.id,
                         year=prior_fiscal_year,
-                        period_months=None,  # Full 12-month year
+                        period_months=prior_mesi,  # None = anno intero
                         validation_status=_resolve_validation_status(
                             bool(fresh_prior_balances),
                             _prior_forecastable,
@@ -2914,6 +2951,7 @@ def import_pdf_balance_sheet(
 
         result["prior_year_imported"] = prior_year_imported
         result["prior_fiscal_year"] = prior_fiscal_year
+        result["prior_period_months"] = prior_mesi if prior_year_imported else None
 
         # MinerU OCR metadata (only when the /import/pdf-ocr route supplied a context).
         # extraction_method already describes the accounting path actually used

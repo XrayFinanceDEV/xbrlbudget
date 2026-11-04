@@ -897,6 +897,381 @@
     }
    },
    "giudizio_atteso": "importabile con avviso"
+  },
+  {
+   "id": "1523",
+   "sha256": "01cbe9bad0d390d4168b287753b65788bfd71c5804f384769d7dac76666faf43",
+   "path": "budget-wk-44/budget_1523_2026.11.01_MetalDecor_riclassificato_2025-12.pdf",
+   "tipologia": "contrapposte",
+   "periodo": "annuale 2025",
+   "pagine": 2,
+   "nota": "lotto week-44",
+   "lotto": "wk44",
+   "verita": {
+    "fonte": "due letture indipendenti (Sonnet, Opus) consolidate",
+    "file": "Test/_analisi-campione/verita/1523.json"
+   },
+   "giudizio_atteso": "importabile con avviso"
+  },
+  {
+   "id": "1524",
+   "sha256": "4c2dbc1936fdae7fe728184cae9af603d99531fc9c0297e79b99a352627ac46c",
+   "path": "budget-wk-44/budget_1524_RESINART SRL_BILANCIO AL 30.09.26.PDF",
+   "tipologia": "ivcee-dettaglio/codici",
+   "periodo": "9 mesi 2026",
+   "pagine": 9,
+   "nota": "lotto week-44",
+   "lotto": "wk44",
+   "verita": {
+    "fonte": "due letture indipendenti (Sonnet, Opus) consolidate",
+    "file": "Test/_analisi-campione/verita/1524.json"
+   },
+   "giudizio_atteso": "importabile con avviso"
+  },
+  {
+   "id": "1525",
+   "sha256": "9b56601cf1385982fc37d31a1cae2bf0bd7d3cde8c144e43770d272216d376a2",
+   "path": "budget-wk-44/budget_1525_RESINART_SRL_BILANCIO_31_12_2025.pdf",
+   "tipologia": "ivcee-dettaglio/codici",
+   "periodo": "annuale 2025",
+   "pagine": 9,
+   "nota": "lotto week-44",
+   "lotto": "wk44",
+   "verita": {
+    "fonte": "due letture indipendenti (Sonnet, Opus) consolidate",
+    "file": "Test/_analisi-campione/verita/1525.json"
+   },
+   "giudizio_atteso": "importabile con avviso"
+  },
+  {
+   "id": "1526",
+   "sha256": "e7025c855b846266c003a603ddd45d9e0637a0be8c3b507eac9f2f157e717c91",
+   "path": "budget-wk-44/budget_1526_RESINART_SRL_BILANCIO_30_09_2026.pdf",
+   "tipologia": "ivcee-dettaglio/codici",
+   "periodo": "9 mesi 2026",
+   "pagine": 9,
+   "nota": "lotto week-44",
+   "lotto": "wk44",
+   "verita": {
+    "fonte": "due letture indipendenti (Sonnet, Opus) consolidate",
+    "file": "Test/_analisi-campione/verita/1526.json"
+   },
+   "giudizio_atteso": "importabile con avviso"
+  },
+  {
+   "id": "1528",
+   "sha256": "3ef74d12e6eca4f61252cbc3a7300615129a1fbd18683b5eba3ed2703e91ceaa",
+   "path": "budget-wk-44/budget_1528_Bilancio provvisorio 30.06.2026.pdf",
+   "tipologia": "ivcee/anno-singolo",
+   "periodo": "6 mesi 2026",
+   "pagine": 4,
+   "nota": "lotto week-44",
+   "lotto": "wk44",
+   "verita": {
+    "fonte": "due letture indipendenti (Sonnet, Opus) consolidate",
+    "file": "Test/_analisi-campione/verita/1528.json"
+   },
+   "giudizio_atteso": "importabile con avviso"
+  },
+  {
+   "id": "1529",
+   "sha256": "6a851d6757b6041a7611400d27d7617d4ece9d58b1e8b16da3eb496f0ea62d97",
+   "path": "budget-wk-44/budget_1529_Bilancio 2025.pdf",
+   "tipologia": "ivcee/facsimile-deposito",
+   "periodo": "annuale 2025",
+   "pagine": 22,
+   "nota": "lotto week-44",
+   "lotto": "wk44",
+   "verita": {
+    "fonte": "due letture indipendenti (Sonnet, Opus) consolidate",
+    "file": "Test/_analisi-campione/verita/1529.json"
+   },
+   "giudizio_atteso": "importabile"
+  },
+  {
+   "id": "1531",
+   "sha256": "758d819b44909eb09bcd1c0179a077ff6fcc9da505ddf4a6b3c750676d916115",
+   "path": "budget-wk-44/budget_1531_202605 atlante.pdf",
+   "tipologia": "contrapposte",
+   "periodo": "5 mesi 2026",
+   "pagine": 3,
+   "nota": "lotto week-44",
+   "lotto": "wk44",
+   "verita": {
+    "fonte": "due letture indipendenti (Sonnet, Opus) consolidate",
+    "file": "Test/_analisi-campione/verita/1531.json"
+   },
+   "giudizio_atteso": "importabile con avviso"
+  },
+  {
+   "id": "1532",
+   "sha256": "54bbcd24b5bc6a118c50a74b8ef0ad593fb354ec1f97054f0052a4e12236061c",
+   "path": "budget-wk-44/budget_1532_202512 atlante.pdf",
+   "tipologia": "ivcee/facsimile-deposito",
+   "periodo": "annuale 2025",
+   "pagine": 27,
+   "nota": "lotto week-44",
+   "lotto": "wk44",
+   "verita": {
+    "fonte": "due letture indipendenti (Sonnet, Opus) consolidate",
+    "file": "Test/_analisi-campione/verita/1532.json"
+   },
+   "giudizio_atteso": "importabile"
+  },
+  {
+   "id": "1533",
+   "sha256": "466dab369102749dfe7d351de0e2e6ae37e6466b4f1e7a085f4ad1acc325ec49",
+   "path": "budget-wk-44/budget_1533_STACEE abbreviato.pdf",
+   "tipologia": "ivcee/2-anni",
+   "periodo": "annuale 2025",
+   "pagine": 8,
+   "nota": "lotto week-44",
+   "lotto": "wk44",
+   "verita": {
+    "fonte": "due letture indipendenti (Sonnet, Opus) consolidate",
+    "file": "Test/_analisi-campione/verita/1533.json"
+   },
+   "giudizio_atteso": "importabile"
+  },
+  {
+   "id": "1540",
+   "sha256": "f0bfd79c06f7529856ffe39f5320eaac5205bf2d077d6779ec163b9c9ffc1676",
+   "path": "budget-wk-44/budget_1540_202606 cems.pdf",
+   "tipologia": "ivcee-dettaglio/codici",
+   "periodo": "6 mesi 2026",
+   "pagine": 10,
+   "nota": "lotto week-44",
+   "lotto": "wk44",
+   "verita": {
+    "fonte": "due letture indipendenti (Sonnet, Opus) consolidate",
+    "file": "Test/_analisi-campione/verita/1540.json"
+   },
+   "giudizio_atteso": "importabile con avviso"
+  },
+  {
+   "id": "1541",
+   "sha256": "f1211411e0538a5701a2c4bc06376923c957edb03d1218156e55877a61497965",
+   "path": "budget-wk-44/budget_1541_202512 cems.pdf",
+   "tipologia": "ivcee/facsimile-deposito",
+   "periodo": "annuale 2025",
+   "pagine": 56,
+   "nota": "lotto week-44",
+   "lotto": "wk44",
+   "verita": {
+    "fonte": "due letture indipendenti (Sonnet, Opus) consolidate",
+    "file": "Test/_analisi-campione/verita/1541.json"
+   },
+   "giudizio_atteso": "importabile"
+  },
+  {
+   "id": "1546",
+   "sha256": "13b005aabdc764c8748c71f4b03f620efef2f726982c092f929a5edca09861f0",
+   "path": "budget-wk-44/budget_1546_BR0022120251231.pdf",
+   "tipologia": "ivcee/facsimile-deposito",
+   "periodo": "annuale 2025",
+   "pagine": 23,
+   "nota": "lotto week-44",
+   "lotto": "wk44",
+   "verita": {
+    "fonte": "due letture indipendenti (Sonnet, Opus) consolidate",
+    "file": "Test/_analisi-campione/verita/1546.json"
+   },
+   "giudizio_atteso": "importabile"
+  },
+  {
+   "id": "1548",
+   "sha256": "d614be7ae5f1ae68829158ad895bde7ad6085facecfa17aa1e6278794ead345f",
+   "path": "budget-wk-44/budget_1548_Bilancio infrannuale 09.2026.pdf",
+   "tipologia": "ivcee-dettaglio/codici",
+   "periodo": "9 mesi 2026",
+   "pagine": 7,
+   "nota": "lotto week-44",
+   "lotto": "wk44",
+   "verita": {
+    "fonte": "due letture indipendenti (Sonnet, Opus) consolidate",
+    "file": "Test/_analisi-campione/verita/1548.json"
+   },
+   "giudizio_atteso": "importabile con avviso"
+  },
+  {
+   "id": "1549",
+   "sha256": "25498beac1af14b695ecff12e8541b9d368e5f495b61d823af0b73248a648593",
+   "path": "budget-wk-44/budget_1549_CONTO ECON.PROV2025.pdf",
+   "tipologia": "contrapposte",
+   "periodo": "annuale 2025",
+   "pagine": 3,
+   "nota": "lotto week-44",
+   "lotto": "wk44",
+   "verita": {
+    "fonte": "due letture indipendenti (Sonnet, Opus) consolidate",
+    "file": "Test/_analisi-campione/verita/1549.json"
+   },
+   "giudizio_atteso": "importabile con avviso"
+  },
+  {
+   "id": "1550",
+   "sha256": "841e36db22fddfc29f6f0e45b8cfdecb921150cb4d012bcc01a6c0eaea69a524",
+   "path": "budget-wk-44/budget_1550_BILANCIOVERIFICA2024CUMIMPOSTE.pdf",
+   "tipologia": "contrapposte",
+   "periodo": "annuale 2024",
+   "pagine": 4,
+   "nota": "lotto week-44",
+   "lotto": "wk44",
+   "verita": {
+    "fonte": "due letture indipendenti (Sonnet, Opus) consolidate",
+    "file": "Test/_analisi-campione/verita/1550.json"
+   },
+   "giudizio_atteso": "importabile con avviso"
+  },
+  {
+   "id": "1552",
+   "sha256": "e0f0729cb8f0c38a5f2f319046a252164bf10f22bbcd101a6235237d9368f8bb",
+   "path": "budget-wk-44/budget_1552_Bilancio 30 09 2026.pdf",
+   "tipologia": "ivcee/2-anni",
+   "periodo": "9 mesi 2026",
+   "pagine": 4,
+   "nota": "lotto week-44",
+   "lotto": "wk44",
+   "verita": {
+    "fonte": "due letture indipendenti (Sonnet, Opus) consolidate",
+    "file": "Test/_analisi-campione/verita/1552.json"
+   },
+   "giudizio_atteso": "importabile"
+  },
+  {
+   "id": "1553",
+   "sha256": "f218106736b26c8f3557075df7b36dc601c34fbd280eb3c06a6f2e377120d736",
+   "path": "budget-wk-44/budget_1553_bilancio 2025.pdf",
+   "tipologia": "ivcee/anno-singolo",
+   "periodo": "annuale 2025",
+   "pagine": 4,
+   "nota": "lotto week-44",
+   "lotto": "wk44",
+   "verita": {
+    "fonte": "due letture indipendenti (Sonnet, Opus) consolidate",
+    "file": "Test/_analisi-campione/verita/1553.json"
+   },
+   "giudizio_atteso": "importabile"
+  },
+  {
+   "id": "1555",
+   "sha256": "4e9943006ae03e7345469c0c80d98a20cf1f11b0920624f592bf8caa11ee539c",
+   "path": "budget-wk-44/budget_1555_BILANCIO ANALITICO VIATEK 2025.PDF",
+   "tipologia": "contrapposte",
+   "periodo": "annuale 2025",
+   "pagine": 7,
+   "nota": "lotto week-44",
+   "lotto": "wk44",
+   "verita": {
+    "fonte": "due letture indipendenti (Sonnet, Opus) consolidate",
+    "file": "Test/_analisi-campione/verita/1555.json"
+   },
+   "giudizio_atteso": "importabile"
+  },
+  {
+   "id": "1556",
+   "sha256": "d2c9aab5abc31dd9fa0b02a3429d1136c9d74e6c8bc512633b4a3f7d56a483bb",
+   "path": "budget-wk-44/budget_1556_BILANCIO CEE 2025 VIATEK SRL.pdf",
+   "tipologia": "ivcee/facsimile-deposito",
+   "periodo": "annuale 2025",
+   "pagine": 20,
+   "nota": "lotto week-44",
+   "lotto": "wk44",
+   "verita": {
+    "fonte": "due letture indipendenti (Sonnet, Opus) consolidate",
+    "file": "Test/_analisi-campione/verita/1556.json"
+   },
+   "giudizio_atteso": "importabile con avviso"
+  },
+  {
+   "id": "1561",
+   "sha256": "7f0da22d39803f0371bafe276d12c61846d7393c27f559ed9822cf5403981ff4",
+   "path": "budget-wk-44/budget_1561_vis_agr_zagsplivqj settembre 26.pdf",
+   "tipologia": "conti/colonne",
+   "periodo": "9 mesi 2026",
+   "pagine": 5,
+   "nota": "lotto week-44",
+   "lotto": "wk44",
+   "verita": {
+    "fonte": "due letture indipendenti (Sonnet, Opus) consolidate",
+    "file": "Test/_analisi-campione/verita/1561.json"
+   },
+   "giudizio_atteso": "importabile con avviso"
+  },
+  {
+   "id": "1562",
+   "sha256": "296c6c132785aeb200862877288c5923568065b4cbf009102fc6ea6d451f5105",
+   "path": "budget-wk-44/budget_1562_vis_agr_izfyxmihyy_2025.pdf",
+   "tipologia": "conti/colonne",
+   "periodo": "annuale 2025",
+   "pagine": 9,
+   "nota": "lotto week-44",
+   "lotto": "wk44",
+   "verita": {
+    "fonte": "due letture indipendenti (Sonnet, Opus) consolidate",
+    "file": "Test/_analisi-campione/verita/1562.json"
+   },
+   "giudizio_atteso": "importabile"
+  },
+  {
+   "id": "1563",
+   "sha256": "d09f5d68159a23937d60de26cb33bbe3679f09100e8e0bff927a3da10e87be7d",
+   "path": "budget-wk-44/budget_1563_bilancio.2025.pdf",
+   "tipologia": "ivcee-dettaglio/codici",
+   "periodo": "annuale 2025",
+   "pagine": 10,
+   "nota": "lotto week-44",
+   "lotto": "wk44",
+   "verita": {
+    "fonte": "due letture indipendenti (Sonnet, Opus) consolidate",
+    "file": "Test/_analisi-campione/verita/1563.json"
+   },
+   "giudizio_atteso": "importabile"
+  },
+  {
+   "id": "1565",
+   "sha256": "d65874305842a0de1051be06635e9fbffda462467c1f146c60adfff2f0332cd7",
+   "path": "budget-wk-44/budget_1565_bilancio con valore merci cacq di competenza 300926 export.pdf",
+   "tipologia": "conti/colonne",
+   "periodo": "9 mesi 2026",
+   "pagine": 12,
+   "nota": "lotto week-44",
+   "lotto": "wk44",
+   "verita": {
+    "fonte": "due letture indipendenti (Sonnet, Opus) consolidate",
+    "file": "Test/_analisi-campione/verita/1565.json"
+   },
+   "giudizio_atteso": "importabile con avviso"
+  },
+  {
+   "id": "1566",
+   "sha256": "d003281adadf4912066dbcd2479a601f8d257b2e5b72df37258bc50f14a89a6d",
+   "path": "budget-wk-44/budget_1566_bilancio al 300926 con valore merce di competenza.pdf",
+   "tipologia": "conti/colonne",
+   "periodo": "9 mesi 2026",
+   "pagine": 8,
+   "nota": "lotto week-44",
+   "lotto": "wk44",
+   "verita": {
+    "fonte": "due letture indipendenti (Sonnet, Opus) consolidate",
+    "file": "Test/_analisi-campione/verita/1566.json"
+   },
+   "giudizio_atteso": "importabile con avviso"
+  },
+  {
+   "id": "1567",
+   "sha256": "fec280323b33dd614708e540189debb13680f5707c2929ab9ad6a6bf2c4eade8",
+   "path": "budget-wk-44/budget_1567_ABC Situazione infrannuale al 30.09.2026.pdf",
+   "tipologia": "contrapposte",
+   "periodo": "9 mesi 2026",
+   "pagine": 8,
+   "nota": "lotto week-44",
+   "lotto": "wk44",
+   "verita": {
+    "fonte": "due letture indipendenti (Sonnet, Opus) consolidate",
+    "file": "Test/_analisi-campione/verita/1567.json"
+   },
+   "giudizio_atteso": "importabile con avviso"
   }
  ]
 }

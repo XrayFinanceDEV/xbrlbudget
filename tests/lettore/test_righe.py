@@ -201,3 +201,141 @@ def test_frase_aperta_si_completa_sotto(tmp_path, prima, seconda, unita):
     riga = _riga(doc, unita)
     assert riga.etichetta == unita
     assert [c.valore for c in riga.celle.values()] == [Decimal("4321.00")]
+
+
+# --- Fix round 1 ---------------------------------------------------------------------
+
+def _a_destra(x_destra, y, testo):
+    """Un token posato col bordo destro su `x_destra` anche quando non e' un importo per `leggi_importo`."""
+    return (x_destra - fitz.get_text_length(testo, fontsize=_CORPO), y, testo)
+
+
+def test_capitale_sociale_di_uno_schema_resta_in_colonna(tmp_path):
+    # budget_413 p2: la voce di legge del capitale, con la valuta davanti a ogni colonna
+    # il «€» il font dei PDF sintetici non lo ha: «EUR» e' la stessa valuta per il lettore
+    voci = _riempi(140) + [(50, 240, "I. Capitale Sociale"), (430, 240, "EUR"), (480, 240, "10.000"),
+                           (510, 240, "EUR"), (560, 240, "10.000")]
+    doc = _leggi(tmp_path, [voci])
+    riga = _riga(doc, "Capitale Sociale")
+    assert {i: c.valore for i, c in riga.celle.items()} == {0: Decimal("10000"), 1: Decimal("10000")}
+    assert riga.etichetta == "I. Capitale Sociale"
+
+
+def test_valuta_davanti_a_una_cella_non_resta_nell_etichetta(tmp_path):
+    voci = _riempi(140) + [(50, 240, "IV. Riserva legale"), (440, 240, "Euro"), (520, 240, "Euro"),
+                           _a_destra(560, 240, "0")]
+    doc = _leggi(tmp_path, [voci])
+    riga = _riga(doc, "Riserva legale")
+    assert riga.etichetta == "IV. Riserva legale"
+    assert {i: (c.valore, c.forma) for i, c in riga.celle.items()} == {1: (Decimal("0"), "zero")}
+
+
+def test_intero_nudo_in_colonna_e_un_importo(tmp_path):
+    voci = _riempi(140) + [(50, 240, "Altri ricavi"), _a_destra(560, 240, "-1"),
+                           (50, 254, "Anno di riferimento"), _a_destra(560, 254, "2025")]
+    doc = _leggi(tmp_path, [voci])
+    riga = _riga(doc, "Altri ricavi")
+    assert {i: (c.valore, c.forma, c.testo) for i, c in riga.celle.items()} == {1: (Decimal("-1"), "importo", "-1")}
+    anno = _riga(doc, "Anno di riferimento")
+    assert anno.celle == {} and anno.etichetta.endswith("2025")
+
+
+def test_importo_testo_e_il_token_stampato(tmp_path):
+    voci = _riempi(140) + [(50, 240, "Banca c/c"), _a_destra(560, 240, "1.234,56D")]
+    doc = _leggi(tmp_path, [voci])
+    cella = list(_riga(doc, "Banca c/c").celle.values())[0]
+    assert cella.testo == "1.234,56D" and cella.valore == Decimal("1234.56")
+
+
+def _conti(y0, codici, colonna=560):
+    voci = []
+    for k, codice in enumerate(codici):
+        voci += [(40, y0 + k * 14, codice), (110, y0 + k * 14, f"conto {codice}"),
+                 (colonna, y0 + k * 14, _VALORI[k % len(_VALORI)])]
+    return voci
+
+
+def test_conto_a_saldo_zero_tiene_il_codice(tmp_path):
+    voci = _conti(140, ["10201", "10202", "10203", "10204", "10205"]) + [(40, 210, "10208"),
+                                                                          (110, 210, "BANCA SELLA")]
+    doc = _leggi(tmp_path, [voci])
+    riga = _riga(doc, "BANCA SELLA")
+    assert riga.codice == "10208" and riga.etichetta == "BANCA SELLA"
+    assert not riga.intestazione and riga.celle == {}
+
+
+def test_conto_senza_importo_fra_fratelli_non_e_un_titolo(tmp_path):
+    voci = []
+    for k, codice in enumerate(["707230", "707240", None, "707250", "707260", "707270"]):
+        y = 140 + k * 14
+        if codice is None:
+            voci += [(40, y, "707245"), (80, y, "000"), (100, y, "-"), (110, y, "imposta di bollo")]
+            continue
+        voci += [(40, y, codice), (80, y, "000"), (100, y, "-"), (110, y, f"spese {codice}"),
+                 (560, y, _VALORI[k])]
+    doc = _leggi(tmp_path, [voci])
+    riga = _riga(doc, "imposta di bollo")
+    assert riga.codice == "707245 000" and riga.etichetta == "imposta di bollo"
+    assert not riga.intestazione
+
+
+def test_mastro_a_quattro_cifre_e_un_titolo_col_codice(tmp_path):
+    voci = [(40, 126, "0101"), (110, 126, "CASSA E VALORI BOLLATI")] \
+        + _conti(140, ["010101", "010102", "010103", "010104", "010105"])
+    doc = _leggi(tmp_path, [voci])
+    riga = _riga(doc, "CASSA E VALORI")
+    assert riga.codice == "0101" and riga.etichetta == "CASSA E VALORI BOLLATI"
+    assert riga.intestazione
+
+
+def test_mastro_con_asterischi_e_prosa_numerata(tmp_path):
+    # budget_700: «03/05/*** COSTI DI IMPIANTO» sopra i suoi conti; la prosa numerata non e' un conto
+    voci = [(40, 100, "173/2008 di recepimento della direttiva"), (40, 114, "1.1 roe"),
+            (40, 126, "03/05/***"), (110, 126, "COSTI DI IMPIANTO")] \
+        + _conti(140, ["03/05/001", "03/05/002", "03/05/003", "03/05/004", "03/05/005"])
+    doc = _leggi(tmp_path, [voci])
+    mastro = _riga(doc, "COSTI DI IMPIANTO")
+    assert mastro.codice == "03/05/***" and mastro.intestazione
+    assert _riga(doc, "recepimento").codice == "" and _riga(doc, "recepimento").etichetta.startswith("173/2008")
+    assert _riga(doc, "roe").codice == ""
+
+
+def test_pagina_senza_sezione_dopo_la_chiusura_e_dichiarata(tmp_path):
+    chiusa = [(50, 100, "STATO PATRIMONIALE")] + _riempi(140) + [(50, 240, "TOTALE PASSIVO"), (560, 240, "1.000,00")]
+    doc = _leggi(tmp_path, [chiusa, _riempi(140, prefisso="Seguito")])
+    assert {r.sezione for r in doc.righe if r.pagina == 2} == {""}
+    assert [a for a in doc.avvisi if "pagina 2" in a and "sezione" in a]
+
+
+def test_mastro_con_importo_e_forma_dei_conti_tiene_il_codice(tmp_path):
+    # budget_680/700: «0103 PORTAFOGLIO ...» e «03/05/*** ...» col totale del mastro; `riga_conto` non li separa
+    voci = _conti(140, ["10311", "10313", "10314", "10315"]) + [(40, 196, "0103"), (110, 196, "PORTAFOGLIO"),
+                                                                 (560, 196, "599.842,84")] \
+        + _conti(210, ["03/05/001", "03/05/002", "03/05/003"]) + [(40, 252, "03/05/***"),
+                                                                   (110, 252, "COSTI DI IMPIANTO"),
+                                                                   (560, 252, "3.597,70")]
+    doc = _leggi(tmp_path, [voci])
+    assert _riga(doc, "PORTAFOGLIO").codice == "0103"
+    assert _riga(doc, "COSTI DI IMPIANTO").codice == "03/05/***"
+
+
+def test_mastro_piu_a_sinistra_con_l_etichetta_allineata(tmp_path):
+    # budget_680: il mastro «0103» stampato a x 2,8, i conti a 51,3; le etichette tutte a 79,2
+    voci = []
+    for k, codice in enumerate(["10311", "10313", "10314", None, "10401", "10402"]):
+        y = 140 + k * 14
+        if codice is None:
+            voci += [(10, y, "0104"), (80, y, "CREDITI VERSO ERARIO"), (560, y, "171.763,01")]
+            continue
+        voci += [(52, y, codice), (80, y, f"EFFETTI {codice}"), (560, y, _VALORI[k])]
+    doc = _leggi(tmp_path, [voci])
+    assert _riga(doc, "CREDITI VERSO ERARIO").codice == "0104"
+
+
+def test_intero_nudo_seguito_da_testo_e_un_codice(tmp_path):
+    # budget_700: «Codice attivita' 255100 - LAVORAZ. DI METALLI» con il codice sotto una colonna
+    voci = _riempi(140) + [(300, 100, "Codice attivita'"), _a_destra(480, 100, "255100"), (484, 100, "- LAVORAZ.")]
+    doc = _leggi(tmp_path, [voci])
+    riga = _riga(doc, "LAVORAZ.")
+    assert riga.celle == {} and "255100" in riga.etichetta
+    assert not doc.avvisi

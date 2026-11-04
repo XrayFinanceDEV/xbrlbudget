@@ -33,6 +33,20 @@ _ANALISI = {"differenza", "diff.", "scostamento", "scost.", "variazione", "%"}
 _ANALISI_DIFFERENZA = {"differenza", "diff.", "variazione"}
 _RUOLI_TESTATA = {"dare": "dare", "avere": "avere", "saldo": "saldo"}
 _PAROLE_RIGA_TESTATA = _PAROLE_TESTATA | _ANALISI | set(_RUOLI_TESTATA) | {"dal", "fino", "infrannuale"}
+# Lessico di testata per le intestazioni gia' divise in celle (le tabelle OCR, `celle.py`): quali parole di testata
+# sono di una colonna di valori («Importo», «Esercizio precedente», «Scost. %») e quali della descrizione («Cod.»,
+# «Partitario»); le altre parole di testata stanno in `_PAROLE_RIGA_TESTATA` e in `totali._TESTATA`.
+_PAROLE_VALORE = {"importo", "importi", "saldo", "saldi", "dare", "avere", "esercizio", "esercizi", "corrente",
+                  "precedente", "consuntivo", "comparato", "valori", "progr", "progressivo", "progressivi",
+                  "differenza", "diff", "scost", "scostamento", "variazione", "var", "%", "periodo", "bilancio",
+                  "anno", "totali", "parziali", "rettificato", "finale", "euro", "\u20ac", "eserc"}
+_PAROLE_DESCRIZIONE = {"partitario", "sottoconto", "sottoconti", "mastri", "denominazione", "nr", "n"}
+
+
+def _parola_testata(token: str) -> str:
+    """Una parola d'intestazione nella forma del lessico: minuscola, senza parentesi, punti e due punti attorno
+    («(€)» -> «€», «Scost.» -> «scost», «2025:» -> «2025»)."""
+    return token.strip().casefold().strip("().:;[]")
 
 
 @dataclass

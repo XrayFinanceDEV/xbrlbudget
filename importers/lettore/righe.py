@@ -84,6 +84,8 @@ class Riga:
                                  # sono le colonne di quella tabella, non quelle del documento
     x: float | None = None       # bordo sinistro del testo (codice o etichetta), il rientro; None = soli importi
     x_etichetta: float | None = None   # bordo sinistro dell'etichetta dopo il codice; None = senza codice
+    blocco: int | None = None    # dalle tabelle OCR: il blocco di tabelle da cui viene la riga (una tabella e i suoi
+                                 # seguiti); la ricerca di un'intestazione sopra non lo attraversa. None dal PDF
 
 
 @dataclass

@@ -475,3 +475,78 @@ def test_chiusura_esatta_vince_su_quella_in_tolleranza():
     assert _conto(doc, "Resi, sconti, premi").padre == mastro.id
     assert _conto(doc, "Resi, sconti, premi").padre_verificato
     assert _conto(doc, "TOTALE COSTI").figli[0] == (mastro.id, _conto(doc, "ALTRI ONERI").id)
+
+
+def _doc_a_mano(righe, figli):
+    """Un Documento costruito a mano, con i figli gia' decisi: per provare `assegna_padri` da sola."""
+    from decimal import Decimal
+    from importers.lettore.colonne import Colonna
+    from importers.lettore.importi import Importo
+    from importers.lettore.profilo import Profilo
+    from importers.lettore.righe import Riga
+    colonne = [Colonna(0, 300.0, "U", "esercizio", None, None, None, True),
+               Colonna(1, 420.0, "U", "esercizio", None, None, None, False)]
+    out = []
+    for k, (etichetta, celle) in enumerate(righe, start=1):
+        out.append(Riga(id=f"p1r{k}U", pagina=1, y=10.0 * k, lato="U", sezione="SP", codice="", etichetta=etichetta,
+                        celle={c: Importo(Decimal(v), "importo", v) for c, v in celle.items()}, x=0.0))
+    per = {r.etichetta: r for r in out}
+    for t, per_colonna in figli.items():
+        per[t].totale = True
+        per[t].figli = {c: tuple(per[f].id for f in fs) for c, fs in per_colonna.items()}
+    profilo = Profilo("schema", "", colonne, None, frozenset(), {0: True, 1: True}, [], {1: "SP"}, frozenset(), [])
+    return Documento(out, colonne, False, [], profilo), per
+
+
+def test_r18_gli_stessi_figli_su_ogni_colonna():
+    """R18: la colonna 1 prende «esigibili entro», la colonna 2 «Totale crediti», uguali di importo sulla prima: i
+    figli della colonna 1 non chiudono la 2, e da li' non viene un padre verificato."""
+    from importers.lettore.totali import assegna_padri
+    doc, per = _doc_a_mano(
+        [("esigibili entro", {0: "46996", 1: "40000"}), ("esigibili oltre", {1: "6000"}),
+         ("Totale crediti", {0: "46996", 1: "46000"}), ("Disponibilita", {0: "4", 1: "4"}),
+         ("Totale attivo circolante", {0: "47000", 1: "46004"})],
+        {"Totale crediti": {1: ["esigibili entro", "esigibili oltre"]},
+         "Totale attivo circolante": {0: ["esigibili entro", "Disponibilita"], 1: ["Totale crediti", "Disponibilita"]}})
+    assegna_padri(doc)
+    assert per["esigibili entro"].padre == per["Totale crediti"].id and per["esigibili entro"].padre_verificato
+    assert per["Totale crediti"].padre == per["Totale attivo circolante"].id
+    figli_verificati = [r.etichetta for r in doc.righe
+                        if r.padre == per["Totale attivo circolante"].id and r.padre_verificato]
+    assert "esigibili entro" not in figli_verificati
+    assert any("R18" in a for a in doc.avvisi)
+
+
+def test_risultato_non_e_figlio_verificato_della_riga_sopra():
+    """«Risultato prima delle imposte» = imposte + utile, stampati sotto: un'identita' del conto, non una somma."""
+    from importers.lettore.totali import assegna_padri
+    doc, per = _doc_a_mano(
+        [("Risultato prima delle imposte", {0: "43649", 1: "33336"}), ("imposte correnti", {0: "17134", 1: "12310"}),
+         ("21) Utile (perdita) dell'esercizio", {0: "26515", 1: "21026"})],
+        {"Risultato prima delle imposte": {0: ["imposte correnti", "21) Utile (perdita) dell'esercizio"],
+                                           1: ["imposte correnti", "21) Utile (perdita) dell'esercizio"]}})
+    assegna_padri(doc)
+    assert not per["imposte correnti"].padre_verificato
+    assert not per["21) Utile (perdita) dell'esercizio"].padre_verificato
+
+
+def test_patrimonio_netto_stampato_prima_conta_l_utile():
+    """Sullo SP il patrimonio netto stampato prima delle sue voci conta l'utile per davvero: resta verificato."""
+    from importers.lettore.totali import assegna_padri
+    doc, per = _doc_a_mano(
+        [("A) Patrimonio netto", {0: "1300", 1: "1200"}), ("I - Capitale", {0: "1000", 1: "1000"}),
+         ("IX - Utile (perdita) dell'esercizio", {0: "300", 1: "200"})],
+        {"A) Patrimonio netto": {0: ["I - Capitale", "IX - Utile (perdita) dell'esercizio"],
+                                 1: ["I - Capitale", "IX - Utile (perdita) dell'esercizio"]}})
+    assegna_padri(doc)
+    assert per["IX - Utile (perdita) dell'esercizio"].padre_verificato
+
+
+def test_totale_stampato_sotto_non_e_figlio_di_una_voce_sopra():
+    from importers.lettore.totali import assegna_padri
+    doc, per = _doc_a_mano(
+        [("esigibili entro", {0: "892428", 1: "800000"}), ("esigibili oltre", {0: "0", 1: "0"}),
+         ("Totale crediti", {0: "892428", 1: "800000"}), ("Cassa", {0: "10", 1: "10"})],
+        {"esigibili entro": {0: ["esigibili oltre", "Totale crediti"], 1: ["esigibili oltre", "Totale crediti"]}})
+    assegna_padri(doc)
+    assert not per["Totale crediti"].padre_verificato

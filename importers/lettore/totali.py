@@ -587,6 +587,73 @@ def _figli_di(r: Riga, priorita: dict[int, int]) -> tuple[str, ...]:
     return r.figli[min(r.figli, key=lambda c: priorita.get(c, len(priorita)))]
 
 
+_RISULTATO_ESERCIZIO = re.compile(r"\b(?:utile|perdita|perdite|risultato)\b.*\besercizio\b")
+_DI_RISULTATO = re.compile(r"\b(?:risultato|utile|perdita|perdite|differenza)\b")
+
+
+def _controllo_sotto(t: Riga, membri: list[Riga], pos: dict[str, int]) -> bool:
+    """Un membro stampato sotto `t` che non puo' esserne figlio: una riga di controllo («Totale crediti» sotto
+    «esigibili entro»), se `t` non e' a sua volta di controllo; il risultato d'esercizio, sotto una riga del conto
+    economico o di risultato («Risultato prima delle imposte» = imposte + utile e' un'identita' del conto). Il
+    patrimonio netto stampato prima delle sue voci conta l'utile per davvero: sullo SP il risultato resta membro."""
+    for m in membri:
+        if pos[m.id] < pos[t.id] or not (m.etichetta or m.codice):
+            continue
+        nome = _norm(m.etichetta)
+        if _RISULTATO_ESERCIZIO.search(nome):
+            if t.sezione == "CE" or _DI_RISULTATO.search(_norm(t.etichetta)):
+                return True
+        elif _di_controllo(m) and not _di_controllo(t):
+            return True
+    return False
+
+
+def _gruppi_incoerenti(doc: Documento, colonne_prova: set[int]) -> set[tuple[str, int]]:
+    """R18: i gruppi (totale, colonna) che non provano un padre. Un gruppo prova solo se gli stessi membri chiudono il
+    totale su ogni altra colonna di valori affidabile dove il totale e i membri stampano un importo: con x = 0 (le
+    tabelle OCR) due colonne possono scegliere i membri ciascuna per conto suo («esigibili entro» su una, «Totale
+    crediti» sull'altra, uguali di importo). E una riga di controllo o di risultato non e' membro di un totale
+    stampato sopra di lei: «Risultato prima delle imposte» = imposte + utile e' un'identita' del conto, non una
+    somma di figli. Ogni gruppo scartato si dichiara."""
+    per_id = {r.id: r for r in doc.righe}
+    pos = {r.id: k for k, r in enumerate(doc.righe)}
+    colonne = {c.indice: c for c in doc.colonne if c.ruolo in _RUOLI_VALORE}
+    out: set[tuple[str, int]] = set()
+    for t in doc.righe:
+        if t.parte != "prospetto":
+            continue
+        for c, figli in t.figli.items():
+            membri = [per_id[f] for f in figli]
+            if _controllo_sotto(t, membri, pos):
+                out.add((t.id, c))
+                doc.avvisi.append(f"{_nome(t)}: sulla colonna {c + 1} somma una riga di controllo stampata sotto di "
+                                  f"lui, padre non verificato")
+                continue
+            for c2 in sorted(colonne_prova & set(colonne)):
+                if c2 == c or c2 not in t.celle or not any(c2 in m.celle for m in membri):
+                    continue
+                if c2 in t.figli:
+                    # la colonna c2 ha un gruppo suo: devono essere gli stessi membri fra le righe con un importo non
+                    # nullo su entrambe le colonne; un conto che c'e' su una colonna sola («12) Accantonamenti» solo
+                    # nel corrente, «11) Variazioni» solo nel precedente) o vi vale zero non sposta l'altra somma
+                    def comuni(ids: tuple[str, ...]) -> set[str]:
+                        return {f for f in ids if c in per_id[f].celle and c2 in per_id[f].celle
+                                and per_id[f].celle[c].valore and per_id[f].celle[c2].valore}
+                    if comuni(figli) == comuni(t.figli[c2]):
+                        continue
+                    out.add((t.id, c))
+                    doc.avvisi.append(f"{_nome(t)}: le colonne {c + 1} e {c2 + 1} chiudono con figli diversi, padre "
+                                      f"non verificato (R18)")
+                    break
+                somma = sum((m.celle[c2].valore for m in membri if c2 in m.celle), Decimal(0))
+                if abs(somma - t.celle[c2].valore) > _tolleranza(doc, colonne[c2]):
+                    out.add((t.id, c))
+                    doc.avvisi.append(f"{_nome(t)}: i figli della colonna {c + 1} non chiudono la colonna {c2 + 1} "
+                                      f"(scarto {_euro(t.celle[c2].valore - somma)}), padre non verificato (R18)")
+                    break
+    return out
+
+
 def assegna_padri(doc: Documento) -> None:
     """Imposta `Riga.padre`, `Riga.padre_verificato` e `Riga.percorso`: dalla somma (il totale i cui figli
     contengono la riga, su almeno una colonna), altrimenti dall'ultima intestazione sopra nello stesso lato e
@@ -604,13 +671,15 @@ def assegna_padri(doc: Documento) -> None:
     # di rettifiche letta come esercizio fa catene senza senso.
     correnti = {c.indice for c in doc.colonne if c.corrente}
     affidabili = _colonne_affidabili(doc)
+    incoerenti = _gruppi_incoerenti(doc, correnti | affidabili)
     pretese: dict[str, list[tuple[tuple[int, int], str, bool]]] = defaultdict(list)
     for t in prospetto:
         for c, figli in t.figli.items():
             pieni = {f for f in figli if c in per_id[f].celle and per_id[f].celle[c].valore}
             for f in figli:
-                # la somma prova solo i figli che la fanno: una riga a zero su quella colonna ci sta per posizione
-                vero = len(pieni) >= 2 and f in pieni
+                # la somma prova solo i figli che la fanno: una riga a zero su quella colonna ci sta per posizione; e
+                # solo se gli stessi figli chiudono il totale anche sulle altre colonne (R18)
+                vero = len(pieni) >= 2 and f in pieni and (t.id, c) not in incoerenti
                 pretese[f].append(((0 if vero else 1, priorita.get(c, len(priorita))), t.id,
                                    vero or c in correnti or c in affidabili))
     for f, lista in pretese.items():
@@ -762,7 +831,7 @@ def _titoli_e_gruppi(doc: Documento, lato: _Lato, priorita: dict[int, int], tito
             continue
         sopra = []
         j = prima[t.id] - 1
-        while j >= 0 and righe[j].intestazione:
+        while j >= 0 and righe[j].intestazione and (t.blocco is None or righe[j].blocco == t.blocco):
             sopra.append(righe[j])
             j -= 1
         sopra = [h for h in sopra if h.id not in lato.saltate]
@@ -851,6 +920,8 @@ def _intestazione_sopra(lato: _Lato, da: int, k: int, r: Riga, *, stretto: bool,
             continue
         h = righe[j]
         j -= 1
+        if r.blocco is not None and h.blocco != r.blocco:
+            break           # un'altra tabella OCR, non il seguito di questa: non e' il titolo di nulla qui
         if not h.intestazione or h.id in lato.saltate:
             continue
         if h.id in lato.di_sezione and not stretto:

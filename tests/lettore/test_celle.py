@@ -1,5 +1,6 @@
 """Task 7: il Documento dalle tabelle HTML di MinerU (scansioni senza text layer). La colonna di un importo e' la
 posizione della sua cella, mai «gli ultimi due»."""
+from datetime import date
 from decimal import Decimal
 
 from importers.lettore import Documento, leggi_celle
@@ -283,3 +284,177 @@ def test_prospetto_che_riprende_dopo_una_nota_in_mezzo():
     seguito = _tabella(["IX - Utile (perdita) dell'esercizio", "700,00", "650,00"])
     doc = leggi_celle([prospetto, nota, seguito], [1, 1, 2])
     assert [r.etichetta for r in doc.righe] == ["VI - Altre riserve", "IX - Utile (perdita) dell'esercizio"]
+
+
+# --------------------------------------------------------------------------------------
+# Fix round 1
+# --------------------------------------------------------------------------------------
+
+def test_rowspan_tiene_la_riga_sotto_al_suo_lato():
+    """330 p2: «TOTALE COSTI 2.505,51» su due righe; «PERDITA D'ESERCIZIO» della riga sotto sta nelle posizioni 2-3,
+    sul lato R, e l'importo su due righe si conta una volta."""
+    html = ("<table><tr><td colspan=\"2\">COSTI</td><td colspan=\"2\">RICAVI</td></tr>"
+            "<tr><td>Costi per servizi</td><td>2.505,51</td><td></td><td></td></tr>"
+            "<tr><td rowspan=\"2\">TOTALE COSTI</td><td rowspan=\"2\">2.505,51</td><td>TOTALE RICAVI</td>"
+            "<td>0,00</td></tr>"
+            "<tr><td>PERDITA D'ESERCIZIO</td><td>2.505,51</td></tr></table>")
+    doc = leggi_celle([html], [1])
+    perdita = _riga(doc, "PERDITA D'ESERCIZIO")
+    assert perdita.lato == "R"
+    assert len([r for r in doc.righe if r.etichetta == "TOTALE COSTI"]) == 1
+
+
+def test_nota_dal_titolo_della_tabella():
+    """Il rendiconto finanziario ha le date del prospetto, ma il titolo (nella didascalia o nella tabella) lo fa
+    nota, come in `profilo.py`; e il suo seguito senza intestazione resta nota anche se numera le voci."""
+    sp = _tabella(["", "31-12-2025", "31-12-2024"], ["Stato patrimoniale", "", ""],
+                  ["I - Capitale", "10.000", "10.000"], ["Totale passivo", "10.000", "10.000"])
+    ce = _tabella(["", "31-12-2025", "31-12-2024"], ["Conto economico", "", ""],
+                  ["1) ricavi", "500,00", "400,00"], ["21) Utile (perdita) dell'esercizio", "50,00", "40,00"])
+    rendiconto = _tabella(["", "31-12-2025", "31-12-2024"], ["Rendiconto finanziario, metodo indiretto", "", ""],
+                          ["A) Flussi finanziari derivanti dall'attivita operativa", "", ""],
+                          ["Utile (perdita) dell'esercizio", "50,00", "40,00"])
+    seguito = _tabella(["B) Flussi finanziari derivanti dall'attivita di investimento", "", ""],
+                       ["(Investimenti)", "(14.397)", "0"])
+    doc = leggi_celle([sp, ce, rendiconto, seguito], [1, 2, 3, 4])
+    assert {r.pagina for r in doc.righe} == {1, 2}
+    assert len(doc.profilo.tabelle_nota) == 2
+    doc = leggi_celle([sp, ce, _tabella(*_righe_tabella(rendiconto)[0:1], *_righe_tabella(rendiconto)[2:])],
+                      [1, 2, 3], ["Stato patrimoniale", "Conto economico", "Rendiconto finanziario"])
+    assert {r.pagina for r in doc.righe} == {1, 2}
+
+
+def _righe_tabella(html: str) -> list[list[str]]:
+    from importers.lettore.celle import _celle_tabella
+    return _celle_tabella(html)
+
+
+def test_nota_dall_intestazione_diversa_dal_prospetto():
+    """1322 t3: «Varie altre riserve | 31/12/2025 | 31/12/2024» dopo il passivo: la prima cella e il formato delle
+    date non sono quelli del prospetto («| 31-12-2025 | 31-12-2024»)."""
+    sp = _tabella(["", "31-12-2025", "31-12-2024"], ["Stato patrimoniale", "", ""],
+                  ["Varie altre riserve", "220.159", "220.159"], ["Totale passivo", "220.159", "220.159"])
+    nota = _tabella(["Varie altre riserve", "31/12/2025", "31/12/2024"],
+                    ["Riserva indisponibile", "220.156", "220.156"], ["Differenza da arrotondamento", "3", "3"])
+    doc = leggi_celle([sp, nota], [1, 1])
+    assert [r.etichetta for r in doc.righe].count("Varie altre riserve") == 1
+    assert all("Riserva indisponibile" not in r.etichetta for r in doc.righe)
+
+
+def test_nota_dopo_il_totale_che_chiude_la_sezione():
+    sp = _tabella(["", "31/12/2025", "31/12/2024"], ["Stato patrimoniale", "", ""],
+                  ["Debiti", "100,00", "90,00"], ["Totale passivo", "100,00", "90,00"])
+    dopo = _tabella(["", "31/12/2025", "31/12/2024"], ["Depositi bancari", "60,00", "50,00"],
+                    ["Cassa", "40,00", "40,00"])
+    doc = leggi_celle([sp, dopo], [1, 2])
+    assert all(r.pagina == 1 for r in doc.righe)
+    ce = _tabella(["", "31/12/2025", "31/12/2024"], ["Conto economico", "", ""], ["1) ricavi", "500,00", "400,00"])
+    doc = leggi_celle([sp, ce], [1, 2])
+    assert _riga(doc, "1) ricavi").sezione == "CE"
+
+
+def test_testo_sopra_le_colonne_anche_con_importi():
+    """201 t11: la prosa degli indici in una cella in piu' non e' il seguito del prospetto, anche se la riga porta
+    importi («Quoziente ... | Esprime il grado ... | 0,86 | 0,49»)."""
+    sp = _tabella(["", "31-12-2025", "31-12-2024"], ["Crediti", "1.048", "1.040"], ["Cassa", "1.010", "1.012"])
+    indici = _tabella(["Quoziente di indebitamento complessivo", "Esprime il grado di equilibrio delle fonti",
+                       "0,86", "0,49"])
+    doc = leggi_celle([sp, indici], [1, 2])
+    assert all(r.pagina == 1 for r in doc.righe)
+    assert doc.profilo.decimali[1] is False
+
+
+def test_titoli_dicono_la_sezione_sulla_stessa_pagina():
+    """689 p2: SP e CE sulla stessa pagina, il titolo sta fuori dalla tabella (la didascalia di MinerU)."""
+    sp = _tabella(["", "31/12/2025"], ["Cassa", "10,00"], ["Banca", "20,00"])
+    ce = _tabella(["", "31/12/2025"], ["Ricavi delle vendite", "100,00"], ["Costi per servizi", "60,00"])
+    doc = leggi_celle([sp, ce], [1, 1], ["STATO PATRIMONIALE", "CONTO ECONOMICO"])
+    assert _riga(doc, "Cassa").sezione == "SP"
+    assert _riga(doc, "Ricavi delle vendite").sezione == "CE"
+    assert doc.profilo.sezioni[1] == "SP+CE"
+    doc = leggi_celle([sp, ce], [1, 1])                 # senza titoli: la firma di prima resta
+    assert _riga(doc, "Cassa").sezione == ""
+
+
+def test_titoli_dei_lati_aprono_la_sezione():
+    sp = _tabella(["Attivita'", "", "", "Passivita'", "", ""],
+                  ["Conto", "Descrizione", "Importo", "Conto", "Descrizione", "Importo"],
+                  ["03", "CASSA", "100,00", "23", "CAPITALE", "100,00"])
+    ce = _tabella(["Costi", "", "", "Ricavi", "", ""],
+                  ["Conto", "Descrizione", "Importo", "Conto", "Descrizione", "Importo"],
+                  ["55", "ACQUISTI", "300,00", "47", "VENDITE", "400,00"])
+    doc = leggi_celle([sp, ce], [1, 1])
+    assert next(r for r in doc.righe if "CASSA" in r.etichetta).sezione == "SP"
+    assert next(r for r in doc.righe if "CAPITALE" in r.etichetta).sezione == "SP"
+    assert next(r for r in doc.righe if "ACQUISTI" in r.etichetta).sezione == "CE"
+    assert next(r for r in doc.righe if "VENDITE" in r.etichetta).sezione == "CE"
+
+
+def test_titolo_col_suo_totale_apre_la_sezione():
+    """1319: «2 | Stato patrimoniale attivo | 21.045.280,10 | ...»: il titolo del prospetto stampato con gli importi."""
+    html = _tabella(["Cod.", "Descrizione", "31/12/2025", "31/12/2024"],
+                    ["2", "Stato patrimoniale attivo", "300,00", "200,00"],
+                    ["44", "B) Immobilizzazioni", "300,00", "200,00"])
+    doc = leggi_celle([html], [1])
+    assert {r.sezione for r in doc.righe} == {"SP"}
+
+
+def test_la_sezione_continua_sulla_pagina_dopo():
+    """1405: il conto economico continua a pagina 2 senza titolo: resta CE."""
+    ce = _tabella(["Voce", "2025 (€)"], ["A.1) Ricavi", "5.363.273,18"], ["A.5) Altri ricavi", "102.743,27"],
+                  ["Totale A) Valore della produzione", "5.466.016,45"])
+    seguito = _tabella(["B.7) Servizi", "1.331.075,82"], ["B.14) Oneri diversi", "84.732,43"])
+    doc = leggi_celle([ce, seguito], [1, 2], ["CONTO ECONOMICO", None])
+    assert _riga(doc, "B.7) Servizi").sezione == "CE"
+    assert doc.colonne[0].fine.year == 2025          # «2025 (€)» e' un'intestazione datata
+
+
+def test_intestazione_sopra_non_attraversa_un_altro_blocco():
+    """La ricerca dell'intestazione sopra non passa da una tabella all'altra separate da una nota: «Fornitori» non
+    e' figlio di «Debiti», titolo rimasto aperto in fondo alla prima tabella."""
+    a = _tabella(["", "31/12/2025"], ["Cassa", "5,00"], ["Debiti", ""])
+    nota = _tabella(["", "Valore di inizio esercizio", "Incrementi"], ["Impianti", "1,00", "2,00"])
+    b = _tabella(["", "31/12/2025"], ["Fornitori", "10,00"])
+    doc = leggi_celle([a, nota, b], [1, 2, 3], ["STATO PATRIMONIALE", None, "STATO PATRIMONIALE"])
+    assert _riga(doc, "Fornitori").sezione == _riga(doc, "Debiti").sezione == "SP"
+    assert _riga(doc, "Fornitori").padre != _riga(doc, "Debiti").id
+
+
+def test_anagrafica_e_altro_e_da_il_periodo():
+    anagrafica = _tabella(["Ditta", "TIPOGRAFIA ALFA VIA ADIGE 8", "Movimenti dal 1/01/2026 al 30/06/2026"])
+    html = _tabella(["Attivita'", "", "", "Passivita'", "", ""],
+                    ["Conto", "Descrizione", "Importo", "Conto", "Descrizione", "Importo"],
+                    ["03", "CASSA", "100,00", "23", "CAPITALE", "100,00"],
+                    ["", "Totale", "100,00", "", "Totale", "100,00"])
+    doc = leggi_celle([anagrafica, html], [1, 1])
+    assert doc.profilo.tabelle_nota == []
+    assert any("anagrafica" in a for a in doc.profilo.avvisi)
+    assert all((c.inizio, c.fine, c.mesi) == (date(2026, 1, 1), date(2026, 6, 30), 6) for c in doc.colonne)
+
+
+def test_r18_dalle_celle():
+    """201 p1: «esigibili entro» e «Totale crediti» valgono uguale su entrambe le colonne: nessuno dei due e' figlio
+    verificato di «Totale attivo circolante», che resta ambiguo."""
+    html = _tabella(["", "31-12-2025", "31-12-2024"],
+                    ["C) Attivo circolante", "", ""], ["II - Crediti", "", ""],
+                    ["esigibili entro l'esercizio successivo", "46.996", "44.806"],
+                    ["Totale crediti", "46.996", "44.806"],
+                    ["IV - Disponibilita' liquide", "178.911", "156.291"],
+                    ["Totale attivo circolante (C)", "225.907", "201.097"])
+    doc = leggi_celle([html], [1])
+    totale = _riga(doc, "Totale attivo circolante (C)")
+    verificati = [r.etichetta for r in doc.righe if r.padre == totale.id and r.padre_verificato]
+    assert not ({"esigibili entro l'esercizio successivo", "Totale crediti"} <= set(verificati))
+
+
+def test_dopo_la_chiusura_la_sezione_la_dice_il_contenuto():
+    """1405 senza didascalie: dopo «TOTALE PASSIVO» la tabella del conto economico, stessa intestazione e nessun
+    titolo, non resta SP: le sue voci dicono CE."""
+    sp = _tabella(["Voce", "2025 (€)"], ["A) Patrimonio netto", "1.250.021,56"], ["D) Debiti", "5.017.794,80"],
+                  ["TOTALE PASSIVO", "6.267.816,36"])
+    ce = _tabella(["Voce", "2025 (€)"], ["A.1) Ricavi delle vendite e delle prestazioni", "5.363.273,18"],
+                  ["A.5) Altri ricavi e proventi", "102.743,27"],
+                  ["Totale A) Valore della produzione", "5.466.016,45"])
+    doc = leggi_celle([sp, ce], [1, 1])
+    assert _riga(doc, "A.5) Altri ricavi e proventi").sezione == "CE"
+    assert _riga(doc, "A) Patrimonio netto").sezione == "SP"

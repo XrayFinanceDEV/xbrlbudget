@@ -461,3 +461,17 @@ def test_conto_a_zero_sotto_il_suo_mastro_non_e_un_titolo():
                       ((51, 79), "00129", "BETA", "20,00"), ((51, 79), "00130", "GAMMA", "40,00")])
     fornitori = _conto(doc, "FORNITORI")
     assert _conto(doc, "BETA").padre == fornitori.id and _conto(doc, "GAMMA").padre == fornitori.id
+
+
+def test_chiusura_esatta_vince_su_quella_in_tolleranza():
+    # R17, 1478: 14.445,48 = 14.359,62 + 25,93 + 59,94 - 0,01 esatto; le tre foglie da sole fanno 14.445,49, entro
+    # il centesimo, e il conto da -0,01 finirebbe nel «TOTALE COSTI» (352.912,81 contro 352.912,82)
+    doc = _documento([(20, "680", "ALTRI COSTI", "14.445,48"), (40, "6801", "costo a", "14.359,62"),
+                      (40, "6802", "costo b", "25,93"), (40, "6803", "costo c", "59,94"),
+                      (40, "6804540", "Resi, sconti, premi", "-0,01"), (20, "690", "ALTRI ONERI", "338.467,34"),
+                      (40, "6901", "onere x", "200.000,00"), (40, "6902", "onere y", "138.467,34"),
+                      (20, "", "TOTALE COSTI", "352.912,82")])
+    mastro = _conto(doc, "ALTRI COSTI")
+    assert _conto(doc, "Resi, sconti, premi").padre == mastro.id
+    assert _conto(doc, "Resi, sconti, premi").padre_verificato
+    assert _conto(doc, "TOTALE COSTI").figli[0] == (mastro.id, _conto(doc, "ALTRI ONERI").id)

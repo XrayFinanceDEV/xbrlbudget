@@ -125,26 +125,34 @@ def _cerca_membri(serie: _Serie, passo: list[int], i: int, kmin: int) -> list[in
     tetto = n if serie.controllo[i] else _TETTO_MEMBRI
     s, j, membri, pieni = Decimal(0), passo[i], [], 0
     parziali = {Decimal(0)}
+    # R17: una chiusura entro la tolleranza resta in attesa finche' la somma resta nella finestra: se piu' avanti la
+    # stessa ricerca chiude esatta (14.445,49 -> 14.445,48 col conto da -0,01, 1478), vince l'esatta
+    in_tolleranza: list[int] | None = None
     while j != -1 and j != n and len(membri) < tetto:
         s += valori[j]
         membri.append(j)
         pieni += valori[j] != 0
         if pieni and abs(s - valori[i]) <= tol:
             if pieni < kmin:
-                return None
+                return in_tolleranza
             if pieni == 1 and (s != valori[i] or _meno_rientrato(serie, membri, i)):
-                return None
+                return in_tolleranza
             if _chiusura_piu_esterna(serie, membri, i):
-                return None
+                return in_tolleranza
             if not valori[i] and not serie.controllo[i] and pieni != 2:
-                return None     # un totale a zero fuori dal lessico C12: solo la coppia costo/fondo
-            return membri
+                return in_tolleranza     # un totale a zero fuori dal lessico C12: solo la coppia costo/fondo
+            if s == valori[i]:
+                return membri
+            if in_tolleranza is None:
+                in_tolleranza = list(membri)
+        elif in_tolleranza is not None:
+            return in_tolleranza
         if valori[j]:
             if s in parziali:
-                return None
+                return in_tolleranza
             parziali.add(s)
         j = passo[j]
-    return None
+    return in_tolleranza
 
 
 def _meno_rientrato(serie: _Serie, membri: list[int], i: int) -> bool:

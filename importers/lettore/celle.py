@@ -65,7 +65,7 @@ _TITOLO_NOTA_TABELLA = re.compile(r"^(?:composizione|dettaglio|movimenti|indicat
 # Il totale che chiude una sezione: dopo di lui una tabella datata senza titolo proprio non riprende il prospetto
 _CHIUSURA_SEZIONE = re.compile(
     r"^(?:totale (?:attivo|passivo|attivita|passivita|generale)\b|totale a pareggio"
-    r"|(?:\d{1,2}\s?\)\s*|[ivx]+\s?[-.)]\s*)?(?:utile|perdita)\b.*\besercizio)")
+    r"|(?:\d{1,2}\s?\)\s*)?(?:utile|perdita)\b.*\besercizio)")
 _PERIODO_ANAGRAFICA = re.compile(r"\bdal\s+(\d{1,2}/\d{1,2}/\d{4})\s+al\s+(\d{1,2}/\d{1,2}/\d{4})", re.I)
 _ANAGRAFICA_PAROLE = re.compile(r"\bDITTA\b|\bSEDE\b|\bREGIME CONTABILE\b|\bTIPO REDDITO\b|\bDATI ANAGRAFICI\b")
 
@@ -444,10 +444,12 @@ def _percorsi_di_legge(righe: list[list[str]]) -> bool:
                for r in righe for c in r[:2] if c and _LETTERA.search(c))
 
 
-_VOCI_CE = re.compile(r"valore della produzione|costi della produzione|differenza tra valore e costi"
-                      r"|proventi e oneri finanziari|risultato prima delle imposte|ricavi delle vendite")
-_VOCI_SP = re.compile(r"immobilizzazioni|attivo circolante|patrimonio netto|trattamento di fine rapporto"
-                      r"|ratei e risconti|disponibilita liquide")
+# Le voci che dicono la sezione: con la lettera di legge in testa, o un totale di sezione. «trattamento di fine
+# rapporto», «ammortamento delle immobilizzazioni», «attivo circolante e disponibilita liquide» stanno anche nel CE.
+_VOCI_CE = re.compile(r"^(?:totale\s+)?(?:[ab]\s?\)\s*)?(?:valore|costi) della produzione"
+                      r"|^differenza tra valore e costi|^risultato prima delle imposte")
+_VOCI_SP = re.compile(r"^(?:totale\s+)?(?:[a-d]\s?\)\s*)?(?:patrimonio netto|immobilizzazioni\b|attivo circolante\b)"
+                      r"|^totale (?:attivo|passivo)\b")
 
 
 def _sezione_dal_contenuto(righe: list[list[str]]) -> str | None:

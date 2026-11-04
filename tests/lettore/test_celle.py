@@ -458,3 +458,25 @@ def test_dopo_la_chiusura_la_sezione_la_dice_il_contenuto():
     doc = leggi_celle([sp, ce], [1, 1])
     assert _riga(doc, "A.5) Altri ricavi e proventi").sezione == "CE"
     assert _riga(doc, "A) Patrimonio netto").sezione == "SP"
+
+
+def test_conto_economico_senza_titolo_dopo_una_nota_e_ce():
+    """Le voci del conto economico che nominano le immobilizzazioni, il TFR o l'attivo circolante non votano SP: il
+    voto lo danno le voci con la lettera di legge."""
+    sp = _tabella(["", "31/12/2025"], ["B) Immobilizzazioni", "100,00"], ["Totale attivo", "100,00"])
+    nota = _tabella(["", "Valore di inizio esercizio", "Incrementi"], ["Impianti", "1,00", "2,00"])
+    ce = _tabella(["", "31/12/2025"], ["B) Costi della produzione", ""],
+                  ["9) c) trattamento di fine rapporto", "10,00"],
+                  ["10) a) ammortamento delle immobilizzazioni immateriali", "20,00"],
+                  ["d) svalutazioni dei crediti compresi nell'attivo circolante e delle disponibilita liquide", "5,00"],
+                  ["Totale costi della produzione", "35,00"])
+    doc = leggi_celle([sp, nota, ce], [1, 2, 3], ["STATO PATRIMONIALE", None, None])
+    assert _riga(doc, "Totale costi della produzione").sezione == "CE"
+
+
+def test_utile_nel_patrimonio_netto_non_chiude_la_sezione():
+    """«IX - Utile (perdita) dell'esercizio» e' la voce del PN in mezzo allo SP: la tabella dopo lo continua."""
+    sp = _tabella(["", "31/12/2025"], ["I - Capitale", "100,00"], ["IX - Utile (perdita) dell'esercizio", "10,00"])
+    seguito = _tabella(["", "31/12/2025"], ["Fondo TFR", "30,00"], ["Debiti verso banche", "60,00"])
+    doc = leggi_celle([sp, seguito], [1, 2], ["STATO PATRIMONIALE", None])
+    assert _riga(doc, "Debiti verso banche").sezione == "SP"

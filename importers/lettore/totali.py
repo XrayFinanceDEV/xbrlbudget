@@ -591,11 +591,22 @@ _RISULTATO_ESERCIZIO = re.compile(r"\b(?:utile|perdita|perdite|risultato)\b.*\be
 _DI_RISULTATO = re.compile(r"\b(?:risultato|utile|perdita|perdite|differenza)\b")
 
 
-def _controllo_sotto(t: Riga, membri: list[Riga], pos: dict[str, int]) -> bool:
-    """Un membro stampato sotto `t` che non puo' esserne figlio: una riga di controllo («Totale crediti» sotto
-    «esigibili entro»), se `t` non e' a sua volta di controllo; il risultato d'esercizio, sotto una riga del conto
-    economico o di risultato («Risultato prima delle imposte» = imposte + utile e' un'identita' del conto). Il
-    patrimonio netto stampato prima delle sue voci conta l'utile per davvero: sullo SP il risultato resta membro."""
+def _dentro_il_gruppo(t: Riga, m: Riga, per_id: dict[str, Riga], pos: dict[str, int]) -> bool:
+    """`t` sta dentro il gruppo di `m`: e' uno dei suoi figli o sta fra il primo di loro e `m` («esigibili entro»
+    sopra «Totale crediti» che lo somma). Un totale stampato sopra tutte le voci di `m` («2 PASSIVO» sopra le voci
+    di «A.14 TOTALE PATRIMONIO NETTO») non ci sta."""
+    figli = [f for fs in m.figli.values() for f in fs if f in pos]
+    return bool(figli) and min(pos[f] for f in figli) <= pos[t.id] < pos[m.id]
+
+
+def _controllo_sotto(t: Riga, membri: list[Riga], pos: dict[str, int], per_id: dict[str, Riga] | None = None) -> bool:
+    """Un membro stampato sotto `t` che non puo' esserne figlio: una riga di controllo il cui gruppo contiene `t`
+    («Totale crediti» sotto «esigibili entro», che e' una sua voce), se `t` non e' a sua volta di controllo; il
+    risultato d'esercizio, sotto una riga del conto economico o di risultato («Risultato prima delle imposte» =
+    imposte + utile e' un'identita' del conto). Un totale stampato sopra tutte le sue voci conta per davvero le righe
+    di controllo che le chiudono (1540: «2 PASSIVO» sopra «A.14 TOTALE PATRIMONIO NETTO», B, C, D, E), e sullo SP il
+    patrimonio netto stampato prima delle sue voci conta l'utile."""
+    per_id = per_id or {m.id: m for m in membri}
     for m in membri:
         if pos[m.id] < pos[t.id] or not (m.etichetta or m.codice):
             continue
@@ -603,7 +614,7 @@ def _controllo_sotto(t: Riga, membri: list[Riga], pos: dict[str, int]) -> bool:
         if _RISULTATO_ESERCIZIO.search(nome):
             if t.sezione == "CE" or _DI_RISULTATO.search(_norm(t.etichetta)):
                 return True
-        elif _di_controllo(m) and not _di_controllo(t):
+        elif _di_controllo(m) and not _di_controllo(t) and _dentro_il_gruppo(t, m, per_id, pos):
             return True
     return False
 
@@ -624,7 +635,7 @@ def _gruppi_incoerenti(doc: Documento, colonne_prova: set[int]) -> set[tuple[str
             continue
         for c, figli in t.figli.items():
             membri = [per_id[f] for f in figli]
-            if _controllo_sotto(t, membri, pos):
+            if _controllo_sotto(t, membri, pos, per_id):
                 out.add((t.id, c))
                 doc.avvisi.append(f"{_nome(t)}: sulla colonna {c + 1} somma una riga di controllo stampata sotto di "
                                   f"lui, padre non verificato")
@@ -673,10 +684,15 @@ def assegna_padri(doc: Documento) -> None:
     affidabili = _colonne_affidabili(doc)
     incoerenti = _gruppi_incoerenti(doc, correnti | affidabili)
     pretese: dict[str, list[tuple[tuple[int, int], str, bool]]] = defaultdict(list)
+    pos = {r.id: k for k, r in enumerate(doc.righe)}
     for t in prospetto:
         for c, figli in t.figli.items():
             pieni = {f for f in figli if c in per_id[f].celle and per_id[f].celle[c].valore}
             for f in figli:
+                m = per_id[f]
+                if (pos[f] > pos[t.id] and (m.etichetta or m.codice) and _di_controllo(m) and not _di_controllo(t)
+                        and _dentro_il_gruppo(t, m, per_id, pos)):
+                    continue    # una riga di controllo non ha per padre una sua voce stampata sopra di lei (201)
                 # la somma prova solo i figli che la fanno: una riga a zero su quella colonna ci sta per posizione; e
                 # solo se gli stessi figli chiudono il totale anche sulle altre colonne (R18)
                 vero = len(pieni) >= 2 and f in pieni and (t.id, c) not in incoerenti

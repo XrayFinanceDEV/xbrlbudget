@@ -547,6 +547,35 @@ def test_totale_stampato_sotto_non_e_figlio_di_una_voce_sopra():
     doc, per = _doc_a_mano(
         [("esigibili entro", {0: "892428", 1: "800000"}), ("esigibili oltre", {0: "0", 1: "0"}),
          ("Totale crediti", {0: "892428", 1: "800000"}), ("Cassa", {0: "10", 1: "10"})],
-        {"esigibili entro": {0: ["esigibili oltre", "Totale crediti"], 1: ["esigibili oltre", "Totale crediti"]}})
+        {"esigibili entro": {0: ["esigibili oltre", "Totale crediti"], 1: ["esigibili oltre", "Totale crediti"]},
+         "Totale crediti": {0: ["esigibili entro", "esigibili oltre"], 1: ["esigibili entro", "esigibili oltre"]}})
     assegna_padri(doc)
     assert not per["Totale crediti"].padre_verificato
+
+
+def test_totale_stampato_sopra_tutte_le_sue_voci_resta_verificato():
+    """1540: «2 PASSIVO» stampato sopra le sue cinque voci, fra cui «A.14 TOTALE PATRIMONIO NETTO», chiude su
+    entrambe le colonne: il totale di controllo stampato sotto e' una sua voce, non lo contiene."""
+    from importers.lettore.totali import assegna_padri
+    doc, per = _doc_a_mano(
+        [("2 PASSIVO", {0: "30278599", 1: "21547525"}), ("A.1 Capitale", {0: "1000000", 1: "1000000"}),
+         ("A.2 Riserve", {0: "9000000", 1: "8000000"}), ("A.14 TOTALE PATRIMONIO NETTO", {0: "10000000", 1: "9000000"}),
+         ("B Fondi", {0: "278599", 1: "247525"}), ("C TFR", {0: "1000000", 1: "900000"}),
+         ("D Debiti", {0: "18000000", 1: "10400000"}), ("E Ratei", {0: "1000000", 1: "1000000"})],
+        {"2 PASSIVO": {c: ["A.14 TOTALE PATRIMONIO NETTO", "B Fondi", "C TFR", "D Debiti", "E Ratei"] for c in (0, 1)},
+         "A.14 TOTALE PATRIMONIO NETTO": {c: ["A.1 Capitale", "A.2 Riserve"] for c in (0, 1)}})
+    assegna_padri(doc)
+    for voce in ("A.14 TOTALE PATRIMONIO NETTO", "B Fondi", "E Ratei"):
+        assert per[voce].padre == per["2 PASSIVO"].id and per[voce].padre_verificato, voce
+
+
+def test_riga_di_controllo_non_ha_per_padre_una_sua_voce():
+    """201: «Totale crediti» non prende per padre «esigibili entro», stampato sopra di lui e dentro il suo gruppo."""
+    from importers.lettore.totali import assegna_padri
+    doc, per = _doc_a_mano(
+        [("esigibili entro", {0: "46996", 1: "44806"}), ("Totale crediti", {0: "46996", 1: "44806"}),
+         ("Disponibilita", {0: "178911", 1: "156291"}), ("Totale attivo circolante", {0: "225907", 1: "201097"})],
+        {"esigibili entro": {0: ["Totale crediti"]}, "Totale crediti": {1: ["esigibili entro"]},
+         "Totale attivo circolante": {0: ["esigibili entro", "Disponibilita"], 1: ["Totale crediti", "Disponibilita"]}})
+    assegna_padri(doc)
+    assert per["Totale crediti"].padre != per["esigibili entro"].id

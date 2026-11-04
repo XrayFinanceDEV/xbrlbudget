@@ -69,7 +69,8 @@ _VOCE_LEGGE = re.compile(
     r"^(?:[A-E]\s?\)|[A-E]\s?[.\-]\s|(?:[A-E]\s?\)?\s?)?(?:I|II|III|IV|V|VI|VII|VIII|IX)\s?[).\-](?:\s|$)"
     r"|(?:[A-E]|I|II|III|IV|V|VI|VII|VIII|IX)\s[A-Z][a-z\u00e0-\u00f9])")
 # Il percorso della voce stampato come codice («1.B.2.1», «B.II.1.a)»): e' lo schema di legge, non un piano dei conti.
-_PERCORSO_LEGGE = re.compile(r"^(?:\d{1,2}\.)?[A-E](?:\.(?:[IVX]{1,4}|\d{1,2}[a-z]?))+\)?$")
+# Anche con la lettera in coda come segmento a se' («3.B.10.a», budget_1540).
+_PERCORSO_LEGGE = re.compile(r"^(?:\d{1,2}\.)?[A-E](?:\.(?:[IVX]{1,4}|\d{1,2}[a-z]?))+(?:\.[a-z])?\)?$")
 _RUOLI_ANALISI = ("differenza", "percentuale")
 _RUOLI_VERIFICA = frozenset({"dare", "avere", "saldo"})
 
@@ -424,8 +425,8 @@ def _parti(pagine: list[list[RigaFisica]], altezze: list[float], margini: set[st
             b.parte = "prospetto" if any(_importi_grezzi(r) for r in b.righe) else "altro"
 
     # Le colonne dei prospetti: quelle delle bande prima della nota aperte da un titolo di prospetto o con le prove
-    # di un prospetto (o di tutto il prospetto, se non ce ne sono), presenti su almeno meta' delle loro pagine. Una
-    # tabella che sta su poche pagine non e' una colonna dei prospetti.
+    # di un prospetto (o di tutto il prospetto, se non ce ne sono), presenti su almeno meta' delle loro pagine o su
+    # almeno due. Una tabella che sta su una pagina sola non e' una colonna dei prospetti.
     prima_nota = next((i for i, b in enumerate(bande) if b.parte in ("nota", "nota-debole")), len(bande))
     fonte = ([b for b in bande[:prima_nota] if b.parte == "prospetto" and (b.titolo == "prospetto" or b.prove())]
              or [b for b in bande if b.parte == "prospetto"])
@@ -437,7 +438,9 @@ def _parti(pagine: list[list[RigaFisica]], altezze: list[float], margini: set[st
         conta.update(c.indice for r in b.righe for p in _importi_grezzi(r)
                      if (c := colonna_di(p.x1, candidate)) is not None)
     presenze = Counter(i for conta in per_pagina.values() for i, k in conta.items() if k >= 2)
-    principali = [c for c in candidate if presenze[c.indice] * 2 >= len(pagine_fonte)]
+    # ...o su almeno due pagine: la colonna di destra delle contrapposte ha importi solo sulle pagine del passivo e
+    # dei ricavi (budget_375: 3 pagine su 7)
+    principali = [c for c in candidate if presenze[c.indice] * 2 >= len(pagine_fonte) or presenze[c.indice] >= 2]
 
     # Le prove: una banda del prospetto che le ha non si declassa; una banda «altro», o aperta da un titolo debole
     # («Informazioni generali sull'impresa»), che le ha e' prospetto. Un titolo forte della nota resta nota anche
@@ -495,6 +498,25 @@ def _parti_pagina(pagine: list[list[RigaFisica]], parti: dict[int, str]) -> tupl
     return per_pagina, bande
 
 
+# Un trattino seguito a meno di tanto da una parola e' un separatore, non uno zero (come `righe._STACCO_CELLA_TESTO`).
+_STACCO_SEPARATORE = 8.0
+
+
+def _zeri(r: RigaFisica) -> list[Parola]:
+    """Gli zeri della zona degli importi («0», «-»): una colonna della tabella che stampa solo zeri accanto a un importo
+    e' comunque una colonna («Totali 191.633 0 0», budget_1437 p17)."""
+    out = []
+    for i, p in enumerate(r.parole):
+        if p.x0 <= _X0_MINIMO or p.testo not in ("0", "-", "\u2013"):
+            continue
+        dopo = r.parole[i + 1] if i + 1 < len(r.parole) else None
+        if p.testo != "0" and dopo is not None and any(ch.isalpha() for ch in dopo.testo) \
+                and dopo.x0 - p.x1 <= _STACCO_SEPARATORE:
+            continue    # il trattino di un elenco o di una descrizione («- canoni di leasing»), non uno zero
+        out.append(p)
+    return out
+
+
 def _riga_di_tabella(r: RigaFisica) -> bool:
     """Una riga con importi, o con un trattino nella zona degli importi: la riserva a zero «Riserve statutarie -
     A,B,C,D» (budget_1315 p17) e' una riga della tabella, e una serie di righe cosi' non la spezza in due."""
@@ -504,7 +526,7 @@ def _riga_di_tabella(r: RigaFisica) -> bool:
 def _tabelle_nota(pagine: list[list[RigaFisica]], parti: dict[int, str]) -> list[TabellaNota]:
     """Le tabelle della nota: per pagina, i blocchi di righe della tabella (`_riga_di_tabella`) separati da almeno
     due righe di testo; titolo la riga di testo appena sopra, o l'ultimo titolo della nota. Le colonne sono i bordi
-    destri dei suoi importi."""
+    destri dei suoi importi e dei suoi zeri."""
     out = []
     titolo_nota = ""
     for righe in pagine:
@@ -515,7 +537,7 @@ def _tabelle_nota(pagine: list[list[RigaFisica]], parti: dict[int, str]) -> list
         def chiudi():
             if blocco:
                 out.append(TabellaNota(blocco[0].pagina, blocco[0].y, blocco[-1].y, sopra or titolo_nota,
-                                       tuple(_bordi([p.x1 for r in blocco for p in _importi_grezzi(r)]))))
+                                       tuple(_bordi([p.x1 for r in blocco for p in _importi_grezzi(r) + _zeri(r)]))))
 
         for r in righe:
             if parti[id(r)] != "nota":
@@ -598,13 +620,27 @@ def _e_token_forma(t: str, primo: bool) -> bool:
                 and not _DATE_RE.fullmatch(t))
 
 
+_FILETTO = re.compile(r"^[|\u00a6]+$")
+
+
+def senza_filetti(parole: list[Parola]) -> list[Parola]:
+    """Le parole senza i filetti verticali in testa e in coda («| 303.01000 RISERVE |», budget_375): non sono testo
+    della riga, e in testa nascondono il codice."""
+    i, j = 0, len(parole)
+    while i < j and _FILETTO.match(parole[i].testo):
+        i += 1
+    while j > i and _FILETTO.match(parole[j - 1].testo):
+        j -= 1
+    return parole[i:j]
+
+
 def _candidati(righe: list[RigaFisica], colonne: list[Colonna], confine: float | None) -> list[_Candidato]:
     out = []
     for r in righe:
         for lato, parole in _gruppi(r, confine).items():
             celle = [p for p in parole if (t := _in_colonna(p, colonne)) is not None
                      and (confine is None or t[1].lato == lato)]
-            testo = [p for p in parole if p not in celle]
+            testo = senza_filetti([p for p in parole if p not in celle])
             trovato = _codice_in_testa(testo)
             if trovato is None:
                 continue

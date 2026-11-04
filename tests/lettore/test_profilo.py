@@ -472,3 +472,17 @@ def test_decisioni_per_riga_nel_profilo(tmp_path):
     voce = next(r for r in righe if r.pagina == 1 and r.parole[0].testo == "A)")
     assert prof.sezioni_righe[(1, voce.y)] == "SP" and prof.parti_righe[(1, voce.y)] == "prospetto"
     assert {prof.parti_righe[(r.pagina, r.y)] for r in righe if r.pagina == 2} == {"nota"}
+
+
+def test_colonna_destra_delle_contrapposte_su_poche_pagine_resta_del_prospetto(tmp_path):
+    # budget_375: la colonna di destra ha importi solo su 3 pagine su 7; la pagina col solo passivo non e' nota
+    def lato(prefisso, x_codice, x_etichetta, x_importo, y0=140, n=8):
+        return [v for k in range(n) for v in ((x_codice, y0 + k * 14, f"{prefisso}{k + 1}.01"),
+                                              (x_etichetta, y0 + k * 14, f"Conto {prefisso}{k + 1}"),
+                                              (x_importo, y0 + k * 14, _VALORI[k % len(_VALORI)]))]
+    pagina1 = [(50, 100, "SITUAZIONE PATRIMONIALE")] + lato("1", 40, 80, 280) + lato("2", 310, 350, 560)
+    pagina2 = [(50, 100, "SITUAZIONE PATRIMONIALE")] + lato("3", 310, 350, 560)
+    economico = [[(50, 100, "CONTO ECONOMICO")] + lato(str(4 + k), 40, 80, 280) for k in range(3)]
+    prof = profilo_documento(_righe(tmp_path, [pagina1, pagina2] + economico))
+    assert prof.parti[2] == "prospetto"
+    assert all(prof.parti_righe[k] == "prospetto" for k in prof.parti_righe if k[0] == 2)

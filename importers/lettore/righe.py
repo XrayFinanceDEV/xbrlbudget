@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import re
 import statistics
+from collections import Counter
 from dataclasses import dataclass, field
 
 import fitz
@@ -19,9 +20,9 @@ from importers.lettore.geometria import Parola, RigaFisica, parole_pagina, righe
 from importers.lettore.importi import Importo, leggi_importo
 # Le regole di livello documento stanno nel profilo (Task 5-bis): qui si leggono dal Profilo, calcolato prima.
 from importers.lettore.profilo import (
-    _PERCORSO_LEGGE, _RUOLI_ANALISI, _SEPARATORE, _SEPARATORE_CODICE, _TOL_X_CODICE, _VALUTA, _VOCE_NUMERATA,
-    FormaCodice, Profilo, TabellaNota, _capitale_in_anagrafica, _codice_in_testa, _in_colonna, _norm, _rimando_di_nota,
-    _valuta_davanti, _voce_di_legge, profilo_documento)
+    _PERCORSO_LEGGE, _RUOLI_ANALISI, _SEPARATORE, _STACCO_SEPARATORE, _SEPARATORE_CODICE, _TOL_X_CODICE, _VALUTA, _VOCE_NUMERATA,
+    FormaCodice, Profilo, TabellaNota, _capitale_in_anagrafica, _codice_in_testa, _decimali, _in_colonna, _norm,
+    _rimando_di_nota, _valuta_davanti, _voce_di_legge, profilo_documento, senza_filetti)
 from importers.schema_legge_generico import _forma_strutturale, _intestazione
 from importers.xbrl_reso_parser import _frase_aperta
 
@@ -51,10 +52,13 @@ _RIFERIMENTO = {"art.", "art", "artt.", "n.", "n", "nr.", "nr", "n°", "num.", "
 _ANNO = re.compile(r"^(?:19|20)\d{2}$")
 # La voce IV-CEE senza cifre davanti al conto («AI 301.00001», «D 230.00011», budget_1548): fa parte del codice.
 _TAG_IVCEE = re.compile(r"^[a-e](?:[ivx]+\d*[a-z]?|\d+[a-z]?)?$")
-# Una colonna di testo di una tabella («Possibilita' di utilizzazione»): il testo che segue una cella comincia
-# allo stesso x0 (entro tanto) su almeno tante righe.
-_TOL_COLONNA_TESTO = 2.0
-_MIN_COLONNA_TESTO = 3
+# Un trattino in colonna seguito da una parola piu' lontana di cosi' e' una cella, e la parola sta nella colonna dopo
+# («Utili portati a nuovo - U» a 77 pt, budget_202 p16; «- A,B,C,D» a 9,8 pt, budget_1315 p17); un separatore di
+# descrizione e' a uno spazio (fino a 6,5 pt misurati, «lavoro - avvenuta» budget_255).
+_STACCO_CELLA_TESTO = _STACCO_SEPARATORE
+# Marcatori di una riga di mastro che cambiano fra la riga col totale e la sua ripetizione in testa a pagina
+# («0105 I.V.A. A A A IE» e «0105 I I.V.A.», budget_680).
+_MARCATORE = re.compile(r"^[A-Z]{1,2}$")
 _FORME_SEGNO = {"parentesi": "tra parentesi", "meno": "col meno davanti", "meno-finale": "col meno in coda"}
 
 
@@ -103,6 +107,9 @@ class _Pezzo:
     celle: dict[int, Importo]
     parole: list[str] = field(default_factory=list)   # etichetta in token, senza il codice
     conto: bool = False                               # conto senza importo: non un titolo
+    forma: FormaCodice | None = None                  # la forma del profilo del codice, alla sua posizione
+    x_codice: float = 0.0
+    x_etichetta: float | None = None
     parte: str = "prospetto"
     tabella: int | None = None
 
@@ -157,8 +164,8 @@ def _riferimento_davanti(parole: list[Parola], i: int) -> bool:
 
 
 def _celle_del_lato(parole: list[Parola], colonne: list[Colonna], lato: str, pagina: int,
-                    avvisi: list[str], stampati: dict[Parola, str], intere: frozenset[int] = frozenset(),
-                    colonne_testo: tuple[float, ...] = ()) -> tuple[dict[int, Importo], list[Parola]]:
+                    avvisi: list[str], stampati: dict[Parola, str],
+                    intere: frozenset[int] = frozenset()) -> tuple[dict[int, Importo], list[Parola]]:
     """(celle per colonna, parole dell'etichetta). Un importo e' una cella solo nella sua colonna e sul suo
     lato; fuori colonna, seguito da una durata («12 mesi») o dentro una frase dopo una valuta («euro 516,46
     di valore unitario», o in un'anagrafica col capitale sociale) torna nell'etichetta. Un anno nudo su una
@@ -174,13 +181,12 @@ def _celle_del_lato(parole: list[Parola], colonne: list[Colonna], lato: str, pag
                for i, (p, t) in enumerate(zip(parole, trovati))]
     # un trattino seguito da una parola e' un separatore («PRESTAZ. - IMPRESE»), e un intero nudo davanti a quel
     # separatore o a una parola e' un codice («Codice attivita' 255100 - LAVORAZ.»): si legge da destra, perche'
-    # il trattino decide per l'intero. Davanti a un importo, o a una parola che sta in una colonna di testo della
-    # tabella («Riserve statutarie - A,B,C,D», R9), il trattino resta una cella zero.
+    # il trattino decide per l'intero. Davanti a un importo, o a una parola lontana, nella colonna dopo («Riserve
+    # statutarie - A,B,C,D», R9), il trattino resta una cella zero.
     separatori: set[int] = set()
     for i in range(len(parole) - 2, -1, -1):
         dopo = parole[i + 1].testo
-        in_colonna = parole[i].testo == "-" and any(abs(parole[i + 1].x0 - x) <= _TOL_COLONNA_TESTO
-                                                    for x in colonne_testo)
+        in_colonna = parole[i].testo == "-" and parole[i + 1].x0 - parole[i].x1 > _STACCO_CELLA_TESTO
         segue_testo = (any(ch.isalpha() for ch in dopo) and not in_colonna) or (i + 1 in separatori and dopo == "-")
         if trovati[i] is not None and segue_testo and (
                 parole[i].testo == "-" or leggi_importo(parole[i].testo) is None):
@@ -239,24 +245,42 @@ def _famiglia(forma: str) -> str:
     return re.sub(r"[9*]+", "9", _compatta(forma))
 
 
-def _codice(testo: list[Parola], forme: list[FormaCodice], ha_celle: bool) -> tuple[str, list[str], bool]:
-    """(codice conto, parole dell'etichetta, conto a zero) dalle forme di codice del profilo. Il codice in testa
-    (`profilo._codice_in_testa`) e' un codice solo se ha una forma del documento, e allora una riga senza celle e' un
-    conto a zero se nel documento quella forma porta soprattutto importi; o se e' della famiglia di una forma con
-    altre lunghezze e allineato a lei sul codice o sull'etichetta (il mastro «0103», «48», «03/05/***» sopra i
-    conti), e allora senza celle e' un titolo. Senza, resta nell'etichetta. Un codice piu' lungo di ogni forma si
-    accorcia fino a una che c'e' («70110 1000 FOGLI»), mai dentro un codice («4 / 5 / 1», «6 / x»). La voce IV-CEE
-    senza cifre davanti al conto («AI 301.00001») conta come la voce con le cifre delle forme («A9 999.99999»); il
-    percorso di una voce di legge stampato in testa («1.B.2.1») non e' un codice."""
+@dataclass
+class _Codice:
+    codice: str
+    etichetta: list[str]
+    forma: FormaCodice | None = None     # la forma del profilo con la stessa sagoma, alla posizione del codice
+    x_etichetta: float | None = None
+
+
+def _alla_posizione(forme: list[FormaCodice], x0: float, x_etichetta: float | None) -> list[FormaCodice]:
+    """Le forme allineate a un codice: prima sul codice, poi sull'etichetta."""
+    sul_codice = [f for f in forme if abs(f.x0 - x0) <= _TOL_X_CODICE]
+    sull_etichetta = [f for f in forme if x_etichetta is not None and abs(f.x_etichetta - x_etichetta) <= _TOL_X_CODICE
+                      and f not in sul_codice]
+    return sul_codice + sull_etichetta
+
+
+def _codice(testo: list[Parola], forme: list[FormaCodice]) -> _Codice:
+    """Il codice conto in testa e le parole dell'etichetta, dalle forme di codice del profilo. Il codice in testa
+    (`profilo._codice_in_testa`) e' un codice se ha una forma del documento, o se e' della famiglia di una forma
+    allineata a lui (sul codice o sull'etichetta) e non piu' lungo di lei (il mastro «0103», «48», «03/05/***» sopra
+    i conti; non «12/3456» accanto ai codici «10/01»). Senza, resta nell'etichetta. Un codice piu'
+    lungo di ogni forma si accorcia fino a una che c'e' («70110 1000 FOGLI»), mai dentro un codice («4 / 5 / 1»,
+    «6 / x»). La voce IV-CEE senza cifre davanti al conto («AI 301.00001») conta come la voce con le cifre delle forme
+    («A9 999.99999»); il percorso di una voce di legge stampato in testa («1.B.2.1») non e' un codice. `forma` e' la
+    forma della stessa sagoma alla posizione del codice: e' lei, non la sagoma, a dire se una riga senza importi e' un
+    titolo o un conto (`_conti_e_titoli`)."""
     parole = [p.testo for p in testo]
+    nessuno = _Codice("", parole)
     if not forme or not testo:
-        return "", parole, False
+        return nessuno
     voce = 1 if (len(testo) > 1 and _TAG_IVCEE.match(parole[0].lower()) and not re.search(r"\d", parole[0])) else 0
     if _PERCORSO_LEGGE.match(parole[voce]):
-        return "", parole, False        # il percorso della voce di legge («1.B.2.1»), non un conto
+        return nessuno        # il percorso della voce di legge («1.B.2.1»), non un conto
     trovato = _codice_in_testa(testo[voce:], cifre_min=1)
     if trovato is None:
-        return "", parole, False
+        return nessuno
     sagome, n = trovato[0].split(" "), trovato[1] + voce
     for m in range(n, voce, -1):
         if _SEPARATORE_CODICE.match(parole[m - 1]) or (m < len(parole) and parole[m] in ("/", ".")) or (
@@ -269,24 +293,65 @@ def _codice(testo: list[Parola], forme: list[FormaCodice], ha_celle: bool) -> tu
         x_etichetta = testo[k].x0 if k < len(testo) else None
         if voce:
             # la forma della voce con le cifre, senza la voce
-            stessa = next((f for f in forme if " " in f.forma and re.search(r"[A-Za-z]", f.forma.split(" ")[0])
-                           and _compatta(f.forma.split(" ", 1)[1]) == forma), None)
+            stesse = [f for f in forme if " " in f.forma and re.search(r"[A-Za-z]", f.forma.split(" ")[0])
+                      and _compatta(f.forma.split(" ", 1)[1]) == forma]
             famiglia = False
         else:
-            stessa = next((f for f in forme if _compatta(f.forma) == forma), None)
-            famiglia = any(_famiglia(f.forma) == _famiglia(forma) and (
-                abs(f.x0 - testo[0].x0) <= _TOL_X_CODICE
-                or (x_etichetta is not None and abs(f.x_etichetta - x_etichetta) <= _TOL_X_CODICE)) for f in forme)
-        if k >= len(parole) and not ha_celle:
-            return "", parole, False    # un numero da solo, senza etichetta ne' importi, non e' un conto
-        if stessa is not None or famiglia:
-            # la voce di legge col codice del gestionale («AD000000 D) RATEI E RISCONTI», «PD000700 07) Debiti verso
-            # fornitori», budget_672) resta un titolo
-            etichetta = " ".join(parole[k:])
-            conto = (stessa is not None and not ha_celle and stessa.con_importi > stessa.senza_importi
-                     and not _voce_di_legge(etichetta) and not _VOCE_NUMERATA.match(_norm(etichetta)))
-            return " ".join(parole[:m]), parole[k:], conto
-    return "", parole, False
+            stesse = [f for f in forme if _compatta(f.forma) == forma]
+            famiglia = any(_famiglia(f.forma) == _famiglia(forma) and len(forma) <= len(_compatta(f.forma))
+                           for f in _alla_posizione(forme, testo[0].x0, x_etichetta))
+        if k >= len(parole):
+            return nessuno    # un numero da solo, senza etichetta, non e' un conto
+        if stesse or famiglia:
+            posizione = _alla_posizione(stesse, testo[0].x0, x_etichetta)
+            return _Codice(" ".join(parole[:m]), parole[k:], posizione[0] if posizione else None, x_etichetta)
+    return nessuno
+
+
+def _chiave_mastro(codice: str, etichetta: str) -> tuple[str, str]:
+    return codice, " ".join(t for t in etichetta.split() if not _MARCATORE.match(t))
+
+
+def _ruoli_delle_forme(sequenze: list[list[_Pezzo]]) -> dict[int, str]:
+    """Per forma del profilo (alla sua posizione), «foglia» se le sue righe sono per lo piu' seguite da una riga della
+    stessa forma, «testa» se per lo piu' da una riga con un codice piu' rientrato (il mastro sopra i suoi conti)."""
+    voti: dict[int, Counter] = {}
+    for seq in sequenze:
+        con_codice = [p for p in seq if p.codice]
+        for a, b in zip(con_codice, con_codice[1:]):
+            if a.forma is None:
+                continue
+            conta = voti.setdefault(id(a.forma), Counter())
+            if b.forma is a.forma:
+                conta["foglia"] += 1
+            elif b.x_codice > a.x_codice + _TOL_X_CODICE or (
+                    a.x_etichetta is not None and b.x_etichetta is not None
+                    and b.x_etichetta > a.x_etichetta + _TOL_X_CODICE):
+                conta["testa"] += 1
+    return {k: ("foglia" if v["foglia"] > v["testa"] else "testa") for k, v in voti.items() if v["foglia"] != v["testa"]}
+
+
+def _conti_e_titoli(sequenze: list[list[_Pezzo]]) -> None:
+    """Una riga senza importi con un codice e' un conto a saldo zero o un titolo. E' un conto se la sua forma (alla
+    sua posizione) e' una foglia (`_ruoli_delle_forme`; senza voti, se la forma porta per lo piu' importi). Resta un
+    titolo: in una forma di testa, senza una forma alla sua posizione, la ripetizione di un mastro gia' stampato col
+    suo totale (stesso codice e stessa etichetta: budget_680 riusa i codici dei sottoconti fra mastri, il codice da
+    solo non basta), la voce di legge col codice del gestionale («AD000000 D) RATEI E RISCONTI», budget_672). Decide
+    solo titolo o conto, mai la parentela."""
+    ruoli = _ruoli_delle_forme(sequenze)
+    gia_stampati: set[tuple[str, str]] = set()
+    for seq in sequenze:
+        for p in seq:
+            if p.celle:
+                if p.codice:
+                    gia_stampati.add(_chiave_mastro(p.codice, p.etichetta))
+                continue
+            f = p.forma
+            if not p.codice or f is None:
+                continue
+            ruolo = ruoli.get(id(f)) or ("foglia" if f.con_importi > f.senza_importi else "testa")
+            p.conto = (ruolo == "foglia" and _chiave_mastro(p.codice, p.etichetta) not in gia_stampati
+                       and not _voce_di_legge(p.etichetta) and not _VOCE_NUMERATA.match(_norm(p.etichetta)))
 
 
 def _forma_negativo(testo: str) -> str | None:
@@ -321,22 +386,6 @@ def _segni_fuori_profilo(celle: dict[int, Importo], colonne: list[Colonna], nega
                           f"negativo, da verificare")
 
 
-def _colonne_di_testo(righe: list[RigaFisica], colonne: list[Colonna]) -> tuple[float, ...]:
-    """Gli x0 delle colonne di testo di una tabella: il testo che segue una cella (un importo o un trattino nella
-    sua colonna) e comincia allo stesso x0 su almeno tre righe («B», «A,B», «A,B,C,D» della colonna «Possibilita'
-    di utilizzazione»)."""
-    xs = sorted(r.parole[i + 1].x0 for r in righe for i, p in enumerate(r.parole[:-1])
-                if p.x0 > _X0_MINIMO and leggi_importo(p.testo) is not None and colonna_di(p.x1, colonne) is not None
-                and any(ch.isalpha() for ch in r.parole[i + 1].testo))
-    gruppi: list[list[float]] = []
-    for x in xs:
-        if gruppi and x - gruppi[-1][-1] <= _TOL_COLONNA_TESTO:
-            gruppi[-1].append(x)
-        else:
-            gruppi.append([x])
-    return tuple(statistics.median(g) for g in gruppi if len(g) >= _MIN_COLONNA_TESTO)
-
-
 # --------------------------------------------------------------------------------------
 # Unioni: importo orfano, didascalia a capo
 # --------------------------------------------------------------------------------------
@@ -357,7 +406,9 @@ def _unisci(sopra: _Pezzo, sotto: _Pezzo, *, sillaba: bool = False) -> _Pezzo:
     return _Pezzo(sopra.pagina, sopra.lato, sopra.y, max(sopra.y_ultima, sotto.y_ultima),
                   min(sopra.y0, sotto.y0), max(sopra.y1, sotto.y1), sopra.sezione,
                   sopra.codice or sotto.codice, etichetta, {**sopra.celle, **sotto.celle},
-                  sopra.parole + sotto.parole, sopra.conto or sotto.conto, sopra.parte, sopra.tabella)
+                  sopra.parole + sotto.parole, sopra.conto or sotto.conto, parte=sopra.parte, tabella=sopra.tabella,
+                  forma=sopra.forma or sotto.forma, x_codice=sopra.x_codice if sopra.codice else sotto.x_codice,
+                  x_etichetta=sopra.x_etichetta if sopra.codice else sotto.x_etichetta)
 
 
 def _stessa_parte(a: _Pezzo, b: _Pezzo) -> bool:
@@ -445,7 +496,6 @@ class _Lettura:
     confine: float | None
     intere: frozenset[int] = frozenset()
     negativi: frozenset[str] = frozenset()
-    colonne_testo: tuple[float, ...] = ()
 
 
 def _pezzi_della_riga(r: RigaFisica, sezione: str, lettura: _Lettura, forme: list[FormaCodice],
@@ -460,10 +510,13 @@ def _pezzi_della_riga(r: RigaFisica, sezione: str, lettura: _Lettura, forme: lis
     for lato, parole in gruppi.items():
         if not parole:
             continue
-        celle, testo = _celle_del_lato(parole, lettura.colonne, lato, r.pagina, avvisi, stampati, lettura.intere,
-                                       lettura.colonne_testo)
+        celle, testo = _celle_del_lato(parole, lettura.colonne, lato, r.pagina, avvisi, stampati, lettura.intere)
         _segni_fuori_profilo(celle, lettura.colonne, lettura.negativi, r.pagina, avvisi)
-        codice, etichetta, conto = _codice(testo, forme, bool(celle))
+        # i filetti verticali in testa e in coda al lato («| 303.01000 RISERVE DI RIVALUTAZIONE |», budget_375) non
+        # sono testo della riga: nascondono il codice e, da soli, fanno una riga vuota
+        testo = senza_filetti(testo)
+        trovato = _codice(testo, forme)
+        codice, etichetta = trovato.codice, trovato.etichetta
         etichetta_testo = " ".join(etichetta).strip()
         controllo = (codice + " " + etichetta_testo).upper()
         if _ANAGRAFICA.search(etichetta_testo.upper()) or _RIPORTO.search(controllo) \
@@ -472,7 +525,9 @@ def _pezzi_della_riga(r: RigaFisica, sezione: str, lettura: _Lettura, forme: lis
         if not celle and not codice and not etichetta_testo:
             continue
         out.append(_Pezzo(r.pagina, lato, r.y, r.y, min(p.y0 for p in parole), max(p.y1 for p in parole),
-                          sezione, codice, etichetta_testo, celle, etichetta, conto, lettura.parte, lettura.tabella))
+                          sezione, codice, etichetta_testo, celle, etichetta, parte=lettura.parte,
+                          tabella=lettura.tabella, forma=trovato.forma, x_codice=testo[0].x0 if testo else 0.0,
+                          x_etichetta=trovato.x_etichetta))
     return out
 
 
@@ -506,7 +561,8 @@ def _tabella_di(r: RigaFisica, tabelle: list[TabellaNota]) -> int | None:
 def _letture(righe: list[RigaFisica], profilo: Profilo, colonne_tabelle: list[list[Colonna]]) -> list[_Lettura]:
     """Per ogni riga fisica di una pagina, come si legge: una riga del prospetto sulle colonne del documento, coi
     lati, gli interi in colonna e i negativi del profilo; una riga della nota sulle colonne della sua tabella, a
-    lato unico (R11); una riga della nota fuori da ogni tabella, o di un'altra parte, senza colonne."""
+    lato unico, con gli interi delle colonne senza decimali (R11); una riga della nota fuori da ogni tabella, o di
+    un'altra parte, senza colonne."""
     chiavi = []
     for r in righe:
         parte = profilo.parti_righe.get((r.pagina, r.y), "prospetto")
@@ -520,8 +576,10 @@ def _letture(righe: list[RigaFisica], profilo: Profilo, colonne_tabelle: list[li
                                frozenset(i for i, d in profilo.decimali.items() if d is False), profilo.negativi)
         else:
             colonne = colonne_tabelle[tabella] if tabella is not None else []
-            lettura = _Lettura(parte, tabella, colonne, None)
-        lettura.colonne_testo = _colonne_di_testo([r for r, c in zip(righe, chiavi) if c == chiave], colonne)
+            # gli interi in colonna dove gli importi della tabella non hanno decimali («(311)», budget_255 p26), o
+            # dove la colonna stampa solo zeri («Totali 191.633 0 0», budget_1437 p17)
+            decimali = _decimali([r for r, c in zip(righe, chiavi) if c == chiave], colonne)
+            lettura = _Lettura(parte, tabella, colonne, None, frozenset(i for i, d in decimali.items() if d is not True))
         letture[chiave] = lettura
     return [letture[c] for c in chiavi]
 
@@ -549,6 +607,7 @@ def leggi_pdf(file_path: str) -> Documento:
                                            profilo.codici, avvisi, stampati):
                 per_lato.setdefault(pezzo.lato, []).append(pezzo)
         sequenze += [per_lato[lato] for lato in sorted(per_lato, key=_ORDINE_LATI.get)]
+    _conti_e_titoli(sequenze)
 
     righe_doc: list[Riga] = []
     for seq in sequenze:

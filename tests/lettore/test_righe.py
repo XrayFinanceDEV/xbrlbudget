@@ -610,3 +610,118 @@ def test_percorso_di_legge_in_testa_non_e_un_codice(tmp_path):
     riga = _riga(doc, "Voce 2 di legge")
     assert riga.codice == "" and riga.etichetta.startswith("1.B.2.2")
     assert _riga(doc, "conto 101.01.01.02").codice == "101.01.01.02"
+
+
+def test_percorso_di_legge_con_lettera_finale_non_e_un_codice(tmp_path):
+    # budget_1540/1558: «3.B.10.a Salari e stipendi» (tre cifre: il profilo ne fa una forma)
+    voci = _conti(140, ["101.01.01.01", "101.01.01.02", "101.01.01.03", "101.01.01.04"]) + [
+        v for k, lettera in enumerate("abc") for v in ((40, 210 + k * 14, f"3.B.10.{lettera}"),
+                                                       (110, 210 + k * 14, f"Personale {lettera}"),
+                                                       (560, 210 + k * 14, _VALORI[k]))]
+    doc = _leggi(tmp_path, [voci])
+    riga = _riga(doc, "Personale b")
+    assert riga.codice == "" and riga.etichetta.startswith("3.B.10.b")
+
+
+# --- Task 5-ter, fix round 1: titolo o conto per posizione e per ruolo della forma ----------------------------------
+
+def _mastro_e_conti(y0, mastro, etichetta, conti, importo_mastro=True, zero=None):
+    """Un mastro a x 3 col suo totale (o senza) e i suoi conti a x 52, etichette tutte a 80 (budget_680)."""
+    voci = [(3, y0, mastro), (80, y0, etichetta)] + ([(560, y0, "9.636,00")] if importo_mastro else [])
+    for k, conto in enumerate(conti):
+        y = y0 + (k + 1) * 14
+        voci += [(52, y, conto), (80, y, f"conto {conto}")]
+        if conto != zero:
+            voci.append((560, y, _VALORI[k % len(_VALORI)]))
+    return voci
+
+
+def test_mastro_ripetuto_sulla_pagina_di_continuazione_resta_un_titolo(tmp_path):
+    # budget_680: «0105 I.V.A.» col totale a pagina 1, ripetuto senza importi in testa a pagina 2 sopra i suoi conti
+    pagina1 = (_mastro_e_conti(100, "0103", "PORTAFOGLIO", ["10301", "10302", "10303"])
+               + _mastro_e_conti(170, "0104", "ERARIO", ["10401", "10402", "10403"])
+               + _mastro_e_conti(240, "0105", "I.V.A.", ["10501", "10502"]))
+    pagina2 = _mastro_e_conti(100, "0105", "I.V.A.", ["10503", "10504", "10505"], importo_mastro=False)
+    doc = _leggi(tmp_path, [pagina1, pagina2])
+    ripetuto = next(r for r in doc.righe if r.pagina == 2 and r.codice == "0105")
+    assert ripetuto.celle == {} and ripetuto.intestazione
+
+
+def test_mastro_a_codice_corto_senza_saldo_resta_un_titolo(tmp_path):
+    # budget_680 p5: «01100 PERDITA D'ESERCIZIO» a x 3, stessa sagoma dei conti a x 51, sopra un conto senza saldo
+    voci = (_mastro_e_conti(100, "0103", "PORTAFOGLIO", ["10301", "10302", "10303", "10304"])
+            + _mastro_e_conti(184, "0104", "ERARIO", ["10401", "10402", "10403"])
+            + [(3, 254, "01100"), (80, 254, "PERDITA D'ESERCIZIO"), (52, 268, "10001"), (80, 268, "PERDITA ESERCIZIO"),
+               (3, 282, "01999"), (80, 282, "BILANCIO CHIUSURA"), (52, 296, "99901"), (80, 296, "BILANCIO APERTURA")])
+    doc = _leggi(tmp_path, [voci])
+    for etichetta in ("PERDITA D'ESERCIZIO", "BILANCIO CHIUSURA"):
+        assert _riga(doc, etichetta).intestazione, etichetta
+    assert not _riga(doc, "PERDITA ESERCIZIO").intestazione
+
+
+def test_conto_a_saldo_zero_fra_i_conti_resta_un_conto(tmp_path):
+    voci = (_mastro_e_conti(100, "0103", "PORTAFOGLIO", ["10301", "10302", "10303", "10304"], zero="10302")
+            + _mastro_e_conti(184, "0104", "ERARIO", ["10401", "10402", "10403"]))
+    doc = _leggi(tmp_path, [voci])
+    zero = _riga(doc, "conto 10302")
+    assert zero.codice == "10302" and zero.celle == {} and not zero.intestazione
+    assert not _riga(doc, "PORTAFOGLIO").intestazione
+
+
+def test_famiglia_piu_lunga_della_forma_non_e_un_codice(tmp_path):
+    # la famiglia «9/9» dei codici «10/01» non fa un codice di «12/3456», piu' lungo di ogni codice allineato
+    voci = _conti(140, ["10/01", "10/02", "10/03", "10/04"]) + [(40, 210, "12/3456"), (110, 210, "rimborso"),
+                                                                 (560, 210, "12,00"), (40, 224, "1/2"),
+                                                                 (110, 224, "conto corto"), (560, 224, "3,10")]
+    doc = _leggi(tmp_path, [voci])
+    riga = _riga(doc, "rimborso")
+    assert riga.codice == "" and riga.etichetta.startswith("12/3456")
+    assert _riga(doc, "conto corto").codice == "1/2"
+
+
+def test_trattino_seguito_da_una_parola_lontana_e_cella_zero(tmp_path):
+    # budget_201/202 p16: «Utili portati a nuovo - U», una riga sola: nessuna colonna di testo, ma la «U» e' a 77 pt
+    tabella = [(45, 156, "Riserva legale"), (294.6, 156, "4.132"), (45, 172, "Riserva straordinaria"),
+               (294.6, 172, "3.705"), (45, 188, "Utili portati a nuovo"), (294.6, 188, "-"), (372, 188, "U"),
+               (45, 204, "Totale"), (294.6, 204, "7.837")]
+    doc = _leggi(tmp_path, _prospetto_e_nota(tabella))
+    utili = _riga(doc, "Utili portati a nuovo")
+    assert {i: c.forma for i, c in utili.celle.items()} == {0: "zero"}
+
+
+def test_variazione_tra_parentesi_in_una_tabella_della_nota_e_una_cella(tmp_path):
+    # budget_255 p26: «(311)» in una tabella della nota a interi e' una variazione di -311, non un rimando
+    tabella = []
+    for k, (etichetta, a, b) in enumerate([("Crediti tributari", "18.315", "16.733"), ("Altri crediti", "1.271", "(311)"),
+                                           ("Totale", "19.586", "16.422")]):
+        y = 156 + k * 16
+        tabella += [(45, y, etichetta), (300, y, a), _a_destra(400, y, b) if b == "(311)" else (400, y, b)]
+    doc = _leggi(tmp_path, _prospetto_e_nota(tabella))
+    assert {i: c.valore for i, c in _riga(doc, "Altri crediti").celle.items()} == {0: Decimal("1271"),
+                                                                                  1: Decimal("-311")}
+
+
+def test_filetto_verticale_in_testa_al_lato_non_nasconde_il_codice(tmp_path):
+    # budget_375: sul lato destro delle contrapposte ogni riga comincia col filetto «|»
+    voci = []
+    for k in range(6):
+        y = 140 + k * 14
+        voci += [(20, y, f"205.0001{k}"), (75, y, f"Attivo {k}"), (276, y, _VALORI[k]), (294, y, "|"),
+                 (302, y, f"303.0100{k}"), (360, y, f"Passivo {k}"), (561, y, _VALORI[-1 - k])]
+    voci += [(294, 230, "|"), (294, 236, "|")]
+    doc = _leggi(tmp_path, [voci])
+    passivo = _riga(doc, "Passivo 2")
+    assert passivo.lato == "R" and passivo.codice == "303.01002" and passivo.etichetta == "Passivo 2"
+    assert not [r for r in doc.righe if r.etichetta.strip("| ") == "" and not r.codice and not r.celle]
+
+
+def test_colonna_della_nota_con_soli_zeri_e_una_colonna(tmp_path):
+    # budget_1437 p17: «Totali 191.633 0 0», le ultime due colonne della tabella stampano solo zeri
+    tabella = []
+    for k, (etichetta, a) in enumerate([("Fondo iniziale", "191.633"), ("Utilizzi", "12.000"), ("Totali", "203.633")]):
+        y = 156 + k * 16
+        tabella += [(45, y, etichetta), (300, y, a), _a_destra(400, y, "0"), _a_destra(480, y, "0")]
+    doc = _leggi(tmp_path, _prospetto_e_nota(tabella))
+    totali = _riga(doc, "Totali")
+    assert totali.etichetta == "Totali"
+    assert {i: c.valore for i, c in totali.celle.items()} == {0: Decimal("203633"), 1: Decimal("0"), 2: Decimal("0")}

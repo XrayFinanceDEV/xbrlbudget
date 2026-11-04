@@ -384,3 +384,76 @@ def test_negativi_in_percentuale_non_contano(tmp_path):
     prof = _profilo(tmp_path, voci)
     assert [c.ruolo for c in prof.colonne] == ["esercizio", "percentuale"]
     assert prof.negativi == frozenset()
+
+
+_SP_MICRO = ["B) Immobilizzazioni", "I - Immobilizzazioni immateriali", "II - Immobilizzazioni materiali",
+             "C) Attivo circolante", "Totale attivo", "A) Patrimonio netto", "Totale patrimonio netto", "Totale passivo"]
+_CE_MICRO = ["A) Valore della produzione", "1) ricavi delle vendite", "Totale valore della produzione",
+             "B) Costi della produzione", "7) per servizi", "Totale costi della produzione",
+             "Differenza tra valore e costi della produzione (A - B)", "21) Utile (perdita) dell'esercizio"]
+
+
+def test_bilancio_micro_xbrl(tmp_path):
+    # I titoli dei micro XBRL: «Informazioni generali sull'impresa» in testa, «Stato Patrimoniale Micro»,
+    # «Informazioni in calce allo stato patrimoniale (micro)» fra SP e CE, «Conto economico micro».
+    pagina1 = ([(50, 80, "Informazioni generali sull'impresa"), (50, 100, "Denominazione: ALFA SRL"),
+                (50, 300, "Stato Patrimoniale Micro")] + _tabella(_SP_MICRO, y0=320))
+    pagina2 = ([(50, 80, "Informazioni in calce allo stato patrimoniale (micro)"),
+                (50, 100, "La societa' non ha impegni non risultanti dallo stato patrimoniale."),
+                (50, 300, "Conto economico micro")] + _tabella(_CE_MICRO, y0=320))
+    prof = profilo_documento(_righe(tmp_path, [pagina1, pagina2]))
+    parti = [(p, parte) for p, _, parte in prof.bande]
+    assert parti == [(1, "nota"), (1, "prospetto"), (2, "nota"), (2, "prospetto")]
+    assert prof.parti == {1: "prospetto", 2: "prospetto"}
+    assert [round(c.x_destra) for c in prof.colonne] == [480, 560]
+
+
+def test_informazioni_generali_con_le_prove_di_un_prospetto_sono_prospetto(tmp_path):
+    # Un titolo debole («Informazioni …» senza le parole della nota) non toglie il prospetto che lo segue.
+    voci = [(50, 120, "Informazioni generali sull'impresa")] + _tabella(_SP_MICRO)
+    prof = profilo_documento(_righe(tmp_path, [voci]))
+    assert prof.parti == {1: "prospetto"}
+    assert len(prof.colonne) == 2
+
+
+def test_coda_del_conto_economico_e_rendiconto_sulla_stessa_pagina(tmp_path):
+    pagina1 = [(50, 120, "Conto economico")] + _tabella(_CE_MICRO[:6])
+    coda = _tabella(["20) Imposte sul reddito dell'esercizio", "21) Utile (perdita) dell'esercizio"], y0=80)
+    rendiconto = [(50, 140, "Rendiconto finanziario, metodo indiretto")] + _tabella(
+        ["Utile (perdita) dell'esercizio", "Imposte sul reddito", "Interessi passivi", "Ammortamenti",
+         "Variazione dei crediti"], y0=160)
+    prof = profilo_documento(_righe(tmp_path, [pagina1, coda + rendiconto]))
+    # `bande` elenca i punti in cui la parte cambia: la coda resta prospetto, la nota comincia col rendiconto
+    assert [(p, parte) for p, _, parte in prof.bande] == [(1, "prospetto"), (2, "nota")]
+    assert 94 < prof.bande[1][1] < 140
+
+
+def test_tabella_della_nota_con_totali_non_di_prospetto_resta_nota(tmp_path):
+    pagina1 = [(50, 120, "STATO PATRIMONIALE")] + _tabella(_SCHEMA)
+    nota = [(50, 120, "Movimentazione delle immobilizzazioni")] + _tabella(
+        ["Costo", "Ammortamenti", "Totale variazioni", "Totale valore di bilancio", "Totale"], colonne=(250, 330))
+    prof = profilo_documento(_righe(tmp_path, [pagina1, nota]))
+    assert prof.parti == {1: "prospetto", 2: "nota"}
+    assert [round(c.x_destra) for c in prof.colonne] == [480, 560]
+
+
+def test_totale_con_piu_numeri_delle_colonne_non_e_una_prova(tmp_path):
+    # La tabella delle variazioni del patrimonio netto ha «Totale patrimonio netto» con un numero per riserva: piu'
+    # numeri delle colonne dei prospetti, quindi non prova un prospetto, nemmeno sotto un titolo debole.
+    pagina1 = [(50, 120, "STATO PATRIMONIALE")] + _tabella(_SCHEMA)
+    tabella = [(50, 120, "Informazioni generali sul patrimonio")]
+    for k, etichetta in enumerate(["Capitale", "Riserva legale", "Altre riserve", "Totale patrimonio netto"]):
+        y = 140 + k * 14
+        tabella += [(50, y, etichetta)] + [(x, y, _VALORI[(k + j) % 8]) for j, x in enumerate((250, 330, 410, 490))]
+    prof = profilo_documento(_righe(tmp_path, [pagina1, tabella]))
+    assert prof.parti == {1: "prospetto", 2: "nota"}
+    assert [round(c.x_destra) for c in prof.colonne] == [480, 560]
+
+
+def test_fine_di_una_frase_sul_prospetto_non_e_un_titolo(tmp_path):
+    # «… dello stato patrimoniale.» a capo in una pagina della nota non riapre il prospetto (budget_201 p16).
+    pagina1 = [(50, 120, "STATO PATRIMONIALE")] + _tabella(_SCHEMA)
+    nota = [(50, 120, "NOTA INTEGRATIVA"), (50, 140, "stato patrimoniale.")] + _tabella(
+        ["Saldo iniziale", "Incrementi", "Decrementi", "Saldo finale"], y0=200)
+    prof = profilo_documento(_righe(tmp_path, [pagina1, nota]))
+    assert prof.parti == {1: "prospetto", 2: "nota"}

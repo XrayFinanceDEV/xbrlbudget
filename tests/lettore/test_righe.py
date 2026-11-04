@@ -459,3 +459,22 @@ def test_due_interi_nudi_nella_stessa_colonna_restano_testo(tmp_path):
     doc = _leggi(tmp_path, [voci])
     riga = _riga(doc, "Altre partecipazioni")
     assert set(riga.celle) == {1} and not doc.avvisi
+
+
+def test_rimando_di_nota_dopo_un_importo_non_e_una_cella(tmp_path):
+    # budget_385 p2: «VI - Altre riserve 46.078 (1) 37.407». «(1)» e' il rimando a una nota: chiude la colonna al
+    # posto dell'importo, che si legge col bordo destro del rimando; «(1)» resta testo, mai -1 nella colonna.
+    voci = _riempi_interi(140) + [(50, 240, "VI - Altre riserve"), (462, 240, "46.078"), (465, 240, "(1)"),
+                                  (560, 240, "37.407")]
+    doc = _leggi(tmp_path, [voci])
+    riga = _riga(doc, "Altre riserve")
+    assert {i: c.valore for i, c in riga.celle.items()} == {0: Decimal("46078"), 1: Decimal("37407")}
+    assert "(1)" in riga.etichetta
+
+
+def test_zero_tra_parentesi_dopo_un_importo_e_una_cella(tmp_path):
+    # budget_207, 271: «IVA conto erario 4.316 (0)», lo zero dell'anno prima stampato tra parentesi
+    voci = _riempi_interi(140) + [(50, 240, "IVA conto erario"), (480, 240, "4.316"), _a_destra(560, 240, "(0)")]
+    doc = _leggi(tmp_path, [voci])
+    assert {i: c.valore for i, c in _riga(doc, "IVA conto erario").celle.items()} == {0: Decimal("4316"),
+                                                                                      1: Decimal("0")}

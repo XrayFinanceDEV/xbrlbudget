@@ -19,8 +19,8 @@ from importers.lettore.geometria import Parola, RigaFisica, parole_pagina, righe
 from importers.lettore.importi import Importo, leggi_importo
 # Le regole di livello documento stanno nel profilo (Task 5-bis); il Task 5-ter le fara' leggere dal Profilo.
 from importers.lettore.profilo import (
-    _SEPARATORE, _VALUTA, Profilo, _capitale_in_anagrafica, _codici_senza_importi, _in_colonna, _norm, _scartata,
-    _sezioni, _valuta_davanti, profilo_documento)
+    _SEPARATORE, _VALUTA, Profilo, _capitale_in_anagrafica, _codici_senza_importi, _in_colonna, _norm,
+    _rimando_di_nota, _scartata, _sezioni, _valuta_davanti, profilo_documento)
 from importers.schema_legge_generico import _forma_strutturale, _intestazione
 from importers.standard_ivcee_parser import riga_conto
 from importers.xbrl_reso_parser import _frase_aperta
@@ -157,7 +157,11 @@ def _celle_del_lato(parole: list[Parola], colonne: list[Colonna], lato: str, pag
     riga senza altri importi resta testo. Due importi nella stessa colonna: la cella non si legge. La valuta
     davanti a una cella, o in coda all'etichetta, si toglie."""
     trovati = [_in_colonna(p, colonne, intere) for p in parole]
-    trovati = [None if t is None or t[1].lato != lato
+    for i, p in enumerate(parole[:-1]):
+        # l'importo seguito da un rimando di nota («46.078 (1)») sta nella colonna dove il rimando la chiude
+        if trovati[i] is None and _rimando_di_nota(parole, i + 1):
+            trovati[i] = _in_colonna(Parola(p.x0, p.y0, parole[i + 1].x1, p.y1, p.testo), colonne, intere)
+    trovati = [None if t is None or t[1].lato != lato or _rimando_di_nota(parole, i)
                or (leggi_importo(p.testo) is None and _riferimento_davanti(parole, i)) else t
                for i, (p, t) in enumerate(zip(parole, trovati))]
     # un trattino seguito da una parola e' un separatore («PRESTAZ. - IMPRESE»), e un intero nudo davanti a quel

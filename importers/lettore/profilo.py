@@ -150,6 +150,17 @@ def _in_colonna(p: Parola, colonne: list[Colonna], intere: frozenset[int] = froz
     return Importo(v, "zero" if v == 0 else "importo", p.testo), c
 
 
+_RIMANDO = re.compile(r"^\([1-9]\d?\)$")      # «(0)» e' uno zero, i rimandi cominciano da 1
+_STACCO_RIMANDO = 6.0
+
+
+def _rimando_di_nota(parole: list[Parola], i: int) -> bool:
+    """«(1)» attaccato a un importo e' il rimando a una nota («VI - Altre riserve 46.078 (1) 37.407», budget_385),
+    non un intero nudo negativo."""
+    return (bool(_RIMANDO.match(parole[i].testo)) and i > 0 and leggi_importo(parole[i - 1].testo) is not None
+            and parole[i].x0 - parole[i - 1].x1 <= _STACCO_RIMANDO)
+
+
 def _ha_celle(r: RigaFisica, colonne: list[Colonna]) -> bool:
     return any(_in_colonna(p, colonne) for p in r.parole)
 
@@ -375,7 +386,11 @@ def _sezioni(pagine: list[list[RigaFisica]], colonne: list[Colonna], avvisi: lis
 _TITOLO_NOTA = re.compile(
     r"^(?:nota integrativa|relazione (?:sulla gestione|del collegio|della societa di revisione|del revisore|unitaria)"
     r"|rendiconto finanziario|(?:prospetto (?:di |della )?)?movimentazion|variazioni nell|informativa\b"
-    r"|informazioni\b|analisi delle variazioni|rideterminazione (?:del )?risultato)")
+    r"|informazioni (?:sull|sui\b|sul\b|sugli|relative|in calce|ex art|ai sensi)|analisi delle variazioni"
+    r"|rideterminazione (?:del )?risultato)")
+# «Informazioni …» senza le parole della nota («Informazioni generali sull'impresa» dei micro XBRL) e' un titolo
+# debole: apre la nota solo se sotto non ci sono le prove di un prospetto (R12).
+_TITOLO_NOTA_DEBOLE = re.compile(r"^informazioni\b")
 _TITOLO_NOTA_OVUNQUE = ("possibilita di utilizzazione",)
 # Il titolo di un prospetto e' tutto il rigo: il nome, e al piu' parti e date («STATO PATRIMONIALE - ATTIVO»,
 # «SITUAZIONE PATRIMONIALE dal 01/01/2026 al 30/09/2026»). «Conto economico i canoni corrisposti…» e' prosa.
@@ -383,12 +398,22 @@ _TITOLO_PROSPETTO = re.compile(
     r"^(?:[a-e]\s?\)\s*)?(?:stato patrimoniale|conto economico|situazione (?:patrimoniale|economica|contabile)"
     r"|bilancio di verifica)"
     r"(?:\s*[-\u2013:]?\s*(?:attivo|passivo|attivita|passivita|e|ed|patrimonio netto|netto|costi|ricavi|al|dal|del"
-    r"|periodo|esercizio|ordinario|abbreviato|riclassificato|in unita di euro|[\d/.\-]+))*$")
+    r"|periodo|esercizio|ordinario|abbreviato|\(?micro\)?|in forma abbreviata|riclassificato|in unita di euro"
+    r"|\d[\d/.\-]*))*$")
 _TITOLO_MAX = 90
 # Una pagina del prospetto senza titolo proprio, con almeno tanti importi di cui meno della meta' nelle colonne dei
 # prospetti, e' una tabella con colonne sue: nota (la rideterminazione del reddito fiscale, budget_395 p. 6-7).
 _MIN_IMPORTI_GEOMETRIA = 4
 _QUOTA_COLONNE_PROSPETTO = 0.5
+# Prove di un prospetto su una riga con importi (R12: una prova vince su un titolo della nota). Un totale dei
+# prospetti basta; le voci con la numerazione di legge («A)», «B) II», «C.II.2», «21) Utile») contano da tre in su,
+# perche' anche la nota numera i suoi elenchi («1) Totale dell'attivo dello stato patrimoniale: 220.000 euro»).
+_TOTALE_PROSPETTO = re.compile(
+    r"^(?:totale (?:attivo|passivo|patrimonio netto|valore della produzione|costi della produzione)\b"
+    r"|differenza tra valore e costi|risultato prima delle imposte"
+    r"|(?:\d{1,2}\s?\)\s*|[ivx]+\s?[-.)]\s*)?utile\s*[(/]?\s*perdit\w*\)?\s*(?:dell|d)\W*esercizio)")
+_VOCE_NUMERATA = re.compile(r"^(?:\d{1,2}\s?\)|[a-e]\s?\))\s")
+_MIN_VOCI_PROVA = 3
 
 
 def _importi_grezzi(r: RigaFisica) -> list[Parola]:
@@ -405,69 +430,126 @@ def _titolo_parte(r: RigaFisica) -> str | None:
         return None
     if _TITOLO_NOTA.match(n) or any(t in n for t in _TITOLO_NOTA_OVUNQUE):
         return "nota"
+    if _TITOLO_NOTA_DEBOLE.match(n):
+        return "nota-debole"
     if _TITOLO_PROSPETTO.match(n):
         return "prospetto"
     return None
 
 
-def _parti(pagine: list[list[RigaFisica]], altezze: list[float], margini: set[str]) -> dict[int, str]:
-    """id(riga) -> parte. Un titolo apre la sua parte, che continua finche' un altro titolo non la cambia (una
-    pagina di nota segue la nota). Prima di ogni titolo una pagina e' prospetto se ha importi, altro se no. Poi la
-    geometria: una pagina del prospetto senza titolo proprio, con le colonne sue, e' nota. Le righe di margine
-    ripetute non sono titoli («Nota integrativa XBRL al … Pag. N» in piede)."""
-    parti: dict[int, str] = {}
-    titolate: set[int] = set()      # pagine con il titolo di un prospetto, prima di ogni nota
+def _etichetta_grezza(r: RigaFisica) -> list[Parola]:
+    importi = set(map(id, _importi_grezzi(r)))
+    return [p for p in r.parole if id(p) not in importi]
+
+
+def _numeri(r: RigaFisica) -> int:
+    """Quanti numeri ha la riga nella zona degli importi: importi, interi nudi e trattini."""
+    return sum(1 for p in r.parole if p.x0 > _X0_MINIMO and (leggi_importo(p.testo) is not None
+                                                              or _INTERO.match(p.testo)))
+
+
+def _prova(r: RigaFisica, larghezza: int | None = None) -> str | None:
+    """«totale» se la riga e' un totale dei prospetti, «voce» se e' una voce con la numerazione di legge; solo su
+    una riga con importi e, se `larghezza` e' data, con non piu' numeri delle colonne dei prospetti: la tabella
+    della nota sulle variazioni del patrimonio netto ha una riga «Totale patrimonio netto» con un numero per ogni
+    riserva, e non e' un prospetto."""
+    if not _importi_grezzi(r) or (larghezza is not None and _numeri(r) > larghezza):
+        return None
+    testo = _etichetta_grezza(r)
+    trovato = _codice_in_testa(testo)
+    if testo and _PERCORSO_LEGGE.match(testo[0].testo):
+        return "voce"
+    etichetta = " ".join(p.testo for p in testo[trovato[1] if trovato else 0:]).strip()
+    n = _norm(etichetta).replace("'", " ")
+    if _TOTALE_PROSPETTO.match(n):
+        return "totale"
+    if _VOCE_LEGGE.match(etichetta) or _VOCE_NUMERATA.match(n):
+        return "voce"
+    return None
+
+
+@dataclass
+class _Banda:
+    pagina: int             # 0-based
+    parte: str | None
+    righe: list[RigaFisica]
+    titolo: str | None = None   # la parte del titolo che apre la banda, None se continua
+
+    def prove(self, larghezza: int | None = None) -> bool:
+        tipi = [t for r in self.righe if (t := _prova(r, larghezza)) is not None]
+        return "totale" in tipi or len(tipi) >= _MIN_VOCI_PROVA
+
+
+def _bande_del_documento(pagine: list[list[RigaFisica]], altezze: list[float], margini: set[str]) -> list[_Banda]:
+    """Le bande di righe: una nuova a ogni titolo e a ogni pagina, con la parte che il titolo apre o che continua
+    dalla banda prima. Le righe di margine ripetute non sono titoli («Nota integrativa XBRL al … Pag. N»)."""
+    bande: list[_Banda] = []
     stato: str | None = None
-    vista_nota = False
     for n, righe in enumerate(pagine):
-        senza_titolo = []
+        corrente: _Banda | None = None
         for r in righe:
             t = None if (_nel_margine(r, altezze[n]) and _chiave_ripetuta(_testo(r)) in margini) else _titolo_parte(r)
             if t is not None:
-                stato = t
-                vista_nota = vista_nota or t == "nota"
-                if t == "prospetto" and not vista_nota:
-                    titolate.add(n)
-            if stato is None:
-                senza_titolo.append(r)
-            else:
-                parti[id(r)] = stato
-        if senza_titolo:
-            iniziale = "prospetto" if any(_importi_grezzi(r) for r in senza_titolo) else "altro"
-            for r in senza_titolo:
-                parti[id(r)] = iniziale
+                stato, corrente = t, None
+            if corrente is None:
+                corrente = _Banda(n, stato, [], t)
+                bande.append(corrente)
+            corrente.righe.append(r)
+    return bande
 
-    def del_prospetto(n: int) -> list[RigaFisica]:
-        return [r for r in pagine[n] if parti[id(r)] == "prospetto"]
 
-    # Le colonne dei prospetti: quelle dei prospetti titolati prima della nota (o di tutto il prospetto) presenti su
-    # almeno meta' delle loro pagine. Una tabella che sta su poche pagine non e' una colonna dei prospetti.
-    fonte = sorted(titolate) or [n for n in range(len(pagine)) if del_prospetto(n)]
-    candidate = colonne_documento([r for n in fonte for r in del_prospetto(n)])
-    pagine_di: dict[int, int] = Counter()
-    for n in fonte:
-        viste = Counter(c.indice for r in del_prospetto(n) for p in _importi_grezzi(r)
-                        if (c := colonna_di(p.x1, candidate)) is not None)
-        pagine_di.update(i for i, k in viste.items() if k >= 2)
-    principali = [c for c in candidate if pagine_di[c.indice] * 2 >= len(fonte)]
-    # Una pagina del prospetto che il primo blocco titolato non copre (senza titolo, o titolata dopo la nota) e' nota
-    # se i suoi importi stanno per lo piu' fuori da quelle colonne, o se continua con le colonne proprie la tabella
-    # della nota della pagina prima (la seconda pagina della rideterminazione del reddito, budget_395 p. 7).
+def _parti(pagine: list[list[RigaFisica]], altezze: list[float], margini: set[str]) -> dict[int, str]:
+    """id(riga) -> parte, per bande (`_bande_del_documento`). Prima di ogni titolo una banda e' prospetto se ha
+    importi, altro se no. Una banda con le prove di un prospetto (`_prova`) e' prospetto qualunque titolo l'abbia
+    aperta: perdere un prospetto in silenzio e' il danno peggiore (R12). Poi la geometria, solo sulle bande del
+    prospetto senza prove: e' nota una banda con gli importi per lo piu' fuori dalle colonne dei prospetti, o che
+    continua con colonne proprie la tabella della nota della banda prima."""
+    bande = _bande_del_documento(pagine, altezze, margini)
+    for b in bande:
+        if b.parte is None:
+            b.parte = "prospetto" if any(_importi_grezzi(r) for r in b.righe) else "altro"
+
+    # Le colonne dei prospetti: quelle delle bande prima della nota aperte da un titolo di prospetto o con le prove
+    # di un prospetto (o di tutto il prospetto, se non ce ne sono), presenti su almeno meta' delle loro pagine. Una
+    # tabella che sta su poche pagine non e' una colonna dei prospetti.
+    prima_nota = next((i for i, b in enumerate(bande) if b.parte in ("nota", "nota-debole")), len(bande))
+    fonte = ([b for b in bande[:prima_nota] if b.parte == "prospetto" and (b.titolo == "prospetto" or b.prove())]
+             or [b for b in bande if b.parte == "prospetto"])
+    candidate = colonne_documento([r for b in fonte for r in b.righe])
+    pagine_fonte = {b.pagina for b in fonte}
+    per_pagina: dict[int, Counter] = {}
+    for b in fonte:
+        conta = per_pagina.setdefault(b.pagina, Counter())
+        conta.update(c.indice for r in b.righe for p in _importi_grezzi(r)
+                     if (c := colonna_di(p.x1, candidate)) is not None)
+    presenze = Counter(i for conta in per_pagina.values() for i, k in conta.items() if k >= 2)
+    principali = [c for c in candidate if presenze[c.indice] * 2 >= len(pagine_fonte)]
+
+    # Le prove: una banda del prospetto che le ha non si declassa; una banda «altro», o aperta da un titolo debole
+    # («Informazioni generali sull'impresa»), che le ha e' prospetto. Un titolo forte della nota resta nota anche
+    # sopra le stesse voci: il rendiconto finanziario comincia dall'utile, il riepilogo del bilancio della
+    # controllante e la riconciliazione delle imposte le ripetono.
+    larghezza = max(len(principali), 2)
+    provate = set()
+    for i, b in enumerate(bande):
+        if b.parte != "nota" and b.prove(larghezza):
+            b.parte = "prospetto"
+            provate.add(i)
+        elif b.parte == "nota-debole":
+            b.parte = "nota"
     proprie_prima: list[float] = []
-    for n in range(len(pagine)):
-        righe = del_prospetto(n)
-        importi = [p for r in righe for p in _importi_grezzi(r)]
+    for i, b in enumerate(bande):
+        importi = [p for r in b.righe for p in _importi_grezzi(r)]
         fuori = [p.x1 for p in importi if colonna_di(p.x1, principali) is None]
-        proprie = _bordi(fuori, minimo=3)
-        if n not in titolate and len(importi) >= _MIN_IMPORTI_GEOMETRIA and (
+        if b.parte == "prospetto" and i not in provate and len(importi) >= _MIN_IMPORTI_GEOMETRIA and (
                 len(fuori) > (1 - _QUOTA_COLONNE_PROSPETTO) * len(importi)
-                or any(abs(a - b) <= _TOL_X_CODICE * 2 for a in proprie for b in proprie_prima)):
-            for r in righe:
-                parti[id(r)] = "nota"
-        nota = [r for r in pagine[n] if parti[id(r)] == "nota"]
-        proprie_prima = (_bordi([p.x1 for r in nota for p in _importi_grezzi(r)
-                                 if colonna_di(p.x1, principali) is None], minimo=3) if nota else [])
-    return parti
+                or any(abs(x - y) <= _TOL_X_CODICE * 2 for x in _bordi(fuori, minimo=3) for y in proprie_prima)):
+            b.parte = "nota"
+        if b.parte == "nota":
+            proprie_prima = _bordi(fuori, minimo=3)
+        elif importi:
+            proprie_prima = []
+    return {id(r): b.parte for b in bande for r in b.righe}
 
 
 def _bordi(xs: list[float], minimo: int = 2) -> list[float]:
@@ -679,7 +761,7 @@ def _negativi(righe: list[RigaFisica], colonne: list[Colonna], intere: frozenset
     for r in righe:
         for k, p in enumerate(r.parole):
             trovato = _in_colonna(p, colonne, intere)
-            if trovato is None or trovato[1].ruolo in _RUOLI_ANALISI:
+            if trovato is None or trovato[1].ruolo in _RUOLI_ANALISI or _rimando_di_nota(r.parole, k):
                 continue
             testo = p.testo.replace("€", "").strip()
             dopo = r.parole[k + 1] if k + 1 < len(r.parole) else None

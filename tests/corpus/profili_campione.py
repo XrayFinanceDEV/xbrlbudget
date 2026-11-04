@@ -14,6 +14,7 @@ I PDF e le verita' sono cifre di clienti, fuori da git (`Test/` e' ignorata).
 Uso:
     IMPORT_CORPUS_ROOT=$PWD/Test backend/venv/bin/python tests/corpus/profili_campione.py --etichetta profilo
     ... --solo 395,1456
+    ... --rete          # in piu': su TUTTI i PDF di Test/, i totali dei prospetti finiti in una banda nota/altro
 
 Scrive `Test/_analisi-campione/profili/<etichetta>.json` (un profilo per documento) e stampa la sintesi.
 """
@@ -29,7 +30,9 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT))
 
-from importers.lettore.righe import profilo_pdf  # noqa: E402
+from importers.lettore.profilo import (  # noqa: E402
+    _chiave_ripetuta, _nel_margine, _norm, _prova, _testo, _titolo_parte, profilo_documento)
+from importers.lettore.righe import _pagine_pdf, profilo_pdf  # noqa: E402
 
 CORPUS = Path(os.environ.get("IMPORT_CORPUS_ROOT", ROOT / "Test"))
 CAMPIONE = CORPUS / "_analisi-campione"
@@ -111,6 +114,7 @@ def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("--etichetta", required=True)
     ap.add_argument("--solo", default="", help="id separati da virgola")
+    ap.add_argument("--rete", action="store_true", help="rete di sicurezza su tutto il corpus")
     args = ap.parse_args()
     solo = {s.strip() for s in args.solo.split(",") if s.strip()} or None
 
@@ -173,7 +177,57 @@ def main() -> int:
     for r in con_periodi:
         if r["giudizio"]["periodi"] != "giusti":
             print(f"  {r['id']:>10} {r['tipologia'][:26]:26} {r['giudizio']['periodi']}")
+    if args.rete:
+        _rete()
     return 0
+
+
+def _parte_di(bande: list[tuple[int, float, str]], pagina: int, y: float) -> str:
+    parte = bande[0][2] if bande else "?"
+    for p, y0, nome in bande:
+        if (p, y0) <= (pagina, y):
+            parte = nome
+    return parte
+
+
+def _rete() -> None:
+    """Rete di sicurezza (R12): su ogni PDF del corpus, le righe con un totale dei prospetti («Totale attivo»,
+    «Differenza tra valore e costi», «Utile (perdita) dell'esercizio», …) che stanno in una banda nota o altro.
+
+    Si dividono in due: quelle sotto un titolo forte della nota (il rendiconto finanziario comincia dall'utile, la
+    tabella delle variazioni del patrimonio netto ha «Totale patrimonio netto», il riepilogo del bilancio della
+    controllante ripete i prospetti), elencate per titolo; e tutte le altre, cioe' un prospetto perso: l'obiettivo
+    e' zero."""
+    files = sorted(f for f in CORPUS.rglob("*") if f.suffix.lower() == ".pdf" and "_analisi-campione" not in f.parts)
+    perse, sotto_nota = [], defaultdict(list)
+    for f in files:
+        try:
+            pagine, altezze, _ = _pagine_pdf(str(f))
+            prof = profilo_documento([r for rr in pagine for r in rr],
+                                     altezze={n: h for n, h in enumerate(altezze, start=1)})
+        except Exception as e:          # la rete non si ferma su un documento
+            perse.append((f.name, 0, f"errore {e!r}"))
+            continue
+        titolo = None
+        for n, rr in enumerate(pagine):
+            for r in rr:
+                t = None if (_nel_margine(r, altezze[n]) and _chiave_ripetuta(_testo(r)) in prof.margini) \
+                    else _titolo_parte(r)
+                if t is not None:
+                    titolo = (t, _testo(r))
+                if _prova(r) != "totale" or _parte_di(prof.bande, r.pagina, r.y) == "prospetto":
+                    continue
+                if titolo is not None and titolo[0] == "nota":
+                    sotto_nota[_norm(titolo[1])[:45]].append(f"{f.name[:30]} p{r.pagina}")
+                else:
+                    perse.append((f.name, r.pagina, _testo(r)[:80]))
+    print(f"\nrete di sicurezza su {len(files)} PDF: {len(perse)} totali dei prospetti fuori dal prospetto senza un "
+          f"titolo della nota sopra (obiettivo 0)")
+    for nome, pagina, testo in perse:
+        print(f"  {nome[:50]:50} p{pagina} {testo}")
+    print(f"sotto un titolo della nota: {sum(map(len, sotto_nota.values()))} righe, per titolo:")
+    for titolo, dove in sorted(sotto_nota.items(), key=lambda kv: -len(kv[1])):
+        print(f"  {len(dove):3}  «{titolo}»  es. {dove[0]}")
 
 
 if __name__ == "__main__":

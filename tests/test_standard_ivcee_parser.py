@@ -34,8 +34,12 @@ def _write_compact_infrannual_pdf(
     interest_style: str = "negative",
     positive_equity: bool = False,
     passivo_total_delta: Decimal = Decimal("0"),
+    comparato: str | None = None,
 ) -> None:
-    """Create configurable clean/bizarre monocolumn IV-CEE regression layouts."""
+    """Create configurable clean/bizarre monocolumn IV-CEE regression layouts.
+
+    ``comparato``: la data di chiusura della colonna di confronto ("30/06/2025"); la colonna
+    ripete gli importi del periodo e l'intestazione stampa le due date affiancate."""
     def it_amount(value: Decimal) -> str:
         return (
             f"{value:,.2f}".replace(",", "#").replace(".", ",").replace("#", ".")
@@ -73,10 +77,19 @@ def _write_compact_infrannual_pdf(
     def add_page(title, rows):
         page = document.new_page()
         page.insert_text((50, 55), title, fontsize=12)
+        def a_destra(x_destra, y, testo):
+            page.insert_text((x_destra - fitz.get_text_length(testo, fontsize=8), y), testo, fontsize=8)
+
+        if comparato:
+            a_destra(460, 72, f"30/{period_months or 12:02d}/2026")
+            a_destra(540, 72, comparato)
         y = 85
         for label, amount in rows:
             page.insert_text((50, y), label, fontsize=8)
-            if amount is not None:
+            if amount is not None and comparato:
+                a_destra(460, y, amount)
+                a_destra(540, y, amount)
+            elif amount is not None:
                 page.insert_text((400, y), amount, fontsize=8)
             y += 14
 

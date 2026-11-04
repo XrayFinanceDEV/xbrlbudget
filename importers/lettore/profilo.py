@@ -103,6 +103,21 @@ class Profilo:
     sezioni: dict[int, str]            # pagina -> "SP" | "CE" | "SP+CE" | "" (sconosciuta)
     margini: frozenset[str]            # testi normalizzati delle righe ripetute in testa o in piede
     avvisi: list[str] = field(default_factory=list)
+    contrapposto: bool = False         # il verdetto: a sinistra attivo/costi, a destra passivo/ricavi
+    parti: dict[int, str] = field(default_factory=dict)   # pagina -> "prospetto" | "nota" | "altro", la prevalente
+    bande: list[tuple[int, float, str]] = field(default_factory=list)   # (pagina, y da cui comincia, parte), in ordine
+    tabelle_nota: list["TabellaNota"] = field(default_factory=list)
+
+
+@dataclass(frozen=True)
+class TabellaNota:
+    """Una tabella della nota integrativa (o del rendiconto, di una movimentazione): riconosciuta e dichiarata, mai
+    letta come prospetto."""
+    pagina: int
+    y0: float               # centro della prima riga con importi
+    y1: float               # centro dell'ultima
+    titolo: str             # la riga di testo che la precede, o l'ultimo titolo della nota
+    colonne: tuple[float, ...]   # bordi destri delle sue colonne
 
 
 # --------------------------------------------------------------------------------------
@@ -351,6 +366,179 @@ def _sezioni(pagine: list[list[RigaFisica]], colonne: list[Colonna], avvisi: lis
 
 
 # --------------------------------------------------------------------------------------
+# Parti del documento: prospetto, nota, altro
+# --------------------------------------------------------------------------------------
+
+# Titoli che aprono una parte. Un titolo e' una riga corta senza importi che COMINCIA cosi': la prosa della nota
+# nomina il conto economico a meta' frase, il titolo lo stampa in testa. La rideterminazione del reddito ai fini
+# fiscali in coda a una situazione contabile e' un prospetto fiscale, non di bilancio (budget_395, 700).
+_TITOLO_NOTA = re.compile(
+    r"^(?:nota integrativa|relazione (?:sulla gestione|del collegio|della societa di revisione|del revisore|unitaria)"
+    r"|rendiconto finanziario|(?:prospetto (?:di |della )?)?movimentazion|variazioni nell|informativa\b"
+    r"|informazioni\b|analisi delle variazioni|rideterminazione (?:del )?risultato)")
+_TITOLO_NOTA_OVUNQUE = ("possibilita di utilizzazione",)
+# Il titolo di un prospetto e' tutto il rigo: il nome, e al piu' parti e date («STATO PATRIMONIALE - ATTIVO»,
+# «SITUAZIONE PATRIMONIALE dal 01/01/2026 al 30/09/2026»). «Conto economico i canoni corrisposti…» e' prosa.
+_TITOLO_PROSPETTO = re.compile(
+    r"^(?:[a-e]\s?\)\s*)?(?:stato patrimoniale|conto economico|situazione (?:patrimoniale|economica|contabile)"
+    r"|bilancio di verifica)"
+    r"(?:\s*[-\u2013:]?\s*(?:attivo|passivo|attivita|passivita|e|ed|patrimonio netto|netto|costi|ricavi|al|dal|del"
+    r"|periodo|esercizio|ordinario|abbreviato|riclassificato|in unita di euro|[\d/.\-]+))*$")
+_TITOLO_MAX = 90
+# Una pagina del prospetto senza titolo proprio, con almeno tanti importi di cui meno della meta' nelle colonne dei
+# prospetti, e' una tabella con colonne sue: nota (la rideterminazione del reddito fiscale, budget_395 p. 6-7).
+_MIN_IMPORTI_GEOMETRIA = 4
+_QUOTA_COLONNE_PROSPETTO = 0.5
+
+
+def _importi_grezzi(r: RigaFisica) -> list[Parola]:
+    """Gli importi della riga prima di conoscere le colonne (`colonne._in_colonna` + `_e_importo`)."""
+    return [p for p in r.parole if p.x0 > _X0_MINIMO and (i := leggi_importo(p.testo)) is not None
+            and i.forma != "zero"]
+
+
+def _titolo_parte(r: RigaFisica) -> str | None:
+    if _importi_grezzi(r):
+        return None
+    n = _norm(_testo(r)).replace("'", "").replace("`", "")
+    if len(n) > _TITOLO_MAX:
+        return None
+    if _TITOLO_NOTA.match(n) or any(t in n for t in _TITOLO_NOTA_OVUNQUE):
+        return "nota"
+    if _TITOLO_PROSPETTO.match(n):
+        return "prospetto"
+    return None
+
+
+def _parti(pagine: list[list[RigaFisica]], altezze: list[float], margini: set[str]) -> dict[int, str]:
+    """id(riga) -> parte. Un titolo apre la sua parte, che continua finche' un altro titolo non la cambia (una
+    pagina di nota segue la nota). Prima di ogni titolo una pagina e' prospetto se ha importi, altro se no. Poi la
+    geometria: una pagina del prospetto senza titolo proprio, con le colonne sue, e' nota. Le righe di margine
+    ripetute non sono titoli («Nota integrativa XBRL al … Pag. N» in piede)."""
+    parti: dict[int, str] = {}
+    titolate: set[int] = set()      # pagine con il titolo di un prospetto, prima di ogni nota
+    stato: str | None = None
+    vista_nota = False
+    for n, righe in enumerate(pagine):
+        senza_titolo = []
+        for r in righe:
+            t = None if (_nel_margine(r, altezze[n]) and _chiave_ripetuta(_testo(r)) in margini) else _titolo_parte(r)
+            if t is not None:
+                stato = t
+                vista_nota = vista_nota or t == "nota"
+                if t == "prospetto" and not vista_nota:
+                    titolate.add(n)
+            if stato is None:
+                senza_titolo.append(r)
+            else:
+                parti[id(r)] = stato
+        if senza_titolo:
+            iniziale = "prospetto" if any(_importi_grezzi(r) for r in senza_titolo) else "altro"
+            for r in senza_titolo:
+                parti[id(r)] = iniziale
+
+    def del_prospetto(n: int) -> list[RigaFisica]:
+        return [r for r in pagine[n] if parti[id(r)] == "prospetto"]
+
+    # Le colonne dei prospetti: quelle dei prospetti titolati prima della nota (o di tutto il prospetto) presenti su
+    # almeno meta' delle loro pagine. Una tabella che sta su poche pagine non e' una colonna dei prospetti.
+    fonte = sorted(titolate) or [n for n in range(len(pagine)) if del_prospetto(n)]
+    candidate = colonne_documento([r for n in fonte for r in del_prospetto(n)])
+    pagine_di: dict[int, int] = Counter()
+    for n in fonte:
+        viste = Counter(c.indice for r in del_prospetto(n) for p in _importi_grezzi(r)
+                        if (c := colonna_di(p.x1, candidate)) is not None)
+        pagine_di.update(i for i, k in viste.items() if k >= 2)
+    principali = [c for c in candidate if pagine_di[c.indice] * 2 >= len(fonte)]
+    # Una pagina del prospetto che il primo blocco titolato non copre (senza titolo, o titolata dopo la nota) e' nota
+    # se i suoi importi stanno per lo piu' fuori da quelle colonne, o se continua con le colonne proprie la tabella
+    # della nota della pagina prima (la seconda pagina della rideterminazione del reddito, budget_395 p. 7).
+    proprie_prima: list[float] = []
+    for n in range(len(pagine)):
+        righe = del_prospetto(n)
+        importi = [p for r in righe for p in _importi_grezzi(r)]
+        fuori = [p.x1 for p in importi if colonna_di(p.x1, principali) is None]
+        proprie = _bordi(fuori, minimo=3)
+        if n not in titolate and len(importi) >= _MIN_IMPORTI_GEOMETRIA and (
+                len(fuori) > (1 - _QUOTA_COLONNE_PROSPETTO) * len(importi)
+                or any(abs(a - b) <= _TOL_X_CODICE * 2 for a in proprie for b in proprie_prima)):
+            for r in righe:
+                parti[id(r)] = "nota"
+        nota = [r for r in pagine[n] if parti[id(r)] == "nota"]
+        proprie_prima = (_bordi([p.x1 for r in nota for p in _importi_grezzi(r)
+                                 if colonna_di(p.x1, principali) is None], minimo=3) if nota else [])
+    return parti
+
+
+def _bordi(xs: list[float], minimo: int = 2) -> list[float]:
+    """I bordi destri mediani dei gruppi di `xs` a non piu' di 14 pt l'uno dall'altro (`colonne._colonne_dai_bordi`),
+    con almeno `minimo` elementi."""
+    gruppi: list[list[float]] = []
+    for x in sorted(xs):
+        if gruppi and x - gruppi[-1][-1] <= 14.0:
+            gruppi[-1].append(x)
+        else:
+            gruppi.append([x])
+    return [statistics.median(g) for g in gruppi if len(g) >= minimo]
+
+
+def _parti_pagina(pagine: list[list[RigaFisica]], parti: dict[int, str]) -> tuple[dict[int, str], list]:
+    """(pagina -> parte prevalente, bande). Prevale la parte con piu' righe con importi, poi con piu' righe."""
+    per_pagina: dict[int, str] = {}
+    bande: list[tuple[int, float, str]] = []
+    for n, righe in enumerate(pagine, start=1):
+        if not righe:
+            continue
+        conta = Counter()
+        for r in righe:
+            parte = parti[id(r)]
+            conta[parte] += 1 + 1000 * bool(_importi_grezzi(r))
+            if not bande or bande[-1][2] != parte:
+                bande.append((n, r.y, parte))
+        per_pagina[n] = conta.most_common(1)[0][0]
+    return per_pagina, bande
+
+
+def _tabelle_nota(pagine: list[list[RigaFisica]], parti: dict[int, str]) -> list[TabellaNota]:
+    """Le tabelle della nota: per pagina, i blocchi di righe con importi separati da almeno due righe di testo;
+    titolo la riga di testo appena sopra, o l'ultimo titolo della nota."""
+    out = []
+    titolo_nota = ""
+    for righe in pagine:
+        blocco: list[RigaFisica] = []
+        testo_fra = 0
+        sopra = ""
+
+        def chiudi():
+            if blocco:
+                out.append(TabellaNota(blocco[0].pagina, blocco[0].y, blocco[-1].y, sopra or titolo_nota,
+                                       tuple(_bordi([p.x1 for r in blocco for p in _importi_grezzi(r)]))))
+
+        for r in righe:
+            if parti[id(r)] != "nota":
+                chiudi()
+                blocco, testo_fra, sopra = [], 0, ""
+                continue
+            if _titolo_parte(r) == "nota":
+                titolo_nota = _testo(r)
+            if _importi_grezzi(r):
+                if testo_fra >= 2:
+                    chiudi()
+                    blocco = []
+                blocco.append(r)
+                testo_fra = 0
+            else:
+                testo_fra += 1
+                if testo_fra >= 2 or not blocco:
+                    if testo_fra >= 2:
+                        chiudi()
+                        blocco = []
+                    sopra = _testo(r)
+        chiudi()
+    return out
+
+
+# --------------------------------------------------------------------------------------
 # Profilo
 # --------------------------------------------------------------------------------------
 
@@ -547,28 +735,37 @@ def profilo_documento(righe: list[RigaFisica], *, altezze: dict[int, float] | No
         return Profilo("ignoto", "nessun testo", [], None, frozenset(), {}, [], {}, frozenset(),
                        ["tipo non determinato: nessun testo, serve l'OCR"])
 
-    colonne = colonne_documento([r for p in pagine for r in p])
-    margini = _ripetute(pagine, altezze_l, colonne)
+    # I margini come prima, sulle colonne di tutte le righe; poi le parti, e le colonne solo sul prospetto.
+    margini = _ripetute(pagine, altezze_l, colonne_documento([r for p in pagine for r in p]))
+    parti = _parti(pagine, altezze_l, margini)
+    colonne = colonne_documento([r for p in pagine for r in p if parti[id(r)] == "prospetto"])
+    parti_pagina, bande = _parti_pagina(pagine, parti)
+    tabelle = _tabelle_nota(pagine, parti)
     pagine = [[r for r in rr if not _scartata(r, altezze_l[n], colonne, margini)] for n, rr in enumerate(pagine)]
     tutte = [r for rr in pagine for r in rr]
-    decimali = _decimali(tutte, colonne)
+    prospetto = [r for r in tutte if parti[id(r)] == "prospetto"]
+    decimali = _decimali(prospetto, colonne)
     intere = frozenset(i for i, d in decimali.items() if d is False)
 
-    tipo_parole, voci, quota, perche_parole = _parole_del_tipo(tutte, colonne)
-    confine = confine_ammesso(tutte, colonne, tipo_parole)
+    tipo_parole, voci, quota, perche_parole = _parole_del_tipo(prospetto, colonne)
+    confine = confine_ammesso(prospetto, colonne)
     assegna_lati(colonne, confine)
     ruoli = {c.ruolo for c in colonne}
-    if confine is not None:
+    if tipo_parole is not None:
+        tipo, perche = tipo_parole, "parole"
+    elif confine is not None:
         tipo, perche = "contrapposte", f"geometria: due lati simmetrici, confine a x={confine:.1f}"
     elif ruoli & _RUOLI_VERIFICA:
         tipo, perche = "verifica", "colonne " + "/".join(sorted(ruoli & _RUOLI_VERIFICA))
-    elif tipo_parole is not None:
-        tipo, perche = tipo_parole, "parole"
     elif quota >= _QUOTA_CODICI:
         tipo, perche = "verifica", "codici conto senza voci di legge"
     else:
         tipo, perche = "ignoto", "nessuna regola decide"
-    indizio = _indizio(tutte)
+    contrapposto = confine is not None and tipo in ("contrapposte", "verifica")
+    if confine is not None and not contrapposto:
+        avvisi.append(f"due tabelle affiancate: lati fisici, non sezioni contrapposte (confine a x={confine:.1f}, "
+                      f"tipo {tipo})")
+    indizio = _indizio(prospetto)
     tipo_perche = f"{perche}; {perche_parole}; {indizio}"
     if tipo == "ignoto":
         avvisi.append(f"tipo non determinato ({perche_parole}; {indizio})")
@@ -576,5 +773,6 @@ def profilo_documento(righe: list[RigaFisica], *, altezze: dict[int, float] | No
         avvisi.append(f"tipo {tipo}, ma il {indizio} (solo un indizio)")
 
     sezioni = _sezioni_pagina(pagine, _sezioni(pagine, colonne, avvisi))
-    return Profilo(tipo, tipo_perche, colonne, confine, _negativi(tutte, colonne, intere), decimali,
-                   _forme(_candidati(tutte, colonne, confine)), sezioni, frozenset(margini), avvisi)
+    return Profilo(tipo, tipo_perche, colonne, confine, _negativi(prospetto, colonne, intere), decimali,
+                   _forme(_candidati(prospetto, colonne, confine)), sezioni, frozenset(margini), avvisi,
+                   contrapposto, parti_pagina, bande, tabelle)

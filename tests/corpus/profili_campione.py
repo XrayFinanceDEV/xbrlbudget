@@ -71,6 +71,9 @@ def _registro(doc: dict) -> dict:
         "id": doc["id"], "path": doc["path"], "tipologia": doc["tipologia"],
         "tipo": prof.tipo, "tipo_perche": prof.tipo_perche,
         "confine": None if prof.confine is None else round(prof.confine, 1),
+        "contrapposto": prof.contrapposto,
+        "parti": {str(k): v for k, v in prof.parti.items()},
+        "tabelle_nota": len(prof.tabelle_nota),
         "colonne": [{"indice": c.indice, "x": round(c.x_destra, 1), "lato": c.lato, "ruolo": c.ruolo,
                      "fine": c.fine.isoformat() if c.fine else None, "mesi": c.mesi, "corrente": c.corrente}
                     for c in prof.colonne],
@@ -93,7 +96,7 @@ def _giudizio(reg: dict) -> dict:
     if famiglia in A_PARTE:
         return out
     out["tipo_giusto"] = reg["tipo"] == TIPO_ATTESO.get(famiglia)
-    out["contrapposto_giusto"] = (reg["confine"] is not None) == (famiglia == "contrapposte")
+    out["contrapposto_giusto"] = bool(reg.get("contrapposto")) == (famiglia == "contrapposte")
     veri = _periodi_veri(reg["id"])
     if veri:
         n_ok = reg["esercizi_per_lato"] == len(veri)
@@ -117,7 +120,8 @@ def main() -> int:
             reg = _registro(doc)
         except Exception as e:          # la misura non si ferma su un documento
             reg = {"id": doc["id"], "path": doc["path"], "tipologia": doc["tipologia"], "errore": repr(e),
-                   "tipo": None, "confine": None, "esercizi_per_lato": 0, "fini_stampate": []}
+                   "tipo": None, "confine": None, "contrapposto": False, "esercizi_per_lato": 0,
+                   "fini_stampate": []}
         reg["giudizio"] = _giudizio(reg)
         registri.append(reg)
 
@@ -146,17 +150,29 @@ def main() -> int:
     valutati = [r for r in registri if r["giudizio"]["famiglia"] not in A_PARTE]
     altri = [r for r in valutati if r["giudizio"]["famiglia"] != "contrapposte"]
     contr = [r for r in valutati if r["giudizio"]["famiglia"] == "contrapposte"]
+    con_periodi = [r for r in valutati if "periodi" in r["giudizio"]]
     print(f"\ncontrapposto giusto: {sum(r['giudizio']['contrapposto_giusto'] for r in valutati)}/{len(valutati)}"
-          f" (contrapposte trovate {sum(r['confine'] is not None for r in contr)}/{len(contr)}, "
-          f"confini su altri tipi {sum(r['confine'] is not None for r in altri)})")
+          f" (contrapposte trovate {sum(bool(r['contrapposto']) for r in contr)}/{len(contr)}, "
+          f"contrapposto su altri tipi {sum(bool(r['contrapposto']) for r in altri)})")
     print(f"tipo giusto: contrapposte {sum(r['giudizio']['tipo_giusto'] for r in contr)}/{len(contr)}, "
           f"altri {sum(r['giudizio']['tipo_giusto'] for r in altri)}/{len(altri)}")
+    print(f"periodi giusti (colonne-esercizio per lato = periodi della verita'): "
+          f"{sum(r['giudizio']['periodi'] == 'giusti' for r in con_periodi)}/{len(con_periodi)}")
     print("\nsbagliati:")
     for r in valutati:
         g = r["giudizio"]
         if not g["tipo_giusto"] or not g["contrapposto_giusto"]:
             print(f"  {r['id']:>10} {r['tipologia'][:26]:26} -> {r['tipo']} confine={r['confine']} "
                   f"| {r.get('tipo_perche') or r.get('errore')}")
+    print("\nconfine fisico senza sezioni contrapposte (non e' un errore):")
+    for r in registri:
+        if r["confine"] is not None and not r.get("contrapposto"):
+            avviso = next((a for a in r.get("avvisi", []) if "affiancate" in a), "")
+            print(f"  {r['id']:>10} {r['tipologia'][:26]:26} {avviso}")
+    print("\nperiodi sbagliati:")
+    for r in con_periodi:
+        if r["giudizio"]["periodi"] != "giusti":
+            print(f"  {r['id']:>10} {r['tipologia'][:26]:26} {r['giudizio']['periodi']}")
     return 0
 
 

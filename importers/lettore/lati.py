@@ -24,14 +24,14 @@ _X0_MINIMO = 150.0      # come `colonne._in_colonna`
 _COPPIE_TESTATA = ((("attivit", "attivo"), ("passivit", "passivo")), (("costi",), ("ricavi",)))
 # «D»/«A» dopo un importo ne sono il segno (dare/avere), non la descrizione di un lato (budget_682, 1533, 1540).
 _MARCATORI = {"D", "A"}
-# Tipi del profilo che le parole dicono a sezione unica: li' un confine vale solo con l'intestazione dei lati.
-TIPI_SENZA_LATI = frozenset({"schema", "schema-dettaglio"})
 # Ruoli che si confrontano fra i lati: i valori di periodo insieme, gli altri ciascuno per se'.
 _GRUPPO_RUOLO = {"esercizio": "valori", "saldo": "valori", "mastro": "valori", "dare": "dare", "avere": "avere",
                  "differenza": "differenza", "percentuale": "percentuale"}
-# Una colonna conta in un lato se porta almeno questa quota degli importi della colonna piu' piena del lato:
-# una tabella di poche righe su una pagina sola (la nota in fondo) non e' una colonna del prospetto.
-_QUOTA_PRINCIPALE = 0.4
+# Su una pagina una colonna conta in un lato se ha celle su almeno questa quota delle righe con importi di quel lato
+# della pagina; si confrontano le pagine con almeno tante righe per lato. Una colonna che copre solo un pezzo di
+# pagina (una tabella in coda, i mastri di poche righe) non vi conta.
+_QUOTA_RIGHE_PAGINA = 0.25
+_MIN_RIGHE_PAGINA = 3
 
 
 def confine_dei_lati(righe: list[RigaFisica], colonne: list[Colonna]) -> float | None:
@@ -64,42 +64,50 @@ def confine_dei_lati(righe: list[RigaFisica], colonne: list[Colonna]) -> float |
     return max(migliori)[2] if migliori else None
 
 
-def confine_ammesso(righe: list[RigaFisica], colonne: list[Colonna], tipo: str | None) -> float | None:
-    """Il confine del profilo: vale solo se i due lati sono simmetrici (`lati_simmetrici`). Dove le parole dicono
-    gia' uno schema di legge (`tipo` in `TIPI_SENZA_LATI`) serve anche l'intestazione dei lati sulla stessa riga
-    («ATTIVITA' … PASSIVITA'»): una situazione riclassificata a sezioni contrapposte la stampa (budget_1430),
-    lo stato patrimoniale con il conto economico accanto sulla stessa pagina no (budget_1426)."""
+def confine_ammesso(righe: list[RigaFisica], colonne: list[Colonna]) -> float | None:
+    """Il confine fisico del profilo: il varco di `confine_dei_lati`, se i due lati sono simmetrici
+    (`lati_simmetrici`). Dice che la pagina e' fatta di due tabelle affiancate, non che siano sezioni contrapposte:
+    quel verdetto lo da' il profilo (`Profilo.contrapposto`)."""
     x = confine_dei_lati(righe, colonne)
-    if x is None or not lati_simmetrici(righe, colonne, x):
-        return None
-    if tipo in TIPI_SENZA_LATI and not _confermato(righe, colonne, x):
-        return None
-    return x
+    return x if x is not None and lati_simmetrici(righe, colonne, x) else None
 
 
 def lati_simmetrici(righe: list[RigaFisica], colonne: list[Colonna], confine: float) -> bool:
     """Le sezioni contrapposte ripetono la stessa tabella sui due lati: tante colonne di valori a sinistra quante
     a destra, e dare/avere, differenza o percentuale su entrambi o su nessuno. Un lato con colonne che l'altro
-    non ha e' una tabella unica, con le descrizioni corte di una colonna in mezzo (budget_594, 680, 1566). Contano
-    le colonne principali di ciascun lato (`_QUOTA_PRINCIPALE`)."""
-    conteggi: dict[int, int] = {}
+    non ha e' una tabella unica, con le descrizioni corte di una colonna in mezzo (budget_594, 680, 1566).
+
+    Si confronta pagina per pagina, sulle colonne che coprono la pagina (`_QUOTA_RIGHE_PAGINA`), e i lati sono
+    simmetrici se le pagine simmetriche sono piu' di quelle che non lo sono: una colonna minore su una pagina (la
+    colonna dei mastri sotto i ricavi di budget_588 p. 4, una tabella in coda) non rompe la simmetria."""
+    per_pagina: dict[int, list] = {}
     for r in righe:
-        for p in r.parole:
-            imp = leggi_importo(p.testo) if p.x0 > _X0_MINIMO else None
-            if imp is not None and imp.forma != "zero" and (c := colonna_di(p.x1, colonne)) is not None:
-                conteggi[c.indice] = conteggi.get(c.indice, 0) + 1
-    profili = []
-    for sinistra in (True, False):
-        lato = [c for c in colonne if (c.x_destra < confine) == sinistra]
-        massimo = max((conteggi.get(c.indice, 0) for c in lato), default=0)
-        principali = [c for c in lato if massimo and conteggi.get(c.indice, 0) >= _QUOTA_PRINCIPALE * massimo]
-        gruppi: dict[str, int] = {}
-        for c in principali:
-            g = _GRUPPO_RUOLO.get(c.ruolo)
-            if g is not None:
-                gruppi[g] = gruppi.get(g, 0) + 1
-        profili.append(gruppi)
-    return bool(profili[0].get("valori")) and profili[0] == profili[1]
+        usate = {c.indice: c for p in r.parole
+                 if p.x0 > _X0_MINIMO and (i := leggi_importo(p.testo)) is not None and i.forma != "zero"
+                 and (c := colonna_di(p.x1, colonne)) is not None}
+        pagina = per_pagina.setdefault(r.pagina, [[0, {}], [0, {}]])
+        for k, sinistra in enumerate((True, False)):
+            lato = [c for c in usate.values() if (c.x_destra < confine) == sinistra]
+            if lato:
+                pagina[k][0] += 1
+                for c in lato:
+                    pagina[k][1][c.indice] = pagina[k][1].get(c.indice, 0) + 1
+    simmetriche = asimmetriche = 0
+    for lati in per_pagina.values():
+        if min(n for n, _ in lati) < _MIN_RIGHE_PAGINA:
+            continue
+        gruppi = []
+        for n, conteggi in lati:
+            g: dict[str, int] = {}
+            for i, k in conteggi.items():
+                if k >= _QUOTA_RIGHE_PAGINA * n and (ruolo := _GRUPPO_RUOLO.get(colonne[i].ruolo)) is not None:
+                    g[ruolo] = g.get(ruolo, 0) + 1
+            gruppi.append(g)
+        if gruppi[0].get("valori") and gruppi[0] == gruppi[1]:
+            simmetriche += 1
+        else:
+            asimmetriche += 1
+    return simmetriche > asimmetriche
 
 
 def assegna_lati(colonne: list[Colonna], confine: float | None) -> list[Colonna]:
@@ -172,9 +180,14 @@ def _piega(testo: str) -> str:
 def _confermato(righe: list[RigaFisica], colonne: list[Colonna], x: float) -> bool:
     """Una riga senza importi in colonna porta la parola del lato sinistro prima di x e quella del destro dopo, in
     qualunque maiuscolo e con o senza accento («Conto attivo … Conto passivo» su una riga di conti non
-    e' un'intestazione)."""
+    e' un'intestazione), e sta sopra righe con importi della sua stessa pagina: l'intestazione dei lati che
+    descrive."""
+    con_importi: dict[int, float] = {}
     for r in righe:
         if _celle(r, colonne):
+            con_importi[r.pagina] = max(con_importi.get(r.pagina, r.y), r.y)
+    for r in righe:
+        if _celle(r, colonne) or con_importi.get(r.pagina, -1.0) <= r.y:
             continue
         parole = [(p, _piega(p.testo)) for p in r.parole]
         for sinistre, destre in _COPPIE_TESTATA:

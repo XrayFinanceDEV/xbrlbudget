@@ -209,3 +209,15 @@ def test_marcatori_dare_avere_non_fanno_un_lato(tmp_path):
     righe, colonne = _leggi(tmp_path, voci)
     assert len(colonne) == 2
     assert confine_dei_lati(righe, colonne) is None
+
+
+def test_intestazione_su_un_altra_pagina_non_conferma(tmp_path):
+    # L'intestazione dei lati conferma solo le righe che le stanno sotto, sulla sua pagina.
+    p = tmp_path / "l.pdf"
+    scrivi_pdf(p, [_contrapposte(codici=False, descritte_destra=2), [(40, 120, "Attività"), (310, 120, "Passività")]])
+    with fitz.open(str(p)) as doc:
+        righe = [r for n, pagina in enumerate(doc, start=1) for r in righe_fisiche(parole_pagina(pagina), n)]
+    assert confine_dei_lati(righe, colonne_documento(righe)) is None
+    sotto = _contrapposte(codici=False, descritte_destra=2) + [(40, 300, "Attività"), (310, 300, "Passività")]
+    righe, colonne = _leggi(tmp_path, sotto)
+    assert confine_dei_lati(righe, colonne) is None

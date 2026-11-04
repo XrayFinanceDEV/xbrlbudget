@@ -225,19 +225,162 @@ def _due_lati_di_legge(testata):
     return voci
 
 
-def test_situazione_riclassificata_a_sezioni_contrapposte(tmp_path):
-    # Voci di legge su entrambi i lati, ma l'intestazione dei lati sulla stessa riga: sezioni contrapposte
-    # (budget_1429, 1430).
-    prof = _profilo(tmp_path, _due_lati_di_legge([(40, 120, "ATTIVITA'"), (310, 120, "PASSIVITA'")]))
-    assert prof.tipo == "contrapposte"
-    assert prof.confine is not None and 280 < prof.confine < 310
+def test_due_prospetti_di_legge_affiancati_hanno_lati_fisici_non_contrapposti(tmp_path):
+    # Lo stato patrimoniale con il conto economico accanto (budget_1426), o una situazione riclassificata
+    # (budget_1430): due tabelle affiancate. Il confine e' fisico, le parole dicono schema, e il verdetto
+    # «contrapposto» (lato sinistro = attivo/costi) non c'e'; il profilo lo dichiara.
+    for testata in ([], [(40, 120, "ATTIVITA'"), (310, 120, "PASSIVITA'")]):
+        prof = _profilo(tmp_path, _due_lati_di_legge(testata))
+        assert prof.tipo == "schema"
+        assert prof.confine is not None and 280 < prof.confine < 310
+        assert [c.lato for c in prof.colonne] == ["L", "R"]
+        assert prof.contrapposto is False
+        assert any("due tabelle affiancate" in a for a in prof.avvisi)
 
 
-def test_due_prospetti_di_legge_affiancati_senza_intestazione_non_sono_contrapposte(tmp_path):
-    # Lo stato patrimoniale con il conto economico accanto (budget_1426): due tabelle di legge, nessuna
-    # intestazione dei lati. Le parole dicono schema, e la geometria da sola non basta.
-    righe = _righe(tmp_path, [_due_lati_di_legge([])])
-    assert confine_dei_lati(righe, colonne_documento(righe)) is not None
-    prof = profilo_documento(righe)
+def test_contrapposte_hanno_il_verdetto(tmp_path):
+    prof = _profilo(tmp_path, _contrapposte())
+    assert prof.contrapposto is True
+    assert not any("due tabelle affiancate" in a for a in prof.avvisi)
+
+
+def test_titolo_centrato_attivo_e_passivo_non_fa_contrapposte(tmp_path):
+    # «STATO PATRIMONIALE ATTIVO E PASSIVO» centrato sopra uno schema a sezione unica.
+    voci = [(200, 120, "STATO PATRIMONIALE ATTIVO E PASSIVO")] + _tabella(_SCHEMA, colonne=(300, 560))
+    prof = _profilo(tmp_path, voci)
     assert prof.tipo == "schema"
     assert prof.confine is None
+    assert prof.contrapposto is False
+
+
+def _movimentazione(y0=200):
+    """Una tabella della nota con quattro colonne proprie."""
+    voci = [(50, y0 - 20, "Valore di inizio esercizio Incrementi Decrementi Valore di fine esercizio")]
+    for k in range(5):
+        y = y0 + k * 14
+        voci += [(50, y, f"Categoria {k}"), (250, y, _VALORI[k]), (330, y, _VALORI[k + 1]), (410, y, _VALORI[k + 2]),
+                 (490, y, _VALORI[k + 3])]
+    return voci
+
+
+def test_tabella_della_nota_non_fa_colonne(tmp_path):
+    pagina1 = [(50, 120, "STATO PATRIMONIALE")] + _tabella(_SCHEMA)
+    pagina2 = [(50, 120, "NOTA INTEGRATIVA"), (50, 140, "Movimentazione delle immobilizzazioni")] + _movimentazione()
+    prof = profilo_documento(_righe(tmp_path, [pagina1, pagina2]))
+    assert [round(c.x_destra) for c in prof.colonne] == [480, 560]
+    assert prof.parti == {1: "prospetto", 2: "nota"}
+    assert len(prof.tabelle_nota) == 1
+    tab = prof.tabelle_nota[0]
+    assert tab.pagina == 2 and len(tab.colonne) == 4
+    assert "Movimentazione" in tab.titolo or "Valore di inizio" in tab.titolo
+
+
+def test_pagina_di_nota_senza_titolo_continua_la_nota(tmp_path):
+    pagina1 = [(50, 120, "STATO PATRIMONIALE")] + _tabella(_SCHEMA)
+    pagina2 = [(50, 120, "NOTA INTEGRATIVA")] + _movimentazione()
+    # una tabella della nota sulle stesse colonne dei prospetti: la geometria non la distingue, la continuazione si'
+    pagina3 = _tabella(["Saldo iniziale", "Incrementi", "Decrementi", "Saldo finale"])
+    prof = profilo_documento(_righe(tmp_path, [pagina1, pagina2, pagina3]))
+    assert prof.parti == {1: "prospetto", 2: "nota", 3: "nota"}
+    assert [round(c.x_destra) for c in prof.colonne] == [480, 560]
+
+
+def test_titolo_di_prospetto_dopo_la_nota_torna_prospetto(tmp_path):
+    pagina1 = [(50, 120, "STATO PATRIMONIALE")] + _tabella(_SCHEMA)
+    pagina2 = [(50, 120, "Nota integrativa, parte iniziale")] + _movimentazione()
+    pagina3 = [(50, 120, "CONTO ECONOMICO")] + _tabella(["A) Valore della produzione", "1) Ricavi",
+                                                         "B) Costi della produzione", "6) Materie", "7) Servizi"])
+    prof = profilo_documento(_righe(tmp_path, [pagina1, pagina2, pagina3]))
+    assert prof.parti == {1: "prospetto", 2: "nota", 3: "prospetto"}
+    assert [round(c.x_destra) for c in prof.colonne] == [480, 560]
+    assert [b[2] for b in prof.bande] == ["prospetto", "nota", "prospetto"]
+
+
+def test_pagina_con_colonne_proprie_dopo_il_prospetto_e_nota(tmp_path):
+    # Senza titolo, ma con colonne che non sono quelle dei prospetti (la rideterminazione del reddito fiscale in
+    # coda a una situazione contabile, budget_395 p. 6-7).
+    pagina1 = [(50, 120, "STATO PATRIMONIALE")] + _tabella(_SCHEMA)
+    prof = profilo_documento(_righe(tmp_path, [pagina1, _movimentazione(140)]))
+    assert prof.parti == {1: "prospetto", 2: "nota"}
+    assert [round(c.x_destra) for c in prof.colonne] == [480, 560]
+
+
+def test_frontespizio_e_altro(tmp_path):
+    copertina = [(200, 300, "ALFA SRL"), (200, 320, "Bilancio al 31/12/2025")]
+    pagina2 = [(50, 120, "STATO PATRIMONIALE")] + _tabella(_SCHEMA)
+    prof = profilo_documento(_righe(tmp_path, [copertina, pagina2]))
+    assert prof.parti == {1: "altro", 2: "prospetto"}
+
+
+def _pagina_contrapposta(n_sinistra, n_destra, minore=(), y0=140):
+    """Una pagina a sezioni contrapposte: `n_sinistra` conti a sinistra (colonna a 280), `n_destra` a destra (560);
+    sulle righe di `minore` una seconda colonna a sinistra (200), come i mastri dei costi."""
+    voci = []
+    for k in range(max(n_sinistra, n_destra)):
+        y = y0 + k * 14
+        if k < n_sinistra:
+            voci += [(40, y, f"0{k % 9 + 1}.0{k // 9 + 1}"), (80, y, f"Costo {k}"), (280, y, _VALORI[k % 8])]
+            if k in minore:
+                voci.append((200, y, _VALORI[(k + 3) % 8]))
+        if k < n_destra:
+            voci += [(310, y, f"2{k % 9 + 1}.0{k // 9 + 1}"), (350, y, f"Ricavo {k}"), (560, y, _VALORI[(k + 1) % 8])]
+    return voci
+
+
+def test_colonna_minore_su_parte_del_documento_non_rompe_la_simmetria(tmp_path):
+    # La colonna a 200 ha il 45% degli importi della colonna principale di sinistra, ma solo sulla pagina dei costi,
+    # dove a destra non c'e' niente da confrontare. Contata per quota degli importi (regola di prima, 40%) faceva
+    # due colonne a sinistra contro una a destra.
+    pagine = [_pagina_contrapposta(8, 8), _pagina_contrapposta(8, 8), _pagina_contrapposta(40, 0, minore=range(25))]
+    righe = _righe(tmp_path, pagine)
+    prof = profilo_documento(righe)
+    principale = sum(1 for r in righe for p in r.parole if abs(p.x1 - 280) < 3)
+    minore = sum(1 for r in righe for p in r.parole if abs(p.x1 - 200) < 3)
+    assert 0.4 < minore / principale < 0.5
+    assert prof.contrapposto is True and prof.tipo == "contrapposte"
+    assert [c.lato for c in prof.colonne] == ["L", "L", "R"]
+
+
+def test_colonna_minore_su_una_pagina_su_tre_non_rompe_la_simmetria(tmp_path):
+    pagine = [_pagina_contrapposta(8, 8), _pagina_contrapposta(8, 8), _pagina_contrapposta(8, 8, minore=range(4))]
+    prof = profilo_documento(_righe(tmp_path, pagine))
+    assert prof.contrapposto is True
+
+
+def test_lati_asimmetrici_su_ogni_pagina_sono_una_tabella(tmp_path):
+    pagine = [_pagina_contrapposta(8, 8, minore=range(8)) for _ in range(3)]
+    prof = profilo_documento(_righe(tmp_path, pagine))
+    assert prof.confine is None and prof.contrapposto is False
+
+
+def test_negativi_col_meno(tmp_path):
+    voci = _tabella([f"Voce {k}" for k in range(6)])
+    voci += [(50, 240, "Perdite"), (480, 240, "-1.234,56"), (560, 240, "-45,00")]
+    prof = _profilo(tmp_path, voci)
+    assert prof.negativi == frozenset({"meno"})
+
+
+def test_negativi_col_marcatore(tmp_path):
+    # Il marcatore staccato («1.234,56 D») e quello attaccato («45,00A», ricucito da `righe._ricuci` come in
+    # `leggi_pdf`): il profilo del PDF vede l'uno e l'altro.
+    from importers.lettore.righe import profilo_pdf
+    for forma in ("staccato", "attaccato"):
+        voci = []
+        for k in range(6):
+            y = 140 + k * 14
+            voci += [(50, y, f"Conto {k}"), (560, y, _VALORI[k + 1])]
+            voci += [(480, y, _VALORI[k]), (486, y, "D")] if forma == "staccato" else [(480, y, _VALORI[k] + "A")]
+        p = tmp_path / f"m-{forma}.pdf"
+        scrivi_pdf(p, [voci])
+        prof = profilo_pdf(str(p))
+        assert len(prof.colonne) == 2, forma
+        assert "marcatore" in prof.negativi, forma
+
+
+def test_negativi_in_percentuale_non_contano(tmp_path):
+    percentuali = ("-12,345", "-3,500", "10,000", "-1,250", "4,000", "-2,000")
+    voci = _tabella([f"Voce {k}" for k in range(6)], colonne=(480,))
+    voci += [(560, 140 + k * 14, v) for k, v in enumerate(percentuali)]
+    prof = _profilo(tmp_path, voci)
+    assert [c.ruolo for c in prof.colonne] == ["esercizio", "percentuale"]
+    assert prof.negativi == frozenset()

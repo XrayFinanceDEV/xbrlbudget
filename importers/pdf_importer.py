@@ -1190,6 +1190,37 @@ def _create_income_statement(db, financial_year_id: int, data: Dict[str, Decimal
     return inc
 
 
+def _lettore_diagnosi_import(file_path, extraction_context, fiscal_year, qd, unbalanced_reason, snello_report):
+    """La diagnosi del lettore di righe per questo import: ``(diagnosi | None, frasi)``. Non solleva mai.
+
+    Spenta con ``LETTORE_DIAGNOSI=0|false|no`` (nessuna chiave). Le frasi vanno all'utente solo se l'import
+    stesso dichiara che qualcosa non torna; altrimenti la diagnosi resta in ``validation_report``."""
+    if os.environ.get("LETTORE_DIAGNOSI", "1").strip().lower() in ("0", "false", "no", "off"):
+        return None, []
+    try:
+        from importers.lettore.diagnosi import diagnosi_pdf, frasi_per_utente
+        anno = fiscal_year or datetime.now().year
+        diagnosi = diagnosi_pdf(file_path, extraction_context, anno_corrente=anno, anno_precedente=anno - 1)
+    except Exception as exc:  # noqa: BLE001 - il lettore non ferma mai un import
+        logger.warning(f"Lettore di righe non eseguito: {exc}")
+        return {"esito": "errore", "motivo": f"{type(exc).__name__}: {exc}"}, []
+    try:
+        sezioni = set()
+        if abs(qd.sbilancio) > Decimal("0.01"):
+            sezioni.add("SP")
+        if not qd.utile_match:
+            sezioni.add("CE")
+        if (snello_report or {}).get("esito") in ("squadrato", "tappo"):
+            sezioni.add("SP")
+        if unbalanced_reason and not sezioni:
+            sezioni = {"SP", "CE"}
+        frasi = frasi_per_utente(diagnosi, sezioni, anno_precedente=anno - 1) if sezioni else []
+    except Exception as exc:  # noqa: BLE001
+        logger.warning(f"Frasi del lettore non prodotte: {exc}")
+        frasi = []
+    return diagnosi, frasi
+
+
 def import_pdf_balance_sheet(
     file_path: str,
     company_id: Optional[int] = None,
@@ -2425,6 +2456,11 @@ def import_pdf_balance_sheet(
                 f"Impossibile validare contabilmente il bilancio estratto: {_qd_err}"
             ) from _qd_err
 
+        # Lettore di righe (Fase 2, REGOLE-IMPORT-02 §11): solo diagnosi, nessun importo ne dipende. Un try
+        # proprio: nulla di cio' che accade qui puo' cambiare SP, CE, esito o anni. Una volta per import.
+        _lettore, _lettore_frasi = _lettore_diagnosi_import(
+            file_path, extraction_context, fiscal_year, _qd, unbalanced_reason, _snello_report)
+
         warnings = mapper.validate_hierarchy(balance_sheet_data)
         if _testo_cifrato is not None:
             warnings.insert(0, _tc.avviso(_testo_cifrato))
@@ -2473,6 +2509,9 @@ def import_pdf_balance_sheet(
         warnings.extend(sc_quadratura_warnings)
         if unbalanced_reason:
             warnings.insert(0, unbalanced_reason)
+        if _lettore_frasi:
+            _pos = 1 if unbalanced_reason else 0
+            warnings[_pos:_pos] = _lettore_frasi
         if _snello is not None:
             # Percorso snello (Task 25 fix round 1): lo stesso avviso arriva da piu' fonti
             # (validate_hierarchy e la quadratura unificata); ogni avviso distinto esce una
@@ -2547,6 +2586,8 @@ def import_pdf_balance_sheet(
             logger.warning(f"Reliability non calcolata: {_rel_err}")
 
         _validation_payload = _validation_report_payload(_qd, reliability=_reliability)
+        if _lettore is not None:
+            _validation_payload["lettore"] = _lettore
         if _snello_report is not None:
             _validation_payload["import_snello"] = _snello_report
         if _mineru_tabelle:

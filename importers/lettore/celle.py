@@ -28,6 +28,7 @@ from dataclasses import dataclass, field
 from datetime import date
 from decimal import Decimal
 
+from importers.lettore._ereditati import TableHTMLParser
 from importers.lettore.colonne import (
     _ANALISI, _PAROLE_DESCRIZIONE, _PAROLE_RIGA_TESTATA, _PAROLE_VALORE, _RUOLI_TESTATA, Colonna, _corrente, _data,
     _mastri, _mesi, _parola_testata, _ruoli)
@@ -40,7 +41,6 @@ from importers.lettore.profilo import (
 from importers.lettore.righe import _ANAGRAFICA, Documento, Riga, _codice, _normalizza
 from importers.lettore.totali import _PAROLE_CE, _PAROLE_SP, _PAROLE_VUOTE, _TESTATA, _TESTATA_ANCHE, assegna_padri, \
     marca_totali
-from importers.mineru_adapter import _TableHTMLParser
 
 # Geometria sintetica: la descrizione sta a sinistra di `profilo._X0_MINIMO` (150), le colonne a destra.
 _X_TESTO = 10.0
@@ -109,7 +109,7 @@ def _importo_cella(cella: str) -> tuple[Importo, str] | None:
 # HTML: la griglia delle celle
 # --------------------------------------------------------------------------------------
 
-class _ParserGriglia(_TableHTMLParser):
+class _ParserGriglia(TableHTMLParser):
     """Il parser delle tabelle di `mineru_adapter`, che tiene anche colspan e rowspan di ogni cella."""
 
     def __init__(self) -> None:
@@ -860,7 +860,7 @@ def leggi_celle(tabelle: list[str], pagine: list[int], titoli: list[str | None] 
     per_riga = _sezioni(sintetiche, colonne, avvisi_doc)
     sezione_di = {id(f): s for ff, ss in zip(sintetiche, per_riga) for f, s in zip(ff, ss)}
     # una tabella che continua sulla pagina dopo resta nella sua sezione, anche se `_sezioni` sulla pagina nuova non
-    # la vede (la pagina prima ha chiuso con un totale che `_chiude_sezione` prende per la chiusura)
+    # la vede (la pagina prima ha chiuso con un totale che `chiude_sezione` prende per la chiusura)
     del_blocco: dict[int, str] = {}
     for g, f in zip(grezze, fisiche):
         if sezione_di[id(f)]:

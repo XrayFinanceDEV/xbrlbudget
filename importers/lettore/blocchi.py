@@ -18,6 +18,7 @@ from importers.lettore.totali import (
 
 _TETTO_ETICHETTE = 12
 _NUMERO_RIGA = re.compile(r"r(\d+)")
+_PAGINA_RIGA = re.compile(r"p(\d+)r")
 # Il lessico C12 conta anche «Utile (perdita) dell'esercizio», che sullo SP e' un conto del patrimonio netto e non
 # somma le righe sopra di se': come blocco nasce solo una riga che dice di essere un totale, o una riga di soli importi.
 _DICE_TOTALE = re.compile(r"\btotal[ei]\b|\bpareggio\b|\bsaldo (?:finale|generale)\b|\beccedenza\b")
@@ -57,7 +58,8 @@ def blocchi_aperti(doc: Documento) -> list[Blocco]:
         colonna = colonne.get(serie.colonna)
         if colonna is None:
             continue
-        aperti = _candidati(doc, serie, coppie)
+        # un tratto scelto per minimo scarto vale solo su uno schema di legge: su un elenco di conti inventerebbe divari
+        aperti = _candidati(doc, serie, coppie) if _su_schema(doc) else {}
         for i, r in enumerate(serie.righe):
             if _chiuso(r, serie.colonna, coppie):
                 continue
@@ -146,5 +148,7 @@ def frase_blocco(b: Blocco) -> str:
     periodo = str(b.fine.year) if b.fine else f"colonna {b.colonna + 1}"
     a, z = (_NUMERO_RIGA.search(x) for x in b.righe)
     righe = f"righe {a.group(1)}-{z.group(1)}" if a and z else "righe"
-    return (f"{b.voce} ({periodo}, p. {b.pagina}, {righe}): stampato {_euro(b.stampato)}, "
+    pa, pz = (_PAGINA_RIGA.match(x) for x in b.righe)
+    pagine = f"pp. {pa.group(1)}-{pz.group(1)}" if pa and pz and pa.group(1) != pz.group(1) else f"p. {b.pagina}"
+    return (f"{b.voce} ({periodo}, {pagine}, {righe}): stampato {_euro(b.stampato)}, "
             f"i conti sommano {_euro(b.somma)}, scarto {_euro(b.scarto)}")

@@ -32,7 +32,9 @@ _APERTURA = [("Voce a", "40,00"), ("Voce b", "60,00"), ("Totale apertura", "100,
 
 def _doc(tmp_path, righe, apertura=True):
     """Un gruppo che chiude davanti (serve al profilo per riconoscere la colonna, e fa da confine) e le `righe`."""
-    return _leggi(tmp_path, [_righe(140, (_APERTURA if apertura else []) + righe)])
+    doc = _leggi(tmp_path, [_righe(140, (_APERTURA if apertura else []) + righe)])
+    doc.profilo.tipo = "schema"     # il PDF sintetico e' «ignoto»: i blocchi da riga di controllo valgono solo su uno schema
+    return doc
 
 
 def test_documento_che_chiude_non_ha_blocchi(tmp_path):
@@ -127,3 +129,20 @@ def test_ordine_per_scarto(tmp_path):
     blocchi = blocchi_aperti(doc)
     assert [b.voce for b in blocchi] == ["Totale", "Totale parziale"]
     assert [abs(b.scarto) for b in blocchi] == [Decimal("100.00"), Decimal("5.00")]
+
+
+def test_controllo_su_elenco_di_conti_non_e_un_blocco(tmp_path):
+    righe = [("Conto uno", "150,00"), ("Conto due", "200,00"), ("Conto tre", "250,00"), ("Totale", "610,00")]
+    doc = _doc(tmp_path, righe)
+    assert len(blocchi_aperti(doc)) == 1          # su uno schema: un blocco
+    for tipo in ("contrapposte", "verifica", "ignoto"):
+        doc.profilo.tipo = tipo
+        assert blocchi_aperti(doc) == []
+
+
+def test_frase_blocco_su_due_pagine():
+    b = Blocco(voce="B) II - Crediti", codice="", sezione="SP", lato="U", colonna=0, fine=date(2025, 12, 31),
+               mesi=12, corrente=True, stampato=Decimal("1234.56"), somma=Decimal("1200.00"),
+               scarto=Decimal("34.56"), pagina=4, righe=("p3r21U", "p4r11U"), etichette=())
+    assert frase_blocco(b) == ("B) II - Crediti (2025, pp. 3-4, righe 21-11): stampato 1.234,56, "
+                               "i conti sommano 1.200,00, scarto 34,56")

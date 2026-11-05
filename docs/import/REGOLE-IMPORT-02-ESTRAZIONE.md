@@ -1012,3 +1012,148 @@ Ognuna ha il suo test; le regressioni sono su 208 PDF diversi (`Test/` più il l
   quando `is_contrapposte_file` riconosce conti su due lati. budget_1432 era letto in «legge» e il
   modello mescolava lordi e fondi (sbilancio 585.819, ora 15.524,64). Sui 208 PDF la guardia può
   toccare 9 file; reimportati, 8 verificati e 1432 migliorato.
+
+## 11. Lettore di righe unico (Fase 1)
+
+`importers/lettore/` è il lettore nuovo, scritto **accanto** al percorso attuale: **non è collegato
+all'import**. Nessuna rotta e nessun importatore lo chiama; collegarlo è il lavoro delle Fasi 2-4. Fino ad
+allora quello che si legge in queste pagine sopra descrive l'import vero, e il lettore si misura soltanto.
+
+**Che cosa legge.** Da un PDF col text layer (`leggi_pdf`) o dalle tabelle HTML di MinerU (`leggi_celle`)
+restituisce un `Documento`: righe con codice, etichetta e un importo `Decimal` per colonna; le colonne col
+loro ruolo (esercizio, mastro, differenza, percentuale, dare, avere, saldo, oppure ignoto quando testata e
+numeri non decidono), il periodo e la corrente; il lato
+fisico e il verdetto «sezioni contrapposte»; la sezione SP/CE; la parte (prospetto, nota, altro); le righe di
+totale coi figli colonna per colonna, e per ogni riga il padre, se verificato dalla somma, e il percorso. Non
+classifica in campi `sp`/`ce`, non netta, non tappa: ciò che non sa decidere lo dichiara (`Documento.avvisi`,
+`Profilo.avvisi`).
+
+**I principi del proprietario, nell'ordine in cui il lettore li applica.**
+
+- **Prima la struttura, poi le righe.** Il profilo del documento (`profilo.py`: tipo, colonne e periodi, lati,
+  negativi, decimali, forme dei codici, sezioni, margini, parti) si calcola per primo, e le righe si leggono su
+  di lui, senza rifare quelle decisioni.
+- **Le tabelle della nota integrativa non sono mai un prospetto.** Si riconoscono e si dichiarano
+  (`Profilo.tabelle_nota`, `Riga.parte == "nota"`); colonne, periodi, totali e padri si calcolano solo sul
+  prospetto.
+- **La parentela viene solo dalle somme stampate**, colonna per colonna; mai dal prefisso o dalla lunghezza del
+  codice conto. Un titolo sopra dà al più un padre non verificato.
+- **Verificato solo con almeno due importi non nulli** (un'uguaglianza a un solo membro resta un'ipotesi, R14)
+  **e con gli stessi membri su ogni colonna** che ha un gruppo suo (R18).
+
+**Le regole riusate e da dove.** Le regole riprese dall'importatore attuale citano la funzione da cui vengono
+nella docstring del modulo (`geometria.py`, `colonne.py`, `lati.py`, `totali.py`, `celle.py`) o accanto alla
+regola stessa (`righe.py` e `profilo.py`, che ne raccolgono molte: `schema_legge_generico._bordi`,
+`standard_ivcee_parser._anchors_carry_amounts`, `import_snello/righe.py:marca_totali`,
+`situazione_contabile_parser` per righe fisiche e lati, `xbrl_reso_parser._DISTANZA_IMPORTO_ORFANO`…);
+`importi.py` è scritto da capo sulle contraddizioni C1-C2 e `__init__.py` esporta soltanto. L'elenco
+completo, con le dodici contraddizioni C1-C12 fra copie della stessa regola e la scelta fatta per ciascuna, è
+nell'inventario `.superpowers/sdd/2026-10-30-importatore-generico-fase1/inventario-lettura.md` (fuori da
+git), e le decisioni prese durante la fase (R1-R23, Q1-Q2) nel registro della stessa cartella SDD
+(`.superpowers/sdd/2026-11-04-fase1-lettore-righe/progress.md`).
+
+Le regole aggiunte con la misura sul campione:
+
+- **Poste rettificative.** Una voce fra parentesi col nome di una rettifica («(Ammortamenti)», «(Fondi di
+  ammortamento)») stampata positiva si sottrae nella somma della voce sopra; la cella resta lo stampato.
+- **Risultati del conto economico.** Nei risultati («Differenza tra valore e costi della produzione», «Risultato
+  prima delle imposte», «Utile (perdita)», «Totale proventi e oneri finanziari», «Totale delle rettifiche») costi,
+  interessi e oneri, svalutazioni e imposte stampati positivi si sottraggono, e quei risultati si cercano dopo gli
+  altri totali. Vale **solo sul conto economico a sezione unica** (sulle contrapposte il risultato pareggia due
+  lati); fuori da uno schema di legge (bilanci di verifica, situazioni contabili) solo col lessico di legge per
+  intero, perché lì «Differenza cambi passiva» o «UTILE ESERCIZIO:» sono nomi di conto. La voce di legge che
+  stampa il suo importo **prima** dei componenti («C) PROVENTI E ONERI FINANZIARI», «D) RETTIFICHE DI VALORE…»,
+  1464) tiene la regola del segno ma non è una riga di controllo: cerca i suoi membri sotto di sé, come ogni voce.
+- **Periodi.** Il periodo di una colonna viene dalla testata sopra di lei (anche con la didascalia a sinistra) e,
+  quando manca, dai titoli del documento solo se il periodo stampato è uno solo. Una colonna «precedente» o
+  «comparato» senza data prende l'anno intero prima (fine al 31/12, mesi ignoti) solo se un titolo dice «anno
+  precedente» o se la corrente è un anno solare intero; quella data non è stampata da nessuna parte, e il profilo
+  lo dichiara in `Profilo.avvisi` (1548, 313).
+- **Tolleranza (C6) sulla cella del totale.** Un euro quando il totale è stampato all'unità (la colonna è tutta a
+  interi, la cella non ha decimali, o sta nella colonna dei totali di una coppia), anche sopra figli al centesimo
+  della stessa colonna (1533, 682: voci e conti in una colonna); altrimenti al centesimo. La chiusura esatta vince
+  ancora su quella in tolleranza (R17).
+- **Coppie parziali → totali (Q1, decisione del proprietario 2026-11-05).** In alcuni schemi con dettaglio i conti
+  stanno nella colonna «parziali» e la voce che li somma nella colonna «totali» accanto (638, 1331, 1451, 1540,
+  1558).
+  Il profilo marca la coppia (`Profilo.coppie`, totali → parziali): due colonne di valori adiacenti sullo stesso
+  lato che non stampano mai sulla stessa riga, i parziali coi centesimi, i totali all'unità. Una voce della
+  colonna dei totali prende per membri le celle dei parziali delle righe fra lei e la riga dei totali successiva
+  (o precedente: vale la direzione che chiude di più), fermandosi al titolo di una voce allo stesso rientro rimasta
+  senza importo; i suoi figli stanno in `Riga.figli[parziali]`, la colonna su cui si leggono i loro importi. I due
+  livelli **non si mescolano**: un conto già membro di un totale dei parziali non conta, fra righe a rientri
+  diversi contano le meno rientrate, e i totali della colonna dei totali sommano solo celle della colonna dei
+  totali. Unire le due colonne in una, la strada ovvia, peggiora la misura (chiusi 73,7% contro 74,5%): somma
+  conti e voci insieme. R14, R16, R17 e R18 valgono come altrove.
+- **Marcatore D/A per colonna (Q2, decisione del proprietario 2026-11-05).** Il profilo marca una colonna «a
+  marcatore» (`Profilo.marcatori`) quando almeno il 60% delle sue celle, e almeno 10, sono seguite da un D/A
+  staccato («11.429.777,38 D», 680). Solo lì il marcatore firma la cella e lascia l'etichetta; altrove resta
+  testo, come prima (365/367: due «A» sparsi in una contrapposta; 1562: il marcatore dei soli mastri). Il
+  marcatore attaccato all'importo («1.234,56A») lo firma sempre. In entrambi i casi il segno segue il lato (R23),
+  perché la colonna è la verità sul lato: `leggi_importo` restituisce il marcatore a parte (`Importo.marcatore`,
+  valore senza segno) e `importi.segno_del_lato` lo applica. A sinistra delle contrapposte (attivo, costi) e su una
+  sezione unica D è positivo e A negativo (il saldo in dare); a destra (passivo, ricavi) A è positivo e D negativo.
+  Il marcatore staccato non apre il varco fra i due lati (`lati._varco`, `_sfora`). Su una sezione unica una voce
+  senza marcatore del passivo o dei ricavi (1533, 1540) chiude i conti a marcatore col segno rovesciato: lo decide
+  la somma, e la voce lo dichiara in `Riga.verso` (-1 per la colonna dei figli). Deciderlo per token, provato e
+  tolto, rompeva 365/367 e 1562.
+- **Voce all'unità sopra un conto solo (R22).** «contributi in conto esercizio 113.946» sopra il solo conto
+  113.945,74 non chiude mai come catena esatta (R14); il totale sopra, in tolleranza, prendeva allora il conto al
+  posto della voce, e il conto saltava un livello (1533, 682; su 208 un credito «esigibile oltre» finiva sotto il
+  totale dei crediti, oltre il confine entro/oltre). Prima di ogni altra somma la voce stampata senza decimali prende
+  il conto adiacente, al centesimo e più rientrato di lei, entro un euro: un'ipotesi (`padre_verificato` falso),
+  ma il conto esce dal cammino e il totale sopra somma la voce. Non vale se anche il conto dopo sta nella
+  tolleranza, per le righe di controllo, né senza rientri (tabelle OCR). Lo stesso per la voce dei totali di una
+  coppia con un conto solo nei parziali.
+
+**Per chi integra (Fase 2).** Sette cose che il `Documento` non dice da sé:
+
+- **Si lavora su `Documento.righe_del_prospetto()`, mai su `righe`.** Le righe di nota che `leggi_pdf`
+  restituisce hanno `celle` con le chiavi delle colonne della loro tabella, `profilo.tabelle_nota[r.tabella]`,
+  non di `Documento.colonne`: la colonna 0 di una riga di nota non è la colonna 0 del prospetto.
+- **Le due letture non danno le stesse righe di nota.** `leggi_celle` non ne restituisce nessuna (le tabelle della
+  nota stanno solo in `profilo.tabelle_nota`); `leggi_pdf` le restituisce, marcate `parte == "nota"`.
+- **Gli avvisi sono in due posti**: quelli del documento in `profilo.avvisi`, quelli delle righe in
+  `Documento.avvisi`. `Documento.tutti_gli_avvisi()` li dà insieme, prima il documento, senza ripetizioni.
+- **Con `Profilo.coppie` i figli stanno su un'altra colonna.** Per una voce della colonna dei totali `t.figli[c]`
+  ha per chiave `c` la colonna dei **parziali**, quella su cui si leggono gli importi dei figli, e `t.celle[c]` può
+  non esistere: il totale della voce sta nella colonna dei totali (la chiave di `Profilo.coppie`).
+- **Per risommare i figli si usa `valore_nel_totale(doc, totale, figlio, colonna)`, mai la cella com'è.** Il
+  valore che un figlio porta nella somma del suo totale non è sempre lo stampato: una posta rettificativa
+  stampata positiva si sottrae, un costo dentro un risultato del conto economico si sottrae, e in una voce dal
+  verso rovesciato (`Riga.verso`, Q2) un conto a marcatore cambia segno. La cella resta lo stampato.
+- **`contrapposto` non vuol dire la stessa cosa sulle due letture.** Su `leggi_pdf` `Documento.contrapposto` è il
+  verdetto del profilo (R10: confine fisico **e** tipo contrapposte o verifica); su `leggi_celle` è vero ogni volta
+  che ci sono colonne L e R. Sulla lettura OCR `Profilo.coppie` e `Profilo.marcatori` sono sempre vuoti.
+- **Il lettore importa nomi privati da sei moduli dell'importatore attuale** (sette contando il pubblico
+  `bilancio_classifier.classify_bilancio`, in `profilo.py`): `schema_legge_generico` (`_PAROLE_TESTATA`,
+  `_e_differenza`, `_PIEDE`, `_intestazione`, `_forma_strutturale`), `standard_ivcee_parser` (`_AMOUNT_LIKE`,
+  `_DATE_RE`), `xbrl_reso_parser` (`_FASCIA_MARGINE`, `_chiave_ripetuta`, `_frase_aperta`), `detail_enrichment`
+  (`_chiude_sezione`, `_sezione_della_chiusura`), `mineru_adapter` (`_TableHTMLParser`) e `import_snello.righe`
+  (`_lista_concatenata`). Un ritocco a uno di quei nomi cambia il lettore senza che i suoi test lo sappiano:
+  togliere questo legame è il primo compito della Fase 2.
+
+**Come si misura.** Due script, nessun import, nessun DB, nessuna rete; i PDF e le verità sono cifre di
+clienti e restano fuori da git (`Test/` è ignorata):
+
+```bash
+# profilo: tipo, contrapposte, periodi sul campione (e con --rete il controllo su tutti i PDF di Test/)
+IMPORT_CORPUS_ROOT=$PWD/Test backend/venv/bin/python tests/corpus/profili_campione.py --etichetta <nome>
+# righe: totali stampati ritrovati e chiusi, periodi, mastri giusti, contro le due letture e la verità
+IMPORT_CORPUS_ROOT=$PWD/Test backend/venv/bin/python tests/corpus/righe_campione.py --etichetta <nome> [--solo 395,1456]
+```
+
+Il secondo legge `tests/corpus/campione.json` (78 documenti; le scansioni si contano a parte, vanno per
+`leggi_celle` solo con MinerU acceso), le letture `Test/_analisi-campione/<id>.json` e `opus/<id>.json`, la
+verità `verita/<id>.json`, e scrive `Test/_analisi-campione/righe/<nome>/righe.json` e `righe.md`: le quote in
+totale e per tipologia, e per documento i totali non ritrovati o non chiusi, i periodi sbagliati e i conti col
+mastro sbagliato. Un totale è chiuso solo se è chiusa la riga che è quel totale (fra le righe della pagina con
+quel valore, quella la cui etichetta somiglia di più alla voce annotata), non un'altra riga con lo stesso importo;
+i chiusi si riportano in tre quote affiancate: letterale, senza i totali ritrovati solo su colonne di differenza o
+percentuale, e senza quelli ritrovati solo su differenza, percentuale, dare o avere. I mastri si contano in due modi: *stretto* (il padre diretto ha il codice o il nome annotato, o il percorso di
+legge stampato in testa all'etichetta, «1.B.2.4 Altri beni»)
+e *tollerante* (anche un «Totale X» con X uguale al padre annotato, o che lo contiene, numerazione di legge a
+parte, salendo per i totali fino al primo antenato che non è un totale: la lettura nomina la voce, «1) Verso
+clienti», il lettore il totale stampato che la chiude, «Totale crediti verso clienti»). Le annotazioni
+sbagliate note stanno in `CORREZIONI_ANNOTAZIONE`, non pesano e si elencano; oggi l'elenco è vuoto, perché le
+prime (353, 1524-1526) il proprietario le ha corrette alla fonte.

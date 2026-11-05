@@ -570,3 +570,12 @@ def test_precedente_dopo_un_infrannuale_non_si_sceglie(tmp_path):
     a, b = _profilo(tmp_path, _con_titolo("Situazione al 30/09/2026", colonne=(480, 560), testata=testata)).colonne
     assert (a.fine, a.mesi) == (date(2026, 9, 30), 9)
     assert b.fine is None
+
+
+def test_precedente_senza_data_si_dichiara(tmp_path):
+    # 1548, 313: il 31/12 dell'anno prima non e' stampato da nessuna parte: si legge, e si dichiara
+    testata = [(480 - 40, 120, "corrente"), (560 - 45, 120, "comparato")]
+    prof = _profilo(tmp_path, _con_titolo("BILANCIO dal 01/01/2026 al 30/09/2026 - COMPARATO CON SALDO ANNO PRECEDENTE",
+                                          colonne=(480, 560), testata=testata))
+    assert prof.colonne[1].fine == date(2025, 12, 31)
+    assert any("«precedente» senza data stampata" in a and "31/12/2025" in a for a in prof.avvisi)

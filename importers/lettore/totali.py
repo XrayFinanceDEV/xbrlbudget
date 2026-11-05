@@ -158,9 +158,32 @@ _COSTO_DEL_RISULTATO = re.compile(r"\bcosti della produzione\b|\binteressi e (?:
                                   r"|\bimposte (?:sul reddito|correnti|relative|differite)|\btotale (?:delle )?imposte\b")
 
 
-def _risultato(r: Riga) -> bool:
-    """Solo su una sezione unica: sulle contrapposte costi e ricavi stanno su due lati, e il risultato pareggia."""
-    return r.sezione == "CE" and r.lato == "U" and bool(_RISULTATO.search(_norm(r.etichetta)))
+# Fuori da uno schema di legge (bilancio di verifica, situazione contabile) «Differenza cambi passiva» o «UTILE
+# ESERCIZIO:» sono nomi di conto: li' vale solo il lessico di legge per intero.
+_RISULTATO_DI_LEGGE = re.compile(r"\bdifferenza tra valore e costi della produzione\b|\brisultato prima delle imposte\b"
+                                 r"|\butile \(perdita\) dell.? ?esercizio\b"
+                                 r"|\btotale (?:dei )?proventi e oneri finanziari\b|\btotale (?:delle )?rettifiche\b")
+# La voce di legge che stampa il suo importo prima dei componenti («C) PROVENTI E ONERI FINANZIARI», «D) RETTIFICHE DI
+# VALORE DI ATTIVITA' …», 1464): tiene la regola del segno, ma non e' una riga di controllo che chiude sopra di se'.
+_VOCE_DI_RISULTATO = re.compile(r"^[a-e]\s?[).\-]\s*(?:proventi e oneri|rettifiche di valore)\b")
+_TIPI_SCHEMA = ("schema", "schema-dettaglio")
+
+
+def _su_schema(doc: Documento) -> bool:
+    return getattr(doc.profilo, "tipo", "schema") in _TIPI_SCHEMA
+
+
+def _risultato(r: Riga, schema: bool = True) -> bool:
+    """Solo su una sezione unica: sulle contrapposte costi e ricavi stanno su due lati, e il risultato pareggia. Fuori
+    da uno schema di legge, solo col lessico di legge per intero."""
+    if r.sezione != "CE" or r.lato != "U":
+        return False
+    return bool((_RISULTATO if schema else _RISULTATO_DI_LEGGE).search(_norm(r.etichetta)))
+
+
+def _risultato_di_controllo(r: Riga, schema: bool = True) -> bool:
+    """Un risultato chiude cio' che gli sta sopra, come una riga di controllo; non la voce che lo apre."""
+    return _risultato(r, schema) and not _VOCE_DI_RISULTATO.match(_norm(r.etichetta))
 
 
 def _costo_del_risultato(r: Riga) -> bool:
@@ -177,17 +200,18 @@ def _marcata(r: Riga, colonna: int) -> bool:
     return cella is not None and bool(_MARCATA.search(cella.testo.strip()))
 
 
-def _valore_nel_totale(t: Riga, f: Riga, colonna: int, verso: int = 1) -> Decimal:
+def _valore_nel_totale(t: Riga, f: Riga, colonna: int, verso: int = 1, schema: bool = True) -> Decimal:
     """Il valore del membro `f` nella somma del totale `t`, con le regole del segno (posta rettificativa, costo
     dentro un risultato, conto a marcatore D/A dentro una voce dal verso rovesciato: `Riga.verso`)."""
     v = _valore_di_somma(f, colonna)
     if verso == -1 and _marcata(f, colonna):
         v = -v
-    return -v if v > 0 and _risultato(t) and _costo_del_risultato(f) else v
+    return -v if v > 0 and _risultato(t, schema) and _costo_del_risultato(f) else v
 
 
 def _serie(doc: Documento) -> list[_Serie]:
     out = []
+    schema = _su_schema(doc)
     for colonna in doc.colonne:
         if colonna.ruolo not in _RUOLI_VALORE:
             continue
@@ -199,8 +223,8 @@ def _serie(doc: Documento) -> list[_Serie]:
             valori = [_valore_di_somma(r, colonna.indice) for r in righe]
             # un risultato chiude sempre cio' che gli sta sopra, come una riga di controllo
             out.append(_Serie(colonna.indice, [_tolleranza_cella(doc, r, colonna.indice) for r in righe], righe, valori,
-                              [_di_controllo(r) or _risultato(r) for r in righe],
-                              [r.celle[colonna.indice].valore for r in righe], [_risultato(r) for r in righe],
+                              [_di_controllo(r) or _risultato_di_controllo(r, schema) for r in righe],
+                              [r.celle[colonna.indice].valore for r in righe], [_risultato(r, schema) for r in righe],
                               [-v if v > 0 and _costo_del_risultato(r) else v for r, v in zip(righe, valori)],
                               [_marcata(r, colonna.indice) for r in righe]))
     return out
@@ -524,7 +548,7 @@ def _gruppi_di_coppia(doc: Documento, righe: list[Riga], totali: int, parziali: 
             versi.append(-1)
         chiusure = []
         for verso in versi:
-            somma = sum((_valore_nel_totale(t, r, parziali, verso) for r in membri), Decimal(0))
+            somma = sum((_valore_nel_totale(t, r, parziali, verso, _su_schema(doc)) for r in membri), Decimal(0))
             if abs(somma - bersaglio) <= tol:
                 chiusure.append((somma != bersaglio, verso))
         if not chiusure:
@@ -631,6 +655,7 @@ def _confronta_colonne(doc: Documento) -> None:
     la somma torna (e i figli valgono anche li', se nessun altro totale li ha presi) o non torna, e si dichiara."""
     priorita = _priorita(doc)
     per_id = {r.id: r for r in doc.righe}
+    schema = _su_schema(doc)
     colonne = {c.indice: c for c in doc.colonne if c.ruolo in _RUOLI_VALORE}
     presi: dict[int, set[str]] = defaultdict(set)
     non_chiude: dict[int, list[str]] = defaultdict(list)
@@ -647,8 +672,8 @@ def _confronta_colonne(doc: Documento) -> None:
                 continue
             if not any(c in f.celle for f in figli):
                 continue        # i figli non stampano quella colonna (parziali e totali, percentuali)
-            somma = sum((_valore_nel_totale(t, f, c, t.verso.get(riferimento, 1)) for f in figli if c in f.celle),
-                        Decimal(0))
+            somma = sum((_valore_nel_totale(t, f, c, t.verso.get(riferimento, 1), schema)
+                         for f in figli if c in f.celle), Decimal(0))
             scarto = t.celle[c].valore - somma
             if abs(scarto) <= _tolleranza_cella(doc, t, c):
                 if not presi[c] & set(t.figli[riferimento]):
@@ -852,6 +877,7 @@ def _gruppi_incoerenti(doc: Documento, colonne_prova: set[int]) -> set[tuple[str
     per_id = {r.id: r for r in doc.righe}
     pos = {r.id: k for k, r in enumerate(doc.righe)}
     colonne = {c.indice: c for c in doc.colonne if c.ruolo in _RUOLI_VALORE}
+    schema = _su_schema(doc)
     out: set[tuple[str, int]] = set()
     for t in doc.righe:
         if t.parte != "prospetto":
@@ -884,7 +910,7 @@ def _gruppi_incoerenti(doc: Documento, colonne_prova: set[int]) -> set[tuple[str
             for c2 in sorted(colonne_prova & set(colonne)):
                 if c2 == c or c2 in t.figli or c2 not in t.celle or not any(c2 in m.celle for m in membri):
                     continue
-                somma = sum((_valore_nel_totale(t, m, c2, t.verso.get(c, 1)) for m in membri if c2 in m.celle),
+                somma = sum((_valore_nel_totale(t, m, c2, t.verso.get(c, 1), schema) for m in membri if c2 in m.celle),
                             Decimal(0))
                 if abs(somma - t.celle[c2].valore) > _tolleranza_cella(doc, t, c2):
                     out.add((t.id, c))

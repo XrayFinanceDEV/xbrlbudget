@@ -173,11 +173,11 @@ def _riferimento_davanti(parole: list[Parola], i: int) -> bool:
     return prima in _RIFERIMENTO
 
 
-# Q2: in una colonna a marcatore (`Profilo.marcatori`) il D/A staccato dopo l'importo e' il segno della cella. La colonna
-# e' la verita' sul lato (CLAUDE.md): sul lato sinistro delle contrapposte (attivo, costi) e su una sezione unica vale
-# il saldo in dare, D positivo e A negativo (come «1.234,56 A» attaccato, `leggi_importo`); sul lato destro (passivo,
-# ricavi) A positivo e D negativo. Su una sezione unica una voce del passivo o dei ricavi chiude i suoi conti col segno
-# rovesciato: lo decide la somma (`totali`, `Riga.verso`), non il marcatore.
+# Q2: in una colonna a marcatore (`Profilo.marcatori`) il D/A staccato dopo l'importo e' il segno della cella. La
+# colonna e' la verita' sul lato (CLAUDE.md): sul lato sinistro delle contrapposte (attivo, costi) e su una sezione
+# unica vale il saldo in dare, D positivo e A negativo (come «1.234,56 A» attaccato, `leggi_importo`); sul lato destro
+# (passivo, ricavi) A positivo e D negativo. Su una sezione unica una voce del passivo o dei ricavi chiude i suoi conti
+# col segno rovesciato: lo decide la somma (`totali`, `Riga.verso`), non il marcatore.
 _MARCATORE_NEGATIVO = {"U": "A", "L": "A", "R": "D"}
 
 

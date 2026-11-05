@@ -361,27 +361,30 @@ def _periodo_unico(stampati: list[tuple[date | None, date]], anno: int | None = 
     return fine, inizio, mesi
 
 
-def completa_periodi(colonne: list[Colonna], testate: list[RigaFisica], titoli: list[RigaFisica]) -> None:
+def completa_periodi(colonne: list[Colonna], testate: list[RigaFisica], titoli: list[RigaFisica],
+                     avvisi: list[str] | None = None) -> None:
     """Il periodo delle colonne-valori che le testate lasciano senza data o con l'anno nudo, dai titoli del documento.
 
     - Un anno nudo sopra la colonna («Esercizio: 2026») prende il periodo stampato che finisce in quell'anno, se e'
       uno solo («Col. 1 Esercizio: 2026 periodo dal 01/01/2026 al 31/05/2026»).
     - Una colonna-valori senza data, sola sul suo lato, prende il periodo del documento, se e' uno solo («Situazione
       dal 01/01/2026 al 30/09/2026»); fra piu' colonne, quella con «corrente» in testata; quella con «precedente» o
-      «comparato» prende l'anno intero prima, come un anno nudo, solo se un titolo dice «anno precedente».
+      «comparato» prende l'anno intero prima, come un anno nudo, solo se un titolo dice «anno precedente» o se la
+      corrente e' un anno solare intero: quella data non e' stampata, e si dichiara in `avvisi`.
     - Una colonna di mastri sul lato di una colonna-valori sola ne prende il periodo (sono lo stesso periodo).
     Poi la corrente si ricalcola (per lato)."""
     stampati, precedente = periodi_stampati(titoli)
     if not stampati:
         return
-    _completa(colonne, testate, stampati, precedente)
+    _completa(colonne, testate, stampati, precedente, avvisi if avvisi is not None else [])
     for c in colonne:
         c.corrente = False
     for lato in {c.lato for c in colonne}:
         _corrente([c for c in colonne if c.lato == lato])
 
 
-def _completa(colonne: list[Colonna], testate: list[RigaFisica], stampati: list, precedente: bool) -> None:
+def _completa(colonne: list[Colonna], testate: list[RigaFisica], stampati: list, precedente: bool,
+              avvisi: list[str]) -> None:
     for c in colonne:
         if c.ruolo in ("esercizio", "saldo", "mastro") and c.fine is not None and c.mesi is None \
                 and c.inizio is None and (c.fine.month, c.fine.day) == (12, 31):
@@ -410,6 +413,9 @@ def _completa(colonne: list[Colonna], testate: list[RigaFisica], stampati: list,
                 # l'anno intero prima, come un anno nudo: dal titolo («anno precedente»), o perche' la corrente e'
                 # un anno solare intero; dopo un infrannuale «precedente» puo' essere lo stesso periodo, e non si sceglie
                 c.fine, c.inizio, c.mesi = date(documento[0].year - 1, 12, 31), None, None
+                perche = "dal titolo «anno precedente»" if precedente else "dopo un anno solare intero"
+                avvisi.append(f"colonna {c.indice + 1} «precedente» senza data stampata: letta come l'esercizio al "
+                              f"{c.fine:%d/%m/%Y} ({perche}), data non stampata nel documento")
 
 
 # --------------------------------------------------------------------------------------

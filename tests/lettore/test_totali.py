@@ -181,7 +181,7 @@ from importers.lettore.righe import Riga  # noqa: E402
 from importers.lettore.totali import assegna_padri, marca_totali  # noqa: E402
 
 
-def _documento(righe, *, colonne=1, correnti=(), pagina_di=None, sezione="SP", sezioni=None):
+def _documento(righe, *, colonne=1, correnti=(), pagina_di=None, sezione="SP", sezioni=None, tipo="schema"):
     """`righe`: (x, codice, etichetta, importi...) con importi None per una cella vuota; nessun importo = titolo.
     `x` puo' essere una coppia (x del codice, x dell'etichetta)."""
     out = []
@@ -193,7 +193,7 @@ def _documento(righe, *, colonne=1, correnti=(), pagina_di=None, sezione="SP", s
                         etichetta=etichetta, celle=celle, intestazione=not celle, x=x, x_etichetta=x_etichetta))
     cols = [Colonna(c, 400.0 + 80 * c, "U", "esercizio", None, None, None, c in correnti) for c in range(colonne)]
     doc = Documento(out, cols, False, [], SimpleNamespace(decimali={c: True for c in range(colonne)},
-                                                          sezioni=sezioni or {}))
+                                                          sezioni=sezioni or {}, tipo=tipo))
     marca_totali(doc)
     assegna_padri(doc)
     return doc
@@ -809,7 +809,8 @@ def test_colonne_affiancate_a_centesimi_non_sono_una_coppia(tmp_path):
     # corrente e precedente che non stampano sulla stessa riga ma entrambe al centesimo: nessuna coppia
     righe = [(30, "Voce uno", "1.200,50", None), (30, "Voce due", None, "2.300,40"), (30, "Voce tre", "3.700,10", None),
              (30, "Voce quattro", None, "4.100,20"), (30, "Voce cinque", "5.200,30", None),
-             (30, "Voce sei", None, "6.300,60"), (30, "Voce sette", "7.400,70", None), (30, "Voce otto", None, "8.500,80")]
+             (30, "Voce sei", None, "6.300,60"), (30, "Voce sette", "7.400,70", None),
+             (30, "Voce otto", None, "8.500,80")]
     doc = _leggi(tmp_path, _righe(140, righe, colonne=(300, 380)))
     assert doc.profilo.coppie == {}
 
@@ -831,3 +832,35 @@ def test_titolo_di_una_voce_senza_importo_chiude_la_finestra_dei_parziali(tmp_pa
     assert clienti.figli[0] == tuple(_riga(doc, e).id for e in ("Crediti verso privati", "Crediti verso enti",
                                                                   "Altri clienti"))
     assert _riga(doc, "Controllata alfa").padre != clienti.id
+
+
+def test_voce_di_risultato_stampata_prima_dei_componenti_non_e_di_controllo():
+    # 1464: «C) PROVENTI E ONERI FINANZIARI (153.082,01)» apre i suoi componenti: li somma sotto di se', e il risultato
+    # prima delle imposte la prende come membro. Il documento stampa le voci prima dei componenti (direzione +1)
+    doc = _documento([(46, "", "B) Costi della produzione", "300,00"), (54, "", "6) per materie", "100,00"),
+                      (54, "", "7) per servizi", "200,00"),
+                      (46, "", "Differenza tra valore e costi della produzione", "219.297,34"),
+                      (46, "", "C) PROVENTI E ONERI FINANZIARI", "(153.082,01)"),
+                      (54, "", "16) altri proventi finanziari", "4.258,70"),
+                      (54, "", "17) interessi e altri oneri finanziari", "(149.529,16)"),
+                      (54, "", "17-bis) utili e perdite su cambi", "(7.811,55)"),
+                      (46, "", "Risultato prima delle imposte (A - B + - C + - D)", "66.215,33")], sezione="CE")
+    voce = _conto(doc, "C) PROVENTI E ONERI FINANZIARI")
+    assert voce.figli[0] == tuple(_conto(doc, e).id for e in (
+        "16) altri proventi finanziari", "17) interessi e altri oneri finanziari", "17-bis) utili e perdite su cambi"))
+    assert _conto(doc, "17-bis) utili e perdite su cambi").padre_verificato
+    assert set(_conto(doc, "Risultato prima delle imposte (A - B + - C + - D)").figli[0]) == {
+        _conto(doc, "Differenza tra valore e costi della produzione").id, voce.id}
+
+
+def test_nomi_di_conto_di_una_verifica_non_sono_risultati():
+    # su un bilancio di verifica «UTILE ESERCIZIO:» e «Differenza cambi passiva» sono conti: la regola del segno dei
+    # risultati vale solo col lessico di legge per intero, e qui gli oneri si sommano come stampati
+    doc = _documento([(40, "70101", "Ricavi vendite", "1.000,00"),
+                      (40, "80201", "Interessi e altri oneri bancari", "200,00"),
+                      (20, "", "UTILE ESERCIZIO:", "1.200,00")], sezione="CE", tipo="verifica")
+    utile = _conto(doc, "UTILE ESERCIZIO:")
+    assert utile.totale and len(utile.figli[0]) == 2
+    from importers.lettore.totali import _risultato
+    assert not _risultato(_conto(doc, "UTILE ESERCIZIO:"), schema=False)
+    assert _risultato(_conto(doc, "UTILE ESERCIZIO:"), schema=True)

@@ -870,7 +870,7 @@ def profilo_documento(righe: list[RigaFisica], *, altezze: dict[int, float] | No
     assegna_lati(colonne, confine)
     # i titoli del documento stanno anche fuori dal prospetto e nei margini ripetuti; mai nella nota
     completa_periodi(colonne, [r for rr in pagine_tutte for r in rr if parti[id(r)] == "prospetto"],
-                     [r for rr in pagine_tutte for r in rr if parti[id(r)] != "nota"])
+                     [r for rr in pagine_tutte for r in rr if parti[id(r)] != "nota"], avvisi)
     ruoli = {c.ruolo for c in colonne}
     if tipo_parole is not None:
         tipo, perche = tipo_parole, "parole"

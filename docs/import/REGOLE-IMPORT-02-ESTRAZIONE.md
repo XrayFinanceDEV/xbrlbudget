@@ -1049,7 +1049,7 @@ regola stessa (`righe.py` e `profilo.py`, che ne raccolgono molte: `schema_legge
 `importi.py` è scritto da capo sulle contraddizioni C1-C2 e `__init__.py` esporta soltanto. L'elenco
 completo, con le dodici contraddizioni C1-C12 fra copie della stessa regola e la scelta fatta per ciascuna, è
 nell'inventario `.superpowers/sdd/2026-10-30-importatore-generico-fase1/inventario-lettura.md` (fuori da
-git), e le decisioni prese durante la fase (R1-R21, Q1-Q2) nel registro della stessa cartella SDD
+git), e le decisioni prese durante la fase (R1-R23, Q1-Q2) nel registro della stessa cartella SDD
 (`.superpowers/sdd/2026-11-04-fase1-lettore-righe/progress.md`).
 
 Le regole aggiunte con la misura sul campione:
@@ -1105,6 +1105,33 @@ Le regole aggiunte con la misura sul campione:
   ma il conto esce dal cammino e il totale sopra somma la voce. Non vale se anche il conto dopo sta nella
   tolleranza, per le righe di controllo, né senza rientri (tabelle OCR). Lo stesso per la voce dei totali di una
   coppia con un conto solo nei parziali.
+
+**Per chi integra (Fase 2).** Sette cose che il `Documento` non dice da sé:
+
+- **Si lavora su `Documento.righe_del_prospetto()`, mai su `righe`.** Le righe di nota che `leggi_pdf`
+  restituisce hanno `celle` con le chiavi delle colonne della loro tabella, `profilo.tabelle_nota[r.tabella]`,
+  non di `Documento.colonne`: la colonna 0 di una riga di nota non è la colonna 0 del prospetto.
+- **Le due letture non danno le stesse righe di nota.** `leggi_celle` non ne restituisce nessuna (le tabelle della
+  nota stanno solo in `profilo.tabelle_nota`); `leggi_pdf` le restituisce, marcate `parte == "nota"`.
+- **Gli avvisi sono in due posti**: quelli del documento in `profilo.avvisi`, quelli delle righe in
+  `Documento.avvisi`. `Documento.tutti_gli_avvisi()` li dà insieme, prima il documento, senza ripetizioni.
+- **Con `Profilo.coppie` i figli stanno su un'altra colonna.** Per una voce della colonna dei totali `t.figli[c]`
+  ha per chiave `c` la colonna dei **parziali**, quella su cui si leggono gli importi dei figli, e `t.celle[c]` può
+  non esistere: il totale della voce sta nella colonna dei totali (la chiave di `Profilo.coppie`).
+- **Per risommare i figli si usa `valore_nel_totale(doc, totale, figlio, colonna)`, mai la cella com'è.** Il
+  valore che un figlio porta nella somma del suo totale non è sempre lo stampato: una posta rettificativa
+  stampata positiva si sottrae, un costo dentro un risultato del conto economico si sottrae, e in una voce dal
+  verso rovesciato (`Riga.verso`, Q2) un conto a marcatore cambia segno. La cella resta lo stampato.
+- **`contrapposto` non vuol dire la stessa cosa sulle due letture.** Su `leggi_pdf` `Documento.contrapposto` è il
+  verdetto del profilo (R10: confine fisico **e** tipo contrapposte o verifica); su `leggi_celle` è vero ogni volta
+  che ci sono colonne L e R. Sulla lettura OCR `Profilo.coppie` e `Profilo.marcatori` sono sempre vuoti.
+- **Il lettore importa nomi privati da sei moduli dell'importatore attuale** (sette contando il pubblico
+  `bilancio_classifier.classify_bilancio`, in `profilo.py`): `schema_legge_generico` (`_PAROLE_TESTATA`,
+  `_e_differenza`, `_PIEDE`, `_intestazione`, `_forma_strutturale`), `standard_ivcee_parser` (`_AMOUNT_LIKE`,
+  `_DATE_RE`), `xbrl_reso_parser` (`_FASCIA_MARGINE`, `_chiave_ripetuta`, `_frase_aperta`), `detail_enrichment`
+  (`_chiude_sezione`, `_sezione_della_chiusura`), `mineru_adapter` (`_TableHTMLParser`) e `import_snello.righe`
+  (`_lista_concatenata`). Un ritocco a uno di quei nomi cambia il lettore senza che i suoi test lo sappiano:
+  togliere questo legame è il primo compito della Fase 2.
 
 **Come si misura.** Due script, nessun import, nessun DB, nessuna rete; i PDF e le verità sono cifre di
 clienti e restano fuori da git (`Test/` è ignorata):

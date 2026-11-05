@@ -100,6 +100,14 @@ class Documento:
     avvisi: list[str]            # della lettura delle righe; quelli del documento stanno in `profilo.avvisi`
     profilo: Profilo
 
+    def tutti_gli_avvisi(self) -> list[str]:
+        """Gli avvisi del documento (`profilo.avvisi`) e poi quelli delle righe (`avvisi`), senza ripetizioni."""
+        return list(dict.fromkeys([*getattr(self.profilo, "avvisi", []), *self.avvisi]))
+
+    def righe_del_prospetto(self) -> list[Riga]:
+        """Le righe con `parte == "prospetto"`: le sole con le celle sulle colonne di `colonne`."""
+        return [r for r in self.righe if r.parte == "prospetto"]
+
 
 @dataclass
 class _Pezzo:
@@ -215,6 +223,7 @@ def _celle_del_lato(parole: list[Parola], colonne: list[Colonna], lato: str, pag
         trovati = [None if i in anni else t for i, t in enumerate(trovati)]
     capitale = _capitale_in_anagrafica(parole, colonne)
     celle: dict[int, Importo] = {}
+    costruite: dict[int, Importo] = {}    # la cella di ogni parola, col segno del suo marcatore (anche staccato)
     sedi: dict[int, list[Parola]] = {}
     testo: list[int] = []
     segni: set[int] = set()
@@ -235,15 +244,14 @@ def _celle_del_lato(parole: list[Parola], colonne: list[Colonna], lato: str, pag
             segni.add(i + 1)
             stampato = f"{stampato} {marcatore}"
             imp = Importo(imp.valore, imp.forma, stampato, marcatore)
-        celle[c.indice] = segno_del_lato(Importo(imp.valore, imp.forma, stampato, imp.marcatore), lato)
+        celle[c.indice] = costruite[i] = segno_del_lato(Importo(imp.valore, imp.forma, stampato, imp.marcatore), lato)
     for indice, ps in sedi.items():
         # davanti a un importo vero, l'intero nudo nella stessa colonna cede (budget_1438, colonne della nota)
         nudi = [p for p in ps if leggi_importo(p.testo) is None]
         if len(ps) > 1 and len(nudi) < len(ps):
             testo.extend(parole.index(p) for p in nudi)
             ps = [p for p in ps if p not in nudi]
-            celle[indice] = next(Importo(t[0].valore, t[0].forma, stampati.get(q, q.testo))
-                                 for q, t in zip(parole, trovati) if q is ps[-1])
+            celle[indice] = costruite[next(i for i, q in enumerate(parole) if q is ps[-1])]
         if len(ps) > 1 and not any(leggi_importo(p.testo) is not None for p in ps):
             # solo interi nudi: le colonne di una tabella della nota, non quelle del documento; restano testo
             del celle[indice]

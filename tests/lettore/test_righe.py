@@ -812,3 +812,52 @@ def test_marcatori_sul_lato_destro_delle_contrapposte(tmp_path):
     assert _riga(doc, "Fornitore Fx").celle[1].valore == Decimal("-7100.25")
     assert _riga(doc, "Debito attaccato").celle[1].valore == Decimal("750.00")
     assert _riga(doc, "Anticipo attaccato").celle[1].valore == Decimal("-80.00")
+
+
+# --- Revisione finale: l'intero nudo che cede non porta via il segno del marcatore -----------------
+
+def _contrapposta_a_interi(extra):
+    """Una contrapposta coi prospetti a interi («10.000») sui due lati, piu' le voci di `extra`."""
+    voci = []
+    for k in range(8):
+        y = 140 + k * 14
+        voci += [(40, y, f"0{k + 1}.01"), (80, y, f"Cliente {k + 1}"), (280, y, _INTERI[k]),
+                 (310, y, f"2{k + 1}.01"), (350, y, f"Fornitore {k + 1}"), (560, y, _INTERI[7 - k])]
+    return voci + extra
+
+
+@pytest.mark.parametrize("x, marcatore, colonna, valore", [
+    (280, "A", 0, Decimal("-1234")),     # a sinistra (attivo, costi) A e' negativo
+    (280, "D", 0, Decimal("1234")),
+    (560, "D", 1, Decimal("-1234")),     # a destra (passivo, ricavi) D e' negativo
+    (560, "A", 1, Decimal("1234")),
+])
+def test_intero_nudo_dopo_un_importo_marcato_non_toglie_il_segno(tmp_path, x, marcatore, colonna, valore):
+    # «1.234D 12» nella stessa colonna a interi: l'intero cede all'importo vero, che tiene marcatore e segno (R23)
+    token = f"1.234{marcatore}"
+    extra = [(40 if x == 280 else 310, 270, "09.09"), (80 if x == 280 else 350, 270, "Voce marcata"),
+             _a_destra(x - 12, 270, token), _a_destra(x, 270, "12")]
+    doc = _leggi(tmp_path, [_contrapposta_a_interi(extra)])
+    assert doc.contrapposto
+    cella = _riga(doc, "Voce marcata").celle[colonna]
+    assert (cella.valore, cella.marcatore) == (valore, marcatore)
+
+
+@pytest.mark.parametrize("x, marcatore, colonna, valore", [
+    (280, "A", 0, Decimal("-1234")), (560, "D", 1, Decimal("-1234")), (560, "A", 1, Decimal("1234"))])
+def test_intero_nudo_dopo_un_marcatore_staccato_non_toglie_il_segno(tmp_path, x, marcatore, colonna, valore):
+    # Q2: nella colonna a marcatore il D/A staccato e' il segno della cella anche quando un intero nudo la segue
+    voci = []
+    for k in range(12):
+        y = 140 + k * 14
+        voci += [(40, y, f"0{k + 1}.01"), (80, y, f"Cliente {chr(65 + k)}x"), (280, y, f"{k + 1}.000"),
+                 (284, y, "D"), (310, y, f"2{k + 1}.01"), (350, y, f"Fornitore {chr(65 + k)}x"),
+                 (560, y, f"{k + 2}.100"), (564, y, "A")]
+    voci += [(40 if x == 280 else 310, 324, "09.09"), (80 if x == 280 else 350, 324, "Voce marcata"),
+             (x - 10, 324, "1.234"), (x - 6, 324, marcatore), _a_destra(x + 13, 324, "12")]
+    doc = _leggi(tmp_path, [voci])
+    assert doc.profilo.marcatori == frozenset({0, 1})
+    riga = _riga(doc, "Voce marcata")
+    cella = riga.celle[colonna]
+    assert (cella.valore, cella.marcatore) == (valore, marcatore)
+    assert marcatore not in riga.etichetta.split()

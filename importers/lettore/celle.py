@@ -759,8 +759,9 @@ def leggi_celle(tabelle: list[str], pagine: list[int], titoli: list[str | None] 
     parti = {n: "nota" for n in {t.pagina for t in note}}
     parti.update({n: "altro" for n in lettura.altro if n not in parti})
     if not grezze:
-        profilo = Profilo("ignoto", "nessuna tabella", [], None, frozenset(), {}, [], {}, frozenset(),
-                          avvisi_doc + ["tipo non determinato: nessuna riga di prospetto nelle tabelle OCR"],
+        profilo = Profilo(tipo="ignoto", tipo_perche="nessuna tabella", colonne=[], confine=None,
+                          negativi=frozenset(), decimali={}, codici=[], sezioni={}, margini=frozenset(),
+                          avvisi=avvisi_doc + ["tipo non determinato: nessuna riga di prospetto nelle tabelle OCR"],
                           tabelle_nota=note, parti=parti)
         return Documento([], [], False, avvisi + ["nessuna riga di prospetto nelle tabelle OCR"], profilo)
 
@@ -869,10 +870,13 @@ def leggi_celle(tabelle: list[str], pagine: list[int], titoli: list[str | None] 
     per_riga = [[sezione_di[id(f)] for f in ff] for ff in sintetiche]
     per_riga_doc = [[sezione_di[id(f)] for f in ff] for ff in per_pagina]
     profilo = Profilo(
-        tipo, f"{perche}; {perche_parole}; {indizio}", colonne, None, _negativi(fisiche, colonne, intere), decimali,
-        forme_codice, _sezioni_pagina(per_pagina, per_riga_doc), frozenset(), avvisi_doc, contrapposto,
-        {**parti, **{g.pagina: "prospetto" for g in grezze}}, [], note, frozenset(),
-        {(f.pagina, f.y): sezione_di[id(f)] for f in fisiche}, {(f.pagina, f.y): "prospetto" for f in fisiche})
+        tipo=tipo, tipo_perche=f"{perche}; {perche_parole}; {indizio}", colonne=colonne, confine=None,
+        negativi=_negativi(fisiche, colonne, intere), decimali=decimali, codici=forme_codice,
+        sezioni=_sezioni_pagina(per_pagina, per_riga_doc), margini=frozenset(), avvisi=avvisi_doc,
+        contrapposto=contrapposto, parti={**parti, **{g.pagina: "prospetto" for g in grezze}}, bande=[],
+        tabelle_nota=note, scartate=frozenset(),
+        sezioni_righe={(f.pagina, f.y): sezione_di[id(f)] for f in fisiche},
+        parti_righe={(f.pagina, f.y): "prospetto" for f in fisiche})
 
     righe_doc: list[Riga] = []
     contatori: dict[tuple[int, str], int] = {}

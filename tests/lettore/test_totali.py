@@ -921,3 +921,97 @@ def test_voce_all_unita_sopra_un_totale_dei_suoi_conti(tmp_path):
     assert depositi.totale and set(depositi.figli[0]) == {_riga(doc, "Banca uno").id, _riga(doc, "Banca due").id}
     assert _riga(doc, "Banca due").padre == depositi.id and _riga(doc, "Banca due").padre_verificato
     assert depositi.padre == _riga(doc, "4) Disponibilita' liquide").id and not depositi.padre_verificato
+
+
+# --------------------------------------------------------------------------------------
+# Revisione finale: l'API per chi integra
+# --------------------------------------------------------------------------------------
+
+_CE_CON_DIFFERENZA = [(51, "", "A) Valore della produzione", "1.000,00"), (58, "", "1) ricavi", "600,00"),
+                      (58, "", "5) altri ricavi", "400,00"),
+                      (51, "", "B) Costi della produzione", "700,00"), (58, "", "6) materie", "300,00"),
+                      (58, "", "7) servizi", "400,00"),
+                      (51, "", "Differenza tra valore e costi della produzione", "300,00")]
+
+
+def test_documento_senza_profilo_si_legge_come_schema_e_lo_dichiara():
+    # un profilo senza `tipo` vale «schema» (comportamento invariato), ma il documento lo dice
+    righe = _CE_CON_DIFFERENZA
+    con = _documento(righe, sezione="CE")
+    senza = _documento(righe, sezione="CE")
+    senza.profilo = SimpleNamespace(decimali=con.profilo.decimali, sezioni={})
+    marca_totali(senza)
+    assegna_padri(senza)
+    assert [(r.totale, r.figli, r.padre) for r in senza.righe] == [(r.totale, r.figli, r.padre) for r in con.righe]
+    assert _conto(senza, "Differenza tra valore e costi della produzione").totale
+    assert senza.avvisi == ["documento senza profilo: totali e segni letti come su uno schema di legge"]
+    assert not con.avvisi
+    marca_totali(senza)
+    assert len(senza.avvisi) == 1          # una volta sola, anche rileggendo
+
+
+def test_tutti_gli_avvisi_prima_il_documento_poi_le_righe_senza_ripetizioni():
+    from importers.lettore import Documento
+    doc = Documento([], [], False, ["riga b", "doc a", "riga b"], SimpleNamespace(avvisi=["doc a", "doc c"]))
+    assert doc.tutti_gli_avvisi() == ["doc a", "doc c", "riga b"]
+    assert doc.avvisi == ["riga b", "doc a", "riga b"] and doc.profilo.avvisi == ["doc a", "doc c"]
+
+
+def test_righe_del_prospetto():
+    from importers.lettore import Documento
+    righe = [Riga(id=f"p1r{k}U", pagina=1, y=float(k), lato="U", sezione="SP", codice="", etichetta=parte,
+                  celle={}, parte=parte) for k, parte in enumerate(("prospetto", "nota", "altro", "prospetto"))]
+    doc = Documento(righe, [], False, [], SimpleNamespace(avvisi=[]))
+    assert [r.id for r in doc.righe_del_prospetto()] == ["p1r0U", "p1r3U"]
+
+
+def test_valore_nel_totale_costo_dentro_un_risultato():
+    # il costo stampato positivo entra col meno nel risultato; il valore com'e'; la cella resta lo stampato
+    from importers.lettore import valore_nel_totale
+    doc = _documento(_CE_CON_DIFFERENZA, sezione="CE")
+    valore, costi, differenza = (_conto(doc, e) for e in ("A) Valore della produzione", "B) Costi della produzione",
+                                                         "Differenza tra valore e costi della produzione"))
+    assert set(differenza.figli[0]) == {valore.id, costi.id}
+    assert valore_nel_totale(doc, differenza, valore, 0) == Decimal("1000.00")
+    assert valore_nel_totale(doc, differenza, costi, 0) == Decimal("-700.00")
+    assert costi.celle[0].valore == Decimal("700.00")
+
+
+def test_valore_nel_totale_conto_a_marcatore_in_una_voce_dal_verso_rovesciato(tmp_path):
+    # Q2: sul passivo di una sezione unica i conti in avere (A negativo) chiudono la voce col verso rovesciato
+    righe = [(50, "Crediti verso clienti", "1.500", None), (90, "Clienti", "1.700,30", "D"),
+             (90, "Fondo svalutazione crediti", "200,10", "A"), (50, "Disponibilita' liquide", "2.450", None),
+             (90, "Banca uno", "2.000,15", "D"), (90, "Cassa", "449,90", "D"),
+             (50, "Debiti verso fornitori", "3.000", None), (90, "Fornitori Italia", "2.000,40", "A"),
+             (90, "Fornitori estero", "999,80", "A"), (50, "Debiti tributari", "1.200", None),
+             (90, "Erario c/IVA", "1.300,25", "A"), (90, "Erario c/ritenute", "100,15", "D"),
+             (90, "Erario c/IRES", "0,10", "A"), (50, "Altri debiti", "800", None),
+             (90, "Debiti diversi", "500,20", "A"), (90, "Debiti verso dipendenti", "300,10", "A")]
+    voci = []
+    for k, (x, etichetta, importo, marcatore) in enumerate(righe):
+        y = 140 + k * 14
+        voci += [(x, y, etichetta), (400, y, importo)] + ([(404, y, marcatore)] if marcatore else [])
+    doc = _leggi(tmp_path, voci)
+    from importers.lettore import valore_nel_totale
+    per_id = {r.id: r for r in doc.righe}
+    tributari = _riga(doc, "Debiti tributari")
+    assert tributari.verso == {0: -1}
+    iva, ritenute = _riga(doc, "Erario c/IVA"), _riga(doc, "Erario c/ritenute")
+    assert iva.celle[0].valore == Decimal("-1300.25")
+    assert valore_nel_totale(doc, tributari, iva, 0) == Decimal("1300.25")
+    assert valore_nel_totale(doc, tributari, ritenute, 0) == Decimal("-100.15")
+    figli = [per_id[f] for f in tributari.figli[0]]
+    assert abs(sum(valore_nel_totale(doc, tributari, f, 0) for f in figli) - tributari.celle[0].valore) <= 1
+    # la voce dell'attivo chiude diritta: il fondo in avere resta negativo
+    crediti, fondo = _riga(doc, "Crediti verso clienti"), _riga(doc, "Fondo svalutazione crediti")
+    assert valore_nel_totale(doc, crediti, fondo, 0) == Decimal("-200.10")
+
+
+def test_valore_nel_totale_posta_rettificativa():
+    from importers.lettore import valore_nel_totale
+    doc = _documento([(40, "", "Costi", "3.033.132,00"), (40, "", "(Ammortamenti)", "124.980,00"),
+                      (30, "", "1) Terreni e fabbricati", "2.908.152,00")])
+    terreni, costi, fondo = (_conto(doc, e) for e in ("1) Terreni e fabbricati", "Costi", "(Ammortamenti)"))
+    assert set(terreni.figli[0]) == {costi.id, fondo.id}
+    assert valore_nel_totale(doc, terreni, fondo, 0) == Decimal("-124980.00")
+    assert valore_nel_totale(doc, terreni, costi, 0) == Decimal("3033132.00")

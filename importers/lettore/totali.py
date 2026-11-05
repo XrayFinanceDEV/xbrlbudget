@@ -169,6 +169,9 @@ _VOCE_DI_RISULTATO = re.compile(r"^[a-e]\s?[).\-]\s*(?:proventi e oneri|rettific
 _TIPI_SCHEMA = ("schema", "schema-dettaglio")
 
 
+_PROFILO_ASSENTE = "documento senza profilo: totali e segni letti come su uno schema di legge"
+
+
 def _su_schema(doc: Documento) -> bool:
     return getattr(doc.profilo, "tipo", "schema") in _TIPI_SCHEMA
 
@@ -191,13 +194,11 @@ def _costo_del_risultato(r: Riga) -> bool:
     return r.sezione == "CE" and r.lato == "U" and bool(_COSTO_DEL_RISULTATO.search(e)) and not _RISULTATO.search(e)
 
 
-# Una cella col segno dal marcatore D/A (Q2: `Profilo.marcatori`, o il marcatore attaccato «1.234,56A»).
-_MARCATA = re.compile(r"\d\)?\s?[DA]$")
-
-
 def _marcata(r: Riga, colonna: int) -> bool:
+    """Una cella col segno dal marcatore D/A: attaccato («1.234,56A») o staccato in una colonna di
+    `Profilo.marcatori` (Q2), lo registra `Importo.marcatore`."""
     cella = r.celle.get(colonna)
-    return cella is not None and bool(_MARCATA.search(cella.testo.strip()))
+    return cella is not None and cella.marcatore is not None
 
 
 def _valore_nel_totale(t: Riga, f: Riga, colonna: int, verso: int = 1, schema: bool = True) -> Decimal:
@@ -207,6 +208,13 @@ def _valore_nel_totale(t: Riga, f: Riga, colonna: int, verso: int = 1, schema: b
     if verso == -1 and _marcata(f, colonna):
         v = -v
     return -v if v > 0 and _risultato(t, schema) and _costo_del_risultato(f) else v
+
+
+def valore_nel_totale(doc: Documento, totale: Riga, figlio: Riga, colonna: int) -> Decimal:
+    """Il valore che il figlio porta nella somma del suo totale, sulla colonna `colonna` di `totale.figli`: le
+    poste rettificative, un costo dentro un risultato del conto economico, un conto a marcatore D/A dentro una voce
+    dal verso rovesciato (`Riga.verso`). Per risommare i figli si usa questo, mai la cella com'e' stampata."""
+    return _valore_nel_totale(totale, figlio, colonna, totale.verso.get(colonna, 1), _su_schema(doc))
 
 
 def _serie(doc: Documento) -> list[_Serie]:
@@ -502,6 +510,8 @@ def marca_totali(doc: Documento) -> None:
     """Imposta `Riga.totale` e `Riga.figli[colonna]` sulle righe del prospetto, colonna per colonna; una voce i cui
     figli tornano su una colonna e non su un'altra resta totale dove torna, e lo scarto dell'altra va in
     `doc.avvisi`."""
+    if not hasattr(doc.profilo, "tipo") and _PROFILO_ASSENTE not in doc.avvisi:
+        doc.avvisi.append(_PROFILO_ASSENTE)      # `_su_schema` legge allora il documento come uno schema di legge
     for r in doc.righe:
         if r.parte == "prospetto":
             r.totale, r.figli, r.verso = False, {}, {}

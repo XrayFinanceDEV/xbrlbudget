@@ -714,3 +714,25 @@ def test_catene_dei_risultati_prima_dei_risultati():
     assert set(risultato.figli[0]) == {_conto(doc, "Differenza tra valore e costi della produzione").id,
                                        _conto(doc, "Totale proventi e oneri finanziari").id}
     assert set(utile.figli[0]) == {risultato.id, _conto(doc, "Totale delle imposte sul reddito").id}
+
+
+def test_voce_all_unita_sopra_conti_al_centesimo(tmp_path):
+    # 1533, 682: voci e conti nella stessa colonna, le voci stampate all'unita' («4.220»), i conti al centesimo
+    # (1.500,40 + 2.719,55 = 4.219,95): il totale stampato all'unita' tollera un euro
+    doc = _leggi(tmp_path, _righe(140, [(50, "Crediti verso clienti", "4.220"), (90, "Clienti Italia", "1.500,40"),
+                                        (90, "Clienti estero", "2.719,55"), (50, "Disponibilita' liquide", "1.300"),
+                                        (90, "Banca uno", "1.120,10"), (90, "Cassa", "179,95")]))
+    assert doc.profilo.decimali.get(0) is True
+    voce = _riga(doc, "Crediti verso clienti")
+    assert voce.totale
+    assert _riga(doc, "Clienti estero").padre == voce.id and _riga(doc, "Clienti estero").padre_verificato
+    assert _riga(doc, "Cassa").padre == _riga(doc, "Disponibilita' liquide").id
+
+
+def test_voce_stampata_al_centesimo_non_tollera_un_euro(tmp_path):
+    # la stessa voce stampata «4.220,00»: al centesimo, e 4.219,95 non la chiude
+    doc = _leggi(tmp_path, _righe(140, [(50, "Crediti verso clienti", "4.220,00"), (90, "Clienti Italia", "1.500,40"),
+                                        (90, "Clienti estero", "2.719,55"), (50, "Disponibilita' liquide", "1.300,05"),
+                                        (90, "Banca uno", "1.120,10"), (90, "Cassa", "179,95")]))
+    assert not _riga(doc, "Crediti verso clienti").totale
+    assert _riga(doc, "Disponibilita' liquide").totale

@@ -65,9 +65,19 @@ def _di_controllo(r: Riga) -> bool:
     return (not r.etichetta and not r.codice) or bool(_CONTROLLO.search(_norm(r.etichetta)))
 
 
-def _tolleranza(doc: Documento, colonna: Colonna) -> Decimal:
-    """C6: al centesimo, oppure un euro quando la colonna stampa le voci tutte all'unita'."""
-    return _UNITA if doc.profilo.decimali.get(colonna.indice) is False else _CENTESIMO
+_DECIMALI_STAMPATI = re.compile(r",\d")
+
+
+def _tolleranza_cella(doc: Documento, t: Riga, colonna: int) -> Decimal:
+    """C6 per un totale: un euro quando il totale e' stampato all'unita' (la colonna stampa tutto a interi, la cella
+    non ha decimali, o sta nella colonna dei totali di una coppia parziali/totali), anche sopra figli al centesimo
+    (le voci a interi sopra i conti a centesimi, 1533, 682, 638); altrimenti al centesimo."""
+    if doc.profilo.decimali.get(colonna) is False or colonna in getattr(doc.profilo, "coppie", {}):
+        return _UNITA
+    cella = t.celle.get(colonna)
+    if cella is not None and cella.forma == "importo" and not _DECIMALI_STAMPATI.search(cella.testo):
+        return _UNITA
+    return _CENTESIMO
 
 
 def _euro(v: Decimal) -> str:
@@ -83,7 +93,7 @@ def _euro(v: Decimal) -> str:
 class _Serie:
     """Le righe di un lato e di una sezione che hanno una cella in una colonna, nell'ordine del documento."""
     colonna: int
-    tolleranza: Decimal
+    tolleranze: list[Decimal]                               # per riga, quando la riga e' il totale (C6)
     righe: list[Riga]
     valori: list[Decimal]
     controllo: list[bool]
@@ -169,11 +179,10 @@ def _serie(doc: Documento) -> list[_Serie]:
         for r in doc.righe:
             if r.parte == "prospetto" and colonna.indice in r.celle:
                 gruppi[(r.lato, r.sezione)].append(r)
-        tolleranza = _tolleranza(doc, colonna)
         for righe in gruppi.values():
             valori = [_valore_di_somma(r, colonna.indice) for r in righe]
             # un risultato chiude sempre cio' che gli sta sopra, come una riga di controllo
-            out.append(_Serie(colonna.indice, tolleranza, righe, valori,
+            out.append(_Serie(colonna.indice, [_tolleranza_cella(doc, r, colonna.indice) for r in righe], righe, valori,
                               [_di_controllo(r) or _risultato(r) for r in righe],
                               [r.celle[colonna.indice].valore for r in righe], [_risultato(r) for r in righe],
                               [-v if v > 0 and _costo_del_risultato(r) else v for r, v in zip(righe, valori)]))
@@ -188,7 +197,7 @@ def _cerca_membri(serie: _Serie, passo: list[int], i: int, kmin: int) -> list[in
     ripetono): un mastro e la sua foglia, +x e -x, finirebbero contati due volte. Una catena (un solo importo) vale
     solo all'uguaglianza esatta e mai con un figlio meno rientrato del totale (R14). Il tetto di 80 membri non vale
     per una riga di controllo (R15): «Totale costi» chiude anche centocinquanta conti."""
-    valori, tol = (serie.sottratti if serie.risultato[i] else serie.valori), serie.tolleranza
+    valori, tol = (serie.sottratti if serie.risultato[i] else serie.valori), serie.tolleranze[i]
     bersaglio = serie.bersagli[i]
     n = len(valori)
     tetto = n if serie.controllo[i] else _TETTO_MEMBRI
@@ -513,7 +522,7 @@ def _confronta_colonne(doc: Documento) -> None:
                 continue        # i figli non stampano quella colonna (parziali e totali, percentuali)
             somma = sum((_valore_nel_totale(t, f, c) for f in figli if c in f.celle), Decimal(0))
             scarto = t.celle[c].valore - somma
-            if abs(scarto) <= _tolleranza(doc, colonne[c]):
+            if abs(scarto) <= _tolleranza_cella(doc, t, c):
                 if not presi[c] & set(t.figli[riferimento]):
                     t.figli[c] = t.figli[riferimento]
                     presi[c].update(t.figli[c])
@@ -746,7 +755,7 @@ def _gruppi_incoerenti(doc: Documento, colonne_prova: set[int]) -> set[tuple[str
                 if c2 == c or c2 in t.figli or c2 not in t.celle or not any(c2 in m.celle for m in membri):
                     continue
                 somma = sum((_valore_nel_totale(t, m, c2) for m in membri if c2 in m.celle), Decimal(0))
-                if abs(somma - t.celle[c2].valore) > _tolleranza(doc, colonne[c2]):
+                if abs(somma - t.celle[c2].valore) > _tolleranza_cella(doc, t, c2):
                     out.add((t.id, c))
                     doc.avvisi.append(f"{_nome(t)}: i figli della colonna {c + 1} non chiudono la colonna {c2 + 1} "
                                       f"(scarto {_euro(t.celle[c2].valore - somma)}), padre non verificato (R18)")

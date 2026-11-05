@@ -87,6 +87,7 @@ class _Serie:
     righe: list[Riga]
     valori: list[Decimal]
     controllo: list[bool]
+    bersagli: list[Decimal] = field(default_factory=list)   # l'importo stampato, che i membri devono fare
     vivo: list[bool] = field(default_factory=list)
     candidabile: list[bool] = field(default_factory=list)
     figli: dict[int, list[int]] = field(default_factory=dict)
@@ -94,6 +95,36 @@ class _Serie:
     def __post_init__(self) -> None:
         self.vivo = [True] * len(self.righe)
         self.candidabile = [True] * len(self.righe)
+        if not self.bersagli:
+            self.bersagli = list(self.valori)
+
+
+# Una voce fra parentesi dopo la sua numerazione («(Ammortamenti)», «B.I.5.f) (Fondi di ammortamento)», «(Perdita
+# d'esercizio)»): nel fac-simile OIC e' una posta rettificativa, stampata positiva e sottratta dalla voce. Solo coi
+# nomi di una rettifica: «(IRES)» o «(di cui …)» fra parentesi sono una voce o un sottoinsieme, non una sottrazione.
+_NUMERAZIONE_VOCE = re.compile(r"^[^\s()]{1,14}\)\s+(?=\()")
+_NOME_RETTIFICA = re.compile(r"ammortament|svalutazion|\bfond[oi]\b|\bperdit[ae]\b|\bsconti\b|\babbuoni\b|\bresi\b"
+                             r"|rettific|\brimanenze finali\b")
+
+
+def _rettificativa(r: Riga) -> bool:
+    e = _NUMERAZIONE_VOCE.sub("", r.etichetta.strip(), count=1)
+    if not (e.startswith("(") and e.endswith(")")) or not _NOME_RETTIFICA.search(_norm(e)):
+        return False
+    livello = 0
+    for k, ch in enumerate(e):     # la prima parentesi si chiude solo in fondo: «(a) e (b)» non e' una voce fra parentesi
+        livello += {"(": 1, ")": -1}.get(ch, 0)
+        if livello == 0 and k < len(e) - 1:
+            return False
+    return True
+
+
+def _valore_di_somma(r: Riga, colonna: int) -> Decimal:
+    """L'importo come entra nelle somme di un totale sopra: lo stampato, col segno meno per una posta rettificativa
+    stampata positiva. Come totale dei suoi conti la posta vale lo stampato (i fondi stampati positivi sommano al
+    fondo). La cella resta lo stampato."""
+    v = r.celle[colonna].valore
+    return -v if v > 0 and _rettificativa(r) else v
 
 
 def _serie(doc: Documento) -> list[_Serie]:
@@ -107,8 +138,8 @@ def _serie(doc: Documento) -> list[_Serie]:
                 gruppi[(r.lato, r.sezione)].append(r)
         tolleranza = _tolleranza(doc, colonna)
         for righe in gruppi.values():
-            out.append(_Serie(colonna.indice, tolleranza, righe, [r.celle[colonna.indice].valore for r in righe],
-                              [_di_controllo(r) for r in righe]))
+            out.append(_Serie(colonna.indice, tolleranza, righe, [_valore_di_somma(r, colonna.indice) for r in righe],
+                              [_di_controllo(r) for r in righe], [r.celle[colonna.indice].valore for r in righe]))
     return out
 
 
@@ -121,6 +152,7 @@ def _cerca_membri(serie: _Serie, passo: list[int], i: int, kmin: int) -> list[in
     solo all'uguaglianza esatta e mai con un figlio meno rientrato del totale (R14). Il tetto di 80 membri non vale
     per una riga di controllo (R15): «Totale costi» chiude anche centocinquanta conti."""
     valori, tol = serie.valori, serie.tolleranza
+    bersaglio = serie.bersagli[i]
     n = len(valori)
     tetto = n if serie.controllo[i] else _TETTO_MEMBRI
     s, j, membri, pieni = Decimal(0), passo[i], [], 0
@@ -132,16 +164,16 @@ def _cerca_membri(serie: _Serie, passo: list[int], i: int, kmin: int) -> list[in
         s += valori[j]
         membri.append(j)
         pieni += valori[j] != 0
-        if pieni and abs(s - valori[i]) <= tol:
+        if pieni and abs(s - bersaglio) <= tol:
             if pieni < kmin:
                 return in_tolleranza
-            if pieni == 1 and (s != valori[i] or _meno_rientrato(serie, membri, i)):
+            if pieni == 1 and (s != bersaglio or _meno_rientrato(serie, membri, i)):
                 return in_tolleranza
             if _chiusura_piu_esterna(serie, membri, i):
                 return in_tolleranza
-            if not valori[i] and not serie.controllo[i] and pieni != 2:
+            if not bersaglio and not serie.controllo[i] and pieni != 2:
                 return in_tolleranza     # un totale a zero fuori dal lessico C12: solo la coppia costo/fondo
-            if s == valori[i]:
+            if s == bersaglio:
                 return membri
             if in_tolleranza is None:
                 in_tolleranza = list(membri)
@@ -207,7 +239,7 @@ def _risolvi(serie: _Serie, ammessi: list[bool], direzione: int, kmin: int) -> i
     marcati = 0
     for i in ordine:
         # un totale a zero (a - b = 0, il costo e il suo fondo) vale con due importi veri, come ogni gruppo
-        if not vivo[i] or not serie.candidabile[i] or not ammessi[i] or (not valori[i] and kmin < 2):
+        if not vivo[i] or not serie.candidabile[i] or not ammessi[i] or (not serie.bersagli[i] and kmin < 2):
             continue
         membri = _cerca_membri(serie, passo, i, kmin)
         if membri is None:
@@ -426,7 +458,7 @@ def _confronta_colonne(doc: Documento) -> None:
                 continue
             if not any(c in f.celle for f in figli):
                 continue        # i figli non stampano quella colonna (parziali e totali, percentuali)
-            somma = sum((f.celle[c].valore for f in figli if c in f.celle), Decimal(0))
+            somma = sum((_valore_di_somma(f, c) for f in figli if c in f.celle), Decimal(0))
             scarto = t.celle[c].valore - somma
             if abs(scarto) <= _tolleranza(doc, colonne[c]):
                 if not presi[c] & set(t.figli[riferimento]):
@@ -660,7 +692,7 @@ def _gruppi_incoerenti(doc: Documento, colonne_prova: set[int]) -> set[tuple[str
             for c2 in sorted(colonne_prova & set(colonne)):
                 if c2 == c or c2 in t.figli or c2 not in t.celle or not any(c2 in m.celle for m in membri):
                     continue
-                somma = sum((m.celle[c2].valore for m in membri if c2 in m.celle), Decimal(0))
+                somma = sum((_valore_di_somma(m, c2) for m in membri if c2 in m.celle), Decimal(0))
                 if abs(somma - t.celle[c2].valore) > _tolleranza(doc, colonne[c2]):
                     out.add((t.id, c))
                     doc.avvisi.append(f"{_nome(t)}: i figli della colonna {c + 1} non chiudono la colonna {c2 + 1} "

@@ -609,3 +609,47 @@ def test_riga_di_controllo_senza_gruppo_non_e_voce_di_una_riga_sopra():
     assegna_padri(doc)
     assert not per["C.17 Interessi e altri oneri finanziari"].padre_verificato
     assert per["TOTALE C) PROVENTI E ONERI FINANZIARI"].padre != per["C.16.d Proventi diversi dai precedenti"].id
+
+
+def test_voce_fra_parentesi_si_sottrae():
+    # fac-simile OIC: «(Ammortamenti)», «(Fondi di ammortamento)» stampati positivi sono poste rettificative; la voce
+    # vale costo meno fondo (3.033.132 - 124.980 = 2.908.152), sotto o sopra che stia il totale
+    doc = _documento([(40, "", "Costi", "3.033.132,00"), (40, "", "(Ammortamenti)", "124.980,00"),
+                      (30, "", "1) Terreni e fabbricati", "2.908.152,00")])
+    terreni = _conto(doc, "1) Terreni e fabbricati")
+    assert terreni.totale and _conto(doc, "(Ammortamenti)").padre == terreni.id
+    assert _conto(doc, "(Ammortamenti)").padre_verificato
+    # la cella resta lo stampato: la sottrazione vale solo per la somma
+    assert _conto(doc, "(Ammortamenti)").celle[0].valore > 0
+    # 302: la voce stampata sopra le sue componenti
+    doc = _documento([(34, "", "B.I) Immobilizzazioni immateriali", "56.444,44"),
+                      (34, "", "B.I.4) Marchi", "1.000,00"),
+                      (34, "", "B.I.5) Avviamento", "55.444,44"), (34, "", "B.I.5.a) Acquisto di azienda", "71.302,00"),
+                      (34, "", "B.I.5.f) (Fondi di ammortamento)", "15.857,56")])
+    avviamento = _conto(doc, "B.I.5) Avviamento")
+    assert avviamento.totale and _conto(doc, "B.I.5.f) (Fondi di ammortamento)").padre == avviamento.id
+    assert _conto(doc, "B.I.5.f) (Fondi di ammortamento)").padre_verificato
+    assert _conto(doc, "B.I.5) Avviamento").padre == _conto(doc, "B.I) Immobilizzazioni immateriali").id
+    # come totale dei suoi conti (stampati positivi anche loro) la posta vale lo stampato
+    doc = _documento([(34, "", "B.II.2) Impianti", "1.141,00"), (34, "", "B.II.2.a) Impianto", "1.630,00"),
+                      (85, "", "IMPIANTI SPECIFICI", "1.630,00"),
+                      (34, "", "B.II.2.c) (Fondi di ammortamento)", "489,00"), (85, "", "F/AMM.IMPIANTI GENERICI", "139,00"),
+                      (85, "", "F/AMM.IMPIANTI SPECIFICI", "350,00")])
+    fondi = _conto(doc, "B.II.2.c) (Fondi di ammortamento)")
+    assert _conto(doc, "F/AMM.IMPIANTI SPECIFICI").padre == fondi.id and _conto(doc, "F/AMM.IMPIANTI SPECIFICI").padre_verificato
+    assert fondi.padre == _conto(doc, "B.II.2) Impianti").id and fondi.padre_verificato
+
+
+def test_voce_fra_parentesi_senza_nome_di_rettifica_si_somma():
+    # «(IRES)» fra parentesi e' una voce, non una sottrazione
+    doc = _documento([(30, "", "Imposte correnti"), (40, "", "(IRES)", "100,00"),
+                      (40, "", "(IRAP)", "200,00"), (30, "", "Totale imposte", "300,00")])
+    assert _conto(doc, "(IRES)").padre == _conto(doc, "Totale imposte").id
+
+
+def test_di_cui_fra_parentesi_non_si_sottrae():
+    # «(di cui già richiamati)» e' un sottoinsieme, non una posta rettificativa
+    doc = _documento([(40, "", "Crediti", "300,00"), (40, "", "(di cui esigibili oltre)", "100,00"),
+                      (40, "", "Altri", "250,00"), (30, "", "Totale", "650,00")])
+    assert _conto(doc, "Totale").totale
+    assert _conto(doc, "(di cui esigibili oltre)").padre == _conto(doc, "Totale").id

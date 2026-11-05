@@ -376,8 +376,16 @@ def test_interruttore_non_snello_e_byte_identico_a_oggi(tmp_path, monkeypatch, v
     monkeypatch.setenv("IMPORT_MOTORE", valore_motore)
     confronto = _esegui()
 
-    riferimento_confrontabile = {k: v for k, v in riferimento.items() if k not in _CHIAVI_TEMPO}
-    confronto_confrontabile = {k: v for k, v in confronto.items() if k not in _CHIAVI_TEMPO}
+    def _senza_tempi(r):
+        r = {k: v for k, v in r.items() if k not in _CHIAVI_TEMPO}
+        lettore = r["validation_report"].get("lettore")      # i secondi del lettore sono un tempo
+        if lettore:
+            r["validation_report"] = {**r["validation_report"], "lettore": {
+                k: v for k, v in lettore.items() if k != "secondi"}}
+        return r
+
+    riferimento_confrontabile = _senza_tempi(riferimento)
+    confronto_confrontabile = _senza_tempi(confronto)
     assert confronto_confrontabile == riferimento_confrontabile
     assert "import_snello" not in confronto["validation_report"]
 

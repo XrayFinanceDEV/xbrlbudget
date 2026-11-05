@@ -129,3 +129,62 @@ def test_frasi_blocco_cercato_da_verificare():
 def test_json_serializzabile(tmp_path, come_schema):
     json.dumps(diagnosi_pdf(_pdf(tmp_path, _APERTO)))
     json.dumps(diagnosi_pdf(str(tmp_path / "no.pdf")))
+
+
+def _blocco(anno, k=0):
+    from datetime import date
+    from decimal import Decimal
+    from importers.lettore import Blocco
+    return Blocco(voce=f"V{k}", codice="", sezione="SP", lato="U", colonna=0, fine=date(anno, 12, 31), mesi=12,
+                  corrente=True, stampato=Decimal(100 + k), somma=Decimal(100), scarto=Decimal(k), pagina=1,
+                  righe=("p1r1U", "p1r2U"), etichette=(), cercato=False)
+
+
+def _doc_finto(monkeypatch, blocchi):
+    class _P:
+        tipo, avvisi = "schema", []
+
+    class _D:
+        righe, colonne, contrapposto, profilo = [object()], [], False, _P()
+
+        def tutti_gli_avvisi(self):
+            return []
+    monkeypatch.setattr(mod, "leggi_pdf", lambda p: _D())
+    monkeypatch.setattr(mod, "blocchi_aperti", lambda d: blocchi)
+
+
+def test_tetto_di_venti_blocchi(monkeypatch):
+    _doc_finto(monkeypatch, [_blocco(2025, k) for k in range(25)])
+    assert len(diagnosi_pdf("x.pdf")["blocchi_aperti"]) == 20
+
+
+def test_filtro_per_anno(monkeypatch):
+    _doc_finto(monkeypatch, [_blocco(2025), _blocco(2024), _blocco(2020)])
+    d = diagnosi_pdf("x.pdf", anno_corrente=2025, anno_precedente=2024)
+    assert sorted(b["fine"][:4] for b in d["blocchi_aperti"]) == ["2024", "2025"]
+    assert len(diagnosi_pdf("x.pdf")["blocchi_aperti"]) == 3
+
+
+def test_tetto_env_non_numerico(monkeypatch):
+    monkeypatch.setenv("LETTORE_TETTO_SECONDI", "abc")
+    assert mod._tetto(None) == mod.TETTO_SECONDI_DEFAULT
+
+
+def test_contesto_che_solleva(tmp_path):
+    class _Cattivo:
+        @property
+        def tables(self):
+            raise RuntimeError("rotto")
+    d = diagnosi_pdf(str(tmp_path / "x.pdf"), _Cattivo())
+    assert d["esito"] == "errore" and d["motivo"]
+
+
+def test_frasi_diagnosi_malformata():
+    assert frasi_per_utente({}, {"SP"}) == []
+    assert frasi_per_utente({"esito": "errore"}, {"SP"}) == []
+    assert frasi_per_utente({"blocchi_aperti": [{"sezione": "SP", "corrente": True}]}, {"SP"}) == []
+    assert frasi_per_utente(None, {"SP"}) == []
+
+
+def test_frasi_esito_non_ok():
+    assert frasi_per_utente({"esito": "tempo", "blocchi_aperti": [_b(True)]}, {"SP"}) == []

@@ -17,7 +17,6 @@ from importers.lettore.righe import Documento, leggi_pdf
 TETTO_SECONDI_DEFAULT = 20
 _MAX_BLOCCHI = 20
 _MAX_FRASI = 5
-_RUOLI = ("esercizio", "saldo")
 _INTESTAZIONE = ("BLOCCHI CHE NON CHIUDONO NEL PDF: i totali stampati qui sotto non sono la somma delle righe "
                  "che li precedono; verificarli in Rettifiche.")
 _DA_VERIFICARE = " (righe individuate dal lettore: da verificare)"
@@ -79,18 +78,21 @@ def diagnosi_pdf(file_path: str, contesto_mineru=None, *, anno_corrente: int | N
                  anno_precedente: int | None = None, tetto_secondi: float | None = None) -> dict:
     """La diagnosi di un import; mai un'eccezione. `esito`: ok | errore | tempo | non_applicabile."""
     inizio = time.monotonic()
-    base = {"esito": "errore", "motivo": None, "ingresso": "mineru" if getattr(contesto_mineru, "tables", None)
-            else "pdf", "tipo": "", "contrapposto": False, "colonne": [], "blocchi_aperti": [], "avvisi": []}
-    esecutore = ThreadPoolExecutor(max_workers=1)
+    base = {"esito": "errore", "motivo": None, "ingresso": "pdf", "tipo": "", "contrapposto": False,
+            "colonne": [], "blocchi_aperti": [], "avvisi": []}
+    esecutore = None
     try:
+        base["ingresso"] = "mineru" if getattr(contesto_mineru, "tables", None) else "pdf"
+        esecutore = ThreadPoolExecutor(max_workers=1)
         futuro = esecutore.submit(_leggi, file_path, contesto_mineru, anno_corrente, anno_precedente)
         base.update(futuro.result(timeout=_tetto(tetto_secondi)))
     except TempoScaduto:
         base.update(esito="tempo", motivo="tempo massimo della lettura superato")
-    except BaseException as e:  # noqa: BLE001 - la diagnosi non fa mai fallire un import
+    except Exception as e:  # noqa: BLE001 - la diagnosi non fa mai fallire un import
         base.update(esito="errore", motivo=f"{type(e).__name__}: {e}"[:300] or "errore")
     finally:
-        esecutore.shutdown(wait=False)
+        if esecutore is not None:
+            esecutore.shutdown(wait=False)
     base["secondi"] = round(time.monotonic() - inizio, 3)
     return base
 
@@ -99,14 +101,19 @@ def frasi_per_utente(diagnosi: dict, sezioni: set[str], *, anno_precedente: int 
     """Le frasi d'avviso: l'intestazione e al piu' 5 blocchi della colonna corrente (o dell'anno precedente, se
     richiesto) delle `sezioni`. Prima i blocchi dai figli noti, poi quelli individuati dal lettore, ciascun gruppo
     dal piu' grande scarto in valore assoluto."""
-    scelti = []
-    for d in diagnosi.get("blocchi_aperti") or []:
-        if d.get("sezione") not in sezioni:
-            continue
-        precedente = bool(anno_precedente and d.get("fine") and d["fine"][:4] == str(anno_precedente))
-        if d.get("corrente") or precedente:
-            scelti.append(_blocco_da_dict(d))
-    if not scelti:
+    try:
+        if diagnosi.get("esito", "ok") != "ok":
+            return []
+        scelti = []
+        for d in diagnosi.get("blocchi_aperti") or []:
+            if d.get("sezione") not in sezioni:
+                continue
+            precedente = bool(anno_precedente and d.get("fine") and d["fine"][:4] == str(anno_precedente))
+            if d.get("corrente") or precedente:
+                scelti.append(_blocco_da_dict(d))
+        if not scelti:
+            return []
+        scelti.sort(key=lambda b: (b.cercato, -abs(b.scarto)))
+        return [_INTESTAZIONE] + [frase_blocco(b) + (_DA_VERIFICARE if b.cercato else "") for b in scelti[:_MAX_FRASI]]
+    except Exception:  # noqa: BLE001 - una diagnosi malformata non produce frasi, mai un errore
         return []
-    scelti.sort(key=lambda b: (b.cercato, -abs(b.scarto)))
-    return [_INTESTAZIONE] + [frase_blocco(b) + (_DA_VERIFICARE if b.cercato else "") for b in scelti[:_MAX_FRASI]]

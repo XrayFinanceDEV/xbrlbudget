@@ -9,9 +9,11 @@ Che cosa misura, per documento:
 - **totali ritrovati**: un totale stampato (unione delle due letture, valore diverso da zero, deduplicato per
   `(pagina, valore)`) è ritrovato se una riga del prospetto di quella pagina ha una cella con quel valore entro
   0,01 € (1 € se nessuna colonna del documento stampa i centesimi);
-- **totali chiusi**: fra i ritrovati, quelli su una riga marcata `totale` con `figli` sulla colonna della cella;
-  accanto, *chiusi v.*: la stessa quota senza i totali ritrovati solo su una colonna di analisi o di movimenti
-  (differenza, percentuale, dare, avere), dove il lettore non somma per costruzione;
+- **totali chiusi**: fra i ritrovati, quelli la cui riga (fra le righe della pagina con quel valore, quella che
+  somiglia di piu' alla voce annotata: non basta un'altra riga con lo stesso importo) e' marcata `totale` con `figli`
+  sulla colonna della cella, o sulla colonna dei parziali della sua coppia (Q1, `Profilo.coppie`). Tre quote
+  affiancate: letterale; senza i totali ritrovati solo su una colonna di differenza o di percentuale; senza quelli
+  ritrovati solo su differenza, percentuale, dare o avere (dove il lettore non somma per costruzione);
 - **periodi giusti**: per ogni periodo della verità, su ogni lato con colonne di valori, una colonna esercizio o
   saldo con la stessa fine (anno e mese) e gli stessi mesi; una colonna ad anno nudo (`mesi` None) vale solo per un
   anno intero (R3); con un periodo solo nella verità basta la fine;
@@ -38,6 +40,7 @@ import re
 import sys
 import unicodedata
 from collections import defaultdict
+from difflib import SequenceMatcher
 from decimal import Decimal
 from pathlib import Path
 
@@ -52,22 +55,15 @@ ANALISI = CORPUS / "_analisi-campione"
 USCITA = ANALISI / "righe"
 A_PARTE = ("scansione",)
 _VALORI = ("esercizio", "saldo")
-_VALORI_E_MASTRI = ("esercizio", "saldo", "mastro")
 _CENT = Decimal("0.01")
 _UNITA = Decimal("1")
 
 # Annotazioni della prima lettura che contraddicono il documento: non pesano sulla misura e si elencano, perché il
 # proprietario le corregga. Un conto è escluso se ha l'id, il codice e il padre annotato dati (None = qualunque) e,
 # con «voce_non», una voce_di_legge che non comincia così (il padre annotato contraddice la voce del conto stesso).
-CORREZIONI_ANNOTAZIONE = [
-    {"id": "353", "codice": "3901051", "padre": None, "voce_non": None,
-     "perche": "sta sotto «a) Debiti verso fornitori esigibili entro»: 537.649,65 + 35.993,98 + 951,00 = "
-               "574.594,63 stampato"},
-    *({"id": i, "codice": None, "padre": "3) Denaro e valori in cassa", "voce_non": "SPA.C.IV",
-       "perche": "annotato sotto la cassa contro la sua voce_di_legge (risconti, patrimonio netto, utili "
-                 "portati a nuovo, TFR: il padre della pagina prima trascinato avanti)"}
-      for i in ("1524", "1525", "1526")),
-]
+CORREZIONI_ANNOTAZIONE: list[dict] = []
+# Le prime (353, 1524, 1525, 1526) il proprietario le ha corrette alla fonte il 2026-11-05 (copie di prima in
+# `Test/_analisi-campione/backup-annotazioni-2026-11-05/`): l'elenco resta, vuoto, per le prossime.
 
 
 # --- confronto ----------------------------------------------------------------------------------------------------
@@ -89,9 +85,12 @@ def e_un_totale(etichetta: str) -> bool:
 
 def stesso_nome(riga, annotati: set[str]) -> bool:
     """Il padre annotato (codice, o il suo nome) nomina la riga per codice, per etichetta, o per codice + etichetta
-    stampati insieme."""
+    stampati insieme; o per il percorso di legge stampato in testa all'etichetta («1.B.2.4 Altri beni», 1540: il
+    lettore non lo separa come codice conto, la lettura lo annota come codice del padre)."""
     cod, et = norm(riga.codice), norm(riga.etichetta)
-    return bool(annotati & ({cod, et, cod + et} - {""}))
+    testa = (riga.etichetta or "").split(" ", 1)[0]
+    percorso = norm(testa) if re.search(r"\d", testa) and re.search(r"[.)]", testa) else ""
+    return bool(annotati & ({cod, et, cod + et, percorso} - {""}))
 
 
 _NUMERAZIONE = re.compile(r"^\s*(?:[A-Z]\)|[IVX]+\s*[-.)]|\d+\)|[a-z]\))\s*", re.I)
@@ -212,13 +211,34 @@ def _tolleranza(doc) -> Decimal:
     return _UNITA if dec and not any(dec) else _CENT
 
 
+_ANALISI = ("differenza", "percentuale")
+_ANALISI_E_MOVIMENTI = ("differenza", "percentuale", "dare", "avere")
+
+
+def _somiglianza(voce: str, riga) -> float:
+    a = norm(senza_numero(senza_totale(voce)))
+    b = norm(senza_numero(senza_totale(f"{riga.codice} {riga.etichetta}".strip())))
+    return SequenceMatcher(None, a, b).ratio() if a and b else 0.0
+
+
+def _riga_del_totale(trovate: list, voce: str):
+    """Fra le righe della pagina con quel valore, quella che e' il totale stampato: la sola, o quella la cui etichetta
+    somiglia di piu' alla voce annotata (a parita', la prima). Un'altra riga con lo stesso importo, un figlio unico o
+    un conto, non chiude il totale al suo posto."""
+    righe = list({r.id: r for r, _ in trovate}.values())
+    if len(righe) == 1:
+        return righe[0]
+    return max(righe, key=lambda r: _somiglianza(voce, r))
+
+
 def misura_totali(doc, totali: list[dict], tol: Decimal) -> dict:
     per_pagina = defaultdict(list)
     for r in doc.righe:
         if r.parte == "prospetto":
             per_pagina[r.pagina].append(r)
-    ritrovati = chiusi = analisi = 0
+    ritrovati = chiusi = solo_dp = solo_dpda = 0
     ruoli = {c.indice: c.ruolo for c in doc.colonne}
+    coppie = getattr(doc.profilo, "coppie", {}) or {}
     mancanti, aperti = [], []
     for t in totali:
         trovate = [(r, col) for r in per_pagina[t["pagina"]] for col, imp in r.celle.items()
@@ -228,16 +248,20 @@ def misura_totali(doc, totali: list[dict], tol: Decimal) -> dict:
             mancanti.append(voce)
             continue
         ritrovati += 1
-        if any(r.totale and r.figli.get(col) for r, col in trovate):
+        riga = _riga_del_totale(trovate, t["voce"])
+        colonne = [col for r, col in trovate if r is riga]
+        # Q1: la voce di una colonna dei totali ha i figli sulla colonna dei parziali della coppia
+        if riga.totale and any(riga.figli.get(col) or riga.figli.get(coppie.get(col)) for col in colonne):
             chiusi += 1
-        elif all(ruoli.get(col) not in _VALORI_E_MASTRI for _, col in trovate):
-            analisi += 1        # ritrovato solo su una colonna di analisi o di movimenti: lì non si somma
-        else:
-            r, col = trovate[0]
-            aperti.append({**voce, "riga": r.id, "etichetta": r.etichetta[:50], "colonna": col,
-                           "ruolo": next((c.ruolo for c in doc.colonne if c.indice == col), None)})
-    return {"stampati": len(totali), "ritrovati": ritrovati, "chiusi": chiusi, "solo_analisi": analisi,
-            "mancanti": mancanti, "non_chiusi": aperti}
+            continue
+        if all(ruoli.get(col) in _ANALISI for col in colonne):
+            solo_dp += 1        # ritrovato solo su una colonna di differenza o di percentuale: li' non si somma
+        if all(ruoli.get(col) in _ANALISI_E_MOVIMENTI for col in colonne):
+            solo_dpda += 1      # ... o di movimenti (dare, avere)
+        aperti.append({**voce, "riga": riga.id, "etichetta": riga.etichetta[:50], "colonna": colonne[0],
+                       "ruolo": ruoli.get(colonne[0])})
+    return {"stampati": len(totali), "ritrovati": ritrovati, "chiusi": chiusi, "solo_analisi": solo_dp,
+            "solo_analisi_movimenti": solo_dpda, "mancanti": mancanti, "non_chiusi": aperti}
 
 
 def misura_periodi(doc, veri: list[dict]) -> dict | None:
@@ -371,6 +395,7 @@ def _somma(regs: list[dict]) -> dict:
             s["ritrovati"] += t["ritrovati"]
             s["chiusi"] += t["chiusi"]
             s["solo_analisi"] += t["solo_analisi"]
+            s["solo_analisi_movimenti"] += t["solo_analisi_movimenti"]
         p = r.get("periodi")
         if p:
             s["con_periodi"] += 1
@@ -394,13 +419,14 @@ def sintesi(registri: list[dict]) -> tuple[dict, list[str]]:
     for r in misurati:
         per_tip[r["tipologia"]].append(r)
     tabella = {"totale": _somma(misurati), **{t: _somma(v) for t, v in sorted(per_tip.items())}}
-    righe = [f"{'tipologia':30} {'doc':>4} {'ritrovati':>10} {'chiusi':>8} {'chiusi v.':>9} {'periodi':>9} "
-             f"{'mastri str':>11} {'mastri tol':>11} {'verif.':>8}"]
+    righe = [f"{'tipologia':30} {'doc':>4} {'ritrovati':>10} {'chiusi':>8} {'-diff/%':>8} {'-d/%/D/A':>9} "
+             f"{'periodi':>9} {'mastri str':>11} {'mastri tol':>11} {'verif.':>8}"]
     for nome, s in tabella.items():
         righe.append(
             f"{nome:30} {s.get('doc', 0):>4} {_pct(s.get('ritrovati', 0), s.get('stampati', 0)):>10} "
             f"{_pct(s.get('chiusi', 0), s.get('ritrovati', 0)):>8} "
-            f"{_pct(s.get('chiusi', 0), s.get('ritrovati', 0) - s.get('solo_analisi', 0)):>9} "
+            f"{_pct(s.get('chiusi', 0), s.get('ritrovati', 0) - s.get('solo_analisi', 0)):>8} "
+            f"{_pct(s.get('chiusi', 0), s.get('ritrovati', 0) - s.get('solo_analisi_movimenti', 0)):>9} "
             f"{s.get('periodi_giusti', 0):>4}/{s.get('con_periodi', 0):<4} "
             f"{_pct(s.get('conti_stretti', 0), s.get('conti_ritrovati', 0)):>11} "
             f"{_pct(s.get('conti_tolleranti', 0), s.get('conti_ritrovati', 0)):>11} "

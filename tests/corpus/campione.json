@@ -1,5 +1,5 @@
 {
- "descrizione": "Campione unico di 53 documenti (50 + 3 bilanci completi aggiunti il 2026-10-28) del corpus Test/ per la Fase 0 (verità e punteggio). I file restano fuori da git: si trovano per sha256 (tests/corpus/manifest.json). 'verita' indica da dove ricavare le cifre vere; null = da scrivere a mano. Analizzati a vista il 2026-10-28 (5 worker codex, Test/_analisi-campione/): tipologie corrette, 'giudizio_atteso' = importabile | importabile con avviso | da rifiutare. L'XBRL depositato vale da verita' solo dove 'coincide'.",
+ "descrizione": "Campione unico di 78 documenti del corpus Test/: i 53 della Fase 0 (50 + 3 bilanci completi aggiunti il 2026-10-28; verità e punteggio, Test/_analisi-campione/campione.json) e i 25 della settimana 44 (budget-wk-44, Test/_analisi-campione/wk44/campione.json). I file restano fuori da git: si trovano per sha256 (tests/corpus/manifest.json). 'verita' indica da dove ricavare le cifre vere; null = da scrivere a mano. Analizzati a vista il 2026-10-28 (5 worker codex, Test/_analisi-campione/): tipologie corrette, 'giudizio_atteso' = importabile | importabile con avviso | da rifiutare. L'XBRL depositato vale da verita' solo dove 'coincide'.",
  "creato": "2026-10-28",
  "documenti": [
   {

@@ -309,6 +309,7 @@ def main() -> None:
     ap.add_argument("--etichetta", default=time.strftime("%Y%m%d-%H%M"))
     ap.add_argument("--ripetizioni", type=int, default=1)
     ap.add_argument("--solo", default=None, help="id separati da virgola")
+    ap.add_argument("--riprendi", action="store_true", help="salta i giri già scritti in esiti.jsonl della stessa etichetta")
     ap.add_argument("--paralleli", type=int, default=1, help="import contemporanei, un processo ciascuno")
     ap.add_argument("--da-esiti", default=None, help="cartella di un giro precedente: ricalcola senza importare")
     args = ap.parse_args()
@@ -325,6 +326,12 @@ def main() -> None:
             e = json.loads(riga)
             giri[e["id"]].append(e)
     else:
+        fatti = set()
+        if args.riprendi and esiti_file.exists():
+            for riga in open(esiti_file, encoding="utf-8"):
+                e = json.loads(riga)
+                fatti.add((e["id"], e["giro"]))
+                giri[e["id"]].append(e)
         lavori = []
         for id_ in ids:
             vero = carica_verita(id_)
@@ -333,7 +340,8 @@ def main() -> None:
                 continue
             mesi = mesi_del_periodo(vero["periodi"][0]["periodo"]) if vero["periodi"] else None
             anno = anno_del_periodo(vero["periodi"][0]["fine"]) if vero["periodi"] else None
-            lavori += [(id_, n + 1, CORPUS / campione[id_]["path"], mesi, anno) for n in range(args.ripetizioni)]
+            lavori += [(id_, n + 1, CORPUS / campione[id_]["path"], mesi, anno) for n in range(args.ripetizioni)
+                       if (id_, n + 1) not in fatti]
         with open(esiti_file, "a", encoding="utf-8") as out:
             def registra(e: dict) -> None:
                 out.write(json.dumps(e, ensure_ascii=False) + "\n")

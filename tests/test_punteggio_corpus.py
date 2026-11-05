@@ -101,3 +101,79 @@ def test_un_confronto_infrannuale_salvato_come_anno_intero_si_segnala():
     d = P.punteggio_documento(vero, [giro])
     assert [p["periodo_giusto"] for p in d["giri"][0]["periodi"]] == [True, False]
     assert P.sintesi([d], {"W": {"tipologia": "x"}})["periodo_sbagliato"] == ["W 2025-09"]
+
+
+# --- lettore di righe (Fase 2) e numeri invariati ----------------------------------------------------
+
+def _giro(giro=1, *, quadra=True, sbil=0.0, utile_ce=None, sp13=None, lettore="assente", campi=None, importato=True):
+    g = {"id": "D", "giro": giro, "importato": importato, "quadra": quadra, "sbilancio": sbil,
+         "utile_ce": utile_ce, "sp13": sp13, "esercizi": [{"anno": 2025, "mesi": None, "campi": campi or {"sp09": 10.0}}]}
+    if lettore != "assente":
+        g["lettore"] = lettore
+    return g
+
+
+def _blocco(scarto, voce="B.7 Debiti", sezione="passivo"):
+    return {"voce": voce, "sezione": sezione, "scarto": scarto, "cercato": "debiti verso fornitori"}
+
+
+def test_lettore_assente_negli_esiti_vecchi_non_solleva():
+    a = P.analisi_lettore({"D": [_giro(), _giro(2)]})
+    assert a["importati"] == 2 and a["assenti"] == 2
+    assert P.righe_lettore(a)[-1].startswith("Lettore assente")
+
+
+def test_sbilanciato_con_blocco_che_spiega_lo_sbilancio():
+    let = {"esito": "ok", "secondi": 1.5, "blocchi_aperti": [_blocco("12.00"), _blocco(-500.0)]}
+    g = _giro(quadra=False, sbil=-500.4, lettore=let)
+    a = P.analisi_lettore({"D": [g]})
+    assert (a["sbilanciati_giri"], a["sbilanciati_con_blocchi"], a["sbilanciati_spiegati"]) == (1, 1, 1)
+    assert a["sbilanciati"][0]["spiega"] is True
+    assert a["esiti"] == {"ok": 1} and a["secondi_max"] == 1.5
+    md = "\n".join(P.righe_lettore(a))
+    assert "| D |" in md and "sì" in md
+
+
+def test_blocco_con_scarto_diverso_non_spiega_e_la_differenza_utile_conta():
+    let = {"esito": "ok", "secondi": 1.0, "blocchi_aperti": [_blocco(300.0)]}
+    no = P.analisi_lettore({"D": [_giro(quadra=False, sbil=-500.0, lettore=let)]})
+    assert no["sbilanciati_con_blocchi"] == 1 and no["sbilanciati_spiegati"] == 0
+    si = P.analisi_lettore({"D": [_giro(quadra=False, sbil=-500.0, utile_ce=1000.0, sp13=700.5, lettore=let)]})
+    assert si["sbilanciati_spiegati"] == 1                       # 1000 - 700,5 = 299,5: entro 1 € da 300
+
+
+def test_sbilanciato_senza_blocchi_e_bilanciato_con_blocchi():
+    let_vuoto = {"esito": "ok", "secondi": 0.5, "blocchi_aperti": []}
+    let_blocchi = {"esito": "ok", "secondi": 0.5, "blocchi_aperti": [_blocco(9.0), _blocco(7.0)]}
+    a = P.analisi_lettore({"A": [_giro(quadra=False, sbil=40.0, lettore=let_vuoto)],
+                           "B": [_giro(quadra=True, lettore=let_blocchi)]})
+    assert a["sbilanciati_giri"] == 1 and a["sbilanciati_con_blocchi"] == 0
+    assert a["sbilanciati"][0]["blocchi"] == []
+    assert a["bilanciati_con_blocchi_documenti"] == ["B"] and a["bilanciati_blocchi"] == 2
+
+
+def test_un_rifiutato_non_conta_nel_lettore():
+    a = P.analisi_lettore({"D": [_giro(importato=False, quadra=None)]})
+    assert a["importati"] == 0
+    assert "Nessun documento importato" in P.righe_lettore(a)[-1]
+
+
+def test_numeri_invariati_solo_sui_documenti_stabili():
+    base = {"S": [_giro(1), _giro(2)],
+            "I": [_giro(1, campi={"sp09": 1.0}), _giro(2, campi={"sp09": 2.0})],
+            "C": [_giro(1), _giro(2)]}
+    nuovi = {"S": [_giro(1), _giro(2)],
+             "I": [_giro(1, campi={"sp09": 9.0})],
+             "C": [_giro(1), _giro(2, campi={"sp09": 10.0, "ce01": 5.0})]}
+    r = P.numeri_invariati(base, nuovi)
+    assert r["stabili"] == 2 and r["invarianti"] == 1 and r["quota"] == 0.5
+    assert r["instabili_nella_base"] == ["I"]
+    assert r["cambiati"][0]["id"] == "C" and r["cambiati"][0]["giri"] == [2]
+    assert [d["campo"] for d in r["cambiati"][0]["differenze"]] == ["2025/None ce01"]
+    md = "\n".join(P.righe_invarianti(r, "base-x"))
+    assert "50.0%" in md and "| C |" in md
+
+
+def test_l_esito_diverso_dalla_base_e_una_differenza():
+    r = P.numeri_invariati({"D": [_giro(1)]}, {"D": [_giro(1, importato=False)]})
+    assert r["invarianti"] == 0 and r["cambiati"][0]["differenze"][0]["campo"] == "importato"

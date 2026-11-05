@@ -23,7 +23,7 @@ from importers.lettore.totali import assegna_padri, marca_totali
 from importers.lettore.profilo import (
     _PERCORSO_LEGGE, _RUOLI_ANALISI, _SEPARATORE, _STACCO_SEPARATORE, _SEPARATORE_CODICE, _TOL_X_CODICE, _VALUTA, _VOCE_NUMERATA,
     FormaCodice, Profilo, TabellaNota, _capitale_in_anagrafica, _codice_in_testa, _decimali, _in_colonna, _norm,
-    _rimando_di_nota, _valuta_davanti, _voce_di_legge, profilo_documento, senza_filetti)
+    _rimando_di_nota, _valuta_davanti, _voce_di_legge, marcatore_dopo, profilo_documento, senza_filetti)
 from importers.schema_legge_generico import _forma_strutturale, _intestazione
 from importers.xbrl_reso_parser import _frase_aperta
 
@@ -78,6 +78,8 @@ class Riga:
     intestazione: bool = False   # riga-titolo senza importi (mastro o gruppo stampato come titolo)
     padre: str | None = None     # id della riga madre (Task 6)
     padre_verificato: bool = False   # True se i figli del padre sommano al suo totale stampato
+    verso: dict[int, int] = field(default_factory=dict)   # per colonna dei figli: -1 quando i conti a marcatore D/A
+                                 # chiudono la voce col segno rovesciato (passivo o ricavi su una sezione unica, Q2)
     percorso: tuple[str, ...] = ()   # etichette degli antenati, dalla sezione al padre (Task 6)
     parte: str = "prospetto"     # "prospetto" | "nota" | "altro", dal profilo; i Task 6-8 leggono solo il prospetto
     tabella: int | None = None   # per una riga della nota: indice in `profilo.tabelle_nota`, e le chiavi di `celle`
@@ -169,14 +171,24 @@ def _riferimento_davanti(parole: list[Parola], i: int) -> bool:
     return prima in _RIFERIMENTO
 
 
+# Q2: in una colonna a marcatore (`Profilo.marcatori`) il D/A staccato dopo l'importo e' il segno della cella. La colonna
+# e' la verita' sul lato (CLAUDE.md): sul lato sinistro delle contrapposte (attivo, costi) e su una sezione unica vale
+# il saldo in dare, D positivo e A negativo (come «1.234,56 A» attaccato, `leggi_importo`); sul lato destro (passivo,
+# ricavi) A positivo e D negativo. Su una sezione unica una voce del passivo o dei ricavi chiude i suoi conti col segno
+# rovesciato: lo decide la somma (`totali`, `Riga.verso`), non il marcatore.
+_MARCATORE_NEGATIVO = {"U": "A", "L": "A", "R": "D"}
+
+
 def _celle_del_lato(parole: list[Parola], colonne: list[Colonna], lato: str, pagina: int,
                     avvisi: list[str], stampati: dict[Parola, str],
-                    intere: frozenset[int] = frozenset()) -> tuple[dict[int, Importo], list[Parola]]:
+                    intere: frozenset[int] = frozenset(),
+                    marcatori: frozenset[int] = frozenset()) -> tuple[dict[int, Importo], list[Parola]]:
     """(celle per colonna, parole dell'etichetta). Un importo e' una cella solo nella sua colonna e sul suo
     lato; fuori colonna, seguito da una durata («12 mesi») o dentro una frase dopo una valuta («euro 516,46
     di valore unitario», o in un'anagrafica col capitale sociale) torna nell'etichetta. Un anno nudo su una
     riga senza altri importi resta testo. Due importi nella stessa colonna: la cella non si legge. La valuta
-    davanti a una cella, o in coda all'etichetta, si toglie."""
+    davanti a una cella, o in coda all'etichetta, si toglie. In una colonna di `marcatori` il D/A dopo l'importo ne
+    e' il segno e lascia l'etichetta."""
     trovati = [_in_colonna(p, colonne, intere) for p in parole]
     for i, p in enumerate(parole[:-1]):
         # l'importo seguito da un rimando di nota («46.078 (1)») sta nella colonna dove il rimando la chiude
@@ -205,7 +217,10 @@ def _celle_del_lato(parole: list[Parola], colonne: list[Colonna], lato: str, pag
     celle: dict[int, Importo] = {}
     sedi: dict[int, list[Parola]] = {}
     testo: list[int] = []
+    segni: set[int] = set()
     for i, (p, trovato) in enumerate(zip(parole, trovati)):
+        if i in segni:
+            continue
         dopo = parole[i + 1].testo.lower().strip(".,:;") if i + 1 < len(parole) else ""
         if (trovato is None or dopo in _SCADENZA
                 or (_valuta_davanti(parole, i)
@@ -214,7 +229,13 @@ def _celle_del_lato(parole: list[Parola], colonne: list[Colonna], lato: str, pag
             continue
         imp, c = trovato
         sedi.setdefault(c.indice, []).append(p)
-        celle[c.indice] = Importo(imp.valore, imp.forma, stampati.get(p, p.testo))
+        stampato = stampati.get(p, p.testo)
+        marcatore = marcatore_dopo(parole, i) if c.indice in marcatori else None
+        if marcatore is not None:
+            segni.add(i + 1)
+            valore = -imp.valore if marcatore == _MARCATORE_NEGATIVO[lato] else imp.valore
+            imp, stampato = Importo(valore, imp.forma, f"{stampato} {marcatore}"), f"{stampato} {marcatore}"
+        celle[c.indice] = Importo(imp.valore, imp.forma, stampato)
     for indice, ps in sedi.items():
         # davanti a un importo vero, l'intero nudo nella stessa colonna cede (budget_1438, colonne della nota)
         nudi = [p for p in ps if leggi_importo(p.testo) is None]
@@ -233,7 +254,7 @@ def _celle_del_lato(parole: list[Parola], colonne: list[Colonna], lato: str, pag
             testo.extend(parole.index(p) for p in ps)
             avvisi.append(f"pagina {pagina}: due importi nella colonna {indice} sulla stessa riga "
                           f"({' '.join(p.testo for p in ps)}): cella non letta")
-    in_cella = set(range(len(parole))) - set(testo)
+    in_cella = set(range(len(parole))) - set(testo) - segni
     etichetta = [parole[i] for i in sorted(testo, key=lambda i: parole[i].x0)
                  if not (_norm(parole[i].testo) in _VALUTA and i + 1 in in_cella)]
     while etichetta and _norm(etichetta[-1].testo) in _VALUTA:
@@ -503,6 +524,7 @@ class _Lettura:
     confine: float | None
     intere: frozenset[int] = frozenset()
     negativi: frozenset[str] = frozenset()
+    marcatori: frozenset[int] = frozenset()
 
 
 def _pezzi_della_riga(r: RigaFisica, sezione: str, lettura: _Lettura, forme: list[FormaCodice],
@@ -517,7 +539,8 @@ def _pezzi_della_riga(r: RigaFisica, sezione: str, lettura: _Lettura, forme: lis
     for lato, parole in gruppi.items():
         if not parole:
             continue
-        celle, testo = _celle_del_lato(parole, lettura.colonne, lato, r.pagina, avvisi, stampati, lettura.intere)
+        celle, testo = _celle_del_lato(parole, lettura.colonne, lato, r.pagina, avvisi, stampati, lettura.intere,
+                                       lettura.marcatori)
         _segni_fuori_profilo(celle, lettura.colonne, lettura.negativi, r.pagina, avvisi)
         # i filetti verticali in testa e in coda al lato («| 303.01000 RISERVE DI RIVALUTAZIONE |», budget_375) non
         # sono testo della riga: nascondono il codice e, da soli, fanno una riga vuota
@@ -594,7 +617,8 @@ def _letture(righe: list[RigaFisica], profilo: Profilo, colonne_tabelle: list[li
         if parte == "prospetto":
             colonne = profilo.colonne
             lettura = _Lettura(parte, None, colonne, profilo.confine,
-                               frozenset(i for i, d in profilo.decimali.items() if d is False), profilo.negativi)
+                               frozenset(i for i, d in profilo.decimali.items() if d is False), profilo.negativi,
+                               profilo.marcatori)
         else:
             colonne = colonne_tabelle[tabella] if tabella is not None else []
             # gli interi in colonna dove gli importi della tabella non hanno decimali («(311)», budget_255 p26), o

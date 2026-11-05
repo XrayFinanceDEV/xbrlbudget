@@ -104,6 +104,9 @@ class Profilo:
     scartate: frozenset[tuple[int, float]] = frozenset()             # margini, piedi, testate di colonna
     sezioni_righe: dict[tuple[int, float], str] = field(default_factory=dict)   # righe non scartate -> sezione
     parti_righe: dict[tuple[int, float], str] = field(default_factory=dict)     # ogni riga -> parte
+    # Q2 (proprietario, 2026-11-05): le colonne in cui la maggioranza delle celle porta il marcatore D/A staccato
+    # dopo l'importo («11.429.777,38 D»): solo li' il marcatore e' il segno della cella e lascia l'etichetta
+    marcatori: frozenset[int] = frozenset()
 
 
 @dataclass(frozen=True)
@@ -726,9 +729,7 @@ def _negativi(righe: list[RigaFisica], colonne: list[Colonna], intere: frozenset
             if trovato is None or trovato[1].ruolo in _RUOLI_ANALISI or _rimando_di_nota(r.parole, k):
                 continue
             testo = p.testo.replace("€", "").strip()
-            dopo = r.parole[k + 1] if k + 1 < len(r.parole) else None
-            if re.search(r"\s[DA]$", testo) or (
-                    dopo is not None and dopo.testo in ("D", "A") and dopo.x0 - p.x1 <= 8):
+            if re.search(r"\s[DA]$", testo) or marcatore_dopo(r.parole, k) is not None:
                 viste["marcatore"] += 1
             if trovato[0].valore >= 0:
                 continue
@@ -743,6 +744,36 @@ def _negativi(righe: list[RigaFisica], colonne: list[Colonna], intere: frozenset
     if {"dare", "avere"} <= ruoli:
         forme.add("colonne-dare-avere")
     return frozenset(forme)
+
+
+_MARCATORI = ("D", "A")
+_STACCO_MARCATORE = 8.0
+_MIN_MARCATORI = 10
+_QUOTA_MARCATORI = 0.6
+
+
+def marcatore_dopo(parole: list[Parola], i: int) -> str | None:
+    """Il marcatore D/A staccato subito dopo la parola `i` («11.429.777,38 D»), o None."""
+    dopo = parole[i + 1] if i + 1 < len(parole) else None
+    if dopo is not None and dopo.testo in _MARCATORI and dopo.x0 - parole[i].x1 <= _STACCO_MARCATORE:
+        return dopo.testo
+    return None
+
+
+def _colonne_a_marcatore(righe: list[RigaFisica], colonne: list[Colonna], intere: frozenset[int]) -> frozenset[int]:
+    """Q2: una colonna e' «a marcatore» quando almeno il 60% delle sue celle, e almeno 10, sono seguite da un D/A
+    staccato. Si decide per colonna, non per token: due «A» sparsi in una contrapposta (365, 367) o il marcatore dei
+    soli mastri (1562) non fanno una colonna a marcatore. Le colonne di differenza e di percentuale non contano."""
+    celle: Counter[int] = Counter()
+    marcate: Counter[int] = Counter()
+    for r in righe:
+        for k, p in enumerate(r.parole):
+            trovato = _in_colonna(p, colonne, intere)
+            if trovato is None or trovato[1].ruolo in _RUOLI_ANALISI or _rimando_di_nota(r.parole, k):
+                continue
+            celle[trovato[1].indice] += 1
+            marcate[trovato[1].indice] += marcatore_dopo(r.parole, k) is not None
+    return frozenset(c for c, n in celle.items() if marcate[c] >= _MIN_MARCATORI and marcate[c] >= _QUOTA_MARCATORI * n)
 
 
 def _sezioni_pagina(pagine: list[list[RigaFisica]], sezioni: list[list[str]]) -> dict[int, str]:
@@ -828,4 +859,4 @@ def profilo_documento(righe: list[RigaFisica], *, altezze: dict[int, float] | No
     return Profilo(tipo, tipo_perche, colonne, confine, _negativi(prospetto, colonne, intere), decimali,
                    _forme(_candidati(prospetto, colonne, confine)), _sezioni_pagina(pagine, per_riga),
                    frozenset(margini), avvisi, contrapposto, parti_pagina, bande, tabelle, scartate, sezioni_righe,
-                   parti_righe)
+                   parti_righe, _colonne_a_marcatore(prospetto, colonne, intere))

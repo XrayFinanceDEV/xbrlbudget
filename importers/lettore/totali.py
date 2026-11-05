@@ -100,9 +100,12 @@ class _Serie:
     bersagli: list[Decimal] = field(default_factory=list)   # l'importo stampato, che i membri devono fare
     risultato: list[bool] = field(default_factory=list)      # un risultato del conto economico (una differenza)
     sottratti: list[Decimal] = field(default_factory=list)   # il valore di un membro dentro un risultato
+    marcati: list[bool] = field(default_factory=list)       # la cella ha il segno dal marcatore D/A (Q2)
     vivo: list[bool] = field(default_factory=list)
     candidabile: list[bool] = field(default_factory=list)
     figli: dict[int, list[int]] = field(default_factory=dict)
+    versi: dict[int, int] = field(default_factory=dict)      # -1: i membri a marcatore chiudono col segno rovesciato
+    verso_cercato: dict[int, int] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         self.vivo = [True] * len(self.righe)
@@ -113,6 +116,8 @@ class _Serie:
             self.risultato = [False] * len(self.righe)
         if not self.sottratti:
             self.sottratti = list(self.valori)
+        if not self.marcati:
+            self.marcati = [False] * len(self.righe)
 
 
 # Una voce fra parentesi dopo la sua numerazione («(Ammortamenti)», «B.I.5.f) (Fondi di ammortamento)», «(Perdita
@@ -163,10 +168,21 @@ def _costo_del_risultato(r: Riga) -> bool:
     return r.sezione == "CE" and r.lato == "U" and bool(_COSTO_DEL_RISULTATO.search(e)) and not _RISULTATO.search(e)
 
 
-def _valore_nel_totale(t: Riga, f: Riga, colonna: int) -> Decimal:
-    """Il valore del membro `f` nella somma del totale `t`, con le due regole del segno (posta rettificativa, costo
-    dentro un risultato)."""
+# Una cella col segno dal marcatore D/A (Q2: `Profilo.marcatori`, o il marcatore attaccato «1.234,56A»).
+_MARCATA = re.compile(r"\d\)?\s?[DA]$")
+
+
+def _marcata(r: Riga, colonna: int) -> bool:
+    cella = r.celle.get(colonna)
+    return cella is not None and bool(_MARCATA.search(cella.testo.strip()))
+
+
+def _valore_nel_totale(t: Riga, f: Riga, colonna: int, verso: int = 1) -> Decimal:
+    """Il valore del membro `f` nella somma del totale `t`, con le regole del segno (posta rettificativa, costo
+    dentro un risultato, conto a marcatore D/A dentro una voce dal verso rovesciato: `Riga.verso`)."""
     v = _valore_di_somma(f, colonna)
+    if verso == -1 and _marcata(f, colonna):
+        v = -v
     return -v if v > 0 and _risultato(t) and _costo_del_risultato(f) else v
 
 
@@ -185,11 +201,31 @@ def _serie(doc: Documento) -> list[_Serie]:
             out.append(_Serie(colonna.indice, [_tolleranza_cella(doc, r, colonna.indice) for r in righe], righe, valori,
                               [_di_controllo(r) or _risultato(r) for r in righe],
                               [r.celle[colonna.indice].valore for r in righe], [_risultato(r) for r in righe],
-                              [-v if v > 0 and _costo_del_risultato(r) else v for r, v in zip(righe, valori)]))
+                              [-v if v > 0 and _costo_del_risultato(r) else v for r, v in zip(righe, valori)],
+                              [_marcata(r, colonna.indice) for r in righe]))
     return out
 
 
 def _cerca_membri(serie: _Serie, passo: list[int], i: int, kmin: int) -> list[int] | None:
+    """I membri del totale `i` (`_cerca`). Q2: su una sezione unica i conti a marcatore D/A hanno il saldo in dare
+    positivo, ma una voce del passivo o dei ricavi, stampata positiva e senza marcatore, li chiude col segno
+    rovesciato: se il verso diritto non chiude, si prova il rovesciato (i soli membri a marcatore cambiano segno; una
+    cella senza marcatore, «FORNITORE 2.515.292,93» fra i debiti di 1533, resta com'e' stampata). Il verso trovato
+    resta in `verso_cercato[i]`, e `_marca` lo registra."""
+    base = serie.sottratti if serie.risultato[i] else serie.valori
+    serie.verso_cercato[i] = 1
+    membri = _cerca(serie, passo, i, kmin, base)
+    if membri is not None or serie.righe[i].lato != "U" or serie.marcati[i] or not any(serie.marcati):
+        return membri
+    rovesciati = [-v if m else v for v, m in zip(base, serie.marcati)]
+    membri = _cerca(serie, passo, i, kmin, rovesciati)
+    if membri is None or not any(serie.marcati[m] for m in membri if base[m]):
+        return None
+    serie.verso_cercato[i] = -1
+    return membri
+
+
+def _cerca(serie: _Serie, passo: list[int], i: int, kmin: int, valori: list[Decimal]) -> list[int] | None:
     """Come `import_snello/righe.py:_cerca_membri`, con la tolleranza della colonna: i membri vivi da `passo[i]` la
     cui somma torna a `valori[i]` con almeno `kmin` importi diversi da zero (uno zero non fa un gruppo: 100 = 100 +
     0 e' una catena). Una somma che ha gia' toccato il totale con meno membri e poi ci ritorna aggiunge solo righe
@@ -197,7 +233,7 @@ def _cerca_membri(serie: _Serie, passo: list[int], i: int, kmin: int) -> list[in
     ripetono): un mastro e la sua foglia, +x e -x, finirebbero contati due volte. Una catena (un solo importo) vale
     solo all'uguaglianza esatta e mai con un figlio meno rientrato del totale (R14). Il tetto di 80 membri non vale
     per una riga di controllo (R15): «Totale costi» chiude anche centocinquanta conti."""
-    valori, tol = (serie.sottratti if serie.risultato[i] else serie.valori), serie.tolleranze[i]
+    tol = serie.tolleranze[i]
     bersaglio = serie.bersagli[i]
     n = len(valori)
     tetto = n if serie.controllo[i] else _TETTO_MEMBRI
@@ -278,6 +314,7 @@ def _marca(serie: _Serie, passo: list[int], i: int, membri: list[int]) -> None:
     """Il totale resta vivo come addendo del livello sopra; i suoi membri escono per sempre."""
     serie.candidabile[i] = False
     serie.figli[i] = membri
+    serie.versi[i] = serie.verso_cercato.get(i, 1)
     for m in membri:
         serie.vivo[m] = False
     passo[i] = passo[membri[-1]]
@@ -392,7 +429,7 @@ def marca_totali(doc: Documento) -> None:
     `doc.avvisi`."""
     for r in doc.righe:
         if r.parte == "prospetto":
-            r.totale, r.figli = False, {}
+            r.totale, r.figli, r.verso = False, {}, {}
     direzione = _direzione(doc)
     tutte = _serie(doc)
     _punto_fisso(tutte, lambda serie: _passate(serie, direzione))
@@ -401,12 +438,16 @@ def marca_totali(doc: Documento) -> None:
             totale = serie.righe[i]
             totale.totale = True
             totale.figli[serie.colonna] = tuple(serie.righe[m].id for m in sorted(membri))
+            if serie.versi.get(i, 1) == -1:
+                totale.verso[serie.colonna] = -1
     for r in doc.righe:
         if r.totale:
             r.figli = dict(sorted(r.figli.items()))
     _mastro_e_foglia(doc)
     _confronta_colonne(doc)
     _un_totale_per_colonna(doc)
+    for r in doc.righe:
+        r.verso = {c: v for c, v in r.verso.items() if c in r.figli}
 
 
 def _mastro_e_foglia(doc: Documento) -> None:
@@ -520,11 +561,14 @@ def _confronta_colonne(doc: Documento) -> None:
                 continue
             if not any(c in f.celle for f in figli):
                 continue        # i figli non stampano quella colonna (parziali e totali, percentuali)
-            somma = sum((_valore_nel_totale(t, f, c) for f in figli if c in f.celle), Decimal(0))
+            somma = sum((_valore_nel_totale(t, f, c, t.verso.get(riferimento, 1)) for f in figli if c in f.celle),
+                        Decimal(0))
             scarto = t.celle[c].valore - somma
             if abs(scarto) <= _tolleranza_cella(doc, t, c):
                 if not presi[c] & set(t.figli[riferimento]):
                     t.figli[c] = t.figli[riferimento]
+                    if riferimento in t.verso:
+                        t.verso[c] = t.verso[riferimento]
                     presi[c].update(t.figli[c])
                 continue
             non_chiude[c].append(f"{_nome(t)} scarto {_euro(scarto)}")
@@ -754,7 +798,8 @@ def _gruppi_incoerenti(doc: Documento, colonne_prova: set[int]) -> set[tuple[str
             for c2 in sorted(colonne_prova & set(colonne)):
                 if c2 == c or c2 in t.figli or c2 not in t.celle or not any(c2 in m.celle for m in membri):
                     continue
-                somma = sum((_valore_nel_totale(t, m, c2) for m in membri if c2 in m.celle), Decimal(0))
+                somma = sum((_valore_nel_totale(t, m, c2, t.verso.get(c, 1)) for m in membri if c2 in m.celle),
+                            Decimal(0))
                 if abs(somma - t.celle[c2].valore) > _tolleranza_cella(doc, t, c2):
                     out.add((t.id, c))
                     doc.avvisi.append(f"{_nome(t)}: i figli della colonna {c + 1} non chiudono la colonna {c2 + 1} "

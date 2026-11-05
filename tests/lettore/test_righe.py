@@ -738,3 +738,51 @@ def test_valuta_dopo_la_cella_non_apre_l_etichetta_del_lato_destro():
     # in coda resta: «Capitale sociale €» e' testo dell'etichetta, la valuta in coda la toglie `_celle_del_lato`
     assert [p.testo for p in senza_filetti(parole[1:] + parole[:1])] == ["04.03", "Costi", "€"]
 
+
+
+def _verifica_a_marcatore():
+    """680: una colonna di saldi col marcatore D/A staccato dopo ogni importo, il mastro col suo saldo."""
+    righe = [("0101", "CASSA E VALORI BOLLATI", "1.199,64", "A"), ("10101", "CASSA CONTANTI", "839,66", "D"),
+             ("10102", "VALORI BOLLATI", "48,70", "D"), ("10104", "VALORI BOLLATI VIRTUALI", "118,00", "A"),
+             ("10105", "CARTA DI CREDITO", "1.970,00", "A"), ("0102", "BANCHE", "390.977,16", "D"),
+             ("10202", "INTESA SANPAOLO", "2.882,08", "D"), ("10206", "BANCA DI ASTI", "67.994,40", "D"),
+             ("10207", "CREDEM", "320.100,68", "D"), ("0103", "CLIENTI", "12.500,00", "D"),
+             ("10301", "CLIENTE ALFA", "10.000,00", "D"), ("10302", "CLIENTE BETA", "2.500,00", "D")]
+    voci = []
+    for k, (codice, etichetta, importo, marcatore) in enumerate(righe):
+        y = 140 + k * 14
+        x = 40 if len(codice) == 4 else 60
+        voci += [(x, y, codice), (x + 40, y, etichetta), (480, y, importo), (484, y, marcatore)]
+    return voci
+
+
+def test_marcatore_per_colonna_e_il_segno_della_cella(tmp_path):
+    # Q2: la colonna porta il D/A dopo ogni importo: il marcatore e' il segno (D positivo, A negativo su una sezione
+    # unica) e non resta nell'etichetta; il mastro chiude coi segni
+    doc = _leggi(tmp_path, [_verifica_a_marcatore()])
+    assert doc.profilo.marcatori == frozenset({0})
+    cassa = _riga(doc, "CASSA E VALORI BOLLATI")
+    assert cassa.etichetta == "CASSA E VALORI BOLLATI"
+    assert cassa.celle[0].valore == Decimal("-1199.64")
+    assert _riga(doc, "CARTA DI CREDITO").celle[0].valore == Decimal("-1970.00")
+    assert _riga(doc, "CASSA CONTANTI").celle[0].valore == Decimal("839.66")
+    assert cassa.totale and len(cassa.figli[0]) == 4
+    assert _riga(doc, "CARTA DI CREDITO").padre == cassa.id and _riga(doc, "CARTA DI CREDITO").padre_verificato
+
+
+def test_due_marcatori_sparsi_in_una_contrapposta_restano_testo(tmp_path):
+    # 365, 367: due «A» dopo un importo su novanta celle non fanno una colonna a marcatore: tutto come prima
+    sinistra = ("1.234,56", "500,00", "98.765,43", "12,30", "4.500,00", "777,77", "80,00", "3,10")
+    destra = ("1.000,00", "620,50", "90.000,00", "15,00", "4.100,10", "700,00", "55,55", "9,90")
+    voci = []
+    for k, (a, b) in enumerate(zip(sinistra, destra)):
+        y = 140 + k * 14
+        voci += [(40, y, f"0{k + 1}.01"), (80, y, f"Cliente {k + 1}"), (280, y, a),
+                 (310, y, f"2{k + 1}.01"), (350, y, f"Fornitore {k + 1}"), (560, y, b)]
+        if k in (2, 5):
+            voci.append((284, y, "A"))
+    doc = _leggi(tmp_path, [voci])
+    assert doc.contrapposto
+    assert doc.profilo.marcatori == frozenset()
+    assert _riga(doc, "Cliente 3").celle[0].valore == Decimal("98765.43")
+    assert sum(r.etichetta.split().count("A") for r in doc.righe) == 2      # i due «A» restano testo

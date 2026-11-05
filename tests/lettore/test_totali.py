@@ -736,3 +736,31 @@ def test_voce_stampata_al_centesimo_non_tollera_un_euro(tmp_path):
                                         (90, "Banca uno", "1.120,10"), (90, "Cassa", "179,95")]))
     assert not _riga(doc, "Crediti verso clienti").totale
     assert _riga(doc, "Disponibilita' liquide").totale
+
+
+def test_voce_del_passivo_chiude_i_conti_a_marcatore_col_verso_rovesciato(tmp_path):
+    # Q2, 1533: voci all'unita' senza marcatore e conti col D/A nella stessa colonna di una sezione unica. I conti
+    # hanno il saldo in dare (A negativo): la voce dell'attivo li chiude diritta, quella del passivo rovesciata
+    righe = [(50, "Crediti verso clienti", "1.500", None), (90, "Clienti", "1.700,30", "D"),
+             (90, "Fondo svalutazione crediti", "200,10", "A"), (50, "Disponibilita' liquide", "2.450", None),
+             (90, "Banca uno", "2.000,15", "D"), (90, "Cassa", "449,90", "D"),
+             (50, "Debiti verso fornitori", "3.000", None), (90, "Fornitori Italia", "2.000,40", "A"),
+             (90, "Fornitori estero", "999,80", "A"), (50, "Debiti tributari", "1.200", None),
+             (90, "Erario c/IVA", "1.300,25", "A"), (90, "Erario c/ritenute", "100,15", "D"),
+             (90, "Erario c/IRES", "0,10", "A"), (50, "Altri debiti", "800", None),
+             (90, "Debiti diversi", "500,20", "A"), (90, "Debiti verso dipendenti", "300,10", "A")]
+    voci = []
+    for k, (x, etichetta, importo, marcatore) in enumerate(righe):
+        y = 140 + k * 14
+        voci += [(x, y, etichetta), (400, y, importo)] + ([(404, y, marcatore)] if marcatore else [])
+    doc = _leggi(tmp_path, voci)
+    assert doc.profilo.marcatori == frozenset({0})
+    crediti, debiti = _riga(doc, "Crediti verso clienti"), _riga(doc, "Debiti verso fornitori")
+    assert _riga(doc, "Fondo svalutazione crediti").celle[0].valore < 0
+    assert crediti.totale and crediti.verso == {}
+    assert debiti.totale and debiti.verso == {0: -1}
+    assert set(debiti.figli[0]) == {_riga(doc, "Fornitori Italia").id, _riga(doc, "Fornitori estero").id}
+    assert _riga(doc, "Fornitori estero").padre_verificato
+    # i conti misti del passivo: 1.300,25 A - 100,15 D + 0,10 A = 1.200,20
+    assert _riga(doc, "Debiti tributari").verso == {0: -1}
+    assert _riga(doc, "Erario c/ritenute").padre == _riga(doc, "Debiti tributari").id

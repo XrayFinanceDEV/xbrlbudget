@@ -25,6 +25,7 @@ _X0_MINIMO = 150.0
 # Un'intestazione sta sopra una colonna se il suo bordo destro o il suo centro distano al piu' cosi'.
 _TOL_INTESTAZIONE = 70.0
 _TOL_SOMMA = Decimal("0.01")
+_TESTATA_SU_DUE_RIGHE = 12.0
 
 # Anno nudo, gg/mm/aaaa, gg/mm/aa, con "/", "." o "-".
 _DATA = re.compile(r"^(?:(\d{2})[-/.](\d{2})[-/.])?(20\d{2})$|^(\d{2})[-/.](\d{2})[-/.](\d{2})$")
@@ -158,9 +159,15 @@ def _norm(testo: str) -> str:
     return testo.strip().casefold().rstrip(":")
 
 
+def _norm_testata(testo: str) -> str:
+    """Come `_norm`, e una parola di testata col segno di percento vale «%» («%Scost.», «Diff.%»; non «(80%)»)."""
+    n = _norm(testo)
+    return "%" if "%" in n and n.replace("%", "") in _PAROLE_RIGA_TESTATA else n
+
+
 def _e_riga_testata(r: RigaFisica) -> bool:
     """Solo parole di testata, date e anni: «ESERCIZIO ESERCIZIO DIFFERENZA SCOST.», «DARE AVERE SALDO»."""
-    return all(_norm(p.testo) in _PAROLE_RIGA_TESTATA or re.fullmatch(r"[\d\-./]+", p.testo.strip())
+    return all(_norm_testata(p.testo) in _PAROLE_RIGA_TESTATA or re.fullmatch(r"[\d\-./]+", p.testo.strip())
                for p in r.parole)
 
 
@@ -203,7 +210,26 @@ def _periodi_riga(r: RigaFisica, colonne: list[Colonna]) -> dict[int, tuple] | N
     return {i: v[0] for i, v in trovati.items()}
 
 
-def _intestazioni(righe: list[RigaFisica], colonne: list[Colonna]):
+def _testata_con_didascalia(r: RigaFisica, colonne: list[Colonna]) -> bool:
+    """«Stato patrimoniale attivo 31/12/2025 31/12/2024», «Cod. Descrizione 31/12/2024»: una riga di testata con la
+    didascalia a sinistra. Dalla prima data in poi solo date e parole di testata; prima, parole di testata o testo che
+    finisce nella zona della didascalia, lontano dalle colonne («Data di stampa: 26/05/2026» sta sopra le colonne, e
+    «Pagina 1» dopo la data la esclude)."""
+    prima = next((k for k, p in enumerate(r.parole) if _data(p.testo)), None)
+    if prima is None or not colonne:
+        return False
+    # date di periodo («dal …», «al …») accanto a una data nuda: quella nuda e' la data di stampa («Stato
+    # Patrimoniale dal 01/01/2026 al 11/09/2026 12/10/2026»)
+    etichettate = [k > 0 and _norm(r.parole[k - 1].testo) in ("al", "dal") for k, p in enumerate(r.parole)
+                   if _data(p.testo)]
+    if any(etichettate) and not all(etichettate):
+        return False
+    zona = min(c.x_destra for c in colonne) - _TOL_INTESTAZIONE
+    return (all(_norm(p.testo) in _PAROLE_RIGA_TESTATA or _data(p.testo) for p in r.parole[prima:])
+            and all(_norm(p.testo) in _PAROLE_RIGA_TESTATA or p.x1 <= zona for p in r.parole[:prima]))
+
+
+def _intestazioni(righe: list[RigaFisica], colonne: list[Colonna], extra: set[str] = frozenset()):
     """(colonna -> periodo, colonna -> parole di ruolo) dalle righe di testata sopra le colonne.
 
     Un'intestazione vera ha importi sotto di se' (`standard_ivcee_parser._anchors_carry_amounts`): vale
@@ -222,18 +248,168 @@ def _intestazioni(righe: list[RigaFisica], colonne: list[Colonna]):
 
     candidati: dict[int, tuple] = {}     # colonna -> ((pagina, distanza), periodo)
     parole: dict[int, set[str]] = {}
+    datate: list[tuple[RigaFisica, dict[int, tuple]]] = []
+    zona = min((c.x_destra for c in colonne), default=0.0) - _TOL_INTESTAZIONE
     for r in sorted(righe, key=lambda r: (r.pagina, r.y)):
-        if any(_e_importo(p.testo) for p in r.parole) or not _e_riga_testata(r):
+        if any(_e_importo(p.testo) for p in r.parole):
             continue
-        for i, periodo in (_periodi_riga(r, colonne) or {}).items():
-            if (d := distanza(r, i)) is not None and (i not in candidati or (r.pagina, d) < candidati[i][0]):
-                candidati[i] = ((r.pagina, d), periodo)
+        if not (_e_riga_testata(r) or _testata_con_didascalia(r, colonne)):
+            # «ATTIVITA' CORRENTE PRECEDENTE»: per le sole parole chieste in piu', anche una testata senza date con
+            # la didascalia nella sua zona
+            if extra and not any(_data(p.testo) for p in r.parole) \
+                    and all(_norm(p.testo) in _PAROLE_RIGA_TESTATA or p.x1 <= zona for p in r.parole):
+                for p in r.parole:
+                    if (n := _norm(p.testo)) in extra and (c := _sopra(p, colonne)) is not None \
+                            and distanza(r, c.indice) is not None:
+                        parole.setdefault(c.indice, set()).add(n)
+            continue
+        if periodi := _periodi_riga(r, colonne):
+            datate.append((r, periodi))
         for p in r.parole:
-            n = _norm(p.testo)
-            if (n in _ANALISI or n in _RUOLI_TESTATA) and (c := _sopra(p, colonne)) is not None \
+            n = _norm_testata(p.testo)
+            if (n in _ANALISI or n in _RUOLI_TESTATA or n in extra) and (c := _sopra(p, colonne)) is not None \
                     and distanza(r, c.indice) is not None:
                 parole.setdefault(c.indice, set()).add(n)
+    # La testata datata piu' vicina sopra gli importi della colonna decide, anche se non la copre: una riga datata piu'
+    # in alto («Bilancio di verifica al 30/06/2025», sopra una testata «Periodo al 30/06/2026 … al 30/06/2025» che
+    # copre altre colonne) non da' il periodo a una colonna che la testata vera lascia senza data. Le righe datate a
+    # meno di 12 punti dalla piu' vicina sono la stessa testata su due righe.
+    for c in colonne:
+        for pagina in sorted({r.pagina for r, _ in datate}):
+            qui = [(d, r, periodi) for r, periodi in datate
+                   if r.pagina == pagina and (d := distanza(r, c.indice)) is not None]
+            if not qui:
+                continue
+            vicina = min(d for d, _, _ in qui)
+            blocco = sorted((d, r.y, periodi) for d, r, periodi in qui if d <= vicina + _TESTATA_SU_DUE_RIGHE
+                            and c.indice in periodi)
+            if blocco:
+                candidati[c.indice] = ((pagina, blocco[0][0]), blocco[0][2][c.indice])
+            break
     return {i: v[1] for i, v in candidati.items()}, parole
+
+
+# --------------------------------------------------------------------------------------
+# Periodo del documento: i titoli («Situazione dal 01/01/2026 al 30/09/2026», «Bilancio al 31/12/2025»)
+# --------------------------------------------------------------------------------------
+
+_D = r"(\d{1,2}[-/.]\d{1,2}[-/.]\d{2,4})"
+_MESI_NOME = ("gennaio", "febbraio", "marzo", "aprile", "maggio", "giugno", "luglio", "agosto", "settembre",
+              "ottobre", "novembre", "dicembre")
+_DAL_AL = re.compile(r"\bdal:?\s+" + _D + r"\s+al:?\s+" + _D + r"(?!\S)", re.I)
+_TRATTINO = re.compile(r"(?<!\S)" + _D + r"\s*[\u2013\u2014-]\s*" + _D + r"(?!\S)")
+_AL = re.compile(r"\bal:?\s+" + _D + r"(?!\S)", re.I)
+_A_PAROLE = re.compile(r"\b(\d{1,2})\s+(" + "|".join(_MESI_NOME) + r")\s+(20\d{2})\b", re.I)
+_ESERCIZIO = re.compile(r"\b(?:esercizio|es\. di competenza):?\s+(20\d{2})\b", re.I)
+# un titolo che dice di confrontare il periodo con l'anno intero prima («COMPARATO CON SALDO ANNO PRECEDENTE»)
+_ANNO_PRECEDENTE = re.compile(r"\b(?:anno|esercizio) precedente\b", re.I)
+_PAROLE_PERIODO = {"corrente": "corrente", "precedente": "precedente", "comparato": "precedente"}
+
+
+# 31/12/2099 e simili: la data segnaposto di un gestionale («Dal al 31/12/2099»), non un periodo
+_ANNO_SEGNAPOSTO = 2090
+
+
+def _data_intera(testo: str) -> date | None:
+    d = _data(testo)
+    return d[0] if d and d[1] and d[0].year < _ANNO_SEGNAPOSTO else None
+
+
+def periodi_stampati(righe: list[RigaFisica]) -> tuple[list[tuple[date | None, date]], bool]:
+    """I periodi che i titoli stampano, (inizio, fine), dai piu' espliciti: «dal A al B», «A–B» e «al B»; se non ce
+    n'e', «31 dicembre 2025»; se no «Esercizio 2025» (un anno nudo: fine 31/12, nessun inizio). In piu': se un titolo
+    confronta con l'anno precedente."""
+    espliciti, a_parole, anni = [], [], []
+    precedente = False
+    for r in righe:
+        testo = " ".join(p.testo for p in r.parole)
+        precedente = precedente or bool(_ANNO_PRECEDENTE.search(testo))
+        presi: list[tuple[int, int]] = []
+        for rx in (_DAL_AL, _TRATTINO):
+            for m in rx.finditer(testo):
+                i, f = _data_intera(m.group(1)), _data_intera(m.group(2))
+                if f is not None:
+                    espliciti.append((i, f))
+                    presi.append(m.span())
+        for m in _AL.finditer(testo):
+            if not any(a <= m.start() < b for a, b in presi) and (f := _data_intera(m.group(1))) is not None:
+                espliciti.append((None, f))
+        for m in _A_PAROLE.finditer(testo):
+            try:
+                a_parole.append((None, date(int(m.group(3)), _MESI_NOME.index(m.group(2).casefold()) + 1,
+                                            int(m.group(1)))))
+            except ValueError:
+                pass
+        anni += [(None, date(int(m.group(1)), 12, 31)) for m in _ESERCIZIO.finditer(testo)
+                 if int(m.group(1)) < _ANNO_SEGNAPOSTO]
+    return (espliciti or a_parole or anni), precedente
+
+
+def _periodo_unico(stampati: list[tuple[date | None, date]], anno: int | None = None) -> tuple | None:
+    """(fine, inizio, mesi) se i periodi stampati (dell'anno dato) hanno una fine sola; se no None: due fini diverse
+    non si scelgono."""
+    scelti = [(i, f) for i, f in stampati if anno is None or f.year == anno]
+    fini = {f for _, f in scelti}
+    if len(fini) != 1:
+        return None
+    fine = fini.pop()
+    inizi = {i for i, f in scelti if i is not None}
+    inizio = inizi.pop() if len(inizi) == 1 else None
+    mesi = _mesi(inizio, fine, True)
+    if mesi is not None and mesi > 12:      # «dal 01.01.20 al 31.03.26»: un progressivo, non un esercizio
+        inizio, mesi = None, None
+    return fine, inizio, mesi
+
+
+def completa_periodi(colonne: list[Colonna], testate: list[RigaFisica], titoli: list[RigaFisica]) -> None:
+    """Il periodo delle colonne-valori che le testate lasciano senza data o con l'anno nudo, dai titoli del documento.
+
+    - Un anno nudo sopra la colonna («Esercizio: 2026») prende il periodo stampato che finisce in quell'anno, se e'
+      uno solo («Col. 1 Esercizio: 2026 periodo dal 01/01/2026 al 31/05/2026»).
+    - Una colonna-valori senza data, sola sul suo lato, prende il periodo del documento, se e' uno solo («Situazione
+      dal 01/01/2026 al 30/09/2026»); fra piu' colonne, quella con «corrente» in testata; quella con «precedente» o
+      «comparato» prende l'anno intero prima, come un anno nudo, solo se un titolo dice «anno precedente».
+    - Una colonna di mastri sul lato di una colonna-valori sola ne prende il periodo (sono lo stesso periodo).
+    Poi la corrente si ricalcola (per lato)."""
+    stampati, precedente = periodi_stampati(titoli)
+    if not stampati:
+        return
+    _completa(colonne, testate, stampati, precedente)
+    for c in colonne:
+        c.corrente = False
+    for lato in {c.lato for c in colonne}:
+        _corrente([c for c in colonne if c.lato == lato])
+
+
+def _completa(colonne: list[Colonna], testate: list[RigaFisica], stampati: list, precedente: bool) -> None:
+    for c in colonne:
+        if c.ruolo in ("esercizio", "saldo", "mastro") and c.fine is not None and c.mesi is None \
+                and c.inizio is None and (c.fine.month, c.fine.day) == (12, 31):
+            if (p := _periodo_unico(stampati, c.fine.year)) is not None:
+                c.fine, c.inizio, c.mesi = p
+    documento = _periodo_unico(stampati)
+    if documento is None:
+        return
+    _, parole = _intestazioni(testate, colonne, extra=set(_PAROLE_PERIODO))
+    for lato in {c.lato for c in colonne}:
+        valori = [c for c in colonne if c.lato == lato and c.ruolo in ("esercizio", "saldo")]
+        senza = [c for c in valori if c.fine is None]
+        if not senza:
+            continue
+        if len(valori) == 1:
+            valori[0].fine, valori[0].inizio, valori[0].mesi = documento
+            for m in colonne:
+                if m.lato == lato and m.ruolo == "mastro" and m.fine is None:
+                    m.fine, m.inizio, m.mesi = documento
+            continue
+        for c in senza:
+            nomi = {_PAROLE_PERIODO[n] for n in parole.get(c.indice, set()) if n in _PAROLE_PERIODO}
+            if nomi == {"corrente"}:
+                c.fine, c.inizio, c.mesi = documento
+            elif nomi == {"precedente"} and (precedente or (documento[2] == 12 and documento[0].month == 12)):
+                # l'anno intero prima, come un anno nudo: dal titolo («anno precedente»), o perche' la corrente e'
+                # un anno solare intero; dopo un infrannuale «precedente» puo' essere lo stesso periodo, e non si sceglie
+                c.fine, c.inizio, c.mesi = date(documento[0].year - 1, 12, 31), None, None
 
 
 # --------------------------------------------------------------------------------------

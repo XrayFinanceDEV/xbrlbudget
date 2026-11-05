@@ -19,7 +19,7 @@ from decimal import Decimal
 
 from importers.bilancio_classifier import classify_bilancio
 from importers.detail_enrichment import _chiude_sezione, _sezione_della_chiusura
-from importers.lettore.colonne import Colonna, _e_riga_testata, colonna_di, colonne_documento
+from importers.lettore.colonne import Colonna, _e_riga_testata, colonna_di, colonne_documento, completa_periodi
 from importers.lettore.geometria import Parola, RigaFisica
 from importers.lettore.importi import Importo, leggi_importo
 from importers.lettore.lati import assegna_lati, confine_ammesso
@@ -787,6 +787,7 @@ def profilo_documento(righe: list[RigaFisica], *, altezze: dict[int, float] | No
     parti_righe = {(r.pagina, r.y): parti[id(r)] for rr in pagine for r in rr}
     scartate = frozenset((r.pagina, r.y) for n, rr in enumerate(pagine) for r in rr
                          if _scartata(r, altezze_l[n], colonne, margini))
+    pagine_tutte = pagine
     pagine = [[r for r in rr if (r.pagina, r.y) not in scartate] for rr in pagine]
     tutte = [r for rr in pagine for r in rr]
     prospetto = [r for r in tutte if parti[id(r)] == "prospetto"]
@@ -796,6 +797,9 @@ def profilo_documento(righe: list[RigaFisica], *, altezze: dict[int, float] | No
     tipo_parole, voci, quota, perche_parole = _parole_del_tipo(prospetto, colonne)
     confine = confine_ammesso(prospetto, colonne)
     assegna_lati(colonne, confine)
+    # i titoli del documento stanno anche fuori dal prospetto e nei margini ripetuti; mai nella nota
+    completa_periodi(colonne, [r for rr in pagine_tutte for r in rr if parti[id(r)] == "prospetto"],
+                     [r for rr in pagine_tutte for r in rr if parti[id(r)] != "nota"])
     ruoli = {c.ruolo for c in colonne}
     if tipo_parole is not None:
         tipo, perche = tipo_parole, "parole"

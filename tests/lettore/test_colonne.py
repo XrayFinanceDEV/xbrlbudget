@@ -261,3 +261,54 @@ def test_importo_che_comincia_a_sinistra_di_150_non_conta_per_il_ruolo(tmp_path)
         y += 14
     cols = _colonne(tmp_path, voci)
     assert [c.ruolo for c in cols] == ["percentuale"]
+
+
+def test_testata_con_didascalia_a_sinistra(tmp_path):
+    # 328, 1563: «Stato patrimoniale attivo 31/12/2025 31/12/2024», la didascalia nella zona della descrizione
+    voci = [(50, 120, "Stato patrimoniale attivo"), _testata(430, 120, "31/12/2025"), _testata(540, 120, "31/12/2024")]
+    voci += _righe_dati([430, 540], list(zip(_A, _B)))
+    cols = _colonne(tmp_path, voci)
+    assert [(c.fine, c.mesi) for c in cols] == [(date(2025, 12, 31), 12), (date(2024, 12, 31), 12)]
+
+
+def test_didascalia_con_pagina_dopo_la_data_non_e_testata(tmp_path):
+    # «Bilancio al 31/12/2025 Pagina 1» in piede: dopo la data solo date e parole di testata
+    voci = [(50, 120, "Situazione"), _testata(430, 120, "31/12/2025"), (450, 120, "Pagina"), (520, 120, "1")]
+    voci += _righe_dati([430, 540], list(zip(_A, _B)))
+    cols = _colonne(tmp_path, voci)
+    assert [c.fine for c in cols] == [None, None]
+
+
+def test_data_di_stampa_accanto_al_periodo_non_e_una_testata(tmp_path):
+    # 1432: «Stato Patrimoniale dal 01/01/2026 al 11/09/2026 12/10/2026», la data nuda e' la stampa
+    voci = [(50, 120, "Stato Patrimoniale dal"), _testata(380, 120, "01/01/2026"), (385, 120, "al"),
+            _testata(430, 120, "11/09/2026"), _testata(540, 120, "12/10/2026")]
+    voci += _righe_dati([430, 540], list(zip(_A, _B)))
+    cols = _colonne(tmp_path, voci)
+    assert cols[1].fine is None
+
+
+def test_una_riga_datata_piu_in_alto_non_data_la_colonna_che_la_testata_lascia_vuota(tmp_path):
+    # 1540: «Bilancio di verifica al 30/06/2025» sopra la testata «Periodo al 30/06/2026 … al 30/06/2025» delle
+    # colonne dei totali; la colonna dei parziali resta senza data, non prende il 2025
+    bordi = [330, 400, 470, 540]
+    voci = [(50, 100, "Bilancio di verifica al"), _testata(330, 100, "30/06/2025"),
+            (50, 122, "Descrizione"), _testata(400, 122, "30/06/2026"), _testata(540, 122, "30/06/2025")]
+    voci += _righe_dati(bordi, [(a, a, b, b) for a, b in zip(_A, _B)])
+    cols = _colonne(tmp_path, voci)
+    assert cols[0].fine is None
+    assert (cols[1].fine, cols[1].mesi) == (date(2026, 6, 30), 6)
+
+
+def test_scostamento_percentuale_in_un_token_solo(tmp_path):
+    # 161: «%Scost.» sopra una colonna a due decimali che i numeri non dicono percentuale
+    voci = [_testata(400, 110, "Esercizio"), _testata(470, 110, "Esercizio"), _testata(540, 110, "%Scost.")]
+    voci += _righe_dati([400, 470, 540], [(a, b, Decimal("14.92")) for a, b in zip(_A, _B)])
+    assert [c.ruolo for c in _colonne(tmp_path, voci)][2] == "percentuale"
+
+
+def test_percento_in_una_descrizione_non_fa_testata(tmp_path):
+    # 171, 1478: «TELEFONIA(80%)», «100%» sono righe di conti
+    from importers.lettore.colonne import _norm_testata
+    assert _norm_testata("%Scost.") == "%" and _norm_testata("Diff.%") == "%"
+    assert _norm_testata("TELEFONIA(80%)") != "%" and _norm_testata("100%") != "%"

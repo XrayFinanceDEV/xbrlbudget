@@ -1,3 +1,5 @@
+from datetime import date
+
 import fitz
 
 from importers.lettore.geometria import parole_pagina, righe_fisiche
@@ -496,3 +498,75 @@ def test_titoli_della_nota_delle_tabelle():
     for titolo in ("Dettaglio ratei, risconti e competenze (valuta di gestione)", "Indici di struttura",
                    "Composizione dei ricavi", "Movimenti delle immobilizzazioni"):
         assert _titolo_parte(RigaFisica(1, 10.0, [Parola(10, 6, 200, 14, titolo)])) == "nota", titolo
+
+
+def _con_titolo(titolo, colonne=(480,), testata=None):
+    voci = [(50, 60, titolo)] + (testata or []) + _tabella([f"Voce {k}" for k in range(6)], colonne=colonne)
+    return voci
+
+
+def test_periodo_del_titolo_sulla_colonna_sola(tmp_path):
+    # 1436, 1450: «Bilancio dal 01/01/2026 al 30/09/2026», una colonna di valori senza data in testata
+    prof = _profilo(tmp_path, _con_titolo("Bilancio dal 01/01/2026 al 30/09/2026 - schema CEE"))
+    (c,) = prof.colonne
+    assert (c.fine, c.inizio, c.mesi, c.corrente) == (date(2026, 9, 30), date(2026, 1, 1), 9, True)
+
+
+def test_titolo_al_e_data_a_parole(tmp_path):
+    assert _profilo(tmp_path, _con_titolo("SITUAZIONE PATRIMONIALE AL 30.06.2026")).colonne[0].mesi == 6
+    c = _profilo(tmp_path, _con_titolo("BILANCIO AL 31 DICEMBRE 2025")).colonne[0]
+    assert (c.fine, c.mesi) == (date(2025, 12, 31), 12)
+
+
+def test_due_fini_diverse_nei_titoli_non_si_sceglie(tmp_path):
+    voci = _con_titolo("Esercizio dal 01/01/2026 al 31/12/2026") + [(50, 75, "Registrazioni fino al 30/09/2026")]
+    assert _profilo(tmp_path, voci).colonne[0].fine is None
+
+
+def test_due_colonne_senza_data_non_prendono_il_titolo(tmp_path):
+    # due colonne senza parole: quale sia il periodo del titolo non si sa
+    prof = _profilo(tmp_path, _con_titolo("Bilancio al 31/12/2025", colonne=(480, 560)))
+    assert [c.fine for c in prof.colonne] == [None, None]
+
+
+def test_corrente_e_comparato_con_anno_precedente(tmp_path):
+    # 1548, 1440: «… dal 01/01/2026 al 30/09/2026 - COMPARATO CON SALDO ANNO PRECEDENTE», «Importo corrente |
+    # comparato»: la corrente ha il periodo, la comparata l'anno intero prima (anno nudo: nessuna durata inventata)
+    testata = [(480 - 40, 120, "corrente"), (560 - 45, 120, "comparato")]
+    prof = _profilo(tmp_path, _con_titolo("BILANCIO dal 01/01/2026 al 30/09/2026 - COMPARATO CON SALDO ANNO PRECEDENTE",
+                                          colonne=(480, 560), testata=testata))
+    a, b = prof.colonne
+    assert (a.fine, a.mesi, a.corrente) == (date(2026, 9, 30), 9, True)
+    assert (b.fine, b.mesi, b.corrente) == (date(2025, 12, 31), None, False)
+
+
+def test_anno_nudo_preso_dalla_legenda_dei_periodi(tmp_path):
+    # 638: «Esercizio: 2026 | Esercizio: 2025» sopra le colonne, la legenda stampa i periodi per intero
+    testata = [(480 - 20, 120, "2026"), (560 - 20, 120, "2025")]
+    voci = [(50, 60, "Col. 1 periodo dal 01/01/2026 al 31/05/2026 - Col. 2 periodo dal 01/01/2025 al 31/12/2025")]
+    voci += testata + _tabella([f"Voce {k}" for k in range(6)], colonne=(480, 560))
+    a, b = _profilo(tmp_path, voci).colonne
+    assert (a.fine, a.mesi) == (date(2026, 5, 31), 5)
+    assert (b.fine, b.mesi) == (date(2025, 12, 31), 12)
+
+
+def test_data_segnaposto_e_periodo_progressivo(tmp_path):
+    # «Dal al 31/12/2099» e' un segnaposto del gestionale; «dal 01.01.20 al 31.03.26» un progressivo di anni
+    assert _profilo(tmp_path, _con_titolo("Dal al 31/12/2099")).colonne[0].fine is None
+    c = _profilo(tmp_path, _con_titolo("Periodo dal 01.01.20 al 31.03.26")).colonne[0]
+    assert (c.fine, c.inizio, c.mesi) == (date(2026, 3, 31), None, None)
+
+
+def test_corrente_e_precedente_dopo_un_anno_intero(tmp_path):
+    # 682, 1533: «Bilancio AL 31/12/2025», «ATTIVITA' CORRENTE PRECEDENTE» senza date
+    testata = [(50, 120, "ATTIVITA'"), (480 - 40, 120, "CORRENTE"), (560 - 50, 120, "PRECEDENTE")]
+    a, b = _profilo(tmp_path, _con_titolo("Bilancio AL 31/12/2025", colonne=(480, 560), testata=testata)).colonne
+    assert (a.fine, a.mesi, a.corrente) == (date(2025, 12, 31), 12, True)
+    assert (b.fine, b.mesi) == (date(2024, 12, 31), None)
+
+
+def test_precedente_dopo_un_infrannuale_non_si_sceglie(tmp_path):
+    testata = [(50, 120, "ATTIVITA'"), (480 - 40, 120, "CORRENTE"), (560 - 50, 120, "PRECEDENTE")]
+    a, b = _profilo(tmp_path, _con_titolo("Situazione al 30/09/2026", colonne=(480, 560), testata=testata)).colonne
+    assert (a.fine, a.mesi) == (date(2026, 9, 30), 9)
+    assert b.fine is None

@@ -1012,3 +1012,64 @@ Ognuna ha il suo test; le regressioni sono su 208 PDF diversi (`Test/` più il l
   quando `is_contrapposte_file` riconosce conti su due lati. budget_1432 era letto in «legge» e il
   modello mescolava lordi e fondi (sbilancio 585.819, ora 15.524,64). Sui 208 PDF la guardia può
   toccare 9 file; reimportati, 8 verificati e 1432 migliorato.
+
+## 11. Lettore di righe unico (Fase 1)
+
+`importers/lettore/` è il lettore nuovo, scritto **accanto** al percorso attuale: **non è collegato
+all'import**. Nessuna rotta e nessun importatore lo chiama; collegarlo è il lavoro delle Fasi 2-4. Fino ad
+allora quello che si legge in queste pagine sopra descrive l'import vero, e il lettore si misura soltanto.
+
+**Che cosa legge.** Da un PDF col text layer (`leggi_pdf`) o dalle tabelle HTML di MinerU (`leggi_celle`)
+restituisce un `Documento`: righe con codice, etichetta e un importo `Decimal` per colonna; le colonne col
+loro ruolo (esercizio, mastro, differenza, percentuale, dare, avere, saldo), il periodo e la corrente; il lato
+fisico e il verdetto «sezioni contrapposte»; la sezione SP/CE; la parte (prospetto, nota, altro); le righe di
+totale coi figli colonna per colonna, e per ogni riga il padre, se verificato dalla somma, e il percorso. Non
+classifica in campi `sp`/`ce`, non netta, non tappa: ciò che non sa decidere lo dichiara (`Documento.avvisi`,
+`Profilo.avvisi`).
+
+**I principi del proprietario, nell'ordine in cui il lettore li applica.**
+
+- **Prima la struttura, poi le righe.** Il profilo del documento (`profilo.py`: tipo, colonne e periodi, lati,
+  negativi, decimali, forme dei codici, sezioni, margini, parti) si calcola per primo, e le righe si leggono su
+  di lui, senza rifare quelle decisioni.
+- **Le tabelle della nota integrativa non sono mai un prospetto.** Si riconoscono e si dichiarano
+  (`Profilo.tabelle_nota`, `Riga.parte == "nota"`); colonne, periodi, totali e padri si calcolano solo sul
+  prospetto.
+- **La parentela viene solo dalle somme stampate**, colonna per colonna; mai dal prefisso o dalla lunghezza del
+  codice conto. Un titolo sopra dà al più un padre non verificato.
+- **Verificato solo con almeno due importi non nulli** (un'uguaglianza a un solo membro resta un'ipotesi, R14)
+  **e con gli stessi membri su ogni colonna** che ha un gruppo suo (R18).
+
+**Le regole riusate e da dove.** Ogni modulo dichiara in testa la funzione dell'importatore attuale da cui
+viene la sua regola (`schema_legge_generico._bordi`, `standard_ivcee_parser._anchors_carry_amounts`,
+`import_snello/righe.py:marca_totali`, `situazione_contabile_parser` per righe fisiche e lati…). L'elenco
+completo, con le dodici contraddizioni C1-C12 fra copie della stessa regola e la scelta fatta per ciascuna, è
+nell'inventario `.superpowers/sdd/2026-10-30-importatore-generico-fase1/inventario-lettura.md` (fuori da
+git), e le decisioni prese durante la fase (R1-R21) nel registro della stessa cartella SDD
+(`.superpowers/sdd/2026-11-04-fase1-lettore-righe/progress.md`). Due regole del fac-simile di legge, aggiunte
+con la misura sul campione: una voce rettificativa fra parentesi («(Ammortamenti)», «(Fondi di ammortamento)»)
+si sottrae nella somma della voce sopra; nei risultati del conto economico («Differenza tra valore e costi
+della produzione», «Risultato prima delle imposte», «Utile (perdita)», «Totale proventi e oneri finanziari»)
+costi, interessi e oneri, svalutazioni e imposte stampati positivi si sottraggono, e quei risultati si cercano
+dopo gli altri totali. Il periodo di una colonna viene dalla testata sopra di lei (anche con la didascalia a
+sinistra), e, quando manca, dai titoli del documento solo se il periodo stampato è uno solo.
+
+**Come si misura.** Due script, nessun import, nessun DB, nessuna rete; i PDF e le verità sono cifre di
+clienti e restano fuori da git (`Test/` è ignorata):
+
+```bash
+# profilo: tipo, contrapposte, periodi sul campione (e con --rete il controllo su tutti i PDF di Test/)
+IMPORT_CORPUS_ROOT=$PWD/Test backend/venv/bin/python tests/corpus/profili_campione.py --etichetta <nome>
+# righe: totali stampati ritrovati e chiusi, periodi, mastri giusti, contro le due letture e la verità
+IMPORT_CORPUS_ROOT=$PWD/Test backend/venv/bin/python tests/corpus/righe_campione.py --etichetta <nome> [--solo 395,1456]
+```
+
+Il secondo legge `tests/corpus/campione.json` (78 documenti; le scansioni si contano a parte, vanno per
+`leggi_celle` solo con MinerU acceso), le letture `Test/_analisi-campione/<id>.json` e `opus/<id>.json`, la
+verità `verita/<id>.json`, e scrive `Test/_analisi-campione/righe/<nome>/righe.json` e `righe.md`: le quote in
+totale e per tipologia, e per documento i totali non ritrovati o non chiusi, i periodi sbagliati e i conti col
+mastro sbagliato. I mastri si contano in due modi: *stretto* (il padre diretto ha il codice o il nome annotato)
+e *tollerante* (anche un «Totale X» con X uguale al padre annotato, o che lo contiene, numerazione di legge a
+parte, salendo per i totali fino al primo antenato che non è un totale: la lettura nomina la voce, «1) Verso
+clienti», il lettore il totale stampato che la chiude, «Totale crediti verso clienti»). Le annotazioni
+sbagliate note stanno in `CORREZIONI_ANNOTAZIONE`, non pesano e si elencano.

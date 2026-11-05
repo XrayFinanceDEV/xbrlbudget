@@ -74,7 +74,9 @@ class Riga:
     etichetta: str
     celle: dict[int, Importo]    # indice di Colonna -> importo; una colonna assente = cella vuota
     totale: bool = False         # Task 6
-    figli: dict[int, tuple[str, ...]] = field(default_factory=dict)   # per colonna, id dei figli (Task 6)
+    figli: dict[int, tuple[str, ...]] = field(default_factory=dict)   # per colonna, id dei figli (Task 6): la
+                                 # colonna su cui si leggono i loro importi; per una voce della colonna dei totali di
+                                 # una coppia (`Profilo.coppie`, Q1) e' la colonna dei parziali
     intestazione: bool = False   # riga-titolo senza importi (mastro o gruppo stampato come titolo)
     padre: str | None = None     # id della riga madre (Task 6)
     padre_verificato: bool = False   # True se i figli del padre sommano al suo totale stampato

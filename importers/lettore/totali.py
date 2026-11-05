@@ -433,6 +433,7 @@ def marca_totali(doc: Documento) -> None:
     direzione = _direzione(doc)
     tutte = _serie(doc)
     _punto_fisso(tutte, lambda serie: _passate(serie, direzione))
+    _coppie_parziali_totali(doc, tutte)
     for serie in tutte:
         for i, membri in serie.figli.items():
             totale = serie.righe[i]
@@ -448,6 +449,91 @@ def marca_totali(doc: Documento) -> None:
     _un_totale_per_colonna(doc)
     for r in doc.righe:
         r.verso = {c: v for c, v in r.verso.items() if c in r.figli}
+
+
+# --------------------------------------------------------------------------------------
+# Coppie parziali -> totali (Q1)
+# --------------------------------------------------------------------------------------
+
+def _coppie_parziali_totali(doc: Documento, tutte: list[_Serie]) -> None:
+    """Q1 (proprietario, 2026-11-05): in una coppia (parziali, totali) del profilo i conti stanno nella colonna dei
+    parziali e la voce che li somma in quella dei totali. Una voce della colonna dei totali prende per membri le celle
+    dei parziali delle righe fra lei e la riga dei totali successiva (o precedente, se il documento stampa la voce
+    dopo i conti: vale la direzione che chiude di piu'). I due livelli restano separati: un conto gia' membro di un
+    totale dei parziali non conta (i suoi figli si sommano oppure lui, mai entrambi), e fra righe a rientri diversi
+    contano le meno rientrate. Valgono le regole di sempre: tolleranza di un euro per la voce all'unita' (C6), una
+    catena solo esatta (R14), un totale a zero solo con due membri (R16), e la voce che ha gia' un gruppo sulla sua
+    colonna lo tiene. I figli stanno in `figli[parziali]`: e' la colonna su cui si leggono i loro importi."""
+    coppie = getattr(doc.profilo, "coppie", {}) or {}
+    if not coppie:
+        return
+    consumati: dict[int, set[int]] = defaultdict(set)
+    for serie in tutte:
+        for membri in serie.figli.values():
+            consumati[serie.colonna].update(id(serie.righe[m]) for m in membri)
+    propri = {(id(serie.righe[i]), serie.colonna) for serie in tutte for i in serie.figli}
+    gruppi: dict[tuple[str, str], list[Riga]] = defaultdict(list)
+    for r in doc.righe:
+        if r.parte == "prospetto":
+            gruppi[(r.lato, r.sezione)].append(r)
+    # la testata della stampa ripetuta in cima a ogni pagina, o la riga di testata delle colonne, non chiude una voce
+    saltate = _testate_di_pagina(doc) | {r.id for r in doc.righe if r.intestazione and (_testata(r) or _parametri(r))}
+    for totali, parziali in sorted(coppie.items()):
+        esiti = {d: [g for righe in gruppi.values()
+                     for g in _gruppi_di_coppia(doc, righe, totali, parziali, d, consumati[parziali], propri, saltate)]
+                 for d in (1, -1)}
+        conta = {d: sum(len(g[2]) >= 2 for g in v) for d, v in esiti.items()}
+        if not max(conta.values()):
+            continue
+        for t, membri, pieni, verso in esiti[1 if conta[1] > conta[-1] else -1]:
+            t.totale = True
+            t.figli[parziali] = tuple(m.id for m in membri)
+            if verso == -1:
+                t.verso[parziali] = -1
+
+
+def _gruppi_di_coppia(doc: Documento, righe: list[Riga], totali: int, parziali: int, direzione: int,
+                      consumati: set[int], propri: set[tuple[int, int]], saltate: set[str]
+                      ) -> list[tuple[Riga, list[Riga], list[Riga], int]]:
+    """Le voci della colonna `totali` di un lato e di una sezione che i parziali chiudono, nella direzione data (1: i
+    conti dopo la voce)."""
+    out = []
+    for k, t in enumerate(righe):
+        if totali not in t.celle or (id(t), totali) in propri:
+            continue
+        # fino alla riga dei totali dopo (o prima), o al titolo di una voce allo stesso rientro rimasta senza importo
+        # («1.B.1.4 Concessioni, licenze …» fra i conti di 1.B.1.3 e quelli suoi, 1540)
+        finestra = []
+        passo = range(k + 1, len(righe)) if direzione == 1 else range(k - 1, -1, -1)
+        for j in passo:
+            r = righe[j]
+            if totali in r.celle or (parziali not in r.celle and r.intestazione and r.id not in saltate
+                                     and r.x is not None and t.x is not None and r.x <= t.x + _TOL_RIENTRO):
+                break
+            finestra.append(r)
+        membri = [r for r in finestra[::direzione] if parziali in r.celle and id(r) not in consumati]
+        xs = [r.x for r in membri if r.x is not None]
+        if xs and max(xs) - min(xs) > _TOL_RIENTRO:
+            membri = [r for r in membri if r.x is None or r.x <= min(xs) + _TOL_RIENTRO]
+        pieni = [r for r in membri if r.celle[parziali].valore]
+        if not pieni:
+            continue
+        bersaglio, tol = t.celle[totali].valore, _tolleranza_cella(doc, t, totali)
+        versi = [1]
+        if t.lato == "U" and not _marcata(t, totali) and any(_marcata(r, parziali) for r in pieni):
+            versi.append(-1)
+        chiusure = []
+        for verso in versi:
+            somma = sum((_valore_nel_totale(t, r, parziali, verso) for r in membri), Decimal(0))
+            if abs(somma - bersaglio) <= tol:
+                chiusure.append((somma != bersaglio, verso))
+        if not chiusure:
+            continue
+        inesatta, verso = min(chiusure)
+        if (len(pieni) == 1 and inesatta) or (not bersaglio and len(pieni) != 2):
+            continue
+        out.append((t, membri, pieni, verso))
+    return out
 
 
 def _mastro_e_foglia(doc: Documento) -> None:

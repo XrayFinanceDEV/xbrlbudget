@@ -107,6 +107,9 @@ class Profilo:
     # Q2 (proprietario, 2026-11-05): le colonne in cui la maggioranza delle celle porta il marcatore D/A staccato
     # dopo l'importo («11.429.777,38 D»): solo li' il marcatore e' il segno della cella e lascia l'etichetta
     marcatori: frozenset[int] = frozenset()
+    # Q1 (proprietario, 2026-11-05): colonna dei totali -> colonna dei parziali accanto, sullo stesso lato: i conti
+    # stanno nei parziali (al centesimo), la voce che li somma nei totali (all'unita'), mai sulla stessa riga
+    coppie: dict[int, int] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -776,6 +779,42 @@ def _colonne_a_marcatore(righe: list[RigaFisica], colonne: list[Colonna], intere
     return frozenset(c for c, n in celle.items() if marcate[c] >= _MIN_MARCATORI and marcate[c] >= _QUOTA_MARCATORI * n)
 
 
+_MIN_RIGHE_COPPIA = 4
+_QUOTA_CENTESIMI_PARZIALI = 0.5
+_QUOTA_INTERI_TOTALI = 0.95
+
+
+def _coppie(righe: list[RigaFisica], colonne: list[Colonna], intere: frozenset[int]) -> dict[int, int]:
+    """Q1: le coppie (parziali, totali) del documento, come {totali: parziali}. Due colonne di valori adiacenti sullo
+    stesso lato, che non stampano mai sulla stessa riga, con almeno 4 righe ciascuna; i parziali stampano i centesimi
+    (almeno meta' degli importi non nulli con centesimi diversi da zero), i totali le unita' (almeno il 95% degli
+    importi non nulli interi). Due colonne affiancate a centesimi o a interi (corrente e precedente di uno schema
+    reso da XBRL) non sono una coppia."""
+    per_colonna: dict[int, list[tuple[int, Decimal]]] = {}
+    for k, r in enumerate(righe):
+        for p in r.parole:
+            trovato = _in_colonna(p, colonne, intere)
+            if trovato is not None:
+                per_colonna.setdefault(trovato[1].indice, []).append((k, trovato[0].valore))
+    valori = sorted((c for c in colonne if c.ruolo in ("esercizio", "saldo")), key=lambda c: (c.lato, c.x_destra))
+    out: dict[int, int] = {}
+    for a, b in zip(valori, valori[1:]):
+        if a.lato != b.lato or a.indice in out or a.indice in out.values():
+            continue
+        ra, rb = per_colonna.get(a.indice, []), per_colonna.get(b.indice, [])
+        if len({k for k, _ in ra}) < _MIN_RIGHE_COPPIA or len({k for k, _ in rb}) < _MIN_RIGHE_COPPIA \
+                or {k for k, _ in ra} & {k for k, _ in rb}:
+            continue
+        va, vb = [v for _, v in ra if v], [v for _, v in rb if v]
+        if not va or not vb:
+            continue
+        centesimi = sum(v != v.to_integral_value() for v in va) / len(va)
+        interi = sum(v == v.to_integral_value() for v in vb) / len(vb)
+        if centesimi >= _QUOTA_CENTESIMI_PARZIALI and interi >= _QUOTA_INTERI_TOTALI:
+            out[b.indice] = a.indice
+    return out
+
+
 def _sezioni_pagina(pagine: list[list[RigaFisica]], sezioni: list[list[str]]) -> dict[int, str]:
     out = {}
     for n, (righe, per_riga) in enumerate(zip(pagine, sezioni), start=1):
@@ -859,4 +898,4 @@ def profilo_documento(righe: list[RigaFisica], *, altezze: dict[int, float] | No
     return Profilo(tipo, tipo_perche, colonne, confine, _negativi(prospetto, colonne, intere), decimali,
                    _forme(_candidati(prospetto, colonne, confine)), _sezioni_pagina(pagine, per_riga),
                    frozenset(margini), avvisi, contrapposto, parti_pagina, bande, tabelle, scartate, sezioni_righe,
-                   parti_righe, _colonne_a_marcatore(prospetto, colonne, intere))
+                   parti_righe, _colonne_a_marcatore(prospetto, colonne, intere), _coppie(prospetto, colonne, intere))

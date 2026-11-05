@@ -764,3 +764,70 @@ def test_voce_del_passivo_chiude_i_conti_a_marcatore_col_verso_rovesciato(tmp_pa
     # i conti misti del passivo: 1.300,25 A - 100,15 D + 0,10 A = 1.200,20
     assert _riga(doc, "Debiti tributari").verso == {0: -1}
     assert _riga(doc, "Erario c/ritenute").padre == _riga(doc, "Debiti tributari").id
+
+
+def _parziali_e_totali():
+    """638, 1540: i conti nella colonna dei parziali (x 300, al centesimo), le voci in quella dei totali (x 380,
+    all'unita'), mai sulla stessa riga; la voce prima dei suoi conti."""
+    righe = [(30, "1) Crediti verso clienti", None, "1.183.214"), (40, "Crediti verso privati", "98.180,13", None),
+             (40, "Crediti verso enti", "1.084.033,40", None), (40, "Altri clienti", "1.000,20", None),
+             (30, "2) Crediti tributari", None, "6.000"), (40, "Erario c/IVA", "2.500,40", None),
+             (40, "Erario c/ritenute", "3.499,90", None), (30, "3) Crediti verso altri", None, "12.039"),
+             (40, "Crediti diversi", "10.000,00", None), (40, "Depositi cauzionali", "2.039,45", None),
+             (30, "Totale crediti", None, "1.201.253"), (30, "4) Disponibilita' liquide", None, "5.300"),
+             (54, "Depositi bancari", "5.300,00", None), (63, "Banca uno", "3.000,10", None),
+             (63, "Banca due", "2.299,95", None)]
+    return _righe(140, righe, colonne=(300, 380))
+
+
+def test_voce_dei_totali_somma_i_conti_dei_parziali(tmp_path):
+    # Q1: la voce della colonna dei totali prende i conti dei parziali fino alla voce dopo, con un euro di tolleranza
+    # (1.183.213,73 per 1.183.214); i totali della colonna dei totali sommano solo le voci
+    doc = _leggi(tmp_path, _parziali_e_totali())
+    assert doc.profilo.coppie == {1: 0}
+    clienti = _riga(doc, "1) Crediti verso clienti")
+    assert clienti.totale
+    assert clienti.figli[0] == tuple(_riga(doc, e).id for e in ("Crediti verso privati", "Crediti verso enti",
+                                                                  "Altri clienti"))
+    assert _riga(doc, "Crediti verso enti").padre == clienti.id and _riga(doc, "Crediti verso enti").padre_verificato
+    assert _riga(doc, "Depositi cauzionali").padre == _riga(doc, "3) Crediti verso altri").id
+    assert _riga(doc, "Totale crediti").figli[1] == tuple(_riga(doc, e).id for e in (
+        "1) Crediti verso clienti", "2) Crediti tributari", "3) Crediti verso altri"))
+
+
+def test_coppia_non_somma_due_livelli_dei_parziali(tmp_path):
+    # i conti a 63 sotto «Depositi bancari» a 54 (che non li chiude al centesimo): la voce prende la sottovoce, mai la
+    # sottovoce e i suoi conti insieme (5.300,00 + 5.300,05 non e' 5.300)
+    doc = _leggi(tmp_path, _parziali_e_totali())
+    liquide = _riga(doc, "4) Disponibilita' liquide")
+    assert liquide.figli.get(0) == (_riga(doc, "Depositi bancari").id,)
+    assert not _riga(doc, "Depositi bancari").padre_verificato      # una catena e' un'ipotesi (R14)
+    assert _riga(doc, "Banca uno").padre != liquide.id
+
+
+def test_colonne_affiancate_a_centesimi_non_sono_una_coppia(tmp_path):
+    # corrente e precedente che non stampano sulla stessa riga ma entrambe al centesimo: nessuna coppia
+    righe = [(30, "Voce uno", "1.200,50", None), (30, "Voce due", None, "2.300,40"), (30, "Voce tre", "3.700,10", None),
+             (30, "Voce quattro", None, "4.100,20"), (30, "Voce cinque", "5.200,30", None),
+             (30, "Voce sei", None, "6.300,60"), (30, "Voce sette", "7.400,70", None), (30, "Voce otto", None, "8.500,80")]
+    doc = _leggi(tmp_path, _righe(140, righe, colonne=(300, 380)))
+    assert doc.profilo.coppie == {}
+
+
+def test_titolo_di_una_voce_senza_importo_chiude_la_finestra_dei_parziali(tmp_path):
+    # 1540: «1.B.1.4 Concessioni …» non stampa importo nei totali, ma i suoi conti (2.465,81 D e A, netto zero) non
+    # sono della voce sopra, anche se la somma tornerebbe lo stesso
+    righe = [(30, "1) Crediti verso clienti", None, "1.183.214"), (40, "Crediti verso privati", "98.180,13", None),
+             (40, "Crediti verso enti", "1.084.033,40", None), (40, "Altri clienti", "1.000,20", None),
+             (30, "2) Crediti verso controllate"), (40, "Controllata alfa", "2.465,81", None),
+             (40, "Fondo svalutazione controllata alfa", "-2.465,81", None),
+             (30, "3) Crediti tributari", None, "6.000"), (40, "Erario c/IVA", "2.500,40", None),
+             (40, "Erario c/ritenute", "3.499,90", None), (30, "4) Crediti verso altri", None, "12.039"),
+             (40, "Crediti diversi", "10.000,00", None), (40, "Depositi cauzionali", "2.039,45", None),
+             (30, "5) Ratei attivi", None, "1.500"), (40, "Ratei su interessi", "1.500,30", None)]
+    doc = _leggi(tmp_path, _righe(140, righe, colonne=(300, 380)))
+    assert doc.profilo.coppie == {1: 0}
+    clienti = _riga(doc, "1) Crediti verso clienti")
+    assert clienti.figli[0] == tuple(_riga(doc, e).id for e in ("Crediti verso privati", "Crediti verso enti",
+                                                                  "Altri clienti"))
+    assert _riga(doc, "Controllata alfa").padre != clienti.id

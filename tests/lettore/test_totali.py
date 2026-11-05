@@ -653,3 +653,64 @@ def test_di_cui_fra_parentesi_non_si_sottrae():
                       (40, "", "Altri", "250,00"), (30, "", "Totale", "650,00")])
     assert _conto(doc, "Totale").totale
     assert _conto(doc, "(di cui esigibili oltre)").padre == _conto(doc, "Totale").id
+
+
+def test_risultati_del_conto_economico_sono_differenze():
+    # 409: A - B, poi il risultato prima delle imposte, poi l'utile meno le imposte
+    doc = _documento([(58, "", "1) ricavi delle vendite", "4.369.544,00"), (58, "", "5) altri ricavi", "33.395,00"),
+                      (58, "", "Totale valore della produzione", "4.402.939,00"),
+                      (58, "", "6) per materie prime", "1.490.475,00"), (58, "", "7) per servizi", "1.113.243,00"),
+                      (58, "", "Totale costi della produzione", "2.603.718,00"),
+                      (51, "", "Differenza tra valore e costi della produzione (A - B)", "1.799.221,00"),
+                      (58, "", "Totale proventi e oneri finanziari", "-2.734,00"),
+                      (51, "", "Risultato prima delle imposte", "1.796.487,00"),
+                      (58, "", "Totale delle imposte sul reddito dell'esercizio", "83.199,00"),
+                      (51, "", "21) Utile (perdita) dell'esercizio", "1.713.288,00")], sezione="CE")
+    differenza, risultato = _conto(doc, "Differenza tra valore e costi della produzione (A - B)"), _conto(
+        doc, "Risultato prima delle imposte")
+    utile = _conto(doc, "21) Utile (perdita) dell'esercizio")
+    assert set(differenza.figli[0]) == {_conto(doc, "Totale valore della produzione").id,
+                                        _conto(doc, "Totale costi della produzione").id}
+    assert _conto(doc, "Totale costi della produzione").padre_verificato
+    assert differenza.padre == risultato.id and risultato.padre == utile.id
+    assert _conto(doc, "Totale delle imposte sul reddito dell'esercizio").padre == utile.id
+
+
+def test_risultato_chiude_sopra_anche_coi_totali_stampati_prima():
+    # 409: il documento stampa le voci prima dei conti (direzione +1), la differenza chiude comunque le righe sopra
+    doc = _documento([(51, "", "A) Valore della produzione", "1.000,00"), (58, "", "1) ricavi", "600,00"),
+                      (58, "", "5) altri ricavi", "400,00"),
+                      (51, "", "B) Costi della produzione", "700,00"), (58, "", "6) materie", "300,00"),
+                      (58, "", "7) servizi", "400,00"),
+                      (51, "", "Differenza tra valore e costi della produzione", "300,00")], sezione="CE")
+    differenza = _conto(doc, "Differenza tra valore e costi della produzione")
+    assert set(differenza.figli[0]) == {_conto(doc, "A) Valore della produzione").id,
+                                        _conto(doc, "B) Costi della produzione").id}
+
+
+def test_costi_si_sottraggono_solo_dentro_un_risultato():
+    # fuori da un risultato i costi si sommano come stampati
+    doc = _documento([(58, "", "6) per materie prime", "100,00"), (58, "", "7) per servizi", "200,00"),
+                      (58, "", "Totale costi della produzione", "300,00"),
+                      (58, "", "14) oneri diversi", "50,00"), (51, "", "Totale costi", "350,00")], sezione="CE")
+    assert _conto(doc, "Totale costi della produzione").padre == _conto(doc, "Totale costi").id
+
+
+def test_catene_dei_risultati_prima_dei_risultati():
+    # 409: «altri» / «Totale interessi e altri oneri» / «Totale proventi e oneri (-)» sono una catena; il risultato
+    # prima delle imposte la trova chiusa, e l'utile trova chiuso il risultato
+    doc = _documento([(51, "", "A) Valore della produzione", "1.000,00"), (58, "", "1) ricavi", "600,00"),
+                      (58, "", "5) altri ricavi", "400,00"),
+                      (51, "", "B) Costi della produzione", "700,00"), (58, "", "6) materie", "300,00"),
+                      (58, "", "7) servizi", "400,00"),
+                      (51, "", "Differenza tra valore e costi della produzione", "300,00"),
+                      (66, "", "altri", "20,00"), (66, "", "Totale interessi e altri oneri finanziari", "20,00"),
+                      (58, "", "Totale proventi e oneri finanziari", "-20,00"),
+                      (51, "", "Risultato prima delle imposte", "280,00"),
+                      (58, "", "Totale delle imposte sul reddito", "80,00"),
+                      (51, "", "21) Utile (perdita) dell'esercizio", "200,00")], sezione="CE")
+    risultato, utile = _conto(doc, "Risultato prima delle imposte"), _conto(doc, "21) Utile (perdita) dell'esercizio")
+    assert _conto(doc, "altri").padre == _conto(doc, "Totale interessi e altri oneri finanziari").id
+    assert set(risultato.figli[0]) == {_conto(doc, "Differenza tra valore e costi della produzione").id,
+                                       _conto(doc, "Totale proventi e oneri finanziari").id}
+    assert set(utile.figli[0]) == {risultato.id, _conto(doc, "Totale delle imposte sul reddito").id}

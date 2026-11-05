@@ -88,6 +88,8 @@ class _Serie:
     valori: list[Decimal]
     controllo: list[bool]
     bersagli: list[Decimal] = field(default_factory=list)   # l'importo stampato, che i membri devono fare
+    risultato: list[bool] = field(default_factory=list)      # un risultato del conto economico (una differenza)
+    sottratti: list[Decimal] = field(default_factory=list)   # il valore di un membro dentro un risultato
     vivo: list[bool] = field(default_factory=list)
     candidabile: list[bool] = field(default_factory=list)
     figli: dict[int, list[int]] = field(default_factory=dict)
@@ -97,6 +99,10 @@ class _Serie:
         self.candidabile = [True] * len(self.righe)
         if not self.bersagli:
             self.bersagli = list(self.valori)
+        if not self.risultato:
+            self.risultato = [False] * len(self.righe)
+        if not self.sottratti:
+            self.sottratti = list(self.valori)
 
 
 # Una voce fra parentesi dopo la sua numerazione («(Ammortamenti)», «B.I.5.f) (Fondi di ammortamento)», «(Perdita
@@ -127,6 +133,33 @@ def _valore_di_somma(r: Riga, colonna: int) -> Decimal:
     return -v if v > 0 and _rettificativa(r) else v
 
 
+# I risultati del conto economico di legge sono differenze stampate: «Differenza tra valore e costi della produzione
+# (A - B)», «Risultato prima delle imposte», «21) Utile (perdita) dell'esercizio», «Totale proventi e oneri finanziari
+# (15 + 16 - 17 + - 17-bis)», «Totale delle rettifiche». Dentro una di queste somme i costi della produzione, gli
+# interessi e oneri, le svalutazioni e le imposte, stampati positivi, si sottraggono.
+_RISULTATO = re.compile(r"\bdifferenza\b|\brisultato\b|\butile\b|\bperdita\b|\bproventi e oneri\b"
+                        r"|\brettifiche di valore\b|\btotale (?:delle )?rettifiche\b")
+_COSTO_DEL_RISULTATO = re.compile(r"\bcosti della produzione\b|\binteressi e (?:altri )?oneri\b|\bsvalutazion"
+                                  r"|\bimposte (?:sul reddito|correnti|relative|differite)|\btotale (?:delle )?imposte\b")
+
+
+def _risultato(r: Riga) -> bool:
+    """Solo su una sezione unica: sulle contrapposte costi e ricavi stanno su due lati, e il risultato pareggia."""
+    return r.sezione == "CE" and r.lato == "U" and bool(_RISULTATO.search(_norm(r.etichetta)))
+
+
+def _costo_del_risultato(r: Riga) -> bool:
+    e = _norm(r.etichetta)
+    return r.sezione == "CE" and r.lato == "U" and bool(_COSTO_DEL_RISULTATO.search(e)) and not _RISULTATO.search(e)
+
+
+def _valore_nel_totale(t: Riga, f: Riga, colonna: int) -> Decimal:
+    """Il valore del membro `f` nella somma del totale `t`, con le due regole del segno (posta rettificativa, costo
+    dentro un risultato)."""
+    v = _valore_di_somma(f, colonna)
+    return -v if v > 0 and _risultato(t) and _costo_del_risultato(f) else v
+
+
 def _serie(doc: Documento) -> list[_Serie]:
     out = []
     for colonna in doc.colonne:
@@ -138,8 +171,12 @@ def _serie(doc: Documento) -> list[_Serie]:
                 gruppi[(r.lato, r.sezione)].append(r)
         tolleranza = _tolleranza(doc, colonna)
         for righe in gruppi.values():
-            out.append(_Serie(colonna.indice, tolleranza, righe, [_valore_di_somma(r, colonna.indice) for r in righe],
-                              [_di_controllo(r) for r in righe], [r.celle[colonna.indice].valore for r in righe]))
+            valori = [_valore_di_somma(r, colonna.indice) for r in righe]
+            # un risultato chiude sempre cio' che gli sta sopra, come una riga di controllo
+            out.append(_Serie(colonna.indice, tolleranza, righe, valori,
+                              [_di_controllo(r) or _risultato(r) for r in righe],
+                              [r.celle[colonna.indice].valore for r in righe], [_risultato(r) for r in righe],
+                              [-v if v > 0 and _costo_del_risultato(r) else v for r, v in zip(righe, valori)]))
     return out
 
 
@@ -151,7 +188,7 @@ def _cerca_membri(serie: _Serie, passo: list[int], i: int, kmin: int) -> list[in
     ripetono): un mastro e la sua foglia, +x e -x, finirebbero contati due volte. Una catena (un solo importo) vale
     solo all'uguaglianza esatta e mai con un figlio meno rientrato del totale (R14). Il tetto di 80 membri non vale
     per una riga di controllo (R15): «Totale costi» chiude anche centocinquanta conti."""
-    valori, tol = serie.valori, serie.tolleranza
+    valori, tol = (serie.sottratti if serie.risultato[i] else serie.valori), serie.tolleranza
     bersaglio = serie.bersagli[i]
     n = len(valori)
     tetto = n if serie.controllo[i] else _TETTO_MEMBRI
@@ -167,7 +204,8 @@ def _cerca_membri(serie: _Serie, passo: list[int], i: int, kmin: int) -> list[in
         if pieni and abs(s - bersaglio) <= tol:
             if pieni < kmin:
                 return in_tolleranza
-            if pieni == 1 and (s != bersaglio or _meno_rientrato(serie, membri, i)):
+            if pieni == 1 and (s != bersaglio or _meno_rientrato(serie, membri, i) or _controllo_figlio_unico(
+                    serie, membri, i)):
                 return in_tolleranza
             if _chiusura_piu_esterna(serie, membri, i):
                 return in_tolleranza
@@ -198,6 +236,15 @@ def _meno_rientrato(serie: _Serie, membri: list[int], i: int) -> bool:
         return False
     return any(serie.valori[m] and serie.righe[m].x is not None and serie.righe[m].x < totale.x - _SCALINO
                for m in membri)
+
+
+def _controllo_figlio_unico(serie: _Serie, membri: list[int], i: int) -> bool:
+    """Una catena verso il basso non prende per figlio unico il totale di un costo del conto economico stampato
+    sotto: «Totale interessi e altri oneri finanziari» sotto «altri», con lo stesso importo, chiude «altri» e resta
+    lui il membro che il risultato sottrae (409). Fuori da quel caso la voce stampata sopra resta la voce e il
+    totale sotto la sua ripetizione («I - Immobilizzazioni immateriali» e il suo «Totale …», 1421)."""
+    return membri[0] > i and not serie.controllo[i] and any(
+        serie.valori[m] and serie.controllo[m] and _costo_del_risultato(serie.righe[m]) for m in membri)
 
 
 def _chiusura_piu_esterna(serie: _Serie, membri: list[int], i: int) -> bool:
@@ -290,27 +337,33 @@ def _forzata(serie: _Serie, direzione: int) -> list[tuple[list[bool], int]]:
     return [([not c for c in serie.controllo], direzione)]
 
 
-def _punto_fisso(tutte: list[_Serie], passate: Callable[[_Serie], list[tuple[list[bool], int]]]) -> tuple[int, int]:
+def _punto_fisso(tutte: list[_Serie], passate: Callable[[_Serie], list[tuple[list[bool], int]]], *,
+                 risultati: bool = True) -> tuple[int, int]:
     """Marca fino al punto fisso: per ogni passata k >= 2, poi k = 1 se il documento ha gia' mostrato un gruppo vero
-    su quella colonna (una colonna di percentuali «100,00 100,00» fa solo catene). Restituisce (totali marcati,
-    gruppi k >= 2)."""
+    su quella colonna (una colonna di percentuali «100,00 100,00» fa solo catene). I risultati del conto economico
+    (differenze) si cercano dopo, a punto fisso raggiunto: «A - B» prende «Totale valore della produzione» come
+    membro, e il totale deve aver gia' trovato i suoi. Restituisce (totali marcati, gruppi k >= 2)."""
     piano = [(serie, passate(serie)) for serie in tutte]
     marcati = gruppi = 0
     gruppo_visto: set[int] = set()
-    cambiato = True
-    while cambiato:
-        cambiato = False
-        for k in range(max((len(p) for _, p in piano), default=0)):
-            for kmin in (2, 1):
-                for serie, p in piano:
-                    if k < len(p) and (kmin == 2 or serie.colonna in gruppo_visto):
-                        n = _risolvi(serie, p[k][0], p[k][1], kmin)
-                        if n:
-                            cambiato = True
-                            marcati += n
-                            if kmin == 2:
-                                gruppo_visto.add(serie.colonna)
-                                gruppi += n
+    for fase in ((False, True) if risultati else (False,)):
+        cambiato = True
+        while cambiato:
+            cambiato = False
+            for k in range(max((len(p) for _, p in piano), default=0)):
+                # fra i risultati prima le catene: «Totale proventi e oneri» = «Totale interessi» si chiude prima che
+                # il risultato sotto lo cerchi come membro, e prima che l'utile prenda il risultato
+                for kmin in ((1, 2) if fase else (2, 1)):
+                    for serie, p in piano:
+                        if k < len(p) and (kmin == 2 or serie.colonna in gruppo_visto):
+                            ammessi = p[k][0] if fase else [a and not r for a, r in zip(p[k][0], serie.risultato)]
+                            n = _risolvi(serie, ammessi, p[k][1], kmin)
+                            if n:
+                                cambiato = True
+                                marcati += n
+                                if kmin == 2:
+                                    gruppo_visto.add(serie.colonna)
+                                    gruppi += n
     return marcati, gruppi
 
 
@@ -318,7 +371,7 @@ def _direzione(doc: Documento) -> int:
     """Le due passate forzate per intero, sulle sole righe che non sono di controllo: vince la direzione che marca
     piu' righe; a parita' quella con piu' gruppi veri, poi -1 (il totale dopo i figli). Sostituisce
     `_voti_apprendimento` di `import_snello`, che lavora sulla `Riga` vecchia a un valore solo."""
-    esiti = {d: _punto_fisso(_serie(doc), lambda serie, d=d: _forzata(serie, d)) for d in (1, -1)}
+    esiti = {d: _punto_fisso(_serie(doc), lambda serie, d=d: _forzata(serie, d), risultati=False) for d in (1, -1)}
     if esiti[1] != esiti[-1]:
         return 1 if esiti[1] > esiti[-1] else -1
     return -1
@@ -458,7 +511,7 @@ def _confronta_colonne(doc: Documento) -> None:
                 continue
             if not any(c in f.celle for f in figli):
                 continue        # i figli non stampano quella colonna (parziali e totali, percentuali)
-            somma = sum((_valore_di_somma(f, c) for f in figli if c in f.celle), Decimal(0))
+            somma = sum((_valore_nel_totale(t, f, c) for f in figli if c in f.celle), Decimal(0))
             scarto = t.celle[c].valore - somma
             if abs(scarto) <= _tolleranza(doc, colonne[c]):
                 if not presi[c] & set(t.figli[riferimento]):
@@ -692,7 +745,7 @@ def _gruppi_incoerenti(doc: Documento, colonne_prova: set[int]) -> set[tuple[str
             for c2 in sorted(colonne_prova & set(colonne)):
                 if c2 == c or c2 in t.figli or c2 not in t.celle or not any(c2 in m.celle for m in membri):
                     continue
-                somma = sum((_valore_di_somma(m, c2) for m in membri if c2 in m.celle), Decimal(0))
+                somma = sum((_valore_nel_totale(t, m, c2) for m in membri if c2 in m.celle), Decimal(0))
                 if abs(somma - t.celle[c2].valore) > _tolleranza(doc, colonne[c2]):
                     out.add((t.id, c))
                     doc.avvisi.append(f"{_nome(t)}: i figli della colonna {c + 1} non chiudono la colonna {c2 + 1} "

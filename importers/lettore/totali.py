@@ -330,6 +330,12 @@ def _catene_all_unita(serie: _Serie, direzione: int) -> None:
             verso = next((v for v in versi if abs(serie.bersagli[i] - v * serie.valori[j]) <= _UNITA), None)
             if verso is None:
                 continue
+            # il conto puo' essere a sua volta il totale dei suoi conti («Depositi bancari 5.300,05» = 3.000,10 +
+            # 2.299,95 sotto «4) Disponibilita' liquide 5.300»): si risolve prima lui, poi la voce lo prende
+            if serie.candidabile[j]:
+                sotto = _cerca_membri(serie, passo, j, 2)
+                if sotto is not None and i not in sotto:
+                    _marca(serie, passo, j, sotto)
             k = passo[j]
             if 0 <= k < n and serie.valori[k] and not serie.controllo[k] \
                     and abs(serie.bersagli[i] - verso * (serie.valori[j] + serie.valori[k])) <= _UNITA:

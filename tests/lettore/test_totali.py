@@ -907,3 +907,17 @@ def test_intero_in_colonna_al_centesimo_non_e_una_voce_che_prende_un_padre_sbagl
     assert set(clienti.figli[0]) == {_riga(doc, e).id for e in ("Cliente alfa", "Cliente beta", "Cliente gamma")}
     assert not _riga(doc, "Cliente alfa").totale
     assert all(_riga(doc, e).padre == clienti.id for e in ("Cliente alfa", "Cliente beta", "Cliente gamma"))
+
+
+def test_voce_all_unita_sopra_un_totale_dei_suoi_conti(tmp_path):
+    # R22, revisione: «4) Disponibilita' liquide 5.300» sopra «Depositi bancari 5.300,05», che chiude esatto i suoi due
+    # conti. La sottovoce resta il totale verificato dei conti, e la voce la prende come ipotesi
+    doc = _leggi(tmp_path, _righe(140, [
+        (30, "Crediti verso clienti", "4.220"), (50, "Clienti Italia", "1.500,40"), (50, "Clienti estero", "2.719,55"),
+        (30, "4) Disponibilita' liquide", "5.300"), (54, "Depositi bancari", "5.300,05"),
+        (63, "Banca uno", "3.000,10"), (63, "Banca due", "2.299,95"),
+        (30, "Altri crediti", "1.000"), (50, "Crediti diversi", "600,20"), (50, "Anticipi", "399,90")]))
+    depositi = _riga(doc, "Depositi bancari")
+    assert depositi.totale and set(depositi.figli[0]) == {_riga(doc, "Banca uno").id, _riga(doc, "Banca due").id}
+    assert _riga(doc, "Banca due").padre == depositi.id and _riga(doc, "Banca due").padre_verificato
+    assert depositi.padre == _riga(doc, "4) Disponibilita' liquide").id and not depositi.padre_verificato

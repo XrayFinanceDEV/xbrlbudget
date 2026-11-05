@@ -32,7 +32,7 @@ from importers.lettore.colonne import (
     _ANALISI, _PAROLE_DESCRIZIONE, _PAROLE_RIGA_TESTATA, _PAROLE_VALORE, _RUOLI_TESTATA, Colonna, _corrente, _data,
     _mastri, _mesi, _parola_testata, _ruoli)
 from importers.lettore.geometria import Parola, RigaFisica
-from importers.lettore.importi import Importo, leggi_importo
+from importers.lettore.importi import Importo, leggi_importo, segno_del_lato
 from importers.lettore.profilo import (
     _INTERO, _MACRO_ATTESA, _PERCORSO_LEGGE, _QUOTA_CODICI, _RUOLI_VERIFICA, _TOTALE_PROSPETTO, _VOCE_NUMERATA,
     Profilo, TabellaNota, _candidati, _decimali, _forme, _indizio, _negativi, _norm, _parole_del_tipo, _sezioni,
@@ -881,7 +881,7 @@ def leggi_celle(tabelle: list[str], pagine: list[int], titoli: list[str | None] 
         cod = _codice(testo, forme_codice)
         n = contatori.get((g.pagina, g.lato), 0) + 1
         contatori[(g.pagina, g.lato)] = n
-        celle = {indici[c]: imp for c, (imp, _) in g.celle.items()}
+        celle = {indici[c]: segno_del_lato(imp, g.lato) for c, (imp, _) in g.celle.items()}
         etichetta = " ".join(cod.etichetta)
         righe_doc.append(Riga(id=f"p{g.pagina}r{n}{g.lato}", pagina=g.pagina, y=g.y, lato=g.lato,
                               sezione=sezione_di[id(f)], codice=cod.codice, etichetta=etichetta,

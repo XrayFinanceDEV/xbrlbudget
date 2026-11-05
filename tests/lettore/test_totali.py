@@ -864,3 +864,46 @@ def test_nomi_di_conto_di_una_verifica_non_sono_risultati():
     from importers.lettore.totali import _risultato
     assert not _risultato(_conto(doc, "UTILE ESERCIZIO:"), schema=False)
     assert _risultato(_conto(doc, "UTILE ESERCIZIO:"), schema=True)
+
+
+def test_voce_all_unita_con_un_conto_solo_resta_fra_il_conto_e_il_totale(tmp_path):
+    # R22, 1533: «contributi in conto esercizio 113.946» sopra il solo conto 113.945,74 non chiude esatta (R14), e il
+    # totale sopra in tolleranza prendeva il conto al posto della voce. La voce prende il conto come ipotesi, e il
+    # totale somma la voce
+    doc = _leggi(tmp_path, _righe(140, [
+        (50, "1) ricavi delle vendite e delle prestazioni", "9.419.699"),
+        (90, "RICAVI DA CESSIONI DI BENI", "8.712.168,72"), (90, "RICAVI DA PRESTAZIONI", "707.530,30"),
+        (50, "contributi in conto esercizio", "113.946"), (90, "CONTRIB. C/ESERCIZIO", "113.945,74"),
+        (50, "altri", "65.709"), (90, "RIMBORSI", "60.000,10"), (90, "SOPRAVVENIENZE ATTIVE", "5.709,00"),
+        (72, "Totale altri ricavi e proventi", "179.655")]))
+    contributi, totale = _riga(doc, "contributi in conto esercizio"), _riga(doc, "Totale altri ricavi e proventi")
+    conto = _riga(doc, "CONTRIB. C/ESERCIZIO")
+    assert conto.padre == contributi.id and not conto.padre_verificato
+    assert set(totale.figli[0]) == {contributi.id, _riga(doc, "altri").id}
+    assert contributi.padre == totale.id and contributi.padre_verificato
+
+
+def test_conto_oltre_l_esercizio_non_salta_la_sua_voce(tmp_path):
+    # R22, 208: «Esigibili oltre l'esercizio -2.860» sopra il solo conto -2.860,24: il conto resta sotto «oltre», non
+    # finisce direttamente sotto «Totale crediti (II)» perdendo la scadenza
+    doc = _leggi(tmp_path, _righe(140, [
+        (50, "esigibili entro l'esercizio", "10.500"), (90, "Clienti", "8.000,30"), (90, "Erario", "2.499,90"),
+        (50, "Esigibili oltre l'esercizio", "-2.860"), (90, "CREDITO INVESTIM.", "-2.860,24"),
+        (40, "Totale crediti (II)", "7.640")]))
+    oltre, totale = _riga(doc, "Esigibili oltre l'esercizio"), _riga(doc, "Totale crediti (II)")
+    assert _riga(doc, "CREDITO INVESTIM.").padre == oltre.id
+    assert _riga(doc, "CREDITO INVESTIM.").id not in totale.figli.get(0, ())
+    assert set(totale.figli[0]) == {_riga(doc, "esigibili entro l'esercizio").id, oltre.id}
+    assert oltre.padre_verificato
+
+
+def test_intero_in_colonna_al_centesimo_non_e_una_voce_che_prende_un_padre_sbagliato(tmp_path):
+    # il rischio di `_tolleranza_cella`: un conto stampato senza decimali («2.000») fra conti al centesimo non chiude
+    # in tolleranza il conto accanto, e nessuno prende un padre verificato sbagliato
+    doc = _leggi(tmp_path, _righe(140, [
+        (50, "CLIENTI", "4.500,30"), (90, "Cliente alfa", "2.000"), (90, "Cliente beta", "2.000,40"),
+        (90, "Cliente gamma", "499,90")]))
+    clienti = _riga(doc, "CLIENTI")
+    assert set(clienti.figli[0]) == {_riga(doc, e).id for e in ("Cliente alfa", "Cliente beta", "Cliente gamma")}
+    assert not _riga(doc, "Cliente alfa").totale
+    assert all(_riga(doc, e).padre == clienti.id for e in ("Cliente alfa", "Cliente beta", "Cliente gamma"))

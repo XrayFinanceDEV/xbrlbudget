@@ -294,6 +294,51 @@ def _cerca(serie: _Serie, passo: list[int], i: int, kmin: int, valori: list[Deci
     return in_tolleranza
 
 
+def _all_unita(r: Riga, colonna: int) -> bool:
+    cella = r.celle[colonna]
+    return cella.forma == "importo" and not _DECIMALI_STAMPATI.search(cella.testo)
+
+
+def _catene_all_unita(serie: _Serie, direzione: int) -> None:
+    """R22: una voce stampata all'unita' («contributi in conto esercizio 113.946») sopra un solo conto al centesimo
+    (113.945,74) non chiude mai come catena esatta (R14), e il totale sopra, in tolleranza, prenderebbe il conto al
+    posto della voce (1533, 682, 208: e il conto attraversa il confine entro/oltre). Prima di ogni altra somma la
+    voce prende il suo conto adiacente (sopra o sotto), rientrato piu' di lei o col codice, e col verso dei marcatori
+    D/A, come catena entro un euro: resta un'ipotesi (un membro solo, mai verificato), ma il conto esce dal cammino e
+    il totale sopra somma la voce. Non vale se il conto dopo, sommato, resta nella tolleranza (la voce ha piu'
+    conti), ne' per le righe di controllo o i risultati; senza rientri ne' codici (le tabelle OCR) non vale mai."""
+    nxt, prv = _lista_concatenata(serie.vivo)
+    n = len(serie.righe)
+    for i in range(n):
+        if not serie.vivo[i] or not serie.candidabile[i] or serie.controllo[i] or serie.risultato[i]:
+            continue
+        t = serie.righe[i]
+        if not _all_unita(t, serie.colonna) or t.x is None:
+            continue
+        # il conto dopo la voce nella direzione del documento, poi quello dall'altra parte
+        for passo in ((nxt, prv) if direzione == 1 else (prv, nxt)):
+            j = passo[i]
+            if not (0 <= j < n) or not serie.vivo[j] or serie.controllo[j] or not serie.valori[j]:
+                continue
+            f = serie.righe[j]
+            # una voce sopra il suo conto: rientrata meno di lui, o senza codice sopra un conto col codice (208: voce e
+            # codice allo stesso bordo). Due conti affiancati, uno stampato senza decimali, non sono voce e conto
+            if _all_unita(f, serie.colonna) or f.x is None or not (
+                    t.x < f.x - _TOL_RIENTRO or (f.codice and not t.codice)):
+                continue
+            versi = [1] + ([-1] if t.lato == "U" and serie.marcati[j] and not serie.marcati[i] else [])
+            verso = next((v for v in versi if abs(serie.bersagli[i] - v * serie.valori[j]) <= _UNITA), None)
+            if verso is None:
+                continue
+            k = passo[j]
+            if 0 <= k < n and serie.valori[k] and not serie.controllo[k] \
+                    and abs(serie.bersagli[i] - verso * (serie.valori[j] + serie.valori[k])) <= _UNITA:
+                continue
+            serie.verso_cercato[i] = verso
+            _marca(serie, passo, i, [j])
+            break
+
+
 def _meno_rientrato(serie: _Serie, membri: list[int], i: int) -> bool:
     """R14, per le sole catene: il figlio stampato sotto e a sinistra del suo totale, di almeno un livello, non e'
     suo figlio (un conto a 85 non e' il totale della voce a 34 che lo segue). Vale solo per un totale stampato prima
@@ -456,6 +501,8 @@ def marca_totali(doc: Documento) -> None:
             r.totale, r.figli, r.verso = False, {}, {}
     direzione = _direzione(doc)
     tutte = _serie(doc)
+    for serie in tutte:
+        _catene_all_unita(serie, direzione)
     _punto_fisso(tutte, lambda serie: _passate(serie, direzione))
     _coppie_parziali_totali(doc, tutte)
     for serie in tutte:
@@ -554,7 +601,8 @@ def _gruppi_di_coppia(doc: Documento, righe: list[Riga], totali: int, parziali: 
         if not chiusure:
             continue
         inesatta, verso = min(chiusure)
-        if (len(pieni) == 1 and inesatta) or (not bersaglio and len(pieni) != 2):
+        # R22: un conto solo sotto la voce dei totali (all'unita') vale come catena anche in tolleranza: un'ipotesi
+        if (len(pieni) == 1 and inesatta and not _all_unita(t, totali)) or (not bersaglio and len(pieni) != 2):
             continue
         out.append((t, membri, pieni, verso))
     return out

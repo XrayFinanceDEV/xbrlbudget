@@ -1074,7 +1074,8 @@ Le regole aggiunte con la misura sul campione:
   della stessa colonna (1533, 682: voci e conti in una colonna); altrimenti al centesimo. La chiusura esatta vince
   ancora su quella in tolleranza (R17).
 - **Coppie parziali → totali (Q1, decisione del proprietario 2026-11-05).** In alcuni schemi con dettaglio i conti
-  stanno nella colonna «parziali» e la voce che li somma nella colonna «totali» accanto (638, 1540, 1331).
+  stanno nella colonna «parziali» e la voce che li somma nella colonna «totali» accanto (638, 1331, 1451, 1540,
+  1558).
   Il profilo marca la coppia (`Profilo.coppie`, totali → parziali): due colonne di valori adiacenti sullo stesso
   lato che non stampano mai sulla stessa riga, i parziali coi centesimi, i totali all'unità. Una voce della
   colonna dei totali prende per membri le celle dei parziali delle righe fra lei e la riga dei totali successiva
@@ -1087,12 +1088,23 @@ Le regole aggiunte con la misura sul campione:
 - **Marcatore D/A per colonna (Q2, decisione del proprietario 2026-11-05).** Il profilo marca una colonna «a
   marcatore» (`Profilo.marcatori`) quando almeno il 60% delle sue celle, e almeno 10, sono seguite da un D/A
   staccato («11.429.777,38 D», 680). Solo lì il marcatore firma la cella e lascia l'etichetta; altrove resta
-  testo, come prima (365/367: due «A» sparsi in una contrapposta; 1562: il marcatore dei soli mastri). Il segno
-  segue il lato, perché la colonna è la verità sul lato: a sinistra delle contrapposte (attivo, costi) e su una
-  sezione unica D positivo e A negativo (il saldo in dare, come «1.234,56 A» attaccato); a destra (passivo,
-  ricavi) A positivo e D negativo. Su una sezione unica una voce senza marcatore del passivo o dei ricavi
-  (1533, 1540) chiude i conti a marcatore col segno rovesciato: lo decide la somma, e la voce lo dichiara in
-  `Riga.verso` (-1 per la colonna dei figli). Deciderlo per token, provato e tolto, rompeva 365/367 e 1562.
+  testo, come prima (365/367: due «A» sparsi in una contrapposta; 1562: il marcatore dei soli mastri). Il
+  marcatore attaccato all'importo («1.234,56A») lo firma sempre. In entrambi i casi il segno segue il lato (R23),
+  perché la colonna è la verità sul lato: `leggi_importo` restituisce il marcatore a parte (`Importo.marcatore`,
+  valore senza segno) e `importi.segno_del_lato` lo applica. A sinistra delle contrapposte (attivo, costi) e su una
+  sezione unica D è positivo e A negativo (il saldo in dare); a destra (passivo, ricavi) A è positivo e D negativo.
+  Il marcatore staccato non apre il varco fra i due lati (`lati._varco`, `_sfora`). Su una sezione unica una voce
+  senza marcatore del passivo o dei ricavi (1533, 1540) chiude i conti a marcatore col segno rovesciato: lo decide
+  la somma, e la voce lo dichiara in `Riga.verso` (-1 per la colonna dei figli). Deciderlo per token, provato e
+  tolto, rompeva 365/367 e 1562.
+- **Voce all'unità sopra un conto solo (R22).** «contributi in conto esercizio 113.946» sopra il solo conto
+  113.945,74 non chiude mai come catena esatta (R14); il totale sopra, in tolleranza, prendeva allora il conto al
+  posto della voce, e il conto saltava un livello (1533, 682; su 208 un credito «esigibile oltre» finiva sotto il
+  totale dei crediti, oltre il confine entro/oltre). Prima di ogni altra somma la voce stampata senza decimali prende
+  il conto adiacente, al centesimo e più rientrato di lei, entro un euro: un'ipotesi (`padre_verificato` falso),
+  ma il conto esce dal cammino e il totale sopra somma la voce. Non vale se anche il conto dopo sta nella
+  tolleranza, per le righe di controllo, né senza rientri (tabelle OCR). Lo stesso per la voce dei totali di una
+  coppia con un conto solo nei parziali.
 
 **Come si misura.** Due script, nessun import, nessun DB, nessuna rete; i PDF e le verità sono cifre di
 clienti e restano fuori da git (`Test/` è ignorata):

@@ -183,9 +183,11 @@ def test_id_stabili_fra_due_letture(tmp_path):
     ("1.234,56 A", Decimal("-1234.56")),
 ])
 def test_meno_unicode_e_marcatore_attaccato(token, valore):
+    # su una sezione unica (R23: il segno del marcatore lo da' il lato)
     from importers.lettore import leggi_importo
+    from importers.lettore.importi import segno_del_lato
     letto = leggi_importo(_normalizza(token))
-    assert (letto.valore if letto else None) == valore
+    assert (segno_del_lato(letto, "U").valore if letto else None) == valore
 
 
 def test_testo_senza_importo_non_cambia():
@@ -786,3 +788,27 @@ def test_due_marcatori_sparsi_in_una_contrapposta_restano_testo(tmp_path):
     assert doc.profilo.marcatori == frozenset()
     assert _riga(doc, "Cliente 3").celle[0].valore == Decimal("98765.43")
     assert sum(r.etichetta.split().count("A") for r in doc.righe) == 2      # i due «A» restano testo
+
+
+def test_marcatori_sul_lato_destro_delle_contrapposte(tmp_path):
+    # R23: a destra (passivo, ricavi) A positivo e D negativo, per la colonna a marcatore come per il marcatore
+    # attaccato; a sinistra (attivo, costi) D positivo e A negativo
+    voci = []
+    for k in range(12):
+        y = 140 + k * 14
+        voci += [(40, y, f"0{k + 1}.01"), (80, y, f"Cliente {chr(65 + k)}x"), (280, y, f"{k + 1}.000,50"),
+                 (284, y, "A" if k == 3 else "D"),
+                 (310, y, f"2{k + 1}.01"), (350, y, f"Fornitore {chr(65 + k)}x"), (560, y, f"{k + 2}.100,25"),
+                 (564, y, "D" if k == 5 else "A")]
+    # il marcatore attaccato («750,00A»): un token solo, col bordo destro sulla colonna
+    for y, etichetta, token in ((324, "Debito attaccato", "750,00A"), (338, "Anticipo attaccato", "80,00D")):
+        voci += [(310, y, "29.01"), (350, y, etichetta), (567 - fitz.get_text_length(token, fontsize=_CORPO), y, token)]
+    doc = _leggi(tmp_path, [voci])
+    assert doc.contrapposto
+    assert doc.profilo.marcatori == frozenset({0, 1})
+    assert _riga(doc, "Cliente Ax").celle[0].valore == Decimal("1000.50")
+    assert _riga(doc, "Cliente Dx").celle[0].valore == Decimal("-4000.50")
+    assert _riga(doc, "Fornitore Ax").celle[1].valore == Decimal("2100.25")
+    assert _riga(doc, "Fornitore Fx").celle[1].valore == Decimal("-7100.25")
+    assert _riga(doc, "Debito attaccato").celle[1].valore == Decimal("750.00")
+    assert _riga(doc, "Anticipo attaccato").celle[1].valore == Decimal("-80.00")

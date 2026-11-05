@@ -142,11 +142,16 @@ def _centro(parole: list[Parola]) -> float:
     return (xs[int(0.05 * len(xs))] + xs[min(len(xs) - 1, int(0.95 * len(xs)))]) / 2
 
 
+_STACCO_MARCATORE = 8.0       # come `profilo._STACCO_MARCATORE`
+
+
 def _varco(dati: list[tuple[RigaFisica, list[Parola]]], a: Colonna, b: Colonna) -> float | None:
     """Il primo varco a destra della colonna `a` che nessuna parola di una riga con importi attraversa,
     prima che finisca la colonna `b`; il centro del varco, o None."""
+    # il marcatore D/A staccato subito dopo un importo della colonna `a` ne fa parte: non chiude il varco (R23)
     coperti = sorted((p.x0, p.x1) for r, _ in dati for p in r.parole
-                     if p.testo.strip() and p.x1 > a.x_destra and p.x0 < b.x_destra)
+                     if p.testo.strip() and p.x1 > a.x_destra and p.x0 < b.x_destra
+                     and not (p.testo in _MARCATORI and p.x0 - a.x_destra <= _STACCO_MARCATORE))
     cursore = a.x_destra
     for x0, x1 in coperti:
         if x0 > cursore + _VARCO_MIN:
@@ -158,7 +163,7 @@ def _varco(dati: list[tuple[RigaFisica, list[Parola]]], a: Colonna, b: Colonna) 
 def _sfora(r: RigaFisica, zona: float, x: float) -> bool:
     """Una parola che non e' un importo occupa la zona degli importi di sinistra, fra `zona` e il varco."""
     return any(p.x1 > zona and p.x0 < x and leggi_importo(p.testo) is None and p.testo.strip()
-               for p in r.parole)
+               and p.testo not in _MARCATORI for p in r.parole)
 
 
 def _descritta(r: RigaFisica, celle: list[Parola], lo: float, hi: float) -> bool:

@@ -17,7 +17,7 @@ import fitz
 
 from importers.lettore.colonne import Colonna, colonna_di
 from importers.lettore.geometria import Parola, RigaFisica, parole_pagina, righe_fisiche
-from importers.lettore.importi import Importo, leggi_importo
+from importers.lettore.importi import Importo, leggi_importo, segno_del_lato
 from importers.lettore.totali import assegna_padri, marca_totali
 # Le regole di livello documento stanno nel profilo (Task 5-bis): qui si leggono dal Profilo, calcolato prima.
 from importers.lettore.profilo import (
@@ -173,12 +173,10 @@ def _riferimento_davanti(parole: list[Parola], i: int) -> bool:
     return prima in _RIFERIMENTO
 
 
-# Q2: in una colonna a marcatore (`Profilo.marcatori`) il D/A staccato dopo l'importo e' il segno della cella. La
-# colonna e' la verita' sul lato (CLAUDE.md): sul lato sinistro delle contrapposte (attivo, costi) e su una sezione
-# unica vale il saldo in dare, D positivo e A negativo (come «1.234,56 A» attaccato, `leggi_importo`); sul lato destro
-# (passivo, ricavi) A positivo e D negativo. Su una sezione unica una voce del passivo o dei ricavi chiude i suoi conti
-# col segno rovesciato: lo decide la somma (`totali`, `Riga.verso`), non il marcatore.
-_MARCATORE_NEGATIVO = {"U": "A", "L": "A", "R": "D"}
+# Q2: in una colonna a marcatore (`Profilo.marcatori`) il D/A staccato dopo l'importo e' il segno della cella; il
+# marcatore attaccato («1.234,56A») lo e' sempre. In entrambi i casi il segno lo da' il lato (R23,
+# `importi.segno_del_lato`). Su una sezione unica una voce del passivo o dei ricavi chiude i suoi conti col segno
+# rovesciato: lo decide la somma (`totali`, `Riga.verso`), non il marcatore.
 
 
 def _celle_del_lato(parole: list[Parola], colonne: list[Colonna], lato: str, pagina: int,
@@ -232,12 +230,12 @@ def _celle_del_lato(parole: list[Parola], colonne: list[Colonna], lato: str, pag
         imp, c = trovato
         sedi.setdefault(c.indice, []).append(p)
         stampato = stampati.get(p, p.testo)
-        marcatore = marcatore_dopo(parole, i) if c.indice in marcatori else None
+        marcatore = marcatore_dopo(parole, i) if c.indice in marcatori and imp.marcatore is None else None
         if marcatore is not None:
             segni.add(i + 1)
-            valore = -imp.valore if marcatore == _MARCATORE_NEGATIVO[lato] else imp.valore
-            imp, stampato = Importo(valore, imp.forma, f"{stampato} {marcatore}"), f"{stampato} {marcatore}"
-        celle[c.indice] = Importo(imp.valore, imp.forma, stampato)
+            stampato = f"{stampato} {marcatore}"
+            imp = Importo(imp.valore, imp.forma, stampato, marcatore)
+        celle[c.indice] = segno_del_lato(Importo(imp.valore, imp.forma, stampato, imp.marcatore), lato)
     for indice, ps in sedi.items():
         # davanti a un importo vero, l'intero nudo nella stessa colonna cede (budget_1438, colonne della nota)
         nudi = [p for p in ps if leggi_importo(p.testo) is None]

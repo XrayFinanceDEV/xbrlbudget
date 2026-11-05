@@ -627,9 +627,10 @@ _FILETTO = re.compile(r"^[|\u00a6]+$")
 
 def senza_filetti(parole: list[Parola]) -> list[Parola]:
     """Le parole senza i filetti verticali in testa e in coda («| 303.01000 RISERVE |», budget_375): non sono testo
-    della riga, e in testa nascondono il codice."""
+    della riga, e in testa nascondono il codice. Lo stesso per il segno dell'euro in testa, che e' la valuta della
+    cella dell'altro lato («59.743,13 €» | «04.03 Costi…», budget_1456)."""
     i, j = 0, len(parole)
-    while i < j and _FILETTO.match(parole[i].testo):
+    while i < j and (_FILETTO.match(parole[i].testo) or parole[i].testo.strip() == "€"):
         i += 1
     while j > i and _FILETTO.match(parole[j - 1].testo):
         j -= 1

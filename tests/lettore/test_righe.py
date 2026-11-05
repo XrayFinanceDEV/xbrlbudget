@@ -725,3 +725,16 @@ def test_colonna_della_nota_con_soli_zeri_e_una_colonna(tmp_path):
     totali = _riga(doc, "Totali")
     assert totali.etichetta == "Totali"
     assert {i: c.valore for i, c in totali.celle.items()} == {0: Decimal("203633"), 1: Decimal("0"), 2: Decimal("0")}
+
+
+def test_valuta_dopo_la_cella_non_apre_l_etichetta_del_lato_destro():
+    # 1456: «59.743,13 €» a sinistra e «04.03 Costi di impianto» a destra: il segno dell'euro (che i font di base
+    # dei PDF sintetici non stampano, per questo il test lavora sulle parole) non resta davanti al codice del lato
+    # destro
+    from importers.lettore.geometria import Parola
+    from importers.lettore.profilo import senza_filetti
+    parole = [Parola(411, 100, 415, 108, "€"), Parola(427, 100, 446, 108, "04.03"), Parola(497, 100, 517, 108, "Costi")]
+    assert [p.testo for p in senza_filetti(parole)] == ["04.03", "Costi"]
+    # in coda resta: «Capitale sociale €» e' testo dell'etichetta, la valuta in coda la toglie `_celle_del_lato`
+    assert [p.testo for p in senza_filetti(parole[1:] + parole[:1])] == ["04.03", "Costi", "€"]
+

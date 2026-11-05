@@ -19,7 +19,7 @@ from dataclasses import dataclass, field
 from decimal import Decimal
 from typing import TYPE_CHECKING, Callable
 
-from importers.import_snello.righe import _lista_concatenata
+from importers.lettore._ereditati import lista_concatenata
 from importers.lettore.profilo import _norm
 
 if TYPE_CHECKING:
@@ -315,7 +315,7 @@ def _catene_all_unita(serie: _Serie, direzione: int) -> None:
     D/A, come catena entro un euro: resta un'ipotesi (un membro solo, mai verificato), ma il conto esce dal cammino e
     il totale sopra somma la voce. Non vale se il conto dopo, sommato, resta nella tolleranza (la voce ha piu'
     conti), ne' per le righe di controllo o i risultati; senza rientri ne' codici (le tabelle OCR) non vale mai."""
-    nxt, prv = _lista_concatenata(serie.vivo)
+    nxt, prv = lista_concatenata(serie.vivo)
     n = len(serie.righe)
     for i in range(n):
         if not serie.vivo[i] or not serie.candidabile[i] or serie.controllo[i] or serie.risultato[i]:
@@ -409,7 +409,7 @@ def _risolvi(serie: _Serie, ammessi: list[bool], direzione: int, kmin: int) -> i
     con la somma rifatta dopo (vedi sotto)."""
     valori, vivo = serie.valori, serie.vivo
     n = len(valori)
-    nxt, prv = _lista_concatenata(vivo)
+    nxt, prv = lista_concatenata(vivo)
     passo = prv if direzione == -1 else nxt
     ordine = range(n) if direzione == -1 else range(n - 1, -1, -1)
     marcati = 0

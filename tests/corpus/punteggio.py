@@ -172,6 +172,14 @@ def importa(percorso: Path, period_months: int | None, fiscal_year: int | None =
     return esito
 
 
+def _importa_lavoro(lavoro: tuple) -> dict:
+    """(id, giro, percorso, mesi, anno) -> esito con id e giro: l'unità di lavoro, anche in un processo a parte."""
+    id_, giro, percorso, mesi, anno = lavoro
+    e = importa(percorso, mesi, anno)
+    e.update(id=id_, giro=giro)
+    return e
+
+
 def _e_una_scansione(content: bytes) -> bool:
     """Lo stesso criterio dell'endpoint `/import/pdf`."""
     sys.path.insert(0, str(ROOT / "backend"))
@@ -301,6 +309,7 @@ def main() -> None:
     ap.add_argument("--etichetta", default=time.strftime("%Y%m%d-%H%M"))
     ap.add_argument("--ripetizioni", type=int, default=1)
     ap.add_argument("--solo", default=None, help="id separati da virgola")
+    ap.add_argument("--paralleli", type=int, default=1, help="import contemporanei, un processo ciascuno")
     ap.add_argument("--da-esiti", default=None, help="cartella di un giro precedente: ricalcola senza importare")
     args = ap.parse_args()
 
@@ -316,22 +325,34 @@ def main() -> None:
             e = json.loads(riga)
             giri[e["id"]].append(e)
     else:
+        lavori = []
+        for id_ in ids:
+            vero = carica_verita(id_)
+            if vero is None:
+                print(f"{id_}: verità assente, saltato", flush=True)
+                continue
+            mesi = mesi_del_periodo(vero["periodi"][0]["periodo"]) if vero["periodi"] else None
+            anno = anno_del_periodo(vero["periodi"][0]["fine"]) if vero["periodi"] else None
+            lavori += [(id_, n + 1, CORPUS / campione[id_]["path"], mesi, anno) for n in range(args.ripetizioni)]
         with open(esiti_file, "a", encoding="utf-8") as out:
-            for id_ in ids:
-                vero = carica_verita(id_)
-                if vero is None:
-                    print(f"{id_}: verità assente, saltato", flush=True)
-                    continue
-                mesi = mesi_del_periodo(vero["periodi"][0]["periodo"]) if vero["periodi"] else None
-                anno = anno_del_periodo(vero["periodi"][0]["fine"]) if vero["periodi"] else None
-                for n in range(args.ripetizioni):
-                    e = importa(CORPUS / campione[id_]["path"], mesi, anno)
-                    e.update(id=id_, giro=n + 1)
-                    out.write(json.dumps(e, ensure_ascii=False) + "\n")
-                    out.flush()
-                    giri[id_].append(e)
-                    print(f"{id_} giro {n + 1}: {'importato' if e['importato'] else 'rifiutato'} "
-                          f"({e['metodo']}, {e['secondi']} s)", flush=True)
+            def registra(e: dict) -> None:
+                out.write(json.dumps(e, ensure_ascii=False) + "\n")
+                out.flush()
+                giri[e["id"]].append(e)
+                print(f"{e['id']} giro {e['giro']}: {'importato' if e['importato'] else 'rifiutato'} "
+                      f"({e['metodo']}, {e['secondi']} s)", flush=True)
+            if args.paralleli <= 1:
+                for lavoro in lavori:
+                    registra(_importa_lavoro(lavoro))
+            else:
+                # un processo per lavoratore: ognuno ha il suo DB in memoria (il probe lo installa nel processo)
+                import multiprocessing as mp
+                from concurrent.futures import ProcessPoolExecutor, as_completed
+                with ProcessPoolExecutor(max_workers=args.paralleli, mp_context=mp.get_context("spawn")) as pool:
+                    for fut in as_completed([pool.submit(_importa_lavoro, l) for l in lavori]):
+                        registra(fut.result())
+        for v in giri.values():
+            v.sort(key=lambda e: e["giro"])
 
     documenti = [punteggio_documento(carica_verita(i), giri[i]) for i in ids if giri.get(i) and carica_verita(i)]
     commit = os.popen(f"git -C {ROOT} rev-parse --short HEAD").read().strip()

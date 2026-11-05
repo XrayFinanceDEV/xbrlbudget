@@ -32,8 +32,9 @@ _CENTESIMO = Decimal("0.01")
 _UNITA = Decimal("1")
 # C12: il lessico unico delle righe di controllo (TOTALE, PAREGGIO, SALDO FINALE/GENERALE, ECCEDENZA, il risultato
 # d'esercizio). Una riga di controllo chiude cio' che le sta sopra.
-_CONTROLLO = re.compile(r"\btotal[ei]\b|\bpareggio\b|\bsaldo (?:finale|generale)\b|\beccedenza\b"
-                        r"|\b(?:utile|perdita|perdite|risultato)\b.*\besercizio\b")
+_DICE_TOTALE = r"\btotal[ei]\b|\bpareggio\b|\bsaldo (?:finale|generale)\b|\beccedenza\b"
+_CONTROLLO = re.compile(_DICE_TOTALE + r"|\b(?:utile|perdita|perdite|risultato)\b.*\besercizio\b")
+DICE_TOTALE = re.compile(_DICE_TOTALE)      # solo le righe che si dichiarano un totale (blocchi.py)
 _TOL_RIENTRO = 2.0
 _RIGHE_DI_TESTA = 4
 # un livello di rientro: piu' dei pochi punti di un codice allineato a destra («3960.01» a 27, «3940» a 32)

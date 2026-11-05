@@ -12,16 +12,15 @@ from dataclasses import dataclass
 from datetime import date
 from decimal import Decimal
 
+from importers.lettore.profilo import _norm
 from importers.lettore.righe import Documento, Riga
 from importers.lettore.totali import (
-    _RUOLI_VALORE, _Serie, _risultato_di_controllo, _serie, _su_schema, _tolleranza_cella, _euro, valore_nel_totale)
+    _RUOLI_VALORE, DICE_TOTALE, _Serie, _euro, _risultato_di_controllo, _serie, _su_schema, _tolleranza_cella,
+    valore_nel_totale)
 
 _TETTO_ETICHETTE = 12
 _NUMERO_RIGA = re.compile(r"r(\d+)")
 _PAGINA_RIGA = re.compile(r"p(\d+)r")
-# Il lessico C12 conta anche «Utile (perdita) dell'esercizio», che sullo SP e' un conto del patrimonio netto e non
-# somma le righe sopra di se': come blocco nasce solo una riga che dice di essere un totale, o una riga di soli importi.
-_DICE_TOTALE = re.compile(r"\btotal[ei]\b|\bpareggio\b|\bsaldo (?:finale|generale)\b|\beccedenza\b")
 
 
 @dataclass(frozen=True)
@@ -40,6 +39,7 @@ class Blocco:
     pagina: int
     righe: tuple[str, str]    # prima e ultima riga del tratto, totale compreso, in ordine di documento
     etichette: tuple[str, ...]   # le etichette dei figli candidati, al massimo 12
+    cercato: bool             # True: riga di controllo non chiusa, tratto scelto per minimo scarto; False: figli noti
 
 
 def _chiuso(t: Riga, colonna: int, coppie: dict[int, int]) -> bool:
@@ -77,7 +77,8 @@ def blocchi_aperti(doc: Documento) -> list[Blocco]:
                 voce=r.etichetta, codice=r.codice, sezione=r.sezione, lato=r.lato, colonna=serie.colonna,
                 fine=colonna.fine, mesi=colonna.mesi, corrente=colonna.corrente, stampato=stampato, somma=somma,
                 scarto=scarto, pagina=r.pagina, righe=(tratto[0].id, tratto[-1].id),
-                etichette=tuple(f.etichetta for f in sorted(figli, key=lambda x: pos[x.id]))[:_TETTO_ETICHETTE]),
+                etichette=tuple(f.etichetta for f in sorted(figli, key=lambda x: pos[x.id]))[:_TETTO_ETICHETTE],
+                cercato=not r.totale),
                 pos[r.id], serie.colonna))
     trovati.sort(key=lambda b: (-abs(b[0].scarto), b[1], b[2]))
     return [b for b, _, _ in trovati]
@@ -110,7 +111,7 @@ def _candidati(doc: Documento, serie: _Serie, coppie: dict[int, int]) -> dict[in
     for i, r in enumerate(serie.righe):
         if not serie.controllo[i] or _chiuso(r, colonna, coppie) or r.totale:
             continue
-        if r.etichetta and not _DICE_TOTALE.search(r.etichetta.lower()):
+        if r.etichetta and not DICE_TOTALE.search(_norm(r.etichetta)):
             continue
         stampato = r.celle[colonna].valore
         membri: list[Riga] = []

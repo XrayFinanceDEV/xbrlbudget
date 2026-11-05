@@ -58,6 +58,7 @@ def test_voce_che_non_chiude_e_un_blocco(tmp_path):
     assert b.righe == (ids["Conto uno"], ids["Totale"])
     assert b.etichette == ("Conto uno", "Conto due", "Conto tre")
     assert b.colonna == 0 and b.pagina == 1
+    assert b.cercato is True        # riga di controllo non chiusa: il tratto e' scelto, non noto
 
 
 def test_colonna_precedente_che_non_torna(tmp_path):
@@ -71,6 +72,7 @@ def test_colonna_precedente_che_non_torna(tmp_path):
     assert len(blocchi) == 1
     b = blocchi[0]
     assert b.colonna == 1
+    assert b.cercato is False       # voce chiusa sulla corrente: i figli sono noti
     assert (b.stampato, b.somma, b.scarto) == (Decimal("401361.79"), Decimal("333227.76"), Decimal("68134.03"))
     assert b.etichette == ("Fondo TFR impiegati", "Fondo TFR operai", "Fondo TFR dirigenti")
 
@@ -110,7 +112,7 @@ def test_voce_da_intestazione_non_e_un_blocco(tmp_path):
 def test_frase_blocco(tmp_path):
     b = Blocco(voce="B) II - Crediti", codice="", sezione="SP", lato="U", colonna=0, fine=date(2025, 12, 31),
                mesi=12, corrente=True, stampato=Decimal("1234.56"), somma=Decimal("1200.00"),
-               scarto=Decimal("34.56"), pagina=3, righe=("p3r12U", "p3r27U"), etichette=())
+               scarto=Decimal("34.56"), pagina=3, righe=("p3r12U", "p3r27U"), etichette=(), cercato=True)
     assert frase_blocco(b) == ("B) II - Crediti (2025, p. 3, righe 12-27): stampato 1.234,56, "
                                "i conti sommano 1.200,00, scarto 34,56")
 
@@ -143,6 +145,22 @@ def test_controllo_su_elenco_di_conti_non_e_un_blocco(tmp_path):
 def test_frase_blocco_su_due_pagine():
     b = Blocco(voce="B) II - Crediti", codice="", sezione="SP", lato="U", colonna=0, fine=date(2025, 12, 31),
                mesi=12, corrente=True, stampato=Decimal("1234.56"), somma=Decimal("1200.00"),
-               scarto=Decimal("34.56"), pagina=4, righe=("p3r21U", "p4r11U"), etichette=())
+               scarto=Decimal("34.56"), pagina=4, righe=("p3r21U", "p4r11U"), etichette=(), cercato=True)
     assert frase_blocco(b) == ("B) II - Crediti (2025, pp. 3-4, righe 21-11): stampato 1.234,56, "
                                "i conti sommano 1.200,00, scarto 34,56")
+
+
+def test_taglio_del_tratto_a_minimo_scarto(tmp_path):
+    ids = lambda doc: {r.etichetta: r.id for r in doc.righe}
+    # il totale non chiuso sta dopo un sottototale chiuso e due righe sciolte: 150 + 200 = 350 (scarto 10 su 360)
+    # contro 350 + 100 del sottototale = 450 (scarto -90): vince il tratto che si ferma davanti al sottototale
+    doc = _doc(tmp_path, [("Conto x", "150,00"), ("Conto y", "200,00"), ("Totale", "360,00")])
+    (b,) = blocchi_aperti(doc)
+    assert (b.somma, b.scarto, b.cercato) == (Decimal("350.00"), Decimal("10.00"), True)
+    assert b.righe == (ids(doc)["Conto x"], ids(doc)["Totale"])
+    # stampato 460: ora vince il tratto che include il sottototale chiuso (450, scarto 10) contro 350 (scarto 110)
+    doc = _doc(tmp_path, [("Conto x", "150,00"), ("Conto y", "200,00"), ("Totale", "460,00")])
+    (b,) = blocchi_aperti(doc)
+    assert (b.somma, b.scarto) == (Decimal("450.00"), Decimal("10.00"))
+    assert b.righe == (ids(doc)["Totale apertura"], ids(doc)["Totale"])
+    assert "Totale apertura" in b.etichette

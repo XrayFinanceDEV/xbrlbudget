@@ -142,7 +142,7 @@ def _centro(parole: list[Parola]) -> float:
     return (xs[int(0.05 * len(xs))] + xs[min(len(xs) - 1, int(0.95 * len(xs)))]) / 2
 
 
-_STACCO_MARCATORE = 8.0       # come `profilo._STACCO_MARCATORE`
+_STACCO_MARCATORE = 12.0      # come `profilo._STACCO_MARCATORE`
 
 
 def _varco(dati: list[tuple[RigaFisica, list[Parola]]], a: Colonna, b: Colonna) -> float | None:

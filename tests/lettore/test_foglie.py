@@ -2,7 +2,8 @@
 from decimal import Decimal
 
 from importers.lettore import leggi_pdf
-from importers.lettore.foglie import ancore, colonne_utili, foglie_contabili
+from importers.lettore.foglie import (_fine_finestra, _livelli_eco, _scorri, ancore, colonne_utili,
+                                       foglie_contabili)
 from tests.lettore.pdf_sintetico import scrivi_pdf
 from tests.lettore.test_righe import _INTERI, _riempi
 from tests.lettore.test_totali import _righe
@@ -414,6 +415,24 @@ def test_saldo_senza_negativi_non_dice_il_lato(tmp_path):
     assert {f.lato_sp for f in foglie_contabili(doc, colonne_utili(doc)[0])} == {None}
 
 
+def test_lettera_dare_avere_dopo_il_saldo_decide_il_lato(tmp_path):
+    # 1561: importi assoluti, ma ogni saldo e' seguito dalla sua lettera in una colonna propria (10 pt dopo): D e'
+    # attivo, A passivo, e l'importo arriva positivo sul suo lato
+    voci = [(50, 100, "STATO PATRIMONIALE"), (500 - 28, 120, "Saldo")]
+    dati = [("Banca", "1.000,00", "D"), ("Cassa", "50,00", "D"), ("Clienti", "200,00", "D"), ("Magazzino", "33,00", "D"),
+            ("Erario", "20,00", "D"), ("Ratei", "10,00", "D"), ("Brevetti", "90,00", "D"), ("Impianti", "300,00", "D"),
+            ("Fornitori", "700,00", "A"), ("Capitale", "350,00", "A"), ("Riserve", "200,00", "A"),
+            ("Debiti tributari", "155,00", "A")]
+    for k, (e, v, m) in enumerate(dati):
+        voci += [(50, 140 + k * 14, e), (500, 140 + k * 14, v), (510, 140 + k * 14, m)]
+    doc = _doc(tmp_path, voci)
+    assert doc.profilo.marcatori == frozenset({0})
+    foglie = _per_etichetta(foglie_contabili(doc, colonne_utili(doc)[0]))
+    assert {foglie[e].lato_sp for e, _, m in dati if m == "D"} == {"A"}
+    assert {foglie[e].lato_sp for e, _, m in dati if m == "A"} == {"P"}
+    assert foglie["Fornitori"].importo == Decimal("700.00") and foglie["Banca"].importo == Decimal("1000.00")
+
+
 def test_costi_stampati_col_meno_arrivano_positivi(tmp_path):
     # 1470: tutto il conto economico stampa i costi tra parentesi: e' la convenzione del documento (F3-1: segno normale)
     voci = [(50, 100, "CONTO ECONOMICO")]
@@ -509,3 +528,122 @@ def test_lato_dal_saldo_si_dichiara_con_un_avviso(tmp_path):
     doc = _doc(tmp_path, voci)
     foglie_contabili(doc, colonne_utili(doc)[0])
     assert any("dal segno del saldo" in a and a.startswith("4 righe") for a in doc.tutti_gli_avvisi())
+
+
+# --- Task 2c (Fase 3): voci che ripetono i propri conti, titolo di lato col suo totale ---------------------------
+
+def _attivo_con_catena():
+    """1440 in piccolo: «I.» vale 875 come il suo unico sottogruppo con importo («7) Altre», che non stampa il proprio:
+    i conti stanno sotto «Costo storico»/«Fondo»), e l'altro sottogruppo somma zero: nessun totale chiude «I.»."""
+    return _righe(140, [("STATO PATRIMONIALE ATTIVO", "5.000,00"), ("B) Immobilizzazioni", "875,00"),
+                        ("I. Immobilizzazioni immateriali", "875,00"), ("1) Costi di impianto", ""),
+                        (60, "Costo storico", "1.283,80"), (70, "Costi di impianto", "1.283,80"),
+                        (60, "Fondo ammortamento", "-1.283,80"), (70, "F.amm. costi di impianto", "-1.283,80"),
+                        ("7) Altre", ""), (60, "Costo storico", "3.500,00"), (70, "Migliorie su beni di terzi", "3.500,00"),
+                        (60, "Fondo ammortamento", "-2.625,00"), (70, "F.amm. migliorie", "-2.625,00"),
+                        ("C) Attivo circolante", "4.125,00"), (70, "Banca", "3.000,00"), (70, "Cassa", "1.125,00")])
+
+
+def test_voce_di_pari_importo_sopra_i_suoi_conti_non_e_una_foglia(tmp_path):
+    # 1440: senza questa regola «I.» e il titolo del lato restano foglie accanto ai conti, e l'attivo esce doppio
+    doc = _doc(tmp_path, _attivo_con_catena())
+    foglie = foglie_contabili(doc, 0)
+    assert sorted(f.etichetta for f in foglie) == sorted(["Costi di impianto", "F.amm. costi di impianto",
+                                                          "Migliorie su beni di terzi", "F.amm. migliorie", "Banca",
+                                                          "Cassa"])
+    assert sum(f.importo for f in foglie) == Decimal("5000.00")
+
+
+def test_voce_il_cui_importo_non_e_la_somma_dei_conti_resta_foglia(tmp_path):
+    # i conti sotto «I.» sommano 875, ma la voce dice 900: non e' il loro riepilogo, nessuna massa si toglie
+    voci = [(x, y, "900,00" if t == "875,00" and k < 10 else t) for k, (x, y, t) in enumerate(_attivo_con_catena())]
+    nomi = {f.etichetta for f in foglie_contabili(_doc(tmp_path, voci), 0)}
+    assert "I. Immobilizzazioni immateriali" in nomi
+
+
+def test_voci_sorelle_di_pari_importo_restano_due_foglie(tmp_path):
+    # due voci dello stesso livello con lo stesso importo non sono una catena: la seconda chiude la prima
+    voci = _righe(140, [("STATO PATRIMONIALE ATTIVO", ""), ("B) Immobilizzazioni", "500,00"),
+                        ("C) Attivo circolante", "500,00"), ("D) Ratei e risconti", "70,00"),
+                        ("E) Altre voci", "31,00"), ("F) Altre voci due", "13,00"), ("G) Altre voci tre", "7,00")])
+    nomi = {f.etichetta for f in foglie_contabili(_doc(tmp_path, voci), 0)}
+    assert {"B) Immobilizzazioni", "C) Attivo circolante"} <= nomi
+
+
+def _due_titoli(passivo):
+    return _righe(140, [("STATO PATRIMONIALE ATTIVO", "1.500,00"), ("Banca", "1.000,00"), ("Cassa", "500,00"),
+                        ("STATO PATRIMONIALE PASSIVO", passivo), ("Capitale", "1.000,00"), ("Fornitori", "500,00")])
+
+
+def test_titolo_di_lato_con_importo_uguale_all_altro_e_un_totale(tmp_path):
+    # 1440: «STATO PATRIMONIALE ATTIVO 217.368,86» e «... PASSIVO 217.368,86» senza righe «Totale»: attivo = passivo
+    doc = _doc(tmp_path, _due_titoli("1.500,00"))
+    col = colonne_utili(doc)[0]
+    an = {a.chiave: a.importo for a in ancore(doc, col)}
+    assert an["attivo"] == Decimal("1500.00") and an["passivo"] == Decimal("1500.00")
+
+
+def test_titolo_di_lato_con_importo_diverso_dall_altro_non_e_un_totale(tmp_path):
+    doc = _doc(tmp_path, _due_titoli("1.200,00"))
+    assert not {a.chiave for a in ancore(doc, colonne_utili(doc)[0])} & {"attivo", "passivo"}
+
+
+# --- Task 2c, fix round 1 ---------------------------------------------------------------------------------------
+
+def test_un_totale_chiuso_fra_la_voce_e_i_conti_chiude_la_finestra(tmp_path):
+    # «B) Crediti vari» e' seguita da «Totale altri» (chiuso) e poi da conti di un'altra voce: la finestra dei suoi
+    # conti finisce al totale
+    voci = _righe(140, [("B) Crediti vari", "300,00"), ("Conto a", "120,00"), ("Conto b", "180,00"),
+                        ("Totale crediti", "300,00"), ("Conto c", "100,00"), ("Conto d", "200,00")])
+    doc = _doc(tmp_path, voci)
+    righe = doc.righe_del_prospetto()
+    pos = _scorri(righe, doc.contrapposto)
+    livello = _livelli_eco(righe)
+    k = next(i for i, r in enumerate(righe) if r.etichetta == "B) Crediti vari")
+    t = next(i for i, r in enumerate(righe) if r.etichetta == "Totale crediti")
+    assert righe[t].totale
+    assert _fine_finestra(righe, pos, livello, k) == t
+
+
+def test_nome_con_iniziale_romana_non_e_un_livello_di_legge(tmp_path):
+    # «V. ROSSI» fra i conti di una voce arabica non e' il livello V; «I.» sotto «B)» e «II.» dopo «I.» si'
+    voci = _righe(140, [("B) Immobilizzazioni", "700,00"), ("I. Immateriali", "400,00"), ("4) Crediti diversi", "350,00"),
+                        ("Cliente alfa", "100,00"), ("V. ROSSI", "200,00"), ("Cliente beta", "50,00"),
+                        ("II. Materiali", "300,00"), ("Impianti", "300,00")])
+    doc = _doc(tmp_path, voci)
+    righe = doc.righe_del_prospetto()
+    livello = _livelli_eco(righe)
+    per = {righe[k].etichetta: v for k, v in livello.items()}
+    assert "V. ROSSI" not in per
+    assert per["I. Immateriali"] == 1 and per["II. Materiali"] == 1
+
+
+def test_titolo_ancora_non_e_anche_foglia(tmp_path):
+    # sonda 2900 su 1500: il titolo (1500) non e' il riepilogo dei suoi conti (900 + 500) ma e' l'ancora (= passivo)
+    voci = _righe(140, [("STATO PATRIMONIALE ATTIVO", "1.500,00"), ("Banca", "900,00"), ("Cassa", "500,00"),
+                        ("STATO PATRIMONIALE PASSIVO", "1.500,00"), ("Capitale", "1.000,00"), ("Fornitori", "500,00")])
+    doc = _doc(tmp_path, voci)
+    col = colonne_utili(doc)[0]
+    foglie = foglie_contabili(doc, col)
+    assert "STATO PATRIMONIALE ATTIVO" not in {f.etichetta for f in foglie}
+    assert sum(f.importo for f in foglie if f.lato_sp == "A") == Decimal("1400.00")
+    assert {a.chiave: a.importo for a in ancore(doc, col)}["attivo"] == Decimal("1500.00")
+
+
+def test_titolo_a_zero_non_e_un_ancora(tmp_path):
+    voci = _righe(140, [("STATO PATRIMONIALE ATTIVO", "0,00"), ("Banca", "900,00"), ("Cassa", "500,00"),
+                        ("STATO PATRIMONIALE PASSIVO", "0,00"), ("Capitale", "1.000,00"), ("Fornitori", "400,00")])
+    doc = _doc(tmp_path, voci)
+    assert not {a.chiave for a in ancore(doc, colonne_utili(doc)[0])} & {"attivo", "passivo"}
+
+
+def test_con_un_totale_attivo_il_titolo_non_fa_da_ancora(tmp_path):
+    voci = _righe(140, [("STATO PATRIMONIALE ATTIVO", "1.400,00"), ("Banca", "900,00"), ("Cassa", "500,00"),
+                        ("Totale attivo", "1.400,00"), ("STATO PATRIMONIALE PASSIVO", "1.400,00"),
+                        ("Capitale", "1.000,00"), ("Fornitori", "400,00"), ("Totale passivo", "1.400,00")])
+    doc = _doc(tmp_path, voci)
+    col = colonne_utili(doc)[0]
+    ancora_attivo = [a for a in ancore(doc, col) if a.chiave == "attivo"]
+    assert len(ancora_attivo) == 1
+    r = next(r for r in doc.righe if r.id == ancora_attivo[0].riga)
+    assert r.etichetta == "Totale attivo"

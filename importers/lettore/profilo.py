@@ -936,17 +936,31 @@ def _negativi(righe: list[RigaFisica], colonne: list[Colonna], intere: frozenset
 
 
 _MARCATORI = ("D", "A")
-_STACCO_MARCATORE = 8.0
+# La lettera D/A sta in una colonna propria subito dopo l'importo. Misurato sul corpus: 4-9 pt in dieci documenti,
+# 10 pt in 1561 (lettera in una colonna fissa, a destra dell'importo allineato a destra); 12 le tiene tutte e resta
+# sotto la larghezza di tre caratteri e mezzo, oltre la quale una lettera sola e' una parola dell'etichetta o della
+# colonna dopo. A difendere da un «A» qualunque restano la soglia per colonna (`_colonne_a_marcatore`, 60% e 10 celle).
+_STACCO_MARCATORE = 12.0
 _MIN_MARCATORI = 10
 _QUOTA_MARCATORI = 0.6
 
 
+def _posto_marcatore(parole: list[Parola], i: int) -> int | None:
+    """L'indice del marcatore D/A che segue la parola `i`, o None. Fra importo e lettera possono stare solo i
+    filetti di sottolineatura dell'importo (1562: «3.186,73 _________ D__», token fatti di soli «_» che
+    cominciano sotto l'importo); la lettera puo' portare la sua sottolineatura attaccata («D__»)."""
+    j = i + 1
+    while j < len(parole) and set(parole[j].testo) == {"_"} and parole[j].x0 < parole[i].x1:
+        j += 1
+    if j >= len(parole) or parole[j].testo.rstrip("_") not in _MARCATORI:
+        return None
+    return j if parole[j].x0 - parole[i].x1 <= _STACCO_MARCATORE else None
+
+
 def marcatore_dopo(parole: list[Parola], i: int) -> str | None:
     """Il marcatore D/A staccato subito dopo la parola `i` («11.429.777,38 D»), o None."""
-    dopo = parole[i + 1] if i + 1 < len(parole) else None
-    if dopo is not None and dopo.testo in _MARCATORI and dopo.x0 - parole[i].x1 <= _STACCO_MARCATORE:
-        return dopo.testo
-    return None
+    j = _posto_marcatore(parole, i)
+    return None if j is None else parole[j].testo.rstrip("_")
 
 
 def _colonne_a_marcatore(righe: list[RigaFisica], colonne: list[Colonna], intere: frozenset[int]) -> frozenset[int]:

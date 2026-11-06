@@ -952,3 +952,47 @@ def test_due_tabelle_affiancate_hanno_ognuna_la_sua_sezione(tmp_path):
     assert doc.profilo.confine is not None and not doc.contrapposto
     assert {r.sezione for r in doc.righe if r.lato == "L"} == {"SP"}
     assert {r.sezione for r in doc.righe if r.lato == "R"} == {"CE"}
+
+
+# --- Task 2c: il marcatore D/A dopo l'importo, a distanze e in grafie che prima non leggeva -------------------
+
+
+def _verifica_marcatore_lontano(stacco):
+    """1561: come `_verifica_a_marcatore`, ma la lettera sta in una sua colonna, piu' staccata dall'importo."""
+    return [(x, y, t) if k != 3 else (480 + stacco, y, t)
+            for (x, y, t), k in ((v, i % 4) for i, v in enumerate(_verifica_a_marcatore()))]
+
+
+def test_marcatore_in_colonna_a_dieci_punti_dall_importo(tmp_path):
+    # 1561: la lettera D/A e' in una colonna propria, 10 pt dopo il bordo dell'importo (prima il limite era 8)
+    doc = _leggi(tmp_path, [_verifica_marcatore_lontano(10)])
+    assert doc.profilo.marcatori == frozenset({0})
+    cassa = _riga(doc, "CASSA E VALORI BOLLATI")
+    assert cassa.etichetta == "CASSA E VALORI BOLLATI"
+    assert cassa.celle[0].valore == Decimal("-1199.64")
+    assert _riga(doc, "CASSA CONTANTI").celle[0].valore == Decimal("839.66")
+
+
+def test_marcatore_troppo_lontano_resta_testo(tmp_path):
+    # oltre il limite (30 pt) la lettera non e' piu' del suo importo: nessuna colonna a marcatore
+    doc = _leggi(tmp_path, [_verifica_marcatore_lontano(30)])
+    assert doc.profilo.marcatori == frozenset()
+
+
+def test_marcatore_con_sottolineatura_e_lettera_sottolineata(tmp_path):
+    # 1562: sotto ai conti l'importo e' «sottolineato» (token di underscore sul suo stesso spazio) e la lettera
+    # stampa «D__»: il marcatore e' ancora il segno della cella, e nessuno dei due resta nell'etichetta
+    voci = []
+    for k, (x, y, t) in enumerate(_verifica_a_marcatore()):
+        voci.append((x, y, t))
+        if k % 4 == 2:
+            voci.append((480 - fitz.get_text_length(t, fontsize=9.0) + 0.5, y, "_" * (len(t) - 1)))
+        if k % 4 == 3:
+            voci[-1] = (484, y, t + "__")
+    doc = _leggi(tmp_path, [voci])
+    assert doc.profilo.marcatori == frozenset({0})
+    cassa = _riga(doc, "CASSA E VALORI BOLLATI")
+    assert cassa.celle[0].valore == Decimal("-1199.64")
+    assert "_" not in cassa.etichetta and not cassa.etichetta.endswith(" A")
+    assert _riga(doc, "CASSA CONTANTI").celle[0].valore == Decimal("839.66")
+    assert "_" not in _riga(doc, "CASSA CONTANTI").etichetta

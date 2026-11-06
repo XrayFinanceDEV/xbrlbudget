@@ -1,6 +1,7 @@
 """Import PDF snello: struttura, macroconti per percorso di legge, verifica con tappo dichiarato."""
 from __future__ import annotations
 
+import os
 import time
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
@@ -21,6 +22,7 @@ _MODO_DA_PARSER = {"standard_ivcee_parser": "legge",
                    "schema_legge_generico": "legge",
                    "fonti_legge": "legge",
                    "fonti_ago": "conti",
+                   "lettore": "conti",
                    "situazione_contabile_parser": "conti"}
 
 _IMMOBILIZZAZIONI_CAMPI = ("sp02_immob_immateriali", "sp03_immob_materiali", "sp04_immob_finanziarie")
@@ -263,6 +265,54 @@ def _risultato_deterministico(_det: dict, struttura, modo: str, t0: float) -> "R
                      prior_ce=_det.get("prior_ce"), report=report, struttura=struttura)
 
 
+_SPENTO = ("0", "false", "no", "off")
+
+
+def _lettore_acceso() -> bool:
+    """Interruttore del percorso del lettore (Fase 3): acceso salvo ``IMPORT_LETTORE`` = 0/false/no/off."""
+    return os.environ.get("IMPORT_LETTORE", "1").strip().lower() not in _SPENTO
+
+
+_CHIAVI_REPORT = ("foglie", "ancore", "blocchi", "voti", "foglie_rivotate", "chiamate", "classi_per_fonte", "secondi",
+                  "mesi_precedente", "motivo", "tetto_chiamate")
+
+
+def _tenta_lettore(file_path: str, _det: dict) -> tuple[dict | None, dict]:
+    """(candidato adottato o None, esito per il report). Mai un'eccezione: un errore e' un esito dichiarato e
+    il percorso di oggi prosegue. Il cancello e' quello di ogni lettore deterministico (``deterministico.esito``);
+    l'anno precedente, gia' passato dallo stesso cancello dal percorso, entra solo se letto.
+    Il contesto MinerU non arriva a ``importa``: il lettore gira sul solo PDF (anche su quello sintetico
+    stampato dalle tabelle MinerU)."""
+    try:
+        from importers.import_snello import deterministico
+        from importers.lettore.percorso import importa_col_lettore
+
+        out = importa_col_lettore(file_path)
+        d = out["diagnostica"]
+        # solo conteggi ed esito: mai etichette o importi delle foglie (il report finisce nel DB)
+        diag = {k: d[k] for k in _CHIAVI_REPORT if k in d}
+        diag["blocchi"] = [str(b) for b in diag.get("blocchi", [])]   # chiavi delle ancore, mai importi
+        e = deterministico.esito("lettore", out["bs"], out["ce"], out["stampati"])
+        rep = {"cancello": e["esito"], **diag}
+        if e["adottato"]:
+            if out.get("prior_bs") is not None and out.get("prior_ce") is not None:
+                e["prior_bs"], e["prior_ce"] = out["prior_bs"], out["prior_ce"]
+                e["anno_precedente"] = out["anno_precedente"]
+            e["prior_stato"] = out["prior_stato"]
+            if diag.get("prior_rifiuto"):
+                e["prior_rifiuto"] = diag["prior_rifiuto"]
+            return e, {"esito": "adottato", **rep}
+        if "misura" in e.get("lettura", {}):
+            rep["misura"] = {k: str(v) for k, v in e["lettura"]["misura"].items()}
+        if d.get("errore"):
+            rep["errore"] = str(d["errore"])[:300]
+        if "unclassified_mass" in e:
+            rep["unclassified_mass"] = e["unclassified_mass"]
+        return None, {"esito": "vuoto" if e["esito"] == "vuoto" else "non_adottato", **rep}
+    except Exception as exc:  # noqa: BLE001 - il percorso del lettore non fa mai fallire un import
+        return None, {"esito": "eccezione", "errore": f"{type(exc).__name__}: {exc}"[:300]}
+
+
 def importa(file_path: str, *, ocr_text: str | None = None, analizza=None, leggi_conti=None,
             leggi_voci=None, trascrivi=None, route_hint: str | None = None) -> Risultato:
     t0 = time.monotonic()
@@ -283,31 +333,57 @@ def importa(file_path: str, *, ocr_text: str | None = None, analizza=None, leggi
         struttura = struttura_deterministica(file_path, modo=modo)
         return _risultato_deterministico(_det, struttura, modo, t0)
 
-    try:
-        return _importa_modello(file_path, _det, t0, ocr_text=ocr_text, analizza=analizza,
-                                leggi_conti=leggi_conti, leggi_voci=leggi_voci,
-                                trascrivi=trascrivi, route_hint=route_hint)
-    except SnelloNonRiuscito as e:
-        # Task 28: il modello ripiega o cade, ma un candidato deterministico ha letto davvero
-        # (respinto solo dal limite del tappo): meglio la sua lettura squadrata, dichiarata,
-        # che buttare tutto sull'importatore vecchio.
-        if not _det.get("lettura"):
-            raise
-        # La struttura vera quando il modello l'aveva gia' chiesta (rilievo 5 del riallineamento
-        # 2026-10-03: il segnaposto dichiarava zero chiamate vision dopo averle fatte); il
-        # segnaposto solo quando la struttura stessa e' fallita.
-        struttura_det = e.struttura
-        if struttura_det is None:
+    # Fase 3 (Task 7): il percorso del lettore, dopo i lettori noti e prima del modello di oggi, con lo
+    # stesso cancello di adozione. Spento da IMPORT_LETTORE=0 (allora nulla qui cambia).
+    _lettore_rep = None
+    if _lettore_acceso():
+        _lett, _lettore_rep = _tenta_lettore(file_path, _det)
+        if _lett is not None:
             try:
                 from importers.struttura_documento.analisi import struttura_deterministica
-                modo_det = _MODO_DA_PARSER.get(_det["parser"], "legge")
-                struttura_det = struttura_deterministica(file_path, modo=modo_det)
-            except Exception:
-                raise e
-        return _salva_deterministico_squadrato(
-            _det, struttura_det, t0, letture=e.report.get("letture"),
-            extra={"ripiego_evitato": {k: e.report[k] for k in ("esito", "fase", "errore")
-                                       if k in e.report}})
+                struttura = struttura_deterministica(file_path, modo=_MODO_DA_PARSER["lettore"])
+                r = _risultato_deterministico(_lett, struttura, _MODO_DA_PARSER["lettore"], t0)
+                r.report["lettore_percorso"] = _lettore_rep
+                return r
+            except Exception as exc:  # noqa: BLE001 - nessun risultato a meta': prosegue il percorso di oggi
+                _lettore_rep = {"esito": "eccezione_adozione", "errore": f"{type(exc).__name__}: {exc}"[:300]}
+
+    def _prosegui() -> "Risultato":
+        try:
+            return _importa_modello(file_path, _det, t0, ocr_text=ocr_text, analizza=analizza,
+                                    leggi_conti=leggi_conti, leggi_voci=leggi_voci,
+                                    trascrivi=trascrivi, route_hint=route_hint)
+        except SnelloNonRiuscito as e:
+            # Task 28: il modello ripiega o cade, ma un candidato deterministico ha letto davvero
+            # (respinto solo dal limite del tappo): meglio la sua lettura squadrata, dichiarata,
+            # che buttare tutto sull'importatore vecchio.
+            if not _det.get("lettura"):
+                raise
+            # La struttura vera quando il modello l'aveva gia' chiesta (rilievo 5 del riallineamento
+            # 2026-10-03: il segnaposto dichiarava zero chiamate vision dopo averle fatte); il
+            # segnaposto solo quando la struttura stessa e' fallita.
+            struttura_det = e.struttura
+            if struttura_det is None:
+                try:
+                    from importers.struttura_documento.analisi import struttura_deterministica
+                    modo_det = _MODO_DA_PARSER.get(_det["parser"], "legge")
+                    struttura_det = struttura_deterministica(file_path, modo=modo_det)
+                except Exception:
+                    raise e
+            return _salva_deterministico_squadrato(
+                _det, struttura_det, t0, letture=e.report.get("letture"),
+                extra={"ripiego_evitato": {k: e.report[k] for k in ("esito", "fase", "errore")
+                                           if k in e.report}})
+
+    try:
+        r = _prosegui()
+    except SnelloNonRiuscito as e:
+        if _lettore_rep is not None:
+            e.report["lettore_percorso"] = _lettore_rep
+        raise
+    if _lettore_rep is not None:
+        r.report["lettore_percorso"] = _lettore_rep
+    return r
 
 
 def _scarto_massimo(m: dict) -> Decimal:

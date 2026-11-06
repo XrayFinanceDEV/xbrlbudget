@@ -31,7 +31,7 @@ ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT))
 
 from importers.lettore.profilo import (  # noqa: E402
-    _chiave_ripetuta, _nel_margine, _norm, _prova, _testo, _titolo_parte, profilo_documento)
+    chiave_ripetuta, _nel_margine, _norm, _prova, _testo, _titolo_parte, profilo_documento)
 from importers.lettore.righe import _pagine_pdf, profilo_pdf  # noqa: E402
 
 CORPUS = Path(os.environ.get("IMPORT_CORPUS_ROOT", ROOT / "Test"))
@@ -211,7 +211,7 @@ def _rete() -> None:
         titolo = None
         for n, rr in enumerate(pagine):
             for r in rr:
-                t = None if (_nel_margine(r, altezze[n]) and _chiave_ripetuta(_testo(r)) in prof.margini) \
+                t = None if (_nel_margine(r, altezze[n]) and chiave_ripetuta(_testo(r)) in prof.margini) \
                     else _titolo_parte(r)
                 if t is not None:
                     titolo = (t, _testo(r))

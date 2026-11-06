@@ -11,7 +11,7 @@ from __future__ import annotations
 import re
 import statistics
 from collections import Counter
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 
 import fitz
 
@@ -24,7 +24,7 @@ from importers.lettore.totali import assegna_padri, marca_totali
 from importers.lettore.profilo import (
     _PERCORSO_LEGGE, _RUOLI_ANALISI, _SEPARATORE, _STACCO_SEPARATORE, _SEPARATORE_CODICE, _TOL_X_CODICE, _VALUTA, _VOCE_NUMERATA,
     FormaCodice, Profilo, TabellaNota, _capitale_in_anagrafica, _codice_in_testa, _decimali, _in_colonna, _norm,
-    _rimando_di_nota, _valuta_davanti, _voce_di_legge, marcatore_dopo, profilo_documento, senza_filetti)
+    _rimando_di_nota, _valuta_davanti, _voce_di_legge, _posto_marcatore, marcatore_dopo, meno_staccato, in_colonna_di_segni, profilo_documento, senza_filetti)
 
 _X0_MINIMO = 150.0          # come `colonne._in_colonna`
 # Una riga senza importi piu' vicina di cosi' (frazione dell'interlinea) alla riga sopra ne e' il seguito
@@ -59,7 +59,8 @@ _STACCO_CELLA_TESTO = _STACCO_SEPARATORE
 # Marcatori di una riga di mastro che cambiano fra la riga col totale e la sua ripetizione in testa a pagina
 # («0105 I.V.A. A A A IE» e «0105 I I.V.A.», budget_680).
 _MARCATORE = re.compile(r"^[A-Z]{1,2}$")
-_FORME_SEGNO = {"parentesi": "tra parentesi", "meno": "col meno davanti", "meno-finale": "col meno in coda"}
+_FORME_SEGNO = {"parentesi": "tra parentesi", "meno": "col meno davanti", "meno-finale": "col meno in coda",
+                "meno-staccato": "col meno staccato", "meno-colonna": "col meno in una colonna di segni"}
 
 
 @dataclass
@@ -189,7 +190,9 @@ def _riferimento_davanti(parole: list[Parola], i: int) -> bool:
 def _celle_del_lato(parole: list[Parola], colonne: list[Colonna], lato: str, pagina: int,
                     avvisi: list[str], stampati: dict[Parola, str],
                     intere: frozenset[int] = frozenset(),
-                    marcatori: frozenset[int] = frozenset()) -> tuple[dict[int, Importo], list[Parola]]:
+                    marcatori: frozenset[int] = frozenset(),
+                    negativi: frozenset[str] = frozenset(),
+                    segni_colonna: frozenset[tuple[int, float]] = frozenset()) -> tuple[dict[int, Importo], list[Parola]]:
     """(celle per colonna, parole dell'etichetta). Un importo e' una cella solo nella sua colonna e sul suo
     lato; fuori colonna, seguito da una durata («12 mesi») o dentro una frase dopo una valuta («euro 516,46
     di valore unitario», o in un'anagrafica col capitale sociale) torna nell'etichetta. Un anno nudo su una
@@ -217,6 +220,14 @@ def _celle_del_lato(parole: list[Parola], colonne: list[Colonna], lato: str, pag
                 parole[i].testo == "-" or leggi_importo(parole[i].testo) is None):
             trovati[i] = None
             separatori.add(i)
+    # un trattino a un soffio dall'importo che lo segue e' il suo segno meno, ma solo dove il profilo ha visto quella
+    # forma del negativo (almeno due volte): una volta sola e' un separatore di descrizione (1410)
+    meno_davanti: set[int] = set()
+    for i in range(len(parole) - 1):
+        in_colonna_segni = "meno-colonna" in negativi and in_colonna_di_segni(pagina, parole[i].x1, segni_colonna)
+        if (in_colonna_segni or "meno-staccato" in negativi) and meno_staccato(
+                parole, i, trovati, pagina, segni_colonna if in_colonna_segni else frozenset()):
+            meno_davanti.add(i)
     anni = {i for i, (p, t) in enumerate(zip(parole, trovati)) if t is not None and _ANNO.match(p.testo)}
     if anni and all(t is None or i in anni for i, t in enumerate(trovati)):
         trovati = [None if i in anni else t for i, t in enumerate(trovati)]
@@ -225,7 +236,7 @@ def _celle_del_lato(parole: list[Parola], colonne: list[Colonna], lato: str, pag
     costruite: dict[int, Importo] = {}    # la cella di ogni parola, col segno del suo marcatore (anche staccato)
     sedi: dict[int, list[Parola]] = {}
     testo: list[int] = []
-    segni: set[int] = set()
+    segni: set[int] = set(meno_davanti)
     for i, (p, trovato) in enumerate(zip(parole, trovati)):
         if i in segni:
             continue
@@ -238,9 +249,12 @@ def _celle_del_lato(parole: list[Parola], colonne: list[Colonna], lato: str, pag
         imp, c = trovato
         sedi.setdefault(c.indice, []).append(p)
         stampato = stampati.get(p, p.testo)
+        if i - 1 in meno_davanti:
+            stampato = f"- {stampato}"
+            imp = Importo(-imp.valore, imp.forma, stampato, imp.marcatore)
         marcatore = marcatore_dopo(parole, i) if c.indice in marcatori and imp.marcatore is None else None
         if marcatore is not None:
-            segni.add(i + 1)
+            segni.update(range(i + 1, _posto_marcatore(parole, i) + 1))   # i filetti e la lettera
             stampato = f"{stampato} {marcatore}"
             imp = Importo(imp.valore, imp.forma, stampato, marcatore)
         celle[c.indice] = costruite[i] = segno_del_lato(Importo(imp.valore, imp.forma, stampato, imp.marcatore), lato)
@@ -395,6 +409,8 @@ def _forma_negativo(testo: str) -> str | None:
         return None
     if t.startswith("(") and t.endswith(")"):
         return "parentesi"
+    if t.startswith("- "):
+        return "meno-staccato"
     if t.startswith("-"):
         return "meno"
     if t.rstrip(")").endswith("-"):
@@ -414,7 +430,8 @@ def _segni_fuori_profilo(celle: dict[int, Importo], colonne: list[Colonna], nega
         if imp.valore >= 0 or ruoli.get(indice) in _RUOLI_ANALISI:
             continue
         forma = _forma_negativo(imp.testo)
-        if forma is not None and forma not in viste:
+        if forma is not None and forma not in viste and not (
+                forma == "meno-staccato" and "meno-colonna" in viste):
             avvisi.append(f"pagina {pagina}: negativo «{imp.testo}» stampato {_FORME_SEGNO[forma]}, ma il documento "
                           f"stampa i negativi {' o '.join(_FORME_SEGNO[v] for v in sorted(viste))}: letto come "
                           f"negativo, da verificare")
@@ -532,6 +549,8 @@ class _Lettura:
     intere: frozenset[int] = frozenset()
     negativi: frozenset[str] = frozenset()
     marcatori: frozenset[int] = frozenset()
+    sezioni_lati: dict[tuple[int, float, str], str] = field(default_factory=dict)
+    segni_colonna: frozenset[tuple[int, float]] = frozenset()
 
 
 def _pezzi_della_riga(r: RigaFisica, sezione: str, lettura: _Lettura, forme: list[FormaCodice],
@@ -547,7 +566,7 @@ def _pezzi_della_riga(r: RigaFisica, sezione: str, lettura: _Lettura, forme: lis
         if not parole:
             continue
         celle, testo = _celle_del_lato(parole, lettura.colonne, lato, r.pagina, avvisi, stampati, lettura.intere,
-                                       lettura.marcatori)
+                                       lettura.marcatori, lettura.negativi, lettura.segni_colonna)
         _segni_fuori_profilo(celle, lettura.colonne, lettura.negativi, r.pagina, avvisi)
         # i filetti verticali in testa e in coda al lato («| 303.01000 RISERVE DI RIVALUTAZIONE |», budget_375) non
         # sono testo della riga: nascondono il codice e, da soli, fanno una riga vuota
@@ -562,7 +581,8 @@ def _pezzi_della_riga(r: RigaFisica, sezione: str, lettura: _Lettura, forme: lis
         if not celle and not codice and not etichetta_testo:
             continue
         out.append(_Pezzo(r.pagina, lato, r.y, r.y, min(p.y0 for p in parole), max(p.y1 for p in parole),
-                          sezione, codice, etichetta_testo, celle, etichetta, parte=lettura.parte,
+                          lettura.sezioni_lati.get((r.pagina, r.y, lato)) or sezione, codice, etichetta_testo, celle,
+                          etichetta, parte=lettura.parte,
                           tabella=lettura.tabella, forma=trovato.forma, x_codice=testo[0].x0 if testo else 0.0,
                           x_etichetta=trovato.x_etichetta, x_testo=_rientro(testo)))
     return out
@@ -625,7 +645,7 @@ def _letture(righe: list[RigaFisica], profilo: Profilo, colonne_tabelle: list[li
             colonne = profilo.colonne
             lettura = _Lettura(parte, None, colonne, profilo.confine,
                                frozenset(i for i, d in profilo.decimali.items() if d is False), profilo.negativi,
-                               profilo.marcatori)
+                               profilo.marcatori, profilo.sezioni_lati, profilo.segni_colonna)
         else:
             colonne = colonne_tabelle[tabella] if tabella is not None else []
             # gli interi in colonna dove gli importi della tabella non hanno decimali («(311)», budget_255 p26), o
@@ -644,6 +664,23 @@ def leggi_pdf(file_path: str) -> Documento:
                                 altezze={n: h for n, h in enumerate(altezze, start=1)})
     if not any(pagine):
         return Documento([], [], False, ["nessun testo: serve l'OCR"], profilo)
+    candidate = profilo.negativi & _FORME_MENO_DA_VERIFICARE
+    if not candidate:
+        return _leggi_righe(pagine, stampati, profilo)
+    # Un trattino staccato e' un segno solo se un totale stampato lo conferma: letto il documento con e senza, vale
+    # la lettura che chiude piu' totali (un separatore «descrizione - importo» non ne chiude di piu').
+    senza = _leggi_righe(pagine, stampati, replace(profilo, negativi=profilo.negativi - candidate))
+    con = _leggi_righe(pagine, stampati, profilo)
+    if sum(1 for r in con.righe if r.totale) > sum(1 for r in senza.righe if r.totale):
+        return con
+    return senza
+
+
+# Le forme del negativo che un trattino staccato dalla cifra puo' far credere: si leggono solo se un totale le conferma
+_FORME_MENO_DA_VERIFICARE = frozenset({"meno-staccato", "meno-colonna"})
+
+
+def _leggi_righe(pagine, stampati, profilo: Profilo) -> Documento:
     avvisi: list[str] = []
     if not profilo.colonne:
         avvisi.append("nessuna colonna di importi riconosciuta")

@@ -33,6 +33,11 @@ _DATA = re.compile(r"^(?:(\d{2})[-/.](\d{2})[-/.])?(20\d{2})$|^(\d{2})[-/.](\d{2
 _ANALISI = {"differenza", "diff.", "scostamento", "scost.", "variazione", "%"}
 _ANALISI_DIFFERENZA = {"differenza", "diff.", "variazione"}
 _RUOLI_TESTATA = {"dare": "dare", "avere": "avere", "saldo": "saldo"}
+# «Saldo Costi Ricavi Costi Ricavi» / «Saldo Attivo Passivo Attivo Passivo» (1566, perdite e profitti e stato
+# patrimoniale di una contabilita'): accanto a un «Saldo» le parole di lato fanno una riga di testata, e il saldo ha il
+# suo ruolo. Le altre colonne restano valori (i totali dei mastri stanno li', non sui movimenti dare/avere); senza un
+# saldo le parole di lato sono le testate delle contrapposte, e non cambiano nulla.
+_LATO_DI_TESTATA = {"costi": "dare", "attivo": "dare", "ricavi": "avere", "passivo": "avere"}
 _PAROLE_RIGA_TESTATA = PAROLE_TESTATA | _ANALISI | set(_RUOLI_TESTATA) | {"dal", "fino", "infrannuale"}
 # Lessico di testata per le intestazioni gia' divise in celle (le tabelle OCR, `celle.py`): quali parole di testata
 # sono di una colonna di valori («Importo», «Esercizio precedente», «Scost. %») e quali della descrizione («Cod.»,
@@ -165,9 +170,16 @@ def _norm_testata(testo: str) -> str:
     return "%" if "%" in n and n.replace("%", "") in _PAROLE_RIGA_TESTATA else n
 
 
+def _con_saldo_e_lati(r: RigaFisica) -> bool:
+    """«Saldo Costi Ricavi Costi Ricavi»: un saldo e solo parole di lato, almeno una per verso."""
+    nomi = [_norm_testata(p.testo) for p in r.parole]
+    return "saldo" in nomi and all(n == "saldo" or n in _LATO_DI_TESTATA for n in nomi) \
+        and {_LATO_DI_TESTATA.get(n) for n in nomi} >= {"dare", "avere"}
+
+
 def _e_riga_testata(r: RigaFisica) -> bool:
     """Solo parole di testata, date e anni: «ESERCIZIO ESERCIZIO DIFFERENZA SCOST.», «DARE AVERE SALDO»."""
-    return all(_norm_testata(p.testo) in _PAROLE_RIGA_TESTATA or re.fullmatch(r"[\d\-./]+", p.testo.strip())
+    return _con_saldo_e_lati(r) or all(_norm_testata(p.testo) in _PAROLE_RIGA_TESTATA or re.fullmatch(r"[\d\-./]+", p.testo.strip())
                for p in r.parole)
 
 

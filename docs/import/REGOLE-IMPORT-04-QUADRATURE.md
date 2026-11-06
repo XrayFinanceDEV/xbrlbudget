@@ -484,4 +484,21 @@ male; righe di etichetta spezzate su più righe fisiche; e, per i blocchi `cerca
 minimo scarto che può non essere quello vero (per questo «da verificare»). Un documento sbilanciato senza
 blocco nominato non vuol dire che il bilancio sia a posto.
 
-Misura sul campione: vedi sotto (da completare col giro fase2-93432bb).
+**Misura sul campione** (78 documenti × 3 giri, 2026-11-06, contro la base `base-fase2-e3455d6`):
+
+- nessun import fallito per colpa del lettore; la chiave `lettore` c'è su ogni giro importato;
+- esito `ok` su tutti i documenti con testo, dopo la correzione della numerazione delle pagine di MinerU (da 0,
+  il lettore conta da 1: prima della correzione i sei documenti arrivati da MinerU uscivano in `errore`); una
+  scansione senza tabelle utili esce `non_applicabile`; un solo giro su 234 ha toccato il tetto (20,5 s);
+- tempo: mediana 0,39 s, media 0,92 s;
+- numeri invariati su 60 dei 64 documenti stabili della base; i quattro che cambiano cambiano anche a lettore
+  spento (`LETTORE_DIAGNOSI=0`, verificato su due di essi): la causa è fuori dal lettore (variabilità del modello);
+- documenti salvati sbilanciati: 14; un blocco nominato su 4, e su uno lo scarto spiega lo sbilancio al
+  centesimo. Sui 10 senza blocco, in 9 il PDF quadra (ogni totale stampato chiude, attivo = passivo): lo
+  sbilancio nasce dalla classificazione o dalla scelta di colonna dell'import, che la diagnosi non vede per
+  costruzione; il decimo è una scansione. Il criterio del piano («almeno metà degli sbilanciati con un blocco»)
+  presupponeva sbilanci nati dal PDF: sul campione non lo sono.
+
+Da qui la regola della Fase 3 (decisione del proprietario, 2026-11-06): un PDF che quadra si importa quadrato,
+con gli aggregati ancorati ai totali stampati verificati dal lettore; i dettagli si distribuiscono dentro
+l'aggregato e non possono sbilanciare il foglio.

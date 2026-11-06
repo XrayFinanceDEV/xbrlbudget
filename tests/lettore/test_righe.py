@@ -871,41 +871,60 @@ def _con_meno(x_importo, y, importo, stacco=2.2):
     return [(x_importo - larghezza - stacco, y, "-"), (x_importo, y, importo)]
 
 
-def _voci_con_meno(stacco=2.2, n=3, dopo=None):
+def _voci_con_meno(stacco=2.2, totale="7.800,00", x_trattino=None):
+    """Due ricavi, due righe con il trattino davanti all'importo e il totale stampato."""
     voci = _riempi(140, colonne=(560,), n=4)
-    for k in range(n):
+    righe = [("Ricavi uno", "6.000,00", False), ("Ricavi due", "4.500,00", False),
+             ("Rettifica uno", "2.000,00", True), ("Rettifica due", "700,00", True), ("Totale", totale, False)]
+    for k, (e, v, meno) in enumerate(righe):
         y = 220 + k * 14
-        voci += [(50, y, f"Differenza {k}")] + _con_meno(560, y, ("2.500,00", "12.500,00", "112.500,00")[k], stacco)
-    return voci + (dopo or [])
+        voci.append((50, y, e))
+        voci += _con_meno(560, y, v, stacco) if meno else [(560, y, v)]
+    return voci
 
 
-def test_trattino_a_un_soffio_dall_importo_e_il_suo_segno(tmp_path):
-    # 1553: «Utile (Perdita) dell'esercizio - 184.019» e' -184.019, e il trattino lascia l'etichetta
+def test_trattino_a_un_soffio_dall_importo_e_il_suo_segno_se_il_totale_lo_conferma(tmp_path):
+    # 1553: «Utile (Perdita) dell'esercizio - 184.019» e' -184.019 perche' il totale stampato (7.800) chiude solo cosi'
     doc = _leggi(tmp_path, [_voci_con_meno()])
-    riga = _riga(doc, "Differenza 0")
-    assert riga.celle[0].valore == Decimal("-2500.00")
+    riga = _riga(doc, "Rettifica uno")
+    assert riga.celle[0].valore == Decimal("-2000.00")
     assert not riga.etichetta.endswith("-")
+    assert _riga(doc, "Totale").totale
     assert doc.profilo.negativi == frozenset({"meno-staccato"})
     assert not any("negativo" in a for a in doc.tutti_gli_avvisi())
 
 
+def test_trattino_senza_un_totale_che_lo_confermi_resta_un_separatore(tmp_path):
+    # «Rettifica - 2.000,00» in un documento di soli positivi: il totale (13.200) chiude con gli importi positivi
+    doc = _leggi(tmp_path, [_voci_con_meno(totale="13.200,00")])
+    assert _riga(doc, "Rettifica uno").celle[0].valore == Decimal("2000.00")
+    assert not doc.profilo.negativi
+    assert _riga(doc, "Totale").totale
+
+
 def test_trattino_lontano_dall_importo_resta_un_separatore(tmp_path):
     # «FONDO - 6.138» a 33 pt (1426) con meno di tre trattini allineati: separatore, importo positivo
-    doc = _leggi(tmp_path, [_voci_con_meno(stacco=33.0, n=2)])
-    assert _riga(doc, "Differenza 0").celle[0].valore == Decimal("2500.00")
+    doc = _leggi(tmp_path, [_voci_con_meno(stacco=33.0, totale="13.200,00")])
+    assert _riga(doc, "Rettifica uno").celle[0].valore == Decimal("2000.00")
     assert not doc.profilo.negativi
 
 
 def test_colonna_di_segni_allineati_vale_anche_lontano_dall_importo(tmp_path):
-    # 1426: i trattini stanno sempre alla stessa x, a 33-44 pt dall'importo; tre o piu' in una pagina fanno la colonna
+    # 1426: i trattini stanno alla stessa x (con un po' di oscillazione), a 33-44 pt dall'importo; tre o piu' in una
+    # pagina fanno la colonna, e il totale stampato (89.000) chiude solo con i fondi negativi
     voci = _riempi(140, colonne=(560,), n=4)
-    for k, importo in enumerate(("2.500,00", "12.500,00", "112.500,00")):
+    righe = [("Costo storico A", "60.000,00", None), ("Costo storico B", "40.000,00", None), ("Fondo uno", "2.500,00", 330.0), ("Fondo due", "8.500,00", 330.6),
+             ("Fondo tre", "100,00", 329.5), ("Totale netto", "88.900,00", None)]
+    for k, (e, v, x) in enumerate(righe):
         y = 220 + k * 14
-        voci += [(50, y, f"Fondo {k}"), (330, y, "-"), (560, y, importo)]
+        voci.append((50, y, e))
+        if x:
+            voci.append((x, y, "-"))
+        voci.append((560, y, v))
     doc = _leggi(tmp_path, [voci])
     assert doc.profilo.negativi == frozenset({"meno-colonna"})
-    assert [_riga(doc, f"Fondo {k}").celle[0].valore for k in range(3)] == [
-        Decimal("-2500.00"), Decimal("-12500.00"), Decimal("-112500.00")]
+    assert [_riga(doc, f).celle[0].valore for f in ("Fondo uno", "Fondo due", "Fondo tre")] == [
+        Decimal("-2500.00"), Decimal("-8500.00"), Decimal("-100.00")]
 
 
 def test_trattino_in_un_documento_con_i_negativi_di_sempre_non_e_un_segno(tmp_path):

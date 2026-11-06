@@ -113,7 +113,7 @@ class Profilo:
     # conto economico a destra): la sezione di ogni lato ha i suoi titoli, chiave (pagina, y, "L"|"R")
     sezioni_lati: dict[tuple[int, float, str], str] = field(default_factory=dict)
     # (pagina, x destra) dei trattini che fanno da colonna dei segni meno (1426), vedi `meno_staccato`
-    segni_colonna: frozenset[tuple[int, int]] = frozenset()
+    segni_colonna: frozenset[tuple[int, float]] = frozenset()
 
 
 @dataclass(frozen=True)
@@ -845,8 +845,17 @@ _TRATTINI = ("-", "\u2013")
 _STACCO_SEGNO = 3.0
 
 
+_TOL_COLONNA_SEGNI = 1.5
+
+
+def in_colonna_di_segni(pagina: int, x1: float, segni_colonna: frozenset[tuple[int, float]]) -> bool:
+    """Il trattino con bordo destro `x1` sta su una colonna di segni della pagina (centro del gruppo entro ±1,5 pt:
+    le x reali oscillano di un punto, 284,0-285,2)."""
+    return any(p == pagina and abs(x - x1) <= _TOL_COLONNA_SEGNI for p, x in segni_colonna)
+
+
 def meno_staccato(parole: list[Parola], i: int, trovati: list, pagina: int = 0,
-                  segni_colonna: frozenset[tuple[int, int]] = frozenset()) -> bool:
+                  segni_colonna: frozenset[tuple[int, float]] = frozenset()) -> bool:
     """La parola `i` e' un trattino che fa da segno meno all'importo che la segue, e che sta in una colonna mentre il
     trattino no. Due forme: a un soffio dall'importo («Utile (Perdita) dell'esercizio - 184.019», 1553; due trattini
     di fila, «merci - - 30.517», 394, sono una convenzione che non si legge dal solo segno), oppure in una colonna di
@@ -857,7 +866,7 @@ def meno_staccato(parole: list[Parola], i: int, trovati: list, pagina: int = 0,
     imp = leggi_importo(parole[i + 1].testo)
     if imp is None or imp.forma == "zero" or imp.valore <= 0:
         return False
-    if (pagina, round(parole[i].x1)) in segni_colonna:
+    if in_colonna_di_segni(pagina, parole[i].x1, segni_colonna):
         return True
     if parole[i + 1].x0 - parole[i].x1 > _STACCO_SEGNO:
         return False
@@ -865,10 +874,11 @@ def meno_staccato(parole: list[Parola], i: int, trovati: list, pagina: int = 0,
 
 
 def _segni_in_colonna(righe: list[RigaFisica], colonne: list[Colonna],
-                      intere: frozenset[int]) -> frozenset[tuple[int, int]]:
-    """(pagina, x destra) dei trattini che stanno in colonna di segni: tre o piu' trattini fuori colonna, ciascuno
-    subito prima di un importo in colonna ma a piu' di un soffio da lui, sulla stessa x."""
-    viste: Counter[tuple[int, int]] = Counter()
+                      intere: frozenset[int]) -> frozenset[tuple[int, float]]:
+    """(pagina, x media) dei gruppi di trattini che fanno una colonna di segni: tre o piu' trattini fuori colonna,
+    ciascuno subito prima di un importo in colonna ma a piu' di un soffio da lui, con il bordo destro entro ±1,5 pt
+    gli uni dagli altri."""
+    per_pagina: dict[int, list[float]] = {}
     for r in righe:
         trovati = [_in_colonna(p, colonne, intere) for p in r.parole]
         for i, p in enumerate(r.parole[:-1]):
@@ -876,12 +886,21 @@ def _segni_in_colonna(righe: list[RigaFisica], colonne: list[Colonna],
                     and r.parole[i + 1].x0 - p.x1 > _STACCO_SEGNO:
                 imp = leggi_importo(r.parole[i + 1].testo)
                 if imp is not None and imp.forma != "zero" and imp.valore > 0:
-                    viste[(r.pagina, round(p.x1))] += 1
-    return frozenset(k for k, n in viste.items() if n >= 3)
+                    per_pagina.setdefault(r.pagina, []).append(p.x1)
+    out = set()
+    for pagina, xs in per_pagina.items():
+        gruppo: list[float] = []
+        for x in sorted(xs) + [float("inf")]:
+            if gruppo and x - gruppo[-1] > _TOL_COLONNA_SEGNI:
+                if len(gruppo) >= 3:
+                    out.add((pagina, sum(gruppo) / len(gruppo)))
+                gruppo = []
+            gruppo.append(x)
+    return frozenset(out)
 
 
 def _negativi(righe: list[RigaFisica], colonne: list[Colonna], intere: frozenset[int],
-              segni_colonna: frozenset[tuple[int, int]] = frozenset()) -> frozenset[str]:
+              segni_colonna: frozenset[tuple[int, float]] = frozenset()) -> frozenset[str]:
     """Le forme del negativo viste almeno due volte sulle celle; le colonne di differenza e di percentuale
     non contano (un negativo li' e' una variazione)."""
     viste: Counter[str] = Counter()
@@ -890,7 +909,7 @@ def _negativi(righe: list[RigaFisica], colonne: list[Colonna], intere: frozenset
         for k, p in enumerate(r.parole):
             if meno_staccato(r.parole, k, trovati, r.pagina, segni_colonna) and \
                     trovati[k + 1][1].ruolo not in _RUOLI_ANALISI:
-                viste["meno-colonna" if (r.pagina, round(r.parole[k].x1)) in segni_colonna else "meno-staccato"] += 1
+                viste["meno-colonna" if in_colonna_di_segni(r.pagina, r.parole[k].x1, segni_colonna) else "meno-staccato"] += 1
             trovato = _in_colonna(p, colonne, intere)
             if trovato is None or trovato[1].ruolo in _RUOLI_ANALISI or _rimando_di_nota(r.parole, k):
                 continue

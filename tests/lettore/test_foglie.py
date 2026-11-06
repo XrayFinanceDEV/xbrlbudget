@@ -452,3 +452,60 @@ def test_due_tabelle_affiancate_non_hanno_l_attivo_a_sinistra(tmp_path):
     assert foglie["I - Immobilizzazioni immateriali"].lato_sp == "A" and foglie["I - Rimanenze"].lato_sp == "A"
     assert foglie["I - Capitale"].lato_sp == "P" and foglie["7) Debiti verso fornitori"].lato_sp == "P"
     assert foglie["6) Per materie prime"].sezione == "CE" and foglie["6) Per materie prime"].lato_sp is None
+
+
+# --- Task 2b, fix round 1 ------------------------------------------------------------------------------------------
+
+def _ce_con_costi(valori_costi, totale):
+    voci = [(50, 100, "CONTO ECONOMICO"), (50, 124, "B) Costi della produzione")]
+    righe = [(f"7) Per servizi {k}", v) for k, v in enumerate(valori_costi)]
+    righe.append(("Totale 7) Per servizi", totale))
+    for k, (e, v) in enumerate(righe):
+        voci += [(50, 140 + k * 14, e), (480, 140 + k * 14, v), (560, 140 + k * 14, v)]
+    return voci
+
+
+def test_ancora_dei_costi_ha_il_segno_delle_sue_foglie(tmp_path):
+    # 1470: costi tra parentesi; la foglia arriva positiva e l'ancora della macro-voce con lei (non -1.065.113 contro +)
+    doc = _doc(tmp_path, _ce_con_costi([f"({v},00)" for v in (130, 270, 410, 570, 690, 850)], "(2.920,00)"))
+    col = colonne_utili(doc)[0]
+    foglie = [f for f in foglie_contabili(doc, col) if f.etichetta.startswith("7) Per servizi")]
+    ancora = next(a for a in ancore(doc, col) if a.chiave.startswith("ce"))
+    assert sum(f.importo for f in foglie) == ancora.importo == Decimal("2920.00")
+
+
+def test_un_costo_negativo_fra_i_positivi_resta_negativo(tmp_path):
+    # sotto soglia (1 su 6) non c'e' convenzione: e' uno storno e resta com'e'
+    doc = _doc(tmp_path, _ce_con_costi(["130,00", "270,00", "410,00", "(50,00)", "690,00", "850,00"], "2.300,00"))
+    costi = {f.etichetta: f.importo for f in foglie_contabili(doc, colonne_utili(doc)[0])
+             if f.etichetta.startswith("7) Per servizi")}
+    assert costi["7) Per servizi 3"] == Decimal("-50.00") and costi["7) Per servizi 0"] == Decimal("130.00")
+
+
+def test_contrapposte_tipata_male_con_titoli_di_lato_tiene_i_lati(tmp_path):
+    # L titolata ATTIVO, R titolata PASSIVO, profilo non contrapposto: i lati restano quelli fisici
+    sinistra = [("ATTIVO", "800,00"), ("B) Immobilizzazioni", "300,00"), ("I - Immobilizzazioni immateriali", "300,00"),
+                ("C) Attivo circolante", "500,00"), ("I - Rimanenze", "500,00"), ("II - Crediti", "500,00")]
+    destra = [("PASSIVO", "800,00"), ("A) Patrimonio netto", "600,00"), ("I - Capitale", "600,00"),
+              ("D) Debiti", "200,00"), ("7) Debiti verso fornitori", "200,00"), ("E) Ratei", "100,00")]
+    voci = [(40, 100, "STATO PATRIMONIALE")]
+    for k, ((a, va), (b, vb)) in enumerate(zip(sinistra, destra)):
+        y = 140 + k * 14
+        voci += [(40, y, a), (270, y, va), (320, y, b), (560, y, vb)]
+    doc = _doc(tmp_path, voci)
+    assert not doc.contrapposto       # il profilo la tipa come schema: e' il caso da proteggere
+    foglie = _per_etichetta(foglie_contabili(doc, colonne_utili(doc)[0]))
+    assert foglie["I - Immobilizzazioni immateriali"].lato_sp == "A"
+    assert foglie["I - Rimanenze"].lato_sp == "A"
+    assert foglie["I - Capitale"].lato_sp == "P"
+    assert foglie["7) Debiti verso fornitori"].lato_sp == "P"
+
+
+def test_lato_dal_saldo_si_dichiara_con_un_avviso(tmp_path):
+    voci = [(50, 100, "STATO PATRIMONIALE al 30/09/2026"), (500 - 28, 120, "Saldo")]
+    for k, (e, v) in enumerate([("Banca", "1.000,00"), ("Cassa", "50,00"), ("Fornitori", "700,00-"),
+                                ("Capitale", "350,00-")]):
+        voci += [(50, 140 + k * 14, e), (500, 140 + k * 14, v)]
+    doc = _doc(tmp_path, voci)
+    foglie_contabili(doc, colonne_utili(doc)[0])
+    assert any("dal segno del saldo" in a and a.startswith("4 righe") for a in doc.tutti_gli_avvisi())

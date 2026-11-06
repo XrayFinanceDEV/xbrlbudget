@@ -11,7 +11,7 @@ from __future__ import annotations
 import re
 import statistics
 from collections import Counter
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 
 import fitz
 
@@ -24,7 +24,7 @@ from importers.lettore.totali import assegna_padri, marca_totali
 from importers.lettore.profilo import (
     _PERCORSO_LEGGE, _RUOLI_ANALISI, _SEPARATORE, _STACCO_SEPARATORE, _SEPARATORE_CODICE, _TOL_X_CODICE, _VALUTA, _VOCE_NUMERATA,
     FormaCodice, Profilo, TabellaNota, _capitale_in_anagrafica, _codice_in_testa, _decimali, _in_colonna, _norm,
-    _rimando_di_nota, _valuta_davanti, _voce_di_legge, marcatore_dopo, meno_staccato, profilo_documento, senza_filetti)
+    _rimando_di_nota, _valuta_davanti, _voce_di_legge, marcatore_dopo, meno_staccato, in_colonna_di_segni, profilo_documento, senza_filetti)
 
 _X0_MINIMO = 150.0          # come `colonne._in_colonna`
 # Una riga senza importi piu' vicina di cosi' (frazione dell'interlinea) alla riga sopra ne e' il seguito
@@ -192,7 +192,7 @@ def _celle_del_lato(parole: list[Parola], colonne: list[Colonna], lato: str, pag
                     intere: frozenset[int] = frozenset(),
                     marcatori: frozenset[int] = frozenset(),
                     negativi: frozenset[str] = frozenset(),
-                    segni_colonna: frozenset[tuple[int, int]] = frozenset()) -> tuple[dict[int, Importo], list[Parola]]:
+                    segni_colonna: frozenset[tuple[int, float]] = frozenset()) -> tuple[dict[int, Importo], list[Parola]]:
     """(celle per colonna, parole dell'etichetta). Un importo e' una cella solo nella sua colonna e sul suo
     lato; fuori colonna, seguito da una durata («12 mesi») o dentro una frase dopo una valuta («euro 516,46
     di valore unitario», o in un'anagrafica col capitale sociale) torna nell'etichetta. Un anno nudo su una
@@ -224,7 +224,7 @@ def _celle_del_lato(parole: list[Parola], colonne: list[Colonna], lato: str, pag
     # forma del negativo (almeno due volte): una volta sola e' un separatore di descrizione (1410)
     meno_davanti: set[int] = set()
     for i in range(len(parole) - 1):
-        in_colonna_segni = "meno-colonna" in negativi and (pagina, round(parole[i].x1)) in segni_colonna
+        in_colonna_segni = "meno-colonna" in negativi and in_colonna_di_segni(pagina, parole[i].x1, segni_colonna)
         if (in_colonna_segni or "meno-staccato" in negativi) and meno_staccato(
                 parole, i, trovati, pagina, segni_colonna if in_colonna_segni else frozenset()):
             meno_davanti.add(i)
@@ -550,7 +550,7 @@ class _Lettura:
     negativi: frozenset[str] = frozenset()
     marcatori: frozenset[int] = frozenset()
     sezioni_lati: dict[tuple[int, float, str], str] = field(default_factory=dict)
-    segni_colonna: frozenset[tuple[int, int]] = frozenset()
+    segni_colonna: frozenset[tuple[int, float]] = frozenset()
 
 
 def _pezzi_della_riga(r: RigaFisica, sezione: str, lettura: _Lettura, forme: list[FormaCodice],
@@ -664,6 +664,23 @@ def leggi_pdf(file_path: str) -> Documento:
                                 altezze={n: h for n, h in enumerate(altezze, start=1)})
     if not any(pagine):
         return Documento([], [], False, ["nessun testo: serve l'OCR"], profilo)
+    candidate = profilo.negativi & _FORME_MENO_DA_VERIFICARE
+    if not candidate:
+        return _leggi_righe(pagine, stampati, profilo)
+    # Un trattino staccato e' un segno solo se un totale stampato lo conferma: letto il documento con e senza, vale
+    # la lettura che chiude piu' totali (un separatore «descrizione - importo» non ne chiude di piu').
+    senza = _leggi_righe(pagine, stampati, replace(profilo, negativi=profilo.negativi - candidate))
+    con = _leggi_righe(pagine, stampati, profilo)
+    if sum(1 for r in con.righe if r.totale) > sum(1 for r in senza.righe if r.totale):
+        return con
+    return senza
+
+
+# Le forme del negativo che un trattino staccato dalla cifra puo' far credere: si leggono solo se un totale le conferma
+_FORME_MENO_DA_VERIFICARE = frozenset({"meno-staccato", "meno-colonna"})
+
+
+def _leggi_righe(pagine, stampati, profilo: Profilo) -> Documento:
     avvisi: list[str] = []
     if not profilo.colonne:
         avvisi.append("nessuna colonna di importi riconosciuta")

@@ -146,6 +146,15 @@ def _tipo(gettone: str) -> int:
     return 0 if gettone.isupper() else 3
 
 
+def _titoli_di_lato_sui_due_lati(righe: list[Riga]) -> bool:
+    """Due tabelle affiancate dello stato patrimoniale con un titolo «attivo» a sinistra e uno «passivo» a destra:
+    sono le sezioni contrapposte che il profilo ha tipato male, non due tabelle diverse. Il flusso sequenziale non puo'
+    decidere i lati quando i titoli li dicono gia'."""
+    titoli = {(r.lato, _lato_del_titolo(r, gettoni_di_legge(r.etichetta, r.codice)))
+              for r in righe if r.sezione == "SP" and r.lato in ("L", "R")}
+    return ("L", "A") in titoli and ("R", "P") in titoli
+
+
 def _scorri(righe: list[Riga], contrapposto: bool = True) -> dict[str, _Posizione]:
     """Per ogni riga: il lato dello stato patrimoniale (L/R dal lato fisico; su una colonna unica dal titolo
     «attivo»/«passivo», dal totale dell'attivo, o dalla lettera maiuscola che riparte da A dopo la B), l'outline di
@@ -153,6 +162,8 @@ def _scorri(righe: list[Riga], contrapposto: bool = True) -> dict[str, _Posizion
     prima della prima prova sono dell'attivo solo se la prova e' un passaggio al passivo; altrimenti restano senza
     lato. Due tabelle affiancate che non sono contrapposte (1426) non hanno L = attivo e R = passivo: ogni tabella e'
     una colonna unica. L'outline vale da solo: il percorso degli antenati del lettore non sempre porta il livello piu' alto."""
+    if not contrapposto and _titoli_di_lato_sui_due_lati(righe):
+        contrapposto = True     # il profilo non l'ha vista, ma i titoli dicono L = attivo e R = passivo
     out: dict[str, _Posizione] = {}
     stato: str | None = None
     prima_della_prova: list[str] = []
@@ -456,6 +467,11 @@ def _lato_dal_saldo(r: Riga, lato_sp: str | None, verso: str | None, v: Decimal)
 
 
 def foglie_contabili(doc: Documento, colonna: int) -> list[Foglia]:
+    return _costi_col_segno_normale(_foglie_grezze(doc, colonna))
+
+
+def _foglie_grezze(doc: Documento, colonna: int) -> list[Foglia]:
+    dal_saldo = 0
     righe = doc.righe_del_prospetto()
     per_id = {r.id: r for r in righe}
     pos = _scorri(righe, doc.contrapposto)
@@ -476,23 +492,37 @@ def foglie_contabili(doc: Documento, colonna: int) -> list[Foglia]:
         if v is None or v == _ZERO:
             continue
         if _e_saldo(doc, r, col):
+            prima = (lato_sp, verso)
             lato_sp, verso, v = _lato_dal_saldo(r, lato_sp, verso, v)
+            dal_saldo += (lato_sp, verso) != prima
         out.append(Foglia(r.id, r.etichetta, r.codice, r.lato, r.sezione, v, p, _antenati_verificati(r, per_id),
                           verso, lato_sp))
-    return _costi_col_segno_normale(out)
+    if dal_saldo:
+        avviso = (f"{dal_saldo} righe hanno avuto il lato (attivo/passivo) o il verso (costo/ricavo) dal segno del "
+                  f"saldo: titoli e percorso di legge non lo dicevano")
+        if avviso not in doc.avvisi:
+            doc.avvisi.append(avviso)
+    return out
 
 
 _MIN_COSTI_NEGATIVI = 5
 _QUOTA_COSTI_NEGATIVI = 0.7
 
 
-def _costi_col_segno_normale(foglie: list[Foglia]) -> list[Foglia]:
-    """Un conto economico che stampa i costi col meno («(1.558.295)» sul totale servizi, 1470) e' una convenzione del
-    documento, non uno storno per ogni conto: se almeno il 70% dei costi (cinque o piu') e' negativo, i costi
-    arrivano col segno normale, positivo (F3-1). Una lettura giusta del segno: il valore stampato resta nella cella."""
+def _costi_stampati_negativi(foglie: list[Foglia]) -> bool:
+    """Un conto economico che stampa i costi col meno («(1.558.295)» sul totale servizi, 1470) segue una convenzione
+    del documento intero, non storna ogni conto. La prova e' la maggioranza: almeno cinque costi e almeno il 70% di
+    loro negativo (i cinque documenti misurati sono tutti sopra il 95%; una percentuale piu' bassa e' un documento
+    con storni, che resta com'e'). Un costo positivo dentro un documento sopra soglia e' lo storno."""
     costi = [f for f in foglie if f.sezione == "CE" and f.verso_ce == "costo"]
     negativi = sum(1 for f in costi if f.importo < _ZERO)
-    if len(costi) < _MIN_COSTI_NEGATIVI or negativi < _QUOTA_COSTI_NEGATIVI * len(costi):
+    return len(costi) >= _MIN_COSTI_NEGATIVI and negativi >= _QUOTA_COSTI_NEGATIVI * len(costi)
+
+
+def _costi_col_segno_normale(foglie: list[Foglia]) -> list[Foglia]:
+    """Se il documento stampa i costi col meno, i costi arrivano col segno normale positivo (F3-1); la cella resta lo
+    stampato. Le ancore dei costi seguono la stessa regola (`ancore`), cosi' foglie e ancore concordano."""
+    if not _costi_stampati_negativi(foglie):
         return foglie
     return [replace(f, importo=-f.importo) if f.sezione == "CE" and f.verso_ce == "costo" else f for f in foglie]
 
@@ -621,7 +651,9 @@ def ancore(doc: Documento, colonna: int) -> list[Ancora]:
     pos = _scorri(righe, doc.contrapposto)
     perc = _Percorsi(righe, pos)
     coppie = getattr(doc.profilo, "coppie", {})
-    tutte = foglie_contabili(doc, colonna)
+    grezze = _foglie_grezze(doc, colonna)
+    costi_negativi = _costi_stampati_negativi(grezze)
+    tutte = _costi_col_segno_normale(grezze)
     ids = {f.id for f in tutte}
     per_foglia = {f.id: f for f in tutte}
     out: list[Ancora] = []
@@ -660,6 +692,8 @@ def ancore(doc: Documento, colonna: int) -> list[Ancora]:
             continue                    # una foglia sotto il totale si risolve altrove: il totale non e' questa macro
         v = _importo(doc, t, colonna, per_id, pos[t.id].lato_sp, _verso_ce(t, macro))
         if v is not None:
+            if costi_negativi and macro in _MACRO_COSTI and macro not in _MACRO_RICAVI:
+                v = -v          # come le sue foglie (`_costi_col_segno_normale`)
             aggiungi(macro, v, t.id, sotto)
 
     # totali generali stampati: il totale chiuso se c'e', altrimenti l'ultima riga che si dichiara tale

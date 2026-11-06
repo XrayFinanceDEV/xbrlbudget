@@ -395,3 +395,113 @@ tappo governano solo il **percorso snello** (F3, prima del punto di convergenza)
 il gate contabile duro di questa pagina (§2, `quadra`), che restano quelli di sempre e continuano
 a girare sul foglio consegnato — un tappo entro 10 € non è una licenza a saltare la quadratura
 al centesimo che l'importatore attuale misura dopo.
+
+## 13. Blocchi che non chiudono (Fase 2)
+
+> Codice: `importers/lettore/blocchi.py` (che cosa è un blocco), `importers/lettore/diagnosi.py` (diagnosi e
+> frasi), `_lettore_diagnosi_import` in `importers/pdf_importer.py` (il collegamento). Il lettore di righe è
+> descritto in [REGOLE-IMPORT-02-ESTRAZIONE.md §11](REGOLE-IMPORT-02-ESTRAZIONE.md).
+
+Dalla Fase 2 il lettore di righe gira su ogni PDF importato, **solo per diagnosticare**: nomina i totali
+stampati i cui figli non sommano, così l'utente sa dove guardare in Rettifiche. Non legge, non classifica e non
+corregge nulla: **nessun importo dell'import dipende da questo modulo** (SP, CE, esito e anni sono quelli di
+prima). Se qualcosa va storto nel lettore, l'import non se ne accorge.
+
+### Che cosa è un blocco
+
+Un blocco è un **totale stampato dal documento** il cui importo, su una colonna di esercizio o di saldo, non
+è la somma dei figli candidati oltre la tolleranza della cella (la C6 del lettore: un euro se il totale è
+stampato all'unità, altrimenti il centesimo). Una voce che ha solo figli dichiarati dall'intestazione, senza
+un totale stampato, **non è un blocco**: una parentela da intestazione è un'ipotesi, e «non chiude» su
+un'ipotesi inventerebbe un difetto. Un totale senza figli con un importo non è un blocco. Colonne di
+differenza, percentuale e i parziali delle coppie non contano.
+
+Due origini, e la differenza si porta in `cercato`:
+
+- **`cercato: false` — figli noti.** Il totale è stato chiuso su un'altra colonna (stessi figli, colonna
+  per colonna): su questa colonna gli stessi figli non sommano. I figli sono quelli veri, lo scarto è un
+  fatto del documento.
+- **`cercato: true` — riga di controllo mai chiusa.** Nessuna colonna chiude; i figli sono un tratto di righe
+  **scelto dal lettore per minimo scarto** fra i tagli possibili sopra la riga. È una stima di dove sta il
+  buco, non un fatto.
+
+I blocchi `cercato` si producono **solo su un profilo da schema di legge** (`schema`, `schema-dettaglio`). Su
+contrapposte, bilanci di verifica e profilo ignoto ci sono solo blocchi da figli noti: sugli elenchi di conti
+il tratto indovinato inventa divari da milioni, e un divario falso vale peggio di nessun avviso. Se il
+criterio è troppo stretto, si nominano meno blocchi sulle contrapposte, mai uno falso.
+
+L'ordine è dal più grande scarto in valore assoluto. Il tratto è dato da prima e ultima riga (totale
+compreso), pagina del totale ed etichette dei figli (al massimo 12).
+
+### Che cosa vede l'utente, e quando
+
+Le frasi stanno fra gli avvisi dell'import, subito dopo il motivo di sbilancio (se c'è), **solo quando
+l'import stesso dichiara che qualcosa non torna**: SP sbilanciato oltre 2 € (`_TOL_QUADRATURA`, la tolleranza dei gate dell'import: sotto non c'è avviso e quindi nemmeno
+frasi; sezione SP), utile del CE
+diverso da `sp13` (sezione CE), esito snello `squadrato` o `tappo` (SP); se c'è un motivo di sbilancio ma
+nessuna di queste, entrambe le sezioni. Si mostrano soltanto i blocchi di quelle sezioni, la colonna corrente prima dell'anno precedente, e mai un blocco
+con scarto fino a 1,00 € (`TOLLERANZA_ARROTONDAMENTO`, decisione del proprietario: è arrotondamento; resta in
+`validation_report`). Una colonna corrente senza data stampata non viene scartata dal filtro per anno.
+Su un import che quadra l'utente non vede nulla: un blocco «aperto» in un documento che torna è quasi sempre
+un limite del lettore, non un difetto del bilancio, e avvisarne l'utente sarebbe rumore. Il dato resta in
+`validation_report`.
+
+Forma: un'intestazione fissa seguita da **al massimo 5** frasi (prima i blocchi a figli noti, poi i
+cercati, ciascun gruppo dallo scarto maggiore), solo della **colonna corrente** (o dell'anno precedente):
+
+> BLOCCHI CHE NON CHIUDONO NEL PDF: i totali stampati qui sotto non sono la somma delle righe che li
+> precedono; verificarli in Rettifiche.
+> B) II - Crediti (2025, p. 3, righe 12-27): stampato 1.234,56, i conti sommano 1.200,00, scarto 34,56
+
+(esempio sintetico). Se il tratto attraversa una pagina la frase dice «pp. 3-4». Le frasi dei blocchi
+`cercato` terminano con « (righe individuate dal lettore: da verificare)»: l'utente deve sapere che il tratto
+è una stima. Una diagnosi malformata non produce frasi.
+
+### `validation_report["lettore"]`
+
+La diagnosi intera, sempre (anche su un import che quadra), una volta per import:
+
+| Campo | Contenuto |
+|---|---|
+| `esito` | `ok`, `errore`, `tempo`, `non_applicabile` (nessun testo né tabella) |
+| `motivo` | perché, se non `ok` |
+| `ingresso` | `pdf` (text layer) o `mineru` (tabelle OCR) |
+| `tipo`, `contrapposto` | il profilo letto dal lettore |
+| `colonne` | indice, ruolo, fine, mesi, corrente |
+| `blocchi_aperti` | al massimo 20, solo colonne dell'anno corrente e del precedente; voce, codice, sezione, lato, colonna, fine, mesi, corrente, stampato, somma, scarto, pagina, righe, etichette, `cercato` (importi come stringhe) |
+| `avvisi` | quelli del lettore (`Documento.tutti_gli_avvisi`) |
+| `secondi` | durata |
+
+Se il lettore fallisce fuori dal suo tetto, la chiave porta `{esito: "errore", motivo}`.
+
+**Interruttore e tetto.** `LETTORE_DIAGNOSI=0|false|no|off` spegne tutto: nessuna chiave, nessuna frase.
+`LETTORE_TETTO_SECONDI` (default 20; un valore non numerico o non positivo torna al default) è il tempo
+massimo della lettura: scaduto, esito `tempo` e l'import prosegue. La diagnosi **non solleva mai**, né dentro
+il lettore né nel collegamento; il thread scaduto non si attende.
+
+### Limiti noti, ereditati dalla Fase 1
+
+Vedi [REGOLE-IMPORT-02 §11](REGOLE-IMPORT-02-ESTRAZIONE.md). In pratica un blocco può mancare o essere
+sbagliato per: text layer OCR sporchi; confine fra i due lati deciso per pagina; colonne col ruolo letto
+male; righe di etichetta spezzate su più righe fisiche; e, per i blocchi `cercato`, il tratto scelto per
+minimo scarto che può non essere quello vero (per questo «da verificare»). Un documento sbilanciato senza
+blocco nominato non vuol dire che il bilancio sia a posto.
+
+**Misura sul campione** (78 documenti × 3 giri, 2026-11-06, contro la base `base-fase2-e3455d6`):
+
+- nessun import fallito per colpa del lettore; la chiave `lettore` c'è su ogni giro importato;
+- esito `ok` su tutti i documenti con testo salvo un giro su 234 andato in `tempo` (1540, 20,5 s), dopo la correzione della numerazione delle pagine di MinerU (da 0,
+  il lettore conta da 1: prima della correzione i sei documenti arrivati da MinerU uscivano in `errore`); una
+  scansione senza tabelle utili esce `non_applicabile`;
+- tempo: mediana 0,39 s, media 0,92 s;
+- numeri invariati su 60 dei 64 documenti stabili della base; i quattro che cambiano cambiano anche a lettore
+  spento (`LETTORE_DIAGNOSI=0`, verificato su due di essi): la causa è fuori dal lettore (variabilità del modello);
+- documenti salvati sbilanciati: 14; un blocco nominato su 4, e su uno lo scarto spiega lo sbilancio al
+  centesimo. Sui 10 senza blocco, in 9 il PDF quadra (ogni totale stampato chiude, attivo = passivo): lo
+  sbilancio nasce dalla classificazione o dalla scelta di colonna dell'import, che la diagnosi non vede per
+  costruzione; il decimo è una scansione. Il criterio del piano («almeno metà degli sbilanciati con un blocco»)
+  presupponeva sbilanci nati dal PDF: sul campione non lo sono.
+
+Da qui la regola della Fase 3 (decisione del proprietario, 2026-11-06): un PDF che quadra si importa quadrato,
+con gli aggregati ancorati ai totali stampati verificati dal lettore; i dettagli si distribuiscono dentro
+l'aggregato e non possono sbilanciare il foglio.

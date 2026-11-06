@@ -18,14 +18,13 @@ from dataclasses import dataclass, field
 from decimal import Decimal
 
 from importers.bilancio_classifier import classify_bilancio
-from importers.detail_enrichment import _chiude_sezione, _sezione_della_chiusura
+from importers.lettore._ereditati import (
+    AMOUNT_LIKE, DATE_RE, FASCIA_MARGINE, PIEDE, chiave_ripetuta, chiude_sezione, intestazione, sezione_della_chiusura,
+)
 from importers.lettore.colonne import Colonna, _e_riga_testata, colonna_di, colonne_documento, completa_periodi
 from importers.lettore.geometria import Parola, RigaFisica
 from importers.lettore.importi import Importo, leggi_importo
 from importers.lettore.lati import assegna_lati, confine_ammesso
-from importers.schema_legge_generico import _PIEDE, _intestazione
-from importers.standard_ivcee_parser import _AMOUNT_LIKE, _DATE_RE
-from importers.xbrl_reso_parser import _FASCIA_MARGINE, _chiave_ripetuta
 
 _X0_MINIMO = 150.0          # come `colonne._in_colonna`
 _ALTEZZA_PAGINA = 842.0     # A4 verticale, se chi chiama non da' l'altezza della pagina
@@ -217,7 +216,7 @@ def _testo(r: RigaFisica) -> str:
 
 def _nel_margine(r: RigaFisica, altezza: float) -> bool:
     y0, y1 = min(p.y0 for p in r.parole), max(p.y1 for p in r.parole)
-    return y1 <= _FASCIA_MARGINE * altezza or y0 >= (1 - _FASCIA_MARGINE) * altezza
+    return y1 <= FASCIA_MARGINE * altezza or y0 >= (1 - FASCIA_MARGINE) * altezza
 
 
 def _ripetute(pagine: list[list[RigaFisica]], altezze: list[float], colonne: list[Colonna]) -> set[str]:
@@ -227,7 +226,7 @@ def _ripetute(pagine: list[list[RigaFisica]], altezze: list[float], colonne: lis
     for n, righe in enumerate(pagine):
         for r in righe:
             if _nel_margine(r, altezze[n]) and not _ha_celle(r, colonne):
-                pagine_per_chiave.setdefault(_chiave_ripetuta(_testo(r)), set()).add(n)
+                pagine_per_chiave.setdefault(chiave_ripetuta(_testo(r)), set()).add(n)
     return {k for k, p in pagine_per_chiave.items() if len(p) >= 2}
 
 
@@ -239,9 +238,9 @@ def _scartata(r: RigaFisica, altezza: float, colonne: list[Colonna], ripetute: s
         return True     # «Generato automaticamente - Conforme alla tassonomia»: il trattino cade in colonna
     if _ha_celle(r, colonne):
         return False
-    if _nel_margine(r, altezza) and _chiave_ripetuta(testo) in ripetute and not _intestazione(testo):
+    if _nel_margine(r, altezza) and chiave_ripetuta(testo) in ripetute and not intestazione(testo):
         return True
-    return bool(_PIEDE.search(_norm(testo)) or re.fullmatch(r"\d{1,3}", testo.strip())
+    return bool(PIEDE.search(_norm(testo)) or re.fullmatch(r"\d{1,3}", testo.strip())
                 or _e_riga_testata(r))
 
 
@@ -267,13 +266,13 @@ def _tuple(righe: list[RigaFisica]) -> list[list[tuple]]:
 def _sezioni(pagine: list[list[RigaFisica]], colonne: list[Colonna], avvisi: list[str]) -> list[list[str]]:
     """Per pagina e riga, la sezione: l'ultimo titolo sopra la riga; sopra il primo titolo, la sezione della
     pagina prima finche' quella non si e' chiusa col suo totale; una pagina senza titoli che chiude con un
-    totale dell'altra sezione decide da se' (`collect_source_rows` 255-267, `_sezione_della_chiusura`)."""
+    totale dell'altra sezione decide da se' (`collect_source_rows` 255-267, `sezione_della_chiusura`)."""
     ultima, chiusa = "", False
     out = []
     for righe in pagine:
         titoli = [(r.y, s) for r in righe if (s := _titolo_sezione(r, colonne)) is not None]
         grezze = _tuple(righe)
-        chiusura = _SEZIONI.get(_sezione_della_chiusura(grezze) or "")
+        chiusura = _SEZIONI.get(sezione_della_chiusura(grezze) or "")
         if ultima and not chiusa and (titoli or chiusura in (None, ultima)):
             pagina = ultima
         elif not titoli and chiusura is not None:
@@ -293,7 +292,7 @@ def _sezioni(pagine: list[list[RigaFisica]], colonne: list[Colonna], avvisi: lis
                           f"sua sezione e qui non c'e' un titolo)")
         out.append(sezioni)
         ultima = titoli[-1][1] if titoli else pagina
-        chiusa = _chiude_sezione(grezze)
+        chiusa = chiude_sezione(grezze)
     return out
 
 
@@ -411,7 +410,7 @@ def _bande_del_documento(pagine: list[list[RigaFisica]], altezze: list[float], m
     for n, righe in enumerate(pagine):
         corrente: _Banda | None = None
         for r in righe:
-            t = None if (_nel_margine(r, altezze[n]) and _chiave_ripetuta(_testo(r)) in margini) else _titolo_parte(r)
+            t = None if (_nel_margine(r, altezze[n]) and chiave_ripetuta(_testo(r)) in margini) else _titolo_parte(r)
             if t is not None:
                 stato, corrente = t, None
             if corrente is None:
@@ -624,8 +623,8 @@ def _codice_in_testa(parole: list[Parola], cifre_min: int = _CIFRE_MIN_CODICE) -
 
 def _e_token_forma(t: str, primo: bool) -> bool:
     rx = _TOKEN_FORMA if primo else _TOKEN_SEGUITO_FORMA
-    return bool(rx.fullmatch(t) and leggi_importo(t) is None and not _AMOUNT_LIKE.match(t)
-                and not _DATE_RE.fullmatch(t))
+    return bool(rx.fullmatch(t) and leggi_importo(t) is None and not AMOUNT_LIKE.match(t)
+                and not DATE_RE.fullmatch(t))
 
 
 _FILETTO = re.compile(r"^[|\u00a6]+$")

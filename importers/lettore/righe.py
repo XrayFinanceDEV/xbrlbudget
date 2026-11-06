@@ -15,6 +15,7 @@ from dataclasses import dataclass, field
 
 import fitz
 
+from importers.lettore._ereditati import forma_strutturale, frase_aperta, intestazione
 from importers.lettore.colonne import Colonna, colonna_di
 from importers.lettore.geometria import Parola, RigaFisica, parole_pagina, righe_fisiche
 from importers.lettore.importi import Importo, leggi_importo, segno_del_lato
@@ -24,8 +25,6 @@ from importers.lettore.profilo import (
     _PERCORSO_LEGGE, _RUOLI_ANALISI, _SEPARATORE, _STACCO_SEPARATORE, _SEPARATORE_CODICE, _TOL_X_CODICE, _VALUTA, _VOCE_NUMERATA,
     FormaCodice, Profilo, TabellaNota, _capitale_in_anagrafica, _codice_in_testa, _decimali, _in_colonna, _norm,
     _rimando_di_nota, _valuta_davanti, _voce_di_legge, marcatore_dopo, profilo_documento, senza_filetti)
-from importers.schema_legge_generico import _forma_strutturale, _intestazione
-from importers.xbrl_reso_parser import _frase_aperta
 
 _X0_MINIMO = 150.0          # come `colonne._in_colonna`
 # Una riga senza importi piu' vicina di cosi' (frazione dell'interlinea) alla riga sopra ne e' il seguito
@@ -485,7 +484,7 @@ def _riattacca_orfani(pezzi: list[_Pezzo]) -> list[_Pezzo]:
 
 
 def _strutturale(etichetta: str) -> bool:
-    return bool(_forma_strutturale(etichetta) or _intestazione(etichetta))
+    return bool(forma_strutturale(etichetta) or intestazione(etichetta))
 
 
 def _a_capo(pezzi: list[_Pezzo]) -> list[_Pezzo]:
@@ -508,8 +507,8 @@ def _a_capo(pezzi: list[_Pezzo]) -> list[_Pezzo]:
                 continue
             sillaba = bool(re.search(r"[^\W\d_]-$", sopra.etichetta))
             if (adiacente and not sopra.celle and sopra.etichetta and not p.codice and p.etichetta
-                    and not _intestazione(sopra.etichetta) and not _strutturale(p.etichetta)
-                    and (_frase_aperta(sopra.etichetta) or sillaba)):
+                    and not intestazione(sopra.etichetta) and not _strutturale(p.etichetta)
+                    and (frase_aperta(sopra.etichetta) or sillaba)):
                 out[-1] = _unisci(sopra, p, sillaba=sillaba)
                 continue
             if adiacente and sopra.celle and nuda and p.etichetta[:1].islower():

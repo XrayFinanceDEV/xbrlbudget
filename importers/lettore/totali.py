@@ -19,7 +19,7 @@ from dataclasses import dataclass, field
 from decimal import Decimal
 from typing import TYPE_CHECKING, Callable
 
-from importers.import_snello.righe import _lista_concatenata
+from importers.lettore._ereditati import lista_concatenata
 from importers.lettore.profilo import _norm
 
 if TYPE_CHECKING:
@@ -32,8 +32,9 @@ _CENTESIMO = Decimal("0.01")
 _UNITA = Decimal("1")
 # C12: il lessico unico delle righe di controllo (TOTALE, PAREGGIO, SALDO FINALE/GENERALE, ECCEDENZA, il risultato
 # d'esercizio). Una riga di controllo chiude cio' che le sta sopra.
-_CONTROLLO = re.compile(r"\btotal[ei]\b|\bpareggio\b|\bsaldo (?:finale|generale)\b|\beccedenza\b"
-                        r"|\b(?:utile|perdita|perdite|risultato)\b.*\besercizio\b")
+_DICE_TOTALE = r"\btotal[ei]\b|\bpareggio\b|\bsaldo (?:finale|generale)\b|\beccedenza\b"
+_CONTROLLO = re.compile(_DICE_TOTALE + r"|\b(?:utile|perdita|perdite|risultato)\b.*\besercizio\b")
+DICE_TOTALE = re.compile(_DICE_TOTALE)      # solo le righe che si dichiarano un totale (blocchi.py)
 _TOL_RIENTRO = 2.0
 _RIGHE_DI_TESTA = 4
 # un livello di rientro: piu' dei pochi punti di un codice allineato a destra («3960.01» a 27, «3940» a 32)
@@ -315,7 +316,7 @@ def _catene_all_unita(serie: _Serie, direzione: int) -> None:
     D/A, come catena entro un euro: resta un'ipotesi (un membro solo, mai verificato), ma il conto esce dal cammino e
     il totale sopra somma la voce. Non vale se il conto dopo, sommato, resta nella tolleranza (la voce ha piu'
     conti), ne' per le righe di controllo o i risultati; senza rientri ne' codici (le tabelle OCR) non vale mai."""
-    nxt, prv = _lista_concatenata(serie.vivo)
+    nxt, prv = lista_concatenata(serie.vivo)
     n = len(serie.righe)
     for i in range(n):
         if not serie.vivo[i] or not serie.candidabile[i] or serie.controllo[i] or serie.risultato[i]:
@@ -409,7 +410,7 @@ def _risolvi(serie: _Serie, ammessi: list[bool], direzione: int, kmin: int) -> i
     con la somma rifatta dopo (vedi sotto)."""
     valori, vivo = serie.valori, serie.vivo
     n = len(valori)
-    nxt, prv = _lista_concatenata(vivo)
+    nxt, prv = lista_concatenata(vivo)
     passo = prv if direzione == -1 else nxt
     ordine = range(n) if direzione == -1 else range(n - 1, -1, -1)
     marcati = 0

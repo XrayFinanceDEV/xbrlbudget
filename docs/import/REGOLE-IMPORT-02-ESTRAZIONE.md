@@ -1015,9 +1015,11 @@ Ognuna ha il suo test; le regressioni sono su 208 PDF diversi (`Test/` più il l
 
 ## 11. Lettore di righe unico (Fase 1)
 
-`importers/lettore/` è il lettore nuovo, scritto **accanto** al percorso attuale: **non è collegato
-all'import**. Nessuna rotta e nessun importatore lo chiama; collegarlo è il lavoro delle Fasi 2-4. Fino ad
-allora quello che si legge in queste pagine sopra descrive l'import vero, e il lettore si misura soltanto.
+`importers/lettore/` è il lettore nuovo, scritto **accanto** al percorso attuale. Dalla Fase 2 è collegato
+all'import **solo in diagnosi** (blocchi che non chiudono, `validation_report["lettore"]`, nessun importo
+cambia): vedi [REGOLE-IMPORT-04 §13](REGOLE-IMPORT-04-QUADRATURE.md). Per il resto non lo chiama nessuno;
+collegarlo alla classificazione è il lavoro delle Fasi 3-4, e quello che si legge in queste pagine sopra
+descrive l'import vero.
 
 **Che cosa legge.** Da un PDF col text layer (`leggi_pdf`) o dalle tabelle HTML di MinerU (`leggi_celle`)
 restituisce un `Documento`: righe con codice, etichetta e un importo `Decimal` per colonna; le colonne col
@@ -1106,7 +1108,7 @@ Le regole aggiunte con la misura sul campione:
   tolleranza, per le righe di controllo, né senza rientri (tabelle OCR). Lo stesso per la voce dei totali di una
   coppia con un conto solo nei parziali.
 
-**Per chi integra (Fase 2).** Sette cose che il `Documento` non dice da sé:
+**Per chi integra (Fase 2).** Otto cose che il `Documento` non dice da sé:
 
 - **Si lavora su `Documento.righe_del_prospetto()`, mai su `righe`.** Le righe di nota che `leggi_pdf`
   restituisce hanno `celle` con le chiavi delle colonne della loro tabella, `profilo.tabelle_nota[r.tabella]`,
@@ -1121,17 +1123,21 @@ Le regole aggiunte con la misura sul campione:
 - **Per risommare i figli si usa `valore_nel_totale(doc, totale, figlio, colonna)`, mai la cella com'è.** Il
   valore che un figlio porta nella somma del suo totale non è sempre lo stampato: una posta rettificativa
   stampata positiva si sottrae, un costo dentro un risultato del conto economico si sottrae, e in una voce dal
-  verso rovesciato (`Riga.verso`, Q2) un conto a marcatore cambia segno. La cella resta lo stampato.
+  verso rovesciato (`Riga.verso`, Q2) un conto a marcatore cambia segno. La cella resta lo stampato. Su una colonna che **non** sta in `totale.figli` (un totale chiuso su un'altra
+  colonna) `valore_nel_totale` dà verso +1: chi risomma lì usa il verso della colonna che chiude
+  (`blocchi._figli_altra_colonna`, come `totali._confronta_colonne`).
 - **`contrapposto` non vuol dire la stessa cosa sulle due letture.** Su `leggi_pdf` `Documento.contrapposto` è il
   verdetto del profilo (R10: confine fisico **e** tipo contrapposte o verifica); su `leggi_celle` è vero ogni volta
   che ci sono colonne L e R. Sulla lettura OCR `Profilo.coppie` e `Profilo.marcatori` sono sempre vuoti.
-- **Il lettore importa nomi privati da sei moduli dell'importatore attuale** (sette contando il pubblico
-  `bilancio_classifier.classify_bilancio`, in `profilo.py`): `schema_legge_generico` (`_PAROLE_TESTATA`,
-  `_e_differenza`, `_PIEDE`, `_intestazione`, `_forma_strutturale`), `standard_ivcee_parser` (`_AMOUNT_LIKE`,
-  `_DATE_RE`), `xbrl_reso_parser` (`_FASCIA_MARGINE`, `_chiave_ripetuta`, `_frase_aperta`), `detail_enrichment`
-  (`_chiude_sezione`, `_sezione_della_chiusura`), `mineru_adapter` (`_TableHTMLParser`) e `import_snello.righe`
-  (`_lista_concatenata`). Un ritocco a uno di quei nomi cambia il lettore senza che i suoi test lo sappiano:
-  togliere questo legame è il primo compito della Fase 2.
+- **I nomi privati degli altri moduli sono copiati in `importers/lettore/_ereditati.py`** (fatto nella Fase 2): il
+  lettore non importa più nulla di privato dall'importatore attuale, e la deriva delle copie la vedono
+  `tests/lettore/test_ereditati.py`. Resta solo il pubblico `bilancio_classifier.classify_bilancio` (`profilo.py`).
+- **MinerU numera le pagine da 0 (`page_idx`), `leggi_celle` da 1.** Passare `page_idx` tal quale sposta ogni
+  blocco di una pagina (e rompe la prima); `diagnosi._leggi` somma 1. `Blocco.pagina` e il «p. N» delle frasi
+  contano da 1 su entrambe le letture.
+- **Limite noto: il tetto di tempo non ferma la lettura.** Scaduto il tetto la diagnosi esce `tempo`, ma il thread
+  abbandonato può continuare a leggere il PDF (PyMuPDF) mentre l'import va avanti. Accettato; chi lo toglie passa
+  una scadenza a `_pagine_pdf` e la controlla fra le pagine.
 
 **Come si misura.** Due script, nessun import, nessun DB, nessuna rete; i PDF e le verità sono cifre di
 clienti e restano fuori da git (`Test/` è ignorata):

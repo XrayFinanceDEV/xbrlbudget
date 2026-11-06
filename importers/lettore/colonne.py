@@ -13,9 +13,9 @@ from dataclasses import dataclass
 from datetime import date
 from decimal import Decimal
 
+from importers.lettore._ereditati import PAROLE_TESTATA, e_differenza
 from importers.lettore.geometria import Parola, RigaFisica
 from importers.lettore.importi import leggi_importo
-from importers.schema_legge_generico import _PAROLE_TESTATA, _e_differenza
 
 # Due bordi destri nella stessa colonna distano al piu' cosi' (punti); una colonna ne porta almeno tanti.
 _TOL_COLONNA = 14.0
@@ -33,7 +33,7 @@ _DATA = re.compile(r"^(?:(\d{2})[-/.](\d{2})[-/.])?(20\d{2})$|^(\d{2})[-/.](\d{2
 _ANALISI = {"differenza", "diff.", "scostamento", "scost.", "variazione", "%"}
 _ANALISI_DIFFERENZA = {"differenza", "diff.", "variazione"}
 _RUOLI_TESTATA = {"dare": "dare", "avere": "avere", "saldo": "saldo"}
-_PAROLE_RIGA_TESTATA = _PAROLE_TESTATA | _ANALISI | set(_RUOLI_TESTATA) | {"dal", "fino", "infrannuale"}
+_PAROLE_RIGA_TESTATA = PAROLE_TESTATA | _ANALISI | set(_RUOLI_TESTATA) | {"dal", "fino", "infrannuale"}
 # Lessico di testata per le intestazioni gia' divise in celle (le tabelle OCR, `celle.py`): quali parole di testata
 # sono di una colonna di valori («Importo», «Esercizio precedente», «Scost. %») e quali della descrizione («Cod.»,
 # «Partitario»); le altre parole di testata stanno in `_PAROLE_RIGA_TESTATA` e in `totali._TESTATA`.
@@ -440,7 +440,7 @@ def _ruoli(colonne: list[Colonna], valori: list[list], parole: dict[int, set[str
             c.ruolo = "percentuale"
             continue
         if c.indice not in periodi and any(
-                _e_differenza(matrice, c.indice, a, b) for a in esercizi for b in esercizi if a < b):
+                e_differenza(matrice, c.indice, a, b) for a in esercizi for b in esercizi if a < b):
             c.ruolo = "differenza"
             continue
         analisi = nomi & _ANALISI

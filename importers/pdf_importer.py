@@ -2771,14 +2771,17 @@ def import_pdf_balance_sheet(
                 # di chiusura stampata. Un semestre salvato come anno intero diventa un anno base
                 # falso e sostituisce l'anno vero gia' importato.
                 durata_ignota = False
-                if period_months is not None:
+                # Fase 3 (F3-14): se il lettore ha adottato il documento e dichiara la durata della colonna di
+                # confronto (< 12 mesi), vale anche a periodo pieno: un precedente di 9 mesi non e' un anno intero.
+                _mesi_lettore = ((_snello_report or {}).get("lettore_percorso") or {}).get("mesi_precedente") \
+                    if (_snello_report or {}).get("fonte") == "deterministico:lettore" else None
+                if isinstance(_mesi_lettore, int) and _mesi_lettore < 12:
+                    prior_mesi = _mesi_lettore
+                elif isinstance(_mesi_lettore, int):
+                    pass                                   # il lettore dichiara un anno intero: durata nota
+                elif period_months is not None:
                     from importers.durata_comparato import mesi_del_comparato, testo_di_testa
-                    # Fase 3: se il lettore ha adottato il documento, la durata della colonna di
-                    # confronto e' quella che ha letto dalla sua testata; senza, la lettura del testo di testa.
-                    _mesi_lettore = ((_snello_report or {}).get("lettore_percorso") or {}).get("mesi_precedente") \
-                        if (_snello_report or {}).get("fonte") == "deterministico:lettore" else None
-                    _mesi = (_mesi_lettore if _mesi_lettore is not None
-                             else mesi_del_comparato(testo_di_testa(file_path), fiscal_year))
+                    _mesi = mesi_del_comparato(testo_di_testa(file_path), fiscal_year)
                     if _mesi is None:
                         durata_ignota = True
                     elif _mesi < 12:

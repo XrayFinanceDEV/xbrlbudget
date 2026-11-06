@@ -250,3 +250,19 @@ def test_chiamate_due_anni_come_un_anno(tmp_path):
     importa_col_lettore(_pdf(tmp_path, due, "2.pdf"), chiama_json=f2)
     importa_col_lettore(_pdf(tmp_path, uno, "1.pdf"), chiama_json=f1)
     assert f2.chiamate == f1.chiamate >= 1
+
+
+def test_foglie_non_in_pari_nessuna_chiamata(tmp_path):
+    # i totali stampati tornano, le foglie no (Impianti 500 -> 5.000): la colonna decide il lato, nessuna classe lo sistema
+    voci = [(x, y, "5.000,00" if t == "500,00" and x == 280 and y == 210 else t) for x, y, t in _contrapposte_sp()]
+    assert any(t == "5.000,00" for _, _, t in voci)
+    r = importa_col_lettore(_pdf(tmp_path, voci), chiama_json=_mai)
+    assert r["diagnostica"]["motivo"] == "foglie_non_in_pari" and r["bs"] == {} and "errore" not in r["diagnostica"]
+    assert _esito("lettore", r["bs"], r["ce"], r["stampati"])["esito"] == "vuoto"
+
+
+def test_tetto_di_chiamate_dichiarato(tmp_path, monkeypatch):
+    monkeypatch.setattr(percorso, "MAX_CHIAMATE", 1)
+    finto = Finto(_REGOLE)
+    r = importa_col_lettore(_pdf(tmp_path, _contrapposte_sp()), chiama_json=finto)
+    assert finto.chiamate <= 1 and r["diagnostica"]["tetto_chiamate"] == 1

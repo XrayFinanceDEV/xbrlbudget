@@ -80,26 +80,24 @@ def test_senza_ce_il_percorso_di_oggi_prosegue(tmp_path, monkeypatch):
     assert len(modello) == 1 and r.report["lettore_percorso"]["esito"] == "vuoto"
 
 
-def _senza_tempi(r: Risultato) -> dict:
-    rep = {k: v for k, v in r.report.items() if k not in ("lettore_percorso", "secondi")}
-    return {"bs": r.bs, "ce": r.ce, "prior_bs": r.prior_bs, "prior_ce": r.prior_ce, "report": rep}
-
-
 def test_interruttore_spento_identico(tmp_path, monkeypatch):
+    """Spento: il percorso e' quello di prima. Il confronto e' con la sequenza di BASE scritta a mano
+    (lettori noti, poi `_importa_modello`), con il modulo del lettore che fallisce il test se solo importato."""
     _nessun_lettore_noto(monkeypatch)
     _modello_sentinella(monkeypatch)
-    monkeypatch.setattr(llm_provider, "chiama_gx10_json", Finto(_REGOLE))
     pdf = _pdf(tmp_path, _contrapposte_sp())
-    acceso = import_snello.importa(pdf)
 
     def vietato(*a, **k):
         raise AssertionError("IMPORT_LETTORE spento: il percorso del lettore non va chiamato")
     monkeypatch.setattr(percorso, "importa_col_lettore", vietato)
+    monkeypatch.setattr(import_snello, "_tenta_lettore", vietato)
+    base = import_snello._importa_modello(pdf, deterministico.tentativo(pdf), 0.0, ocr_text=None, analizza=None,
+                                          leggi_conti=None, leggi_voci=None, trascrivi=None, route_hint=None)
     for valore in ("0", "false", "No", "OFF"):
         monkeypatch.setenv("IMPORT_LETTORE", valore)
         spento = import_snello.importa(pdf)
-        assert "lettore_percorso" not in spento.report
-        assert _senza_tempi(spento) == _senza_tempi(acceso)
+        assert (spento.bs, spento.ce, spento.prior_bs, spento.prior_ce) == (base.bs, base.ce, base.prior_bs, base.prior_ce)
+        assert spento.report == base.report and "lettore_percorso" not in spento.report
 
 
 def test_qwen_in_errore_prosegue(tmp_path, monkeypatch):
@@ -139,7 +137,7 @@ def test_snello_non_riuscito_porta_il_tentativo_del_lettore(tmp_path, monkeypatc
     assert e.value.report["lettore_percorso"]["esito"] == "vuoto"
 
 
-def _salva_con_mesi(tmp_path, monkeypatch, mesi_lettore):
+def _salva_con_mesi(tmp_path, monkeypatch, mesi_lettore, period_months=9):
     monkeypatch.setenv("IMPORT_MOTORE", "snello")
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
 
@@ -153,7 +151,7 @@ def _salva_con_mesi(tmp_path, monkeypatch, mesi_lettore):
     sf = _db_in_memoria(monkeypatch)
     res = pdf_importer.import_pdf_balance_sheet(
         file_path=_pdf_coge(tmp_path, RIGHE_PAREGGIO), fiscal_year=2025, company_name="Mesi dal lettore",
-        create_company=True, sector=1, user_id="snello-mesi", period_months=9)
+        create_company=True, sector=1, user_id="snello-mesi", period_months=period_months)
     from database.models import FinancialYear
     with sf() as db:
         return sorted((fy.year, fy.period_months) for fy in
@@ -167,4 +165,36 @@ def test_mesi_dal_lettore_nel_salvataggio(tmp_path, monkeypatch):
 
 def test_mesi_del_lettore_pieni_anno_intero(tmp_path, monkeypatch):
     anni = _salva_con_mesi(tmp_path, monkeypatch, 12)
-    assert (2024, 9) not in anni and any(a == 2024 for a, _ in anni)
+    assert (2024, None) in anni
+
+
+def test_mesi_dal_lettore_anche_ad_anno_pieno(tmp_path, monkeypatch):
+    # F3-14: corrente di 12 mesi (period_months assente), colonna di confronto di 9: il precedente e' parziale
+    assert (2024, 9) in _salva_con_mesi(tmp_path, monkeypatch, 9, period_months=None)
+
+
+def test_senza_mesi_del_lettore_anno_pieno_invariato(tmp_path, monkeypatch):
+    anni = _salva_con_mesi(tmp_path, monkeypatch, None, period_months=None)
+    assert (2024, None) in anni and (2024, 9) not in anni
+
+
+def test_adozione_che_solleva_prosegue_il_modello(tmp_path, monkeypatch):
+    _nessun_lettore_noto(monkeypatch)
+    modello = _modello_sentinella(monkeypatch)
+    monkeypatch.setattr(llm_provider, "chiama_gx10_json", _mai)
+
+    def rotta(*a, **k):
+        raise RuntimeError("struttura rotta")
+    monkeypatch.setattr(import_snello, "_risultato_deterministico", rotta)
+    r = import_snello.importa(_pdf(tmp_path, _schema_di_legge()))
+    assert len(modello) == 1 and r.report["lettore_percorso"]["esito"] == "eccezione_adozione"
+
+
+def test_report_senza_etichette_ne_importi(tmp_path, monkeypatch):
+    _nessun_lettore_noto(monkeypatch)
+    monkeypatch.setattr(llm_provider, "chiama_gx10_json", _mai)
+    r = import_snello.importa(_pdf(tmp_path, _schema_di_legge()))
+    testo = json.dumps(r.report["lettore_percorso"])
+    for k in ("scarti", "chiusure", "scelte", "sbilancio", "senza_colonna", "sp13_da"):
+        assert k not in r.report["lettore_percorso"]
+    assert "impianti" not in testo.lower() and "2.000" not in testo

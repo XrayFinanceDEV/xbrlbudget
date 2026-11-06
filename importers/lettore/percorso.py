@@ -27,6 +27,7 @@ from importers.lettore.righe import Documento, leggi_pdf
 _ZERO = Decimal(0)
 _VOTI = 3          # i turni di `rivota` per foglia (il suo default)
 _MACRO_ANCORATE = set(percorsi.NOMI)
+MAX_CHIAMATE = 40  # tetto di chiamate al modello per documento (Ruling F3-15): oltre, le foglie restano senza classe
 
 
 def _leggi(file_path: str, contesto) -> Documento:
@@ -38,16 +39,50 @@ def _leggi(file_path: str, contesto) -> Documento:
     return leggi_pdf(file_path)
 
 
-def _contatore(chiama_json):
-    """Avvolge il modello contando le chiamate (da piu' thread)."""
+def _contatore(chiama_json, diag: dict | None = None):
+    """Avvolge il modello contando le chiamate (da piu' thread); oltre `MAX_CHIAMATE` non chiama piu' e
+    solleva `LLMProviderError` (le foglie restano senza classe), dichiarando `diag["tetto_chiamate"]`."""
     blocco = threading.Lock()
     conto = {"n": 0}
 
     def chiama(*a, **k):
         with blocco:
+            if conto["n"] >= MAX_CHIAMATE:
+                if diag is not None:
+                    diag["tetto_chiamate"] = MAX_CHIAMATE
+                raise llm_provider.LLMProviderError(f"tetto di {MAX_CHIAMATE} chiamate al modello raggiunto")
             conto["n"] += 1
         return chiama_json(*a, **k)
     return chiama, conto
+
+
+def _foglie_non_in_pari(foglie) -> str | None:
+    """Il motivo per cui le foglie, classificate comunque, non potrebbero mai quadrare (il lato lo decide la
+    colonna, non il modello): nessuna foglia di SP, o attivo diverso da passivo (piu' l'utile letto dal CE, quando
+    le foglie del passivo non lo contengono) oltre la soglia di adozione. None se non si sa (lato ignoto)."""
+    from importers.import_snello.verifica import soglia
+
+    sp = [f for f in foglie if f.sezione != "CE"]      # sezione ignota ("") conta come SP: il lato dira' se si sa
+    if not sp:
+        return "senza_foglie_sp"
+    attivo = passivo = _ZERO
+    for f in sp:
+        if f.lato == "L" or f.lato_sp == "A":
+            attivo += f.importo
+        elif f.lato == "R" or f.lato_sp == "P":
+            passivo += f.importo
+        else:
+            return None
+    ce = [f for f in foglie if f.sezione == "CE"]
+    utili = [_ZERO]
+    if ce and all(f.verso_ce in ("costo", "ricavo") for f in ce):
+        utili.append(sum((f.importo if f.verso_ce == "ricavo" else -f.importo for f in ce), _ZERO))
+    elif ce:
+        return None
+    s = soglia(attivo)
+    if all(abs(attivo - (passivo + u)) > s for u in utili):
+        return "foglie_non_in_pari"
+    return None
 
 
 def _dati(c: Composizione) -> tuple[dict, dict]:
@@ -69,7 +104,7 @@ def _importa(file_path, contesto_mineru, chiama_json, diag: dict) -> dict:
     if corrente is None:
         raise ValueError("nessuna colonna di esercizio")
     base = chiama_json or llm_provider.chiama_gx10_json
-    chiama, conto = _contatore(base)
+    chiama, conto = _contatore(base, diag)
 
     foglie_c = foglie_contabili(doc, corrente)
     anc_c = ancore(doc, corrente)
@@ -78,6 +113,12 @@ def _importa(file_path, contesto_mineru, chiama_json, diag: dict) -> dict:
     ids_c = {f.id for f in foglie_c}
     tutte = foglie_c + [f for f in foglie_p if f.id not in ids_c]   # un solo giro per le due colonne
     diag.update(foglie=len(foglie_c), ancore=len(anc_c), voti=0, foglie_rivotate=0)
+    motivo = _foglie_non_in_pari(foglie_c)
+    if motivo:      # guardia di costo (F3-15): nessuna classe puo' sistemarlo, quindi nessuna chiamata al modello
+        diag["motivo"] = motivo
+        diag.setdefault("mesi_precedente", None)
+        return {"bs": {}, "ce": {}, "prior_bs": None, "prior_ce": None, "anno_precedente": None,
+                "prior_stato": "assente", "stampati": {}, "diagnostica": diag}
 
     cache: dict = {}
     classi = classifica_macro(tutte, chiama_json=chiama, cache=cache, diagnostica=diag)

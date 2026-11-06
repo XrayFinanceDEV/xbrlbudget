@@ -273,6 +273,10 @@ def _lettore_acceso() -> bool:
     return os.environ.get("IMPORT_LETTORE", "1").strip().lower() not in _SPENTO
 
 
+_CHIAVI_REPORT = ("foglie", "ancore", "blocchi", "voti", "foglie_rivotate", "chiamate", "classi_per_fonte", "secondi",
+                  "mesi_precedente", "motivo", "tetto_chiamate")
+
+
 def _tenta_lettore(file_path: str, _det: dict) -> tuple[dict | None, dict]:
     """(candidato adottato o None, esito per il report). Mai un'eccezione: un errore e' un esito dichiarato e
     il percorso di oggi prosegue. Il cancello e' quello di ogni lettore deterministico (``deterministico.esito``);
@@ -284,7 +288,10 @@ def _tenta_lettore(file_path: str, _det: dict) -> tuple[dict | None, dict]:
         from importers.lettore.percorso import importa_col_lettore
 
         out = importa_col_lettore(file_path)
-        diag = dict(out["diagnostica"])
+        d = out["diagnostica"]
+        # solo conteggi ed esito: mai etichette o importi delle foglie (il report finisce nel DB)
+        diag = {k: d[k] for k in _CHIAVI_REPORT if k in d}
+        diag["blocchi"] = [str(b) for b in diag.get("blocchi", [])]   # chiavi delle ancore, mai importi
         e = deterministico.esito("lettore", out["bs"], out["ce"], out["stampati"])
         rep = {"cancello": e["esito"], **diag}
         if e["adottato"]:
@@ -297,6 +304,8 @@ def _tenta_lettore(file_path: str, _det: dict) -> tuple[dict | None, dict]:
             return e, {"esito": "adottato", **rep}
         if "misura" in e.get("lettura", {}):
             rep["misura"] = {k: str(v) for k, v in e["lettura"]["misura"].items()}
+        if d.get("errore"):
+            rep["errore"] = str(d["errore"])[:300]
         if "unclassified_mass" in e:
             rep["unclassified_mass"] = e["unclassified_mass"]
         return None, {"esito": "vuoto" if e["esito"] == "vuoto" else "non_adottato", **rep}
@@ -330,11 +339,14 @@ def importa(file_path: str, *, ocr_text: str | None = None, analizza=None, leggi
     if _lettore_acceso():
         _lett, _lettore_rep = _tenta_lettore(file_path, _det)
         if _lett is not None:
-            from importers.struttura_documento.analisi import struttura_deterministica
-            struttura = struttura_deterministica(file_path, modo=_MODO_DA_PARSER["lettore"])
-            r = _risultato_deterministico(_lett, struttura, _MODO_DA_PARSER["lettore"], t0)
-            r.report["lettore_percorso"] = _lettore_rep
-            return r
+            try:
+                from importers.struttura_documento.analisi import struttura_deterministica
+                struttura = struttura_deterministica(file_path, modo=_MODO_DA_PARSER["lettore"])
+                r = _risultato_deterministico(_lett, struttura, _MODO_DA_PARSER["lettore"], t0)
+                r.report["lettore_percorso"] = _lettore_rep
+                return r
+            except Exception as exc:  # noqa: BLE001 - nessun risultato a meta': prosegue il percorso di oggi
+                _lettore_rep = {"esito": "eccezione_adozione", "errore": f"{type(exc).__name__}: {exc}"[:300]}
 
     def _prosegui() -> "Risultato":
         try:

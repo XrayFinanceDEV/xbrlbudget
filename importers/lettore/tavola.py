@@ -18,12 +18,6 @@ from importers.residual_finalization import CE_BUCKETS
 MACRO_ATTIVO: tuple[str, ...] = tuple(f"sp{n:02d}" for n in range(1, 11))
 MACRO_PASSIVO: tuple[str, ...] = tuple(f"sp{n:02d}" for n in range(11, 19))
 
-# Ricavi come `percorsi.RICAVI`, ridotti alle macro-voci (ce17a e' dettaglio di ce17).
-MACRO_RICAVI: tuple[str, ...] = ("ce01", "ce02", "ce03", "ce03a", "ce04", "ce13", "ce14", "ce16", "ce18")
-# `ce17` (rettifiche di attivita' finanziarie) puo' essere costo o ricavo: sta in entrambi i versi.
-MACRO_COSTI: tuple[str, ...] = ("ce05", "ce06", "ce07", "ce08", "ce09", "ce10", "ce11", "ce11b", "ce12",
-                                "ce15", "ce17", "ce19", "ce20")
-
 # Profondita' decisa dal proprietario: macro-voci + questi dettagli, il resto va nel secchio «altri».
 DETTAGLI_KPI: dict[str, tuple[str, ...]] = {
     "sp06": ("sp06a",),
@@ -55,6 +49,13 @@ def _macro_dei_dettagli() -> dict[str, str]:
 
 _MACRO_DI = _macro_dei_dettagli()
 
+# Macro-voci di CE dalle colonne dell'ORM (senza i dettagli di ce08/ce09/ce17); ricavi = `percorsi.RICAVI`
+# portati alla macro (ce17a -> ce17). `ce17` (rettifiche, segno ambiguo) sta in entrambi i versi.
+_MACRO_CE = tuple(k for k in percorsi.NOMI if k.startswith("ce") and _MACRO_DI.get(k, k) == k)
+MACRO_RICAVI: tuple[str, ...] = tuple(k for k in _MACRO_CE if k in {_MACRO_DI.get(r, r) for r in percorsi.RICAVI})
+MACRO_COSTI: tuple[str, ...] = tuple(k for k in _MACRO_CE if k not in MACRO_RICAVI or k == "ce17")
+MACRO_RICAVI = tuple(k for k in _MACRO_CE if k in MACRO_RICAVI)
+
 ETICHETTE_MACRO: dict[str, str] = {
     m: percorsi.NOMI[m].split("_", 1)[1].replace("_", " ")
     for m in MACRO_ATTIVO + MACRO_PASSIVO + MACRO_COSTI + MACRO_RICAVI
@@ -79,14 +80,17 @@ def altri_di(macro: str) -> str:
     if pieno in CE_BUCKETS:
         return _corto(CE_BUCKETS[pieno])
     if _h.detail_fields(pieno):
+        # Decimal(1): dettaglio gia' presente, cosi' mai il ripiego «tutto clienti/materie» di somma zero
         return _corto(_h.residual_bucket(pieno, Decimal(1)))
     return macro
 
 
 def macro_ammesse(lato: str, sezione: str, verso: str | None) -> tuple[str, ...]:
-    """Macro-voci su cui puo' cadere una foglia. SP: L/U attivo, R passivo. CE: per verso (None = tutte)."""
+    """Macro-voci su cui puo' cadere una foglia. SP: L attivo, R passivo, U (colonna unica) entrambi. CE: per verso (None = tutte)."""
     if sezione == "SP":
-        if lato in ("L", "U"):
+        if lato == "U":      # F3-7: colonna unica, attivo e passivo in sequenza
+            return MACRO_ATTIVO + MACRO_PASSIVO
+        if lato == "L":
             return MACRO_ATTIVO
         if lato == "R":
             return MACRO_PASSIVO
@@ -97,6 +101,6 @@ def macro_ammesse(lato: str, sezione: str, verso: str | None) -> tuple[str, ...]
         if verso == "ricavo":
             return MACRO_RICAVI
         if verso is None:
-            return MACRO_RICAVI + tuple(m for m in MACRO_COSTI if m not in MACRO_RICAVI)
+            return _MACRO_CE
         raise ValueError(f"verso sconosciuto: {verso!r}")
     raise ValueError(f"sezione sconosciuta: {sezione!r}")

@@ -47,8 +47,17 @@ def test_macro_ammesse_per_lato():
 def test_nessun_tier0_come_altri():
     for macro in t.MACRO_ATTIVO + t.MACRO_PASSIVO + t.MACRO_COSTI + t.MACRO_RICAVI:
         altri = t.altri_di(macro)
-        if altri in TIER0_FIELDS:
-            assert altri == macro and macro not in t.DETTAGLI_KPI and not h.detail_fields(t.nome_pieno(macro))
+        assert altri not in TIER0_FIELDS or altri == macro
+        assert t.macro_di(altri) == macro
+
+
+def test_parita_con_percorsi_e_orm():
+    ce = {k for k in percorsi.NOMI if k.startswith("ce")}
+    assert set(t.MACRO_COSTI) | set(t.MACRO_RICAVI) <= ce
+    assert {t.macro_di(r) for r in percorsi.RICAVI} <= set(t.MACRO_RICAVI)
+    assert "ce17" in t.MACRO_COSTI and "ce17" in t.MACRO_RICAVI
+    assert set(t.macro_ammesse("U", "SP", None)) == set(t.MACRO_ATTIVO) | set(t.MACRO_PASSIVO)
+    assert not set(t.macro_ammesse("R", "SP", None)) & set(t.macro_ammesse("L", "SP", None))
 
 
 def test_dettagli_kpi_dentro_la_macro():

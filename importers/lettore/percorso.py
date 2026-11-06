@@ -113,10 +113,10 @@ def _importa(file_path, contesto_mineru, chiama_json, diag: dict) -> dict:
         else:
             # lo stesso cancello dell'anno corrente e di `_con_precedente`: adottato e "ok" (niente tappo, massa
             # non classificata sotto soglia), altrimenti il precedente si scarta e si dice perche'
-            from importers.import_snello import deterministico as _det   # import tardivo: niente cicli col T7
+            from importers.import_snello.deterministico import esito as _esito_deterministico   # import tardivo: niente cicli col T7
             bs_p, ce_p = _dati(comp_p)
             ps = {f"totale_{a.chiave}": a.importo for a in anc_p if a.chiave in ("attivo", "passivo")}
-            e = _det._esito("lettore", bs_p, ce_p, ps)
+            e = _esito_deterministico("lettore", bs_p, ce_p, ps)
             if e["adottato"] and e["esito"] == "ok":
                 out["prior_bs"], out["prior_ce"] = e["bs"], e["ce"]
                 out["prior_stato"] = "letto"

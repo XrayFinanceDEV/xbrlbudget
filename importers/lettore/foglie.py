@@ -468,20 +468,118 @@ def _lato_dal_saldo(r: Riga, lato_sp: str | None, verso: str | None, v: Decimal)
     return lato_sp, verso, v
 
 
+def _generali_stampati(doc: Documento, colonna: int, righe: list[Riga]) -> dict[str, list[Riga]]:
+    """Le righe che si dichiarano totale generale di un lato e hanno una cella su questa colonna."""
+    gen: dict[str, list[Riga]] = {"attivo": [], "passivo": []}
+    for r in righe:
+        lato_gen = _totale_generale(r)
+        c = _colonna_della_riga(doc, colonna, r) if lato_gen else None
+        if lato_gen and c is not None and _cella(doc, r, c) is not None:
+            gen[lato_gen].append(r)
+    return gen
+
+
+def _titoli_come_totali(doc: Documento, colonna: int, righe: list[Riga], per_id: dict[str, Riga],
+                        gen: dict[str, list[Riga]]) -> dict[str, list[Riga]]:
+    """Il titolo di un lato che porta il suo totale («STATO PATRIMONIALE ATTIVO 217.368,86», 1440) vale come totale
+    solo dove nessuna riga «Totale attivo» lo dice, il suo importo non e' zero e coincide con quello dell'altro lato,
+    titolo o totale (attivo = passivo e' la prova stampata che e' un totale: senza, un titolo con un numero e' un
+    titolo, 1426, 680; due zeri non provano nulla). Una riga che e' l'ancora non e' una foglia
+    (`_senza_titoli_ancora`): ogni importo si conta una volta."""
+    def valore(r: Riga, lato: str) -> Decimal | None:
+        c = _colonna_della_riga(doc, colonna, r)
+        if c is None or _cella(doc, r, c) is None:
+            return None
+        return _importo(doc, r, colonna, per_id, lato, None)
+
+    cand_lato: dict[str, set[Decimal]] = {"attivo": set(), "passivo": set()}
+    for chiave_lato, lato in (("attivo", "A"), ("passivo", "P")):
+        for r in gen[chiave_lato]:
+            v = valore(r, lato)
+            if v is not None:
+                cand_lato[chiave_lato].add(v)
+    titoli: dict[str, list[tuple[Riga, Decimal]]] = {}
+    for r in righe:
+        lato_titolo = _lato_del_titolo(r, gettoni_di_legge(r.etichetta, r.codice)) if r.sezione == "SP" else None
+        chiave = {"A": "attivo", "P": "passivo"}.get(lato_titolo or "")
+        if chiave and not gen[chiave]:
+            v = valore(r, lato_titolo)
+            if v is not None and v != _ZERO:
+                titoli.setdefault(chiave, []).append((r, v))
+    out: dict[str, list[Riga]] = {}
+    for chiave, voci in titoli.items():
+        altro = "passivo" if chiave == "attivo" else "attivo"
+        valori_altro = cand_lato[altro] | {v for _, v in titoli.get(altro, [])}
+        out[chiave] = [r for r, v in voci if v in valori_altro]
+    return out
+
+
+def _senza_titoli_ancora(doc: Documento, colonna: int, foglie: list[Foglia]) -> list[Foglia]:
+    """Un titolo di lato usato come ancora e' un totale stampato, non una foglia: contarlo accanto ai suoi conti
+    mostrerebbe come doppio conteggio il divario fra l'ancora e la loro somma."""
+    righe = doc.righe_del_prospetto()
+    per_id = {r.id: r for r in righe}
+    gen = _generali_stampati(doc, colonna, righe)
+    usati = {r.id for rr in _titoli_come_totali(doc, colonna, righe, per_id, gen).values() for r in rr}
+    return [f for f in foglie if f.id not in usati] if usati else foglie
+
+
 def foglie_contabili(doc: Documento, colonna: int) -> list[Foglia]:
-    return _costi_col_segno_normale(_senza_echi(doc, _foglie_grezze(doc, colonna)))
+    return _costi_col_segno_normale(_senza_echi(doc, _senza_titoli_ancora(doc, colonna, _foglie_grezze(doc, colonna))))
 
 
 _TOLLERANZA_ECO = Decimal("0.01")
 # «I. Immobilizzazioni immateriali»: il romano col punto (e non la parentesi) e' un livello di legge per questo
 # solo scopo; `gettoni_di_legge` non lo legge, e cambiarlo sposterebbe i percorsi di tutti i lettori
-_ROMANO_COL_PUNTO = re.compile(r"^\s*[IVX]{1,4}\.\s+\S")
+_ROMANO_COL_PUNTO = re.compile(r"^\s*(?P<n>[IVX]{1,4})\.\s+\S")
+_VALORE_ROMANO = {"I": 1, "II": 2, "III": 3, "IV": 4, "V": 5, "VI": 6, "VII": 7, "VIII": 8, "IX": 9, "X": 10}
+
+
+def _livello_aperto(livello: dict[int, int]) -> int | None:
+    """Il livello dell'ultima riga di legge vista (None se nessuna)."""
+    return livello[max(livello)] if livello else None
+
+
+def _livelli_eco(righe: list[Riga]) -> dict[int, int]:
+    """Indice di riga -> livello di legge (0-3), -1 il titolo di un lato."""
+    livello: dict[int, int] = {}
+    romano = 0                        # l'ultimo romano col punto accettato nella sequenza aperta
+    for k, r in enumerate(righe):
+        g = gettoni_di_legge(r.etichetta, r.codice)
+        m = _ROMANO_COL_PUNTO.match(r.etichetta) if not g else None
+        if g:
+            livello[k] = _tipo(g[-1])
+            if _tipo(g[-1]) == 0:
+                romano = 0
+        elif m and m["n"] in _VALORE_ROMANO and (
+                _VALORE_ROMANO[m["n"]] == romano + 1 or (_VALORE_ROMANO[m["n"]] == 1 and _livello_aperto(livello) == 0)):
+            # «V. ROSSI» fra i conti non e' un livello di legge: conta solo il romano che continua la sequenza
+            # aperta (I, II, III...) o che comincia subito sotto una voce con lettera (B), C))
+            livello[k] = 1
+            romano = _VALORE_ROMANO[m["n"]]
+        elif _lato_del_titolo(r, g) is not None:
+            livello[k] = -1
+    return livello
+
+
+def _fine_finestra(righe: list[Riga], pos: dict[str, "_Posizione"], livello: dict[int, int], k: int) -> int:
+    """L'indice dove finiscono i conti di una voce: la prossima voce di livello pari o piu' alto, un totale chiuso
+    «Totale ...» o il cambio di lato o di sezione."""
+    r = righe[k]
+    for j in range(k + 1, len(righe)):
+        q = righe[j]
+        if q.sezione != r.sezione or q.lato != r.lato or pos[q.id].lato_sp != pos[r.id].lato_sp \
+                or (q.totale and DICE_TOTALE.search(_nome(q))) \
+                or (j in livello and 0 <= livello[j] <= livello[k]):
+            return j
+    return len(righe)
 
 
 def _senza_echi(doc: Documento, foglie: list[Foglia]) -> list[Foglia]:
     """Toglie le voci che ripetono i propri conti. Una voce di legge (o il titolo di un lato) con un importo che nessun
     totale ha chiuso sembra una foglia, ma se i conti stampati sotto di lei (fino alla prossima voce dello stesso
-    livello o piu' alto, o al cambio di lato o di sezione) sommano esattamente il suo importo, e' il loro riepilogo:
+    livello o piu' alto, a un totale chiuso «Totale ...» o al cambio di lato o di sezione; i totali chiusi delle sotto-voci,
+    «Costo storico», stanno dentro la finestra: sono i conti stessi) sommano esattamente il suo importo, e' il loro riepilogo:
     contarla accanto a loro raddoppia la massa (1440: «I. Immobilizzazioni immateriali» sopra «7) Altre» di pari
     importo, e «B) Immobilizzazioni» sopra entrambe; 1426). Il caso piu' semplice e' la catena k=1 di uguale importo
     (R14): resta un'ipotesi, nessuna parentela nuova si registra, cambia solo che non si conta due volte. Si procede
@@ -492,26 +590,12 @@ def _senza_echi(doc: Documento, foglie: list[Foglia]) -> list[Foglia]:
     righe = doc.righe_del_prospetto()
     pos = _scorri(righe, doc.contrapposto)
     indice = {r.id: k for k, r in enumerate(righe)}
-    livello: dict[int, int] = {}      # indice di riga -> livello di legge (0-3), -1 il titolo di un lato
-    for k, r in enumerate(righe):
-        g = gettoni_di_legge(r.etichetta, r.codice)
-        if g:
-            livello[k] = _tipo(g[-1])
-        elif _ROMANO_COL_PUNTO.match(r.etichetta):
-            livello[k] = 1
-        elif _lato_del_titolo(r, g) is not None:
-            livello[k] = -1
+    livello = _livelli_eco(righe)
     aperte = [(indice[f.id], f) for f in foglie if indice.get(f.id) in livello]
     eco: set[str] = set()
     for k, f in sorted(aperte, key=lambda kf: (-livello[kf[0]], -kf[0])):
         r = righe[k]
-        fine = len(righe)
-        for j in range(k + 1, len(righe)):
-            q = righe[j]
-            if q.sezione != r.sezione or q.lato != r.lato or pos[q.id].lato_sp != pos[r.id].lato_sp \
-                    or (j in livello and 0 <= livello[j] <= livello[k]):
-                fine = j
-                break
+        fine = _fine_finestra(righe, pos, livello, k)
         sotto = [g for g in foglie if k < indice.get(g.id, -1) < fine and g.id not in eco]
         if sotto and abs(sum((g.importo for g in sotto), _ZERO) - f.importo) <= _TOLLERANZA_ECO:
             eco.add(f.id)
@@ -703,7 +787,7 @@ def ancore(doc: Documento, colonna: int) -> list[Ancora]:
     pos = _scorri(righe, doc.contrapposto)
     perc = _Percorsi(righe, pos)
     coppie = getattr(doc.profilo, "coppie", {})
-    grezze = _senza_echi(doc, _foglie_grezze(doc, colonna))
+    grezze = _senza_echi(doc, _senza_titoli_ancora(doc, colonna, _foglie_grezze(doc, colonna)))
     costi_negativi = _costi_stampati_negativi(grezze)
     tutte = _costi_col_segno_normale(grezze)
     ids = {f.id for f in tutte}
@@ -749,32 +833,9 @@ def ancore(doc: Documento, colonna: int) -> list[Ancora]:
             aggiungi(macro, v, t.id, sotto)
 
     # totali generali stampati: il totale chiuso se c'e', altrimenti l'ultima riga che si dichiara tale
-    gen: dict[str, list[Riga]] = {"attivo": [], "passivo": []}
-    titoli: dict[str, list[Riga]] = {}
-    for r in righe:
-        lato_gen = _totale_generale(r)
-        if lato_gen and cella(r) is not None:
-            gen[lato_gen].append(r)
-    # il titolo di un lato che porta il suo totale («STATO PATRIMONIALE ATTIVO 217.368,86», 1440): vale come totale
-    # solo dove nessuna riga «Totale attivo» lo dice e il suo importo e' quello dell'altro lato, titolo o totale
-    # (attivo = passivo e' la prova stampata che e' un totale: senza, un titolo con un numero e' un titolo, 1426, 680)
-    cand_lato: dict[str, list[tuple[Riga, Decimal]]] = {"attivo": [], "passivo": []}
-    for chiave_lato, lato in (("attivo", "A"), ("passivo", "P")):
-        for r in gen[chiave_lato]:
-            v = _importo(doc, r, colonna, per_id, lato, None)
-            if v is not None:
-                cand_lato[chiave_lato].append((r, v))
-    for r in righe:
-        lato_titolo = _lato_del_titolo(r, gettoni_di_legge(r.etichetta, r.codice)) if r.sezione == "SP" else None
-        chiave_titolo = {"A": "attivo", "P": "passivo"}.get(lato_titolo or "")
-        if chiave_titolo and not gen[chiave_titolo] and cella(r) is not None:
-            v = _importo(doc, r, colonna, per_id, lato_titolo, None)
-            if v is not None:
-                titoli.setdefault(chiave_titolo, []).append((r, v))
-    for chiave_titolo, voci in titoli.items():
-        altro = "passivo" if chiave_titolo == "attivo" else "attivo"
-        valori_altro = {v for _, v in cand_lato[altro]} | {v for _, v in titoli.get(altro, [])}
-        gen[chiave_titolo].extend(r for r, v in voci if v in valori_altro)
+    gen = _generali_stampati(doc, colonna, righe)
+    for chiave_titolo, rr in _titoli_come_totali(doc, colonna, righe, per_id, gen).items():
+        gen[chiave_titolo].extend(rr)
     for chiave, lista in gen.items():
         if not lista:
             continue

@@ -152,15 +152,15 @@ def test_colonna_unica_con_marcatore_il_passivo_resta_positivo(tmp_path):
 
 
 def test_conversione_degli_enumeratori_in_percorso():
-    from importers.lettore.foglie import _gettoni
-    assert _gettoni("C) ATTIVO CIRCOLANTE") == ("C",)
-    assert _gettoni("II - Crediti") == ("II",)
-    assert _gettoni("5-bis) crediti tributari") == ("5-bis",)
-    assert _gettoni("c) trattamento di fine rapporto") == ("c",)
-    assert _gettoni("C.II.1) Crediti verso clienti") == ("C", "II", "1")
-    assert _gettoni("Conto", "B.I.2") == ("B", "I", "2")
-    assert _gettoni("I.V.A. a credito") == ()
-    assert _gettoni("A. Rossi s.r.l.") == ()
+    from importers.lettore.foglie import gettoni_di_legge
+    assert gettoni_di_legge("C) ATTIVO CIRCOLANTE") == ("C",)
+    assert gettoni_di_legge("II - Crediti") == ("II",)
+    assert gettoni_di_legge("5-bis) crediti tributari") == ("5-bis",)
+    assert gettoni_di_legge("c) trattamento di fine rapporto") == ("c",)
+    assert gettoni_di_legge("C.II.1) Crediti verso clienti") == ("C", "II", "1")
+    assert gettoni_di_legge("Conto", "B.I.2") == ("B", "I", "2")
+    assert gettoni_di_legge("I.V.A. a credito") == ()
+    assert gettoni_di_legge("A. Rossi s.r.l.") == ()
 
 
 def test_verso_dal_lato_sul_conto_economico_contrapposto(tmp_path):
@@ -180,3 +180,147 @@ def test_verso_dal_lato_sul_conto_economico_contrapposto(tmp_path):
     assert f["Salari"].verso_ce == "costo" and f["Vendite"].verso_ce == "ricavo"
     assert "Utile d'esercizio" not in f
     assert f["Vendite"].importo == Decimal("900.00")
+
+
+# --- Fix round 1 -----------------------------------------------------------------------------------------------
+
+def _crediti_attivo(*righe):
+    voci = [(50, 112, "STATO PATRIMONIALE ATTIVO")]
+    return voci + _righe(140, [("C) ATTIVO CIRCOLANTE",), ("II - Crediti",), *righe])
+
+
+def test_elenco_numerato_di_clienti_sono_conti_non_livelli(tmp_path):
+    # «1) Rossi» sotto un padre verificato che ha gia' il livello arabo «1)» e' un conto: non sposta la voce
+    voci = _crediti_attivo(("1) verso clienti esigibili entro", "613,00"), ("1) Rossi srl", "101,00"),
+                           ("2) Bianchi spa", "202,00"), ("3) Verdi snc", "310,00"),
+                           ("5-bis) crediti tributari", "47,00"), ("Erario c/iva", "47,00"),
+                           ("Totale crediti", "660,00"))
+    f = _per_etichetta(foglie_contabili(_doc(tmp_path, voci), 0))
+    assert f["1) Rossi srl"].percorso_legale == "SPA.C.II.1.E"
+    assert f["2) Bianchi spa"].percorso_legale == "SPA.C.II.1.E"
+    assert f["3) Verdi snc"].percorso_legale == "SPA.C.II.1.E"
+
+
+def test_livelli_si_chiudono_con_il_totale(tmp_path):
+    voci = _crediti_attivo(("1) verso clienti esigibili entro", "301,00"), ("Cliente Rossi", "101,00"),
+                           ("Cliente Bianchi", "200,00"), ("Totale crediti", "301,00"),
+                           ("Banca c/c", "517,00"), ("Cassa", "23,00"), ("Magazzino", "71,00"))
+    f = _per_etichetta(foglie_contabili(_doc(tmp_path, voci), 0))
+    assert f["Cliente Rossi"].percorso_legale == "SPA.C.II.1.E"
+    for nome in ("Banca c/c", "Cassa", "Magazzino"):
+        assert f[nome].percorso_legale in (None, "SPA.C")      # mai il C.II.1.E del blocco chiuso
+
+
+def _riga_finta(id_, etichetta, **kw):
+    from importers.lettore.righe import Riga
+    return Riga(id=id_, pagina=1, y=float(len(id_)), lato="U", sezione="SP", codice="", etichetta=etichetta,
+                celle={}, **kw)
+
+
+def test_percorso_dall_antenato_verificato_batte_quello_posizionale():
+    from importers.lettore.foglie import _Percorsi, _scorri
+    righe = [_riga_finta("r1", "STATO PATRIMONIALE ATTIVO", intestazione=True),
+             _riga_finta("r2", "C) ATTIVO CIRCOLANTE", intestazione=True),
+             _riga_finta("r3", "II - Crediti", intestazione=True),
+             _riga_finta("r4", "1) verso clienti esigibili entro", totale=True),
+             _riga_finta("r5", "5-bis) crediti tributari", intestazione=True),      # sposta l'outline posizionale
+             _riga_finta("r6", "Cliente Rossi", padre="r4", padre_verificato=True)]
+    pos = _scorri(righe)
+    assert pos["r6"].livelli == ("C", "II", "5-bis")                  # il posizionale sbaglia
+    assert _Percorsi(righe, pos).posizione(righe[5]).livelli == ("C", "II", "1")
+    assert _Percorsi(righe, pos).posizione(righe[5]).scad == "E"
+
+
+def test_costo_stampato_negativo_in_un_risultato_resta_positivo(tmp_path):
+    righe = [("C) PROVENTI E ONERI FINANZIARI",), ("16) altri proventi finanziari", "300,00"),
+             ("17) interessi e altri oneri finanziari", "(120,00)"),
+             ("Totale proventi e oneri finanziari", "180,00"),
+             ("Ricavi diversi", "710,00"), ("Costi diversi", "430,00"), ("Spese varie", "19,00"),
+             ("Ammortamenti", "88,00")]
+    voci = [(50, 112, "CONTO ECONOMICO")] + _righe(140, righe)
+    f = _per_etichetta(foglie_contabili(_doc(tmp_path, voci), 0))
+    assert f["17) interessi e altri oneri finanziari"].importo == Decimal("120.00")
+    assert f["16) altri proventi finanziari"].importo == Decimal("300.00")
+
+
+def _ce_contrapposto(costi, ricavi, nome_costi_totale="Totale a pareggio"):
+    voci = [(40, 100, "CONTO ECONOMICO"), (40, 120, "Costi"), (310, 120, "Ricavi")]
+    for k in range(max(len(costi), len(ricavi))):
+        y = 140 + 14 * k
+        if k < len(costi):
+            voci += [(40, y, costi[k][0]), (280, y, costi[k][1])]
+        if k < len(ricavi):
+            voci += [(310, y, ricavi[k][0]), (560, y, ricavi[k][1])]
+    return voci
+
+
+def test_utile_e_perdita_con_il_loro_segno(tmp_path):
+    costi = [("Acquisti merci", "310,00"), ("Servizi", "410,00"), ("Salari", "530,00"), ("Ammortamenti", "650,00"),
+             ("Interessi passivi", "500,00"), ("Totale a pareggio", "2.400,00")]
+    ricavi = [("Vendite", "900,00"), ("Prestazioni", "400,00"), ("Altri ricavi", "250,00"),
+              ("Interessi attivi", "150,00"), ("Perdita d'esercizio", "700,00"), ("Totale a pareggio", "2.400,00")]
+    doc = _doc(tmp_path, _ce_contrapposto(costi, ricavi))
+    corrente, _ = colonne_utili(doc)
+    trovate = {a.chiave: a for a in ancore(doc, corrente)}
+    assert trovate["utile"].importo == Decimal("-700.00")
+    assert not any(f.etichetta.startswith("Perdita") for f in foglie_contabili(doc, corrente))
+
+
+def test_totale_generale_chiuso_batte_la_riga_ripetuta_dopo(tmp_path):
+    voci = _contrapposte_sp() + [(40, 140 + 14 * 7, "Totale attivita"), (280, 140 + 14 * 7, "9.999,00")]
+    doc = _doc(tmp_path, voci)
+    corrente, _ = colonne_utili(doc)
+    assert {a.chiave: a for a in ancore(doc, corrente)}["attivo"].importo == Decimal("2100.00")
+
+
+def test_ancora_di_macro_senza_scadenza_se_le_foglie_concordano(tmp_path):
+    voci = _crediti_attivo(("1) verso clienti", "301,00"), ("Cliente Rossi", "101,00"), ("Cliente Bianchi", "200,00"),
+                           ("Totale crediti", "301,00"), ("Banca c/c", "517,00"), ("Cassa", "23,00"))
+    doc = _doc(tmp_path, voci)
+    assert {a.chiave: a for a in ancore(doc, 0)}["sp06"].importo == Decimal("301.00")
+
+
+def _contrapposte_con_precedente():
+    sx = [("Banca c/c", "110,00", "100,00"), ("Clienti Rossi", "210,00", "200,00"),
+          ("Clienti Bianchi", "330,00", "310,00"), ("Magazzino merci", "450,00", "400,00"),
+          ("Cassa", "500,00", "450,00"), ("Impianti", "500,00", "430,00")]
+    dx = [("Capitale sociale", "250,00", "240,00"), ("Fornitori Alfa", "310,00", "301,00"),
+          ("Fornitori Beta", "420,00", "411,00"), ("Mutuo banca", "520,00", "512,00"),
+          ("Debiti tributari", "500,00", "493,00"), ("Debiti vari", "100,00", "93,00")]
+    voci = [(40, 100, "STATO PATRIMONIALE"), (40, 120, "Attivo"), (310, 120, "Passivo"),
+            (200, 118, "31/12/2025"), (280, 118, "31/12/2024"), (480, 118, "31/12/2025"), (560, 118, "31/12/2024")]
+    for k, ((a, c, p), (b, ic, ip)) in enumerate(zip(sx, dx)):
+        y = 140 + 14 * k
+        voci += [(40, y, a), (200, y, c), (280, y, p), (310, y, b), (480, y, ic), (560, y, ip)]
+    return voci
+
+
+def test_colonna_precedente_sulle_contrapposte(tmp_path):
+    doc = _doc(tmp_path, _contrapposte_con_precedente())
+    corrente, precedente = colonne_utili(doc)
+    f = foglie_contabili(doc, precedente)
+    assert sum(x.importo for x in f if x.lato_sp == "A") == Decimal("1890.00")
+    assert sum(x.importo for x in f if x.lato_sp == "P") == Decimal("2050.00")
+
+
+def test_righe_senza_la_colonna_dell_altro_lato_si_dichiarano(tmp_path):
+    from importers.lettore.foglie import senza_colonna
+    doc = _doc(tmp_path, _contrapposte_con_precedente())
+    corrente, precedente = colonne_utili(doc)
+    assert not senza_colonna(doc, precedente)
+    # il lato destro perde la sua colonna precedente: le sue righe non spariscono in silenzio
+    doc.colonne = [c for c in doc.colonne if c.indice != 3]
+    mancanti = senza_colonna(doc, precedente)
+    destre = {f.id for f in foglie_contabili(doc, corrente) if f.lato_sp == "P"}
+    assert destre and destre <= set(mancanti)
+    assert {f.lato_sp for f in foglie_contabili(doc, precedente)} == {"A"}
+
+
+def test_conti_di_una_coppia_parziali_totali(tmp_path):
+    from tests.lettore.test_totali import _parziali_e_totali
+    doc = _doc(tmp_path, _parziali_e_totali())
+    corrente, _ = colonne_utili(doc)
+    assert doc.profilo.coppie
+    nomi = {f.etichetta: f.importo for f in foglie_contabili(doc, corrente)}
+    assert nomi["Crediti verso privati"] == Decimal("98180.13")
+    assert "1) Crediti verso clienti" not in nomi            # la voce dei totali non e' foglia: i suoi conti si contano

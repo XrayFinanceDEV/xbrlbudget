@@ -33,7 +33,8 @@ _UNITA = Decimal("1")
 # C12: il lessico unico delle righe di controllo (TOTALE, PAREGGIO, SALDO FINALE/GENERALE, ECCEDENZA, il risultato
 # d'esercizio). Una riga di controllo chiude cio' che le sta sopra.
 _DICE_TOTALE = r"\btotal[ei]\b|\bpareggio\b|\bsaldo (?:finale|generale)\b|\beccedenza\b"
-_CONTROLLO = re.compile(_DICE_TOTALE + r"|\b(?:utile|perdita|perdite|risultato)\b.*\besercizio\b")
+_RISULTATO_D_ESERCIZIO = r"\b(?:utile|perdita|perdite|risultato)\b.*\besercizio\b"
+_CONTROLLO = re.compile(_DICE_TOTALE + "|" + _RISULTATO_D_ESERCIZIO)
 DICE_TOTALE = re.compile(_DICE_TOTALE)      # solo le righe che si dichiarano un totale (blocchi.py)
 _TOL_RIENTRO = 2.0
 _RIGHE_DI_TESTA = 4
@@ -901,7 +902,10 @@ def _figli_di(r: Riga, priorita: dict[int, int]) -> tuple[str, ...]:
     return r.figli[min(r.figli, key=lambda c: priorita.get(c, len(priorita)))]
 
 
-_RISULTATO_ESERCIZIO = re.compile(r"\b(?:utile|perdita|perdite|risultato)\b.*\besercizio\b")
+_RISULTATO_ESERCIZIO = re.compile(_RISULTATO_D_ESERCIZIO)
+# i lati dei totali generali (foglie.py): «Totale attivo», «Totale passivita'»; il nome di una macro-voce ha altre parole
+DICE_ATTIVO = re.compile(r"\battiv(?:o|ita)\b")
+DICE_PASSIVO = re.compile(r"\bpassiv(?:o|ita)\b")
 _DI_RISULTATO = re.compile(r"\b(?:risultato|utile|perdita|perdite|differenza)\b")
 
 

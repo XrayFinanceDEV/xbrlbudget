@@ -17,7 +17,8 @@ from decimal import Decimal
 from importers.lettore import tavola
 from importers.lettore._ereditati import _CONNETTIVI, _scadenza as _scadenza_inizio, _scadenza_in_coda
 from importers.lettore.righe import Documento, Riga
-from importers.lettore.totali import (DICE_TOTALE, _CONTROLLO, _RISULTATO_DI_LEGGE, _costo_del_risultato, _norm, _risultato,
+from importers.lettore.totali import (DICE_ATTIVO, DICE_PASSIVO, DICE_TOTALE, _CONTROLLO, _RISULTATO_DI_LEGGE,
+                                      _RISULTATO_ESERCIZIO, _costo_del_risultato, _norm, _risultato,
                                       _su_schema, _valore_di_somma, valore_nel_totale)
 from importers.schema_etichette_parser import percorso as _percorso_etichetta
 
@@ -80,13 +81,6 @@ def colonne_utili(doc: Documento) -> tuple[int | None, int | None]:
 # Lato, verso, segno
 # --------------------------------------------------------------------------------------
 
-_ATTIVO = re.compile(r"^(?:stato patrimoniale\s*[-:]?\s*)?(?:a\)\s*)?attivo\b|^attivita\b")
-_PASSIVO = re.compile(r"^(?:stato patrimoniale\s*[-:]?\s*)?(?:passivo\b|passivita\b|patrimonio netto e passivo)")
-_TOTALE_ATTIVO = re.compile(r"^totale\s+(?:generale\s+)?(?:stato patrimoniale\s*[-\u2013]?\s*)?(?:dell\W?\s*)?(?:attivo|attivita\W?)"
-                            r"(?:\s+patrimonial[ei])?\s*(?:\([^)]*\))?[\s:.]*$")
-_TOTALE_PASSIVO = re.compile(r"^totale\s+(?:generale\s+)?(?:stato patrimoniale\s*[-\u2013]?\s*)?(?:del\s+)?(?:passivo|passivita\W?)"
-                             r"(?:\s+(?:e\s+)?(?:patrimonio\s+netto|netto))?\s*(?:\([^)]*\))?[\s:.]*$")
-_PAREGGIO = re.compile(r"^(?:totale\s+)?(?:a\s+)?pareggio\b")
 _ENUM_INIZIALE = re.compile(r"^(?:[a-e]|p)\)\s*")
 
 
@@ -95,7 +89,41 @@ def _nome(r: Riga) -> str:
     return _ENUM_INIZIALE.sub("", _norm(r.etichetta))
 
 
-_UTILE = re.compile(r"\b(?:utile|perdit[ae])\b.*\besercizio\b|^risultato (?:d\W?\s*)?esercizio\b|^21\)")
+# Le parole che un totale generale puo' avere oltre a «totale» e al lato: se ne resta una, e' la voce di una macro
+# («Totale attivo circolante»). Le parole che lo dicono totale e i lati stanno nel lessico C12 di totali.py.
+_PAROLE_DEL_GENERALE = {"totale", "totali", "generale", "stato", "patrimoniale", "patrimoniali", "dell", "del", "e",
+                        "patrimonio", "netto", "a", "pareggio"}
+
+
+def _totale_generale(r: Riga) -> str | None:
+    """«attivo» | «passivo» se la riga e' il totale generale di un lato dello stato patrimoniale (anche «A pareggio» di
+    un lato fisico), altrimenti None."""
+    n = _nome(r)
+    if r.sezione != "SP" or not DICE_TOTALE.search(n):
+        return None
+    parole = re.findall(r"[a-z]+", n)
+    attivo, passivo = bool(DICE_ATTIVO.search(n)), bool(DICE_PASSIVO.search(n))
+    resto = [w for w in parole if w not in _PAROLE_DEL_GENERALE and not DICE_ATTIVO.search(w)
+             and not DICE_PASSIVO.search(w)]
+    if resto or (attivo and passivo and "netto" not in parole):
+        return None
+    if attivo and not passivo:
+        return "attivo"
+    if passivo:
+        return "passivo"
+    if "pareggio" in parole and r.lato in ("L", "R"):
+        return "attivo" if r.lato == "L" else "passivo"
+    return None
+
+
+def _lato_del_titolo(r: Riga, gettoni: tuple[str, ...]) -> str | None:
+    """«A» | «P» se la riga e' il titolo di un lato («STATO PATRIMONIALE ATTIVO», «Passivo»): breve, senza numerazione
+    di legge e senza essere un totale."""
+    n = _nome(r)
+    if gettoni or len(n.split()) > 5 or DICE_TOTALE.search(n):
+        return None
+    attivo, passivo = bool(DICE_ATTIVO.search(n)), bool(DICE_PASSIVO.search(n))
+    return "A" if attivo and not passivo else "P" if passivo and not attivo else None
 
 
 @dataclass(frozen=True)
@@ -142,18 +170,18 @@ def _scorri(righe: list[Riga]) -> dict[str, _Posizione]:
         prima_della_prova.clear()
         stato = "P"
 
-    for r in righe:
+    for k_riga, r in enumerate(righe):
         n = _nome(r)
         chiave = (r.sezione, r.lato)
         livelli = outline.setdefault(chiave, [None] * 4)
-        gettoni = _gettoni(r.etichetta, r.codice)
+        gettoni = gettoni_di_legge(r.etichetta, r.codice)
         if r.sezione == "SP" and r.lato == "U":
-            titolo = len(n.split()) <= 6 and not n.startswith("totale")
-            if titolo and _ATTIVO.search(n) and stato != "A":
+            titolo = _lato_del_titolo(r, gettoni)
+            if titolo == "A" and stato != "A":
                 stato = "A"
                 prima_della_prova.clear()
                 azzera()
-            elif titolo and _PASSIVO.search(n) and stato != "P":
+            elif titolo == "P" and stato != "P":
                 prima_della_prova.clear()
                 stato = "P"
                 azzera()
@@ -172,10 +200,19 @@ def _scorri(righe: list[Riga]) -> dict[str, _Posizione]:
         if r.sezione == "SP":
             lato_sp = {"L": "A", "R": "P"}.get(r.lato, stato)
         out[r.id] = _Posizione(lato_sp, tuple(g for g in livelli if g), scadenze.get(chiave))
+        if r.totale and not gettoni and not _totale_generale(r):
+            # un totale chiuso senza numerazione («Totale crediti») chiude la voce che porta il suo nome: sotto di lui
+            # i livelli tornano a quelli del titolo, meno quello chiuso
+            titolo = _titolo_del_totale(r, righe[:k_riga])
+            base = list(out[titolo.id].livelli) if titolo is not None and titolo.id in out else [g for g in livelli if g]
+            livelli[:] = [None] * 4
+            for g in base[:-1]:
+                livelli[_tipo(g)] = g
+            scadenze[chiave] = None
         if r.sezione == "SP" and r.lato == "U":
             if stato is None:
                 prima_della_prova.append(r.id)
-            if _TOTALE_ATTIVO.search(n):
+            if _totale_generale(r) == "attivo":
                 if stato is None:
                     prima_della_prova.pop()
                     out[r.id] = _Posizione("A", out[r.id].livelli, out[r.id].scad)
@@ -240,8 +277,8 @@ def _importo(doc: Documento, r: Riga, colonna: int, per_id: dict[str, Riga], lat
     chiave = _chiave_figli(doc, padre, r, colonna) if padre is not None else None
     if padre is not None and chiave is not None:
         v = valore_nel_totale(doc, padre, r, chiave)
-        if _risultato(padre, _su_schema(doc)) and _costo_del_risultato(r) and _valore_di_somma(r, chiave) > 0:
-            v = -v
+        if _risultato(padre, _su_schema(doc)) and _costo_del_risultato(r):
+            v = -v        # il meno e' della somma: il costo e' positivo comunque sia stampato
         rovesciato = padre.verso.get(chiave, 1) == -1
     else:
         v = cella.valore
@@ -277,7 +314,7 @@ def _verso_ce(r: Riga, campo: str | None) -> str | None:
 # Percorso di legge
 # --------------------------------------------------------------------------------------
 
-def _gettoni(r_etichetta: str, codice: str = "") -> tuple[str, ...]:
+def gettoni_di_legge(r_etichetta: str, codice: str = "") -> tuple[str, ...]:
     """I livelli di legge che una riga stampa nel proprio codice o nella propria etichetta."""
     if codice and _CODICE_DI_LEGGE.match(codice):
         t = _percorso_etichetta(codice + ") x")
@@ -350,6 +387,7 @@ def foglie_contabili(doc: Documento, colonna: int) -> list[Foglia]:
     righe = doc.righe_del_prospetto()
     per_id = {r.id: r for r in righe}
     pos = _scorri(righe)
+    perc = _Percorsi(righe, pos)
     out: list[Foglia] = []
     for r in righe:
         col = _colonna_della_riga(doc, colonna, r)
@@ -357,7 +395,7 @@ def foglie_contabili(doc: Documento, colonna: int) -> list[Foglia]:
                 or _e_controllo(r):
             continue
         lato_sp = pos[r.id].lato_sp
-        p, campo = _percorso(r, pos[r.id])
+        p, campo = _percorso(r, perc.posizione(r))
         verso = _verso_ce(r, campo)
         if verso is None and r.sezione == "CE" and r.lato == "U":
             cella = _cella(doc, r, col)
@@ -403,14 +441,15 @@ def _parole_nome(r: Riga) -> frozenset[str]:
                      if len(t) > 1 and t not in _STOP and not _TIPO_ROMANO.match(t.upper()) and not t.isdigit())
 
 
-def _titolo_del_totale(t: Riga, righe: list[Riga]) -> Riga | None:
-    """La voce con enumeratore, sopra il totale, che ha il suo nome («Totale crediti» -> «II - Crediti»): prima
-    quella con le stesse parole, poi quella che ne contiene o ne e' contenuta; la piu' vicina."""
+def _titolo_del_totale(t: Riga, sopra: list[Riga]) -> Riga | None:
+    """La voce con enumeratore, sopra il totale (`sopra`: le righe che lo precedono), che ha il suo nome
+    («Totale crediti» -> «II - Crediti»): prima quella con le stesse parole, poi quella che ne contiene o ne e'
+    contenuta; la piu' vicina."""
     nome = _parole_nome(t)
     if not nome:
         return None
-    sopra = [r for r in reversed(righe[:righe.index(t)]) if r.lato == t.lato and r.sezione == t.sezione
-             and _gettoni(r.etichetta, r.codice)]
+    sopra = [r for r in reversed(sopra) if r.lato == t.lato and r.sezione == t.sezione
+             and gettoni_di_legge(r.etichetta, r.codice)]
     for ammesso in (lambda p: p == nome, lambda p: p and (p <= nome or nome <= p)):
         for r in sopra:
             if ammesso(_parole_nome(r)):
@@ -418,16 +457,67 @@ def _titolo_del_totale(t: Riga, righe: list[Riga]) -> Riga | None:
     return None
 
 
-def _macro_del_totale(t: Riga, righe: list[Riga], pos: dict[str, _Posizione]) -> tuple[str | None, bool]:
+class _Percorsi:
+    """Il percorso di legge di una riga. Prima la catena degli antenati VERIFICATI: eredita il percorso del padre
+    verificato e lo affina col proprio enumeratore solo se la riga e' una voce di legge piu' profonda di lui (un
+    «1) Rossi» sotto un padre che ha gia' un livello arabo e' un conto, non un livello). Solo la riga senza padre
+    verificato ripiega sull'outline posizionale di `_scorri`."""
+
+    def __init__(self, righe: list[Riga], pos: dict[str, _Posizione]):
+        self.per_id = {r.id: r for r in righe}
+        self.pos = pos
+        self._memo: dict[str, tuple[tuple[str, ...], str | None, bool]] = {}
+
+    def _livelli(self, r: Riga) -> tuple[tuple[str, ...], str | None, bool]:
+        """(livelli, scadenza, ancorato): `ancorato` dice che la catena porta almeno un enumeratore di legge; un
+        padre verificato senza alcun enumerator («Totale», una riga di soli importi) non e' un'autorita'."""
+        if r.id in self._memo:
+            return self._memo[r.id]
+        self._memo[r.id] = ((), None, False)         # contro un ciclo
+        posizionale = (self.pos[r.id].livelli, self.pos[r.id].scad)
+        propri = gettoni_di_legge(r.etichetta, r.codice)
+        padre = self.per_id.get(r.padre) if r.padre and r.padre_verificato else None
+        base, scad, ancorato = self._livelli(padre) if padre is not None else ((), None, False)
+        slots: list[str | None] = [None] * 4
+        for g in base if ancorato else ():
+            slots[_tipo(g)] = g
+        presenti = [i for i, g in enumerate(slots) if g]
+        accettati = bool(propri) and (len(propri) > 1 or not presenti or _tipo(propri[0]) > max(presenti))
+        if accettati and ancorato:
+            if len(propri) > 1:
+                slots = [None] * 4
+            for g in propri:
+                t = _tipo(g)
+                slots[t] = g
+                for j in range(t + 1, 4):
+                    slots[j] = None
+            propria = _scadenza([r.etichetta])
+            res = (tuple(g for g in slots if g), propria, True)
+        elif accettati:
+            res = (*posizionale, True)               # la riga e' una voce di legge e nessun antenato lo e'
+        elif ancorato:
+            propria = _scadenza([r.etichetta])
+            res = (base, propria or scad, True)      # un conto: eredita dall'antenato che ha un enumeratore
+        else:
+            res = (*posizionale, False)
+        self._memo[r.id] = res
+        return res
+
+    def posizione(self, r: Riga) -> _Posizione:
+        livelli, scad, _ = self._livelli(r)
+        return _Posizione(self.pos[r.id].lato_sp, livelli, scad)
+
+
+def _macro_del_totale(t: Riga, righe: list[Riga], perc: _Percorsi) -> tuple[str | None, bool]:
     """(macro-voce del totale, ambigua sulla scadenza). Dal proprio enumeratore; se il totale non ha un nome di
     legge («Totale crediti»), da quello della voce sopra che ne porta il nome."""
-    candidati = [t] if _gettoni(t.etichetta, t.codice) else []
-    titolo = _titolo_del_totale(t, righe)
+    candidati = [t] if gettoni_di_legge(t.etichetta, t.codice) else []
+    titolo = _titolo_del_totale(t, righe[:righe.index(t)])
     if titolo is not None:
         candidati.append(titolo)
     for c in candidati:
-        p = pos[c.id]
-        _, campo = _percorso(t, _Posizione(pos[t.id].lato_sp or p.lato_sp, p.livelli, p.scad))
+        p = perc.posizione(c)
+        _, campo = _percorso(t, _Posizione(perc.pos[t.id].lato_sp or p.lato_sp, p.livelli, p.scad))
         if campo:
             macro = tavola.macro_di(campo)
             if macro != campo:
@@ -440,6 +530,7 @@ def ancore(doc: Documento, colonna: int) -> list[Ancora]:
     righe = doc.righe_del_prospetto()
     per_id = {r.id: r for r in righe}
     pos = _scorri(righe)
+    perc = _Percorsi(righe, pos)
     coppie = getattr(doc.profilo, "coppie", {})
     tutte = foglie_contabili(doc, colonna)
     ids = {f.id for f in tutte}
@@ -466,7 +557,7 @@ def ancore(doc: Documento, colonna: int) -> list[Ancora]:
             continue
         if not (t.figli.get(c) or t.figli.get(coppie.get(c, -1))):
             continue
-        macro, ambigua = _macro_del_totale(t, righe, pos)
+        macro, ambigua = _macro_del_totale(t, righe, perc)
         if macro is None:
             continue
         sotto = _sotto(t, per_id, ids, c, coppie)
@@ -482,34 +573,41 @@ def ancore(doc: Documento, colonna: int) -> list[Ancora]:
         if v is not None:
             aggiungi(macro, v, t.id, sotto)
 
-    # totali generali stampati
-    gen: dict[str, Riga] = {}
+    # totali generali stampati: il totale chiuso se c'e', altrimenti l'ultima riga che si dichiara tale
+    gen: dict[str, list[Riga]] = {"attivo": [], "passivo": []}
     for r in righe:
-        if r.sezione != "SP" or cella(r) is None:
+        lato_gen = _totale_generale(r)
+        if lato_gen and cella(r) is not None:
+            gen[lato_gen].append(r)
+    for chiave, lista in gen.items():
+        if not lista:
             continue
-        n = _nome(r)
-        if _TOTALE_ATTIVO.search(n):
-            gen["attivo"] = r
-        elif _TOTALE_PASSIVO.search(n):
-            gen["passivo"] = r
-        elif _PAREGGIO.search(n) and r.lato in ("L", "R"):
-            gen["attivo" if r.lato == "L" else "passivo"] = r
-    for chiave, r in gen.items():
+        r = ([x for x in lista if x.totale] or lista)[-1]
         lato = "A" if chiave == "attivo" else "P"
         v = _importo(doc, r, colonna, per_id, lato, None)
         if v is not None:
             aggiungi(chiave, v, r.id, tuple(f.id for f in tutte if f.lato_sp == lato))
 
-    # risultato d'esercizio: quello del conto economico, se manca quello dello stato patrimoniale
+    # risultato d'esercizio: il totale chiuso del conto economico, poi una sua riga, poi quello dello stato
+    # patrimoniale (che e' una foglia del passivo); legato alle foglie che lo compongono se e' un totale
     cand = [r for r in righe if cella(r) is not None and r.sezione in ("CE", "SP")
-            and _UTILE.search(_norm(r.etichetta)) and not _TOTALE_ATTIVO.search(_norm(r.etichetta))
-            and not r.totale]
-    cand.sort(key=lambda r: r.sezione != "CE")
+            and _RISULTATO_ESERCIZIO.search(_norm(r.etichetta)) and not _totale_generale(r)]
+    cand.sort(key=lambda r: (r.sezione != "CE", not r.totale))
     if cand:
         r = cand[0]
-        v = cella(r).valore
-        n = _norm(r.etichetta)
-        if "perdit" in n and "utile" not in n and v > 0:
-            v = -v
-        aggiungi("utile", v, r.id, ())
+        v = _importo(doc, r, colonna, per_id, "P" if r.sezione == "SP" else None,
+                     "ricavo" if r.sezione == "CE" else None)
+        if v is not None:
+            n = _norm(r.etichetta)
+            if "perdit" in n and "utile" not in n and v > 0:
+                v = -v
+            c = col(r)
+            aggiungi("utile", v, r.id, _sotto(r, per_id, ids, c, coppie) if r.totale and c is not None else ())
     return out
+
+
+def senza_colonna(doc: Documento, colonna: int) -> tuple[str, ...]:
+    """Gli id delle righe con importi che non hanno una colonna equivalente a `colonna` (contrapposte: l'altro lato
+    non stampa quella colonna). Non sono foglie ne' ancore: si dichiarano, mai si perdono in silenzio."""
+    return tuple(r.id for r in doc.righe_del_prospetto()
+                 if r.celle and _colonna_della_riga(doc, colonna, r) is None)

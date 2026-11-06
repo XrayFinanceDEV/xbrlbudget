@@ -166,6 +166,18 @@ def _titoli_di_lato_sui_due_lati(righe: list[Riga]) -> bool:
     return ("L", "A") in titoli and ("R", "P") in titoli
 
 
+def _romano_in_sequenza(r: Riga, livelli: list[str | None]) -> tuple[str, ...]:
+    """«II. Crediti»: il romano col punto e' un livello dell'outline solo se e' un totale e continua la sequenza
+    aperta sotto una voce con lettera (I subito sotto «C)», poi II, III...), come in `_livelli_eco`; «V. ROSSI» fra
+    i conti no."""
+    m = _ROMANO_COL_PUNTO.match(r.etichetta)
+    if not m or not r.totale or not livelli[0] or m["n"] not in _VALORE_ROMANO:
+        return ()
+    n = _VALORE_ROMANO[m["n"]]
+    aperto = _VALORE_ROMANO.get(livelli[1] or "", 0)
+    return (m["n"],) if n == aperto + 1 else ()
+
+
 def _scorri(righe: list[Riga], contrapposto: bool = True) -> dict[str, _Posizione]:
     """Per ogni riga: il lato dello stato patrimoniale (L/R dal lato fisico; su una colonna unica dal titolo
     «attivo»/«passivo», dal totale dell'attivo, o dalla lettera maiuscola che riparte da A dopo la B), l'outline di
@@ -197,7 +209,7 @@ def _scorri(righe: list[Riga], contrapposto: bool = True) -> dict[str, _Posizion
         n = _nome(r)
         chiave = (r.sezione, r.lato)
         livelli = outline.setdefault(chiave, [None] * 4)
-        gettoni = gettoni_di_legge(r.etichetta, r.codice)
+        gettoni = gettoni_di_legge(r.etichetta, r.codice) or _romano_in_sequenza(r, livelli)
         unico = r.lato == "U" or not contrapposto
         if r.sezione == "SP" and unico:
             titolo = _lato_del_titolo(r, gettoni)
@@ -411,11 +423,18 @@ def gettoni_di_legge(r_etichetta: str, codice: str = "") -> tuple[str, ...]:
     return (m["minuscola"],)
 
 
+# «- entro esercizio successivo», «- oltre l'esercizio successivo»: la ripartizione senza «esigibili» (Passepartout)
+_SCADENZA_A_TRATTINO = re.compile(r"^\W*(entro|oltre)\s+(?:l\W?\s*)?esercizio\s+successivo\b", re.I)
+
+
 def _scadenza(etichette: list[str]) -> str | None:
     for e in etichette:
         s = _scadenza_in_coda(e) or _scadenza_inizio(e)
         if s:
             return "E" if "entro" in s else "O"
+        m = _SCADENZA_A_TRATTINO.match(e)
+        if m:
+            return "E" if m.group(1).lower() == "entro" else "O"
     return None
 
 
@@ -740,10 +759,19 @@ class _Percorsi:
         if r.id in self._memo:
             return self._memo[r.id]
         self._memo[r.id] = ((), None, False)         # contro un ciclo
+        if _totale_generale(r):
+            # «A) TOTALE STATO PATRIMONIALE - ATTIVO»: la lettera numera il lato, non la voce A di legge; un totale
+            # di sezione verificato sotto di lui («C) TOTALE ATTIVO CIRCOLANTE») non deve ereditarla
+            return (), None, False
         posizionale = (self.pos[r.id].livelli, self.pos[r.id].scad)
         propri = gettoni_di_legge(r.etichetta, r.codice)
         padre = self.per_id.get(r.padre) if r.padre and r.padre_verificato else None
         base, scad, ancorato = self._livelli(padre) if padre is not None else ((), None, False)
+        romano = _ROMANO_COL_PUNTO.match(r.etichetta) if not propri else None
+        if romano and r.totale and ancorato and base and _tipo(base[-1]) == 0 and romano["n"] in _VALORE_ROMANO:
+            # «II. Crediti» sotto «C) Attivo circolante», verificato dai suoi conti: il romano col punto e' un livello
+            # quando e' un totale subito sotto una voce con lettera («V. ROSSI» fra i conti resta un conto)
+            propri = (romano["n"],)
         slots: list[str | None] = [None] * 4
         for g in base if ancorato else ():
             slots[_tipo(g)] = g

@@ -1219,7 +1219,13 @@ il lettore gira sul solo PDF.
    decide il modello. Una lettera che non divide la voce («a) Rossi» sotto «1) verso clienti», la ripartizione
    «a) … entro») si toglie e resta la base, che deve valere da sola (F3-10). *Se si ignora:* un percorso sbagliato
    costa una macro sbagliata senza nessun modello a contestarla; uno mancante costa solo una chiamata. Una macro che
-   il percorso dà ma il lato non ammette si scarta.
+   il percorso dà ma il lato non ammette si scarta. (Task 9) Il totale generale di un lato («A) TOTALE STATO
+   PATRIMONIALE - ATTIVO») non è un livello di legge: la sua lettera numera il lato, e un totale di sezione
+   verificato sotto di lui teneva la «A» al posto della propria «C» (161: rimanenze e liquidità finite in `sp01`).
+   Il romano col punto («II. Crediti») è un livello quando è un totale sotto una voce con lettera, nella catena
+   verificata o in sequenza nell'outline (mai «V. ROSSI» fra i conti); «- entro/oltre esercizio successivo» è una
+   scadenza come «esigibili entro». *Se si ignora:* il percorso manca, decide il modello sull'etichetta nuda, e
+   «CREDITI V/SOCI» sotto «5-quater) verso altri» diventa crediti verso soci (`sp01`).
 5. **Composizione** (`componi.py`): ogni foglia somma una volta sul suo dettaglio o sul secchio «altri»; gli
    aggregati sono la somma dei dettagli (`percorsi.completa`); `sp13` viene dal CE. La riga del risultato
    (`foglie.e_riga_del_risultato`: «Utile (perdita) dell'esercizio», o un'etichetta di sole parole del risultato

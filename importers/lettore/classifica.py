@@ -10,15 +10,17 @@ from __future__ import annotations
 
 from collections import Counter
 from concurrent.futures import ThreadPoolExecutor
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
+from decimal import Decimal
 
 from importers import llm_provider
-from importers.llm_provider import LLMProviderError
+from importers.llm_provider import ContestoEccessivo, LLMProviderError, RispostaTroncata
 from importers.lettore import tavola
-from importers.lettore.foglie import Foglia
+from importers.lettore.foglie import Ancora, Foglia
 from importers.lettore.totali import _norm
 
 BLOCCO = 60
+TIMEOUT = 120.0
 NON_UN_CONTO = "X"
 ALTRI = "altri"
 
@@ -39,7 +41,7 @@ NOTA_VOTO = "Nota: questo blocco non torna contro il totale stampato nel documen
 class Classe:
     macro: str | None          # "sp06"; None = senza classe
     dettaglio: str | None      # "sp06a" solo per le macro di DETTAGLI_KPI, altrimenti None
-    fonte: str                 # "legale" | "modello" | "voto" | "nessuna"
+    fonte: str                 # "legale" | "modello" | "voto" | "nessuna" | "errore" (il modello ha fallito)
     voti: tuple[str, ...] = ()
 
 
@@ -51,7 +53,8 @@ def _ammesse(f: Foglia) -> tuple[str, ...]:
 
 
 def _chiave(f: Foglia) -> tuple:
-    return (_norm(f.etichetta), f.lato, f.sezione, f.verso_ce, f.lato_sp)
+    return (_norm(f.etichetta), _norm(f.antenati[-1]) if f.antenati else "", f.lato, f.sezione, f.verso_ce,
+            f.lato_sp)
 
 
 def _da_percorso(f: Foglia) -> Classe | None:
@@ -85,26 +88,55 @@ def _contesto(f: Foglia) -> str:
     return "; ".join(parti)
 
 
+def _fratelli(f: Foglia, blocco: list[Foglia]) -> str:
+    stessi = [g.etichetta for g in blocco if g.id != f.id and g.antenati[-1:] == f.antenati[-1:]]
+    return "; fratelli: " + ", ".join(stessi[:4]) if stessi else ""
+
+
 def _richiesta(blocco: list[Foglia], enum_per_id: dict[str, list[str]], etichette: dict[str, str],
-               intro: str, nota: str = "") -> tuple[list[dict], dict]:
+               nota: str = "", *, fratelli: bool = False, macro_assegnata: dict[str, str] | None = None,
+               ) -> tuple[list[dict], dict]:
     usati = sorted({c for e in enum_per_id.values() for c in e if c in etichette})
     legenda = "\n".join(f"{c}: {etichette[c]}" for c in usati)
-    righe = "\n".join(f"{f.id} | {f.etichetta} | {_contesto(f)} | ammessi: {', '.join(enum_per_id[f.id])}"
-                      for f in blocco)
-    testo = f"{intro}\n\nCodici:\n{legenda}\n\n" + (nota + "\n\n" if nota else "") + f"Righe (id | voce | contesto):\n{righe}"
+    righe = "\n".join(
+        f"{f.id} | {f.etichetta} | {_contesto(f)}{_fratelli(f, blocco) if fratelli else ''}"
+        + (f" | voce: {macro_assegnata[f.id]}" if macro_assegnata and f.id in macro_assegnata else "")
+        + f" | ammessi: {', '.join(enum_per_id[f.id])}" for f in blocco)
+    testo = ("Classifica queste righe.\n\nCodici:\n" + legenda + "\n\n" + (nota + "\n\n" if nota else "")
+             + "Righe (id | voce | contesto):\n" + righe)
     return [{"role": "user", "content": testo}], _schema(enum_per_id)
 
 
-def _chiama(chiama_json, system: str, blocco, enum_per_id, etichette, nota="") -> dict[str, str]:
-    """Le risposte {id: codice} del blocco; vuoto se il modello fallisce o risponde male. Mai un'eccezione."""
-    messaggi, schema = _richiesta(blocco, enum_per_id, etichette, "Classifica queste righe.", nota)
+_ERRORI_DA_DIMEZZARE = (RispostaTroncata, ContestoEccessivo)
+
+
+def _chiama(chiama_json, system: str, blocco, enum_per_id, etichette, nota="", diag: dict | None = None,
+            **opzioni) -> tuple[dict[str, str], set[str]]:
+    """(risposte {id: codice}, id del blocco persi per un errore del modello). Mai un'eccezione.
+
+    Su risposta troncata o contesto eccessivo il blocco si dimezza e si riprova, fino a una foglia; su
+    qualunque altro errore del provider il blocco si abbandona."""
+    messaggi, schema = _richiesta(blocco, enum_per_id, etichette, nota, **opzioni)
     try:
-        out = chiama_json(system, messaggi, schema, max_tokens=40 + 14 * len(blocco), timeout=900.0)
+        out = chiama_json(system, messaggi, schema, max_tokens=40 + 14 * len(blocco), timeout=TIMEOUT)
+    except _ERRORI_DA_DIMEZZARE:
+        if len(blocco) > 1:
+            if diag is not None:
+                diag["dimezzamenti"] = diag.get("dimezzamenti", 0) + 1
+            m = len(blocco) // 2
+            ris, persi = {}, set()
+            for meta in (blocco[:m], blocco[m:]):
+                r, p = _chiama(chiama_json, system, meta, {f.id: enum_per_id[f.id] for f in meta}, etichette,
+                               nota, diag, **opzioni)
+                ris.update(r)
+                persi |= p
+            return ris, persi
+        return {}, {f.id for f in blocco}
     except LLMProviderError:
-        return {}
+        return {}, {f.id for f in blocco}
     if not isinstance(out, dict):
-        return {}
-    return {str(k): v for k, v in out.items() if isinstance(v, str)}
+        return {}, {f.id for f in blocco}
+    return {str(k): v for k, v in out.items() if isinstance(v, str)}, set()
 
 
 def _blocchi(foglie: list[Foglia]) -> list[list[Foglia]]:
@@ -126,9 +158,16 @@ def _chiama_default():
     return llm_provider.chiama_gx10_json
 
 
-def classifica_macro(foglie: list[Foglia], *, chiama_json=None, cache: dict | None = None) -> dict[str, Classe]:
+def classifica_macro(foglie: list[Foglia], *, chiama_json=None, cache: dict | None = None,
+                     diagnostica: dict | None = None) -> dict[str, Classe]:
+    """Passo 1. `diagnostica`, se dato, e' riempito con `foglie_errore` (foglie la cui domanda il modello non ha
+    saputo evadere: fonte «errore», diverso da una risposta «X» o fuori enum, che e' «nessuna»), `blocchi_falliti`
+    (id persi) e `dimezzamenti`."""
     chiama_json = chiama_json or _chiama_default()
     cache = cache if cache is not None else {}
+    diag = diagnostica if diagnostica is not None else {}
+    diag.setdefault("foglie_errore", 0)
+    diag.setdefault("dimezzamenti", 0)
     classi: dict[str, Classe] = {}
     da_chiedere: dict[tuple, list[Foglia]] = {}
     for f in foglie:
@@ -143,39 +182,69 @@ def classifica_macro(foglie: list[Foglia], *, chiama_json=None, cache: dict | No
             continue
         da_chiedere.setdefault(k, []).append(f)
     rappresentanti = [gruppo[0] for gruppo in da_chiedere.values()]
-    blocchi = _blocchi(rappresentanti)
     risposte = _in_parallelo([
         (lambda b=b: _chiama(chiama_json, PROMPT_MACRO, b, {f.id: _enum_macro(f) for f in b},
-                             tavola.ETICHETTE_MACRO)) for b in blocchi])
+                             tavola.ETICHETTE_MACRO, diag=diag)) for b in _blocchi(rappresentanti)])
     per_id: dict[str, str] = {}
-    for r in risposte:
+    persi: set[str] = set()
+    for r, p in risposte:
         per_id.update(r)
+        persi |= p
     for k, gruppo in da_chiedere.items():
         rep = gruppo[0]
+        if rep.id in persi:
+            for f in gruppo:
+                classi[f.id] = Classe(None, None, "errore")
+            diag["foglie_errore"] += len(gruppo)
+            continue
         r = per_id.get(rep.id)
         macro = r if r in _ammesse(rep) else None     # «X», fuori enum, assente: senza classe
         if macro or rep.id in per_id:
             cache[k] = macro
         for f in gruppo:
             classi[f.id] = Classe(macro, None, "modello") if macro else Classe(None, None, "nessuna")
+    diag["blocchi_falliti"] = len(persi)
     return classi
 
 
-def rivota(foglie: list[Foglia], classi: dict[str, Classe], *, voti: int = 3,
-           chiama_json=None) -> dict[str, Classe]:
+def _variante(n: int, blocco: list[Foglia], ancora: Ancora | None, somma: Decimal | None) -> tuple[list[Foglia], str, dict]:
+    """Il voto n-esimo presenta il blocco in modo diverso, perche' a temperatura zero la stessa domanda darebbe
+    la stessa risposta (F3-11). 0: ogni foglia coi soli antenati; 1: l'ancora con totale stampato e somma di oggi
+    (mai importi di foglia); 2: ordine rovesciato e contesto dei fratelli."""
+    n %= 3
+    if n == 0:
+        return blocco, NOTA_VOTO + " Ogni riga va letta da sola, col solo contesto dei suoi antenati.", {}
+    if n == 1:
+        if ancora is not None and somma is not None:
+            nota = (f"{NOTA_VOTO} Questi conti dovrebbero sommare a {ancora.chiave} = {ancora.importo}; "
+                    f"oggi sommano {somma}.")
+        else:
+            nota = NOTA_VOTO + " Verifica che le righe, insieme, rifacciano il totale della voce."
+        return blocco, nota, {}
+    return blocco[::-1], NOTA_VOTO + " Guarda anche le righe vicine dello stesso gruppo.", {"fratelli": True}
+
+
+def rivota(foglie: list[Foglia], classi: dict[str, Classe], *, voti: int = 3, chiama_json=None,
+           ancora: Ancora | None = None, somma: Decimal | None = None,
+           cache: dict | None = None) -> dict[str, Classe]:
+    """Rivota le sole foglie date (mai una classe «legale»); ritorna copie, non muta `classi`. Ogni voto presenta
+    il blocco in modo diverso (`_variante`). `ancora`/`somma` danno al secondo voto il totale stampato e la somma
+    di oggi; `cache`, se data, e' aggiornata con l'esito."""
     chiama_json = chiama_json or _chiama_default()
-    nuove = dict(classi)
+    nuove = {i: replace(c) for i, c in classi.items()}
+    foglie = [f for f in foglie if not (classi.get(f.id) and classi[f.id].fonte == "legale")]
     if not foglie:
         return nuove
     chiamate, indice = [], []
     for b in _blocchi(foglie):
-        for _ in range(voti):
-            chiamate.append(lambda b=b: _chiama(chiama_json, PROMPT_MACRO, b, {f.id: _enum_macro(f) for f in b},
-                                                tavola.ETICHETTE_MACRO, NOTA_VOTO))
+        for n in range(voti):
+            ordine, nota, opz = _variante(n, b, ancora, somma)
+            chiamate.append(lambda o=ordine, nota=nota, opz=opz: _chiama(
+                chiama_json, PROMPT_MACRO, o, {f.id: _enum_macro(f) for f in o}, tavola.ETICHETTE_MACRO, nota, **opz))
             indice.append(b)
     risposte = _in_parallelo(chiamate)
     raccolti: dict[str, list[str]] = {f.id: [] for f in foglie}
-    for b, r in zip(indice, risposte):
+    for b, (r, _persi) in zip(indice, risposte):
         for f in b:
             raccolti[f.id].append(r.get(f.id, "?"))
     for f in foglie:
@@ -186,6 +255,8 @@ def rivota(foglie: list[Foglia], classi: dict[str, Classe], *, voti: int = 3,
         if macro_voto is not None and n * 2 > voti:
             macro = None if macro_voto == NON_UN_CONTO else macro_voto
             nuove[f.id] = Classe(macro, None, "voto", v)
+            if cache is not None:
+                cache[("macro",) + _chiave(f)] = macro
         else:
             nuove[f.id] = Classe(precedente.macro, precedente.dettaglio, "voto", v)
     return nuove
@@ -200,7 +271,7 @@ def classifica_dettagli(foglie: list[Foglia], classi: dict[str, Classe], *, chia
         c = classi.get(f.id)
         if not c or c.macro not in tavola.DETTAGLI_KPI or c.dettaglio:
             continue
-        k = ("dettaglio", _norm(f.etichetta), c.macro)
+        k = ("dettaglio", c.macro) + _chiave(f)
         if k in cache:
             c.dettaglio = cache[k]
             continue
@@ -211,10 +282,11 @@ def classifica_dettagli(foglie: list[Foglia], classi: dict[str, Classe], *, chia
                  for ds in tavola.DETTAGLI_KPI.values() for d in ds}
     etichette[ALTRI] = "nessuna delle altre sotto-voci"
     risposte = _in_parallelo([
-        (lambda b=b: _chiama(chiama_json, PROMPT_DETTAGLIO, b, {f.id: enum(f) for f in b}, etichette))
+        (lambda b=b: _chiama(chiama_json, PROMPT_DETTAGLIO, b, {f.id: enum(f) for f in b}, etichette,
+                             macro_assegnata={f.id: classi[f.id].macro for f in b}))
         for b in _blocchi(rappresentanti)])
     per_id: dict[str, str] = {}
-    for r in risposte:
+    for r, _p in risposte:
         per_id.update(r)
     for k, gruppo in da_chiedere.items():
         rep = gruppo[0]

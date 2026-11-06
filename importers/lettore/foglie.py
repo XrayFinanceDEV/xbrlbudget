@@ -266,12 +266,13 @@ def percorso_valido(p: str) -> bool:
 def _percorso(r: Riga, pos: _Posizione) -> tuple[str | None, str | None]:
     """(percorso di legge, campo) dall'outline della riga; (None, None) se il lato manca o il percorso non e' ben
     formato (F3-9: un percorso mancante costa una chiamata al modello, uno sbagliato una macro sbagliata). Una lettera
-    che non divide la voce ma la ripartizione entro/oltre («a) … esigibili entro») e' la scadenza, non un livello."""
+    che non divide la voce (F3-10: la ripartizione entro/oltre «a) … esigibili entro», un conto «a) Rossi» sotto
+    «1) verso clienti») non e' un livello: si toglie e la foglia tiene il percorso della voce, che deve valere da solo."""
     prefisso = _prefisso(r, pos.lato_sp)
     if prefisso is None or not pos.livelli:
         return None, None
     livelli = list(pos.livelli)
-    if pos.scad and len(livelli) > 1 and _tipo(livelli[-1]) == 3 \
+    if len(livelli) > 1 and _tipo(livelli[-1]) == 3 \
             and not _lettera_significativa(".".join((prefisso, *livelli[:-1])), livelli[-1]):
         livelli.pop()
     p = ".".join((prefisso, *livelli, *((pos.scad,) if pos.scad else ())))

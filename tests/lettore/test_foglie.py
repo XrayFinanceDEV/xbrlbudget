@@ -351,11 +351,11 @@ def test_mastro_senza_numero_non_perde_il_romano(tmp_path):
 
 
 def test_elenco_con_lettere_di_clienti_non_e_un_livello(tmp_path):
-    # probe 2: «a) Rossi» sotto «1) verso clienti» (gia' sp06a) e' un conto
+    # probe 2 (F3-10): «a) Rossi» sotto «1) verso clienti» (gia' sp06a) e' un conto: tiene il percorso della voce
     voci = _crediti_attivo(("1) verso clienti", "300,00"), ("a) Rossi srl", "100,00"), ("b) Bianchi spa", "200,00"),
                            ("Banca c/c", "517,00"), ("Cassa", "23,00"), ("Magazzino", "71,00"))
     f = _per_etichetta(foglie_contabili(_doc(tmp_path, voci), 0))
-    assert f["a) Rossi srl"].percorso_legale is None and f["b) Bianchi spa"].percorso_legale is None
+    assert f["a) Rossi srl"].percorso_legale == "SPA.C.II.1" and f["b) Bianchi spa"].percorso_legale == "SPA.C.II.1"
 
 
 def test_arabo_posizionale_senza_romano_sopra_e_none(tmp_path):
@@ -374,3 +374,15 @@ def test_lettera_di_scadenza_non_e_un_livello(tmp_path):
     f = _per_etichetta(foglie_contabili(_doc(tmp_path, voci), 0))
     assert f["a) Erario esigibili entro"].percorso_legale == "SPA.C.II.5-bis.E"
     assert f["b) Erario esigibili oltre"].percorso_legale == "SPA.C.II.5-bis.O"
+
+
+def test_lettera_che_non_divide_la_voce_si_toglie_e_la_base_deve_valere(tmp_path):
+    from importers.lettore.foglie import _Posizione, _percorso
+    r = _riga_finta("x", "a) altri")
+    r.sezione = "CE"
+    assert _percorso(r, _Posizione(None, ("B", "7", "a"), None))[0] == "CE.B.7"          # lettera senza significato
+    assert _percorso(r, _Posizione(None, ("C", "16", "b"), None))[0] == "CE.C.16"
+    assert _percorso(r, _Posizione(None, ("B", "9", "a"), None))[0] == "CE.B.9.a"        # lettera che divide: resta
+    assert _percorso(r, _Posizione(None, ("A", "1", "a"), None))[0] == "CE.A.1"
+    r2 = _riga_finta("y", "a) x")
+    assert _percorso(r2, _Posizione("A", ("C", "1", "a"), None)) == (None, None)         # la base non vale: None

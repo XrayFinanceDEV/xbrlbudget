@@ -252,7 +252,7 @@ ciò che non si può non sapere. Ogni voce dice la regola e **cosa si rompe** a 
   squadrato di partenza»). Un riepilogo di poche macro-voci tipo export
   xlsx non è un bilancio e si rifiuta (`PDFImportError`). Su uno schema di legge uno squadrato è un
   difetto del lettore da correggere; resta ammesso per bilanci di verifica e sezioni contrapposte.
-  Il ripiego sull'importatore attuale resta solo per un'estrazione vuota, una struttura non
+  Fra i lettori deterministici e il modello c'è ora il **percorso del lettore** (le foglie del lettore di righe, classe per id dal modello, mai un importo; si adotta solo attraverso lo stesso cancello `deterministico.esito`; interruttore `IMPORT_LETTORE=0`; → `docs/import/REGOLE-IMPORT-02-ESTRAZIONE.md` §11, `REGOLE-IMPORT-04-QUADRATURE.md` §14). Il ripiego sull'importatore attuale resta solo per un'estrazione vuota, una struttura non
   riconosciuta o un'eccezione imprevista. Il divieto di plug e il contratto "riferimenti, non
   importi" valgono per l'importatore attuale.
 

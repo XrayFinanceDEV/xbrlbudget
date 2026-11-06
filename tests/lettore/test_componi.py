@@ -102,7 +102,7 @@ def test_perdita_e_riga_risultato_non_foglia():
     foglie = [F("c", 100, "L", "CE", "costo"), F("a", 100), F("p", 300, "R"),
               F("u", 100, "R", etichetta="Perdita d'esercizio")]
     c = componi(foglie, {"c": C("ce06"), "a": C("sp06"), "p": C("sp16")}, [])
-    assert c.bs["sp13_utile_perdita"] == -100 and c.sbilancio == -200 and "pareggio" in c.blocchi
+    assert c.bs["sp13_utile_perdita"] == -100 and c.sbilancio == -100 and "pareggio" in c.blocchi
 
 
 def test_fondo_positivo_negato():

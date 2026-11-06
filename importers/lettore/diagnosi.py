@@ -51,7 +51,8 @@ def _leggi(file_path: str, contesto, anno_corrente, anno_precedente) -> dict:
     tabelle = list(getattr(contesto, "tables", ()) or ())
     if tabelle:
         ingresso = "mineru"
-        doc: Documento = leggi_celle([t.html for t in tabelle], [t.page for t in tabelle],
+        # MinerU numera le pagine da 0 (page_idx), il lettore da 1
+        doc: Documento = leggi_celle([t.html for t in tabelle], [int(t.page or 0) + 1 for t in tabelle],
                                      titoli=[t.caption for t in tabelle])
     else:
         ingresso = "pdf"

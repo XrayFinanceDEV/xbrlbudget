@@ -1015,9 +1015,11 @@ Ognuna ha il suo test; le regressioni sono su 208 PDF diversi (`Test/` più il l
 
 ## 11. Lettore di righe unico (Fase 1)
 
-`importers/lettore/` è il lettore nuovo, scritto **accanto** al percorso attuale: **non è collegato
-all'import**. Nessuna rotta e nessun importatore lo chiama; collegarlo è il lavoro delle Fasi 2-4. Fino ad
-allora quello che si legge in queste pagine sopra descrive l'import vero, e il lettore si misura soltanto.
+`importers/lettore/` è il lettore nuovo, scritto **accanto** al percorso attuale. Dalla Fase 2 è collegato
+all'import **solo in diagnosi** (blocchi che non chiudono, `validation_report["lettore"]`, nessun importo
+cambia): vedi [REGOLE-IMPORT-04 §13](REGOLE-IMPORT-04-QUADRATURE.md). Per il resto non lo chiama nessuno;
+collegarlo alla classificazione è il lavoro delle Fasi 3-4, e quello che si legge in queste pagine sopra
+descrive l'import vero.
 
 **Che cosa legge.** Da un PDF col text layer (`leggi_pdf`) o dalle tabelle HTML di MinerU (`leggi_celle`)
 restituisce un `Documento`: righe con codice, etichetta e un importo `Decimal` per colonna; le colonne col

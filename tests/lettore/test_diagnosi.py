@@ -78,7 +78,7 @@ def test_diagnosi_mineru(tmp_path):
     t1 = _tabella(["", "31/12/2024", "31/12/2023"], ["Crediti verso clienti", "1.200,00", "1.000,00"],
                   ["Altri crediti", "300,00", "400,00"])
     t2 = _tabella(["Debiti verso fornitori", "700,00", "650,00"], ["Debiti tributari", "", "30,00"])
-    d = diagnosi_pdf(str(tmp_path / "x.pdf"), _Ctx([_T(t1, 1), _T(t2, 2)]))
+    d = diagnosi_pdf(str(tmp_path / "x.pdf"), _Ctx([_T(t1, 0), _T(t2, 1)]))  # page_idx di MinerU: da 0
     assert d["ingresso"] == "mineru" and d["esito"] == "ok"
 
 

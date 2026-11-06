@@ -436,9 +436,12 @@ compreso), pagina del totale ed etichette dei figli (al massimo 12).
 ### Che cosa vede l'utente, e quando
 
 Le frasi stanno fra gli avvisi dell'import, subito dopo il motivo di sbilancio (se c'è), **solo quando
-l'import stesso dichiara che qualcosa non torna**: SP sbilanciato oltre 0,01 € (sezione SP), utile del CE
+l'import stesso dichiara che qualcosa non torna**: SP sbilanciato oltre 2 € (`_TOL_QUADRATURA`, la tolleranza dei gate dell'import: sotto non c'è avviso e quindi nemmeno
+frasi; sezione SP), utile del CE
 diverso da `sp13` (sezione CE), esito snello `squadrato` o `tappo` (SP); se c'è un motivo di sbilancio ma
-nessuna di queste, entrambe le sezioni. Si mostrano soltanto i blocchi di quelle sezioni.
+nessuna di queste, entrambe le sezioni. Si mostrano soltanto i blocchi di quelle sezioni, la colonna corrente prima dell'anno precedente, e mai un blocco
+con scarto fino a 1,00 € (`TOLLERANZA_ARROTONDAMENTO`, decisione del proprietario: è arrotondamento; resta in
+`validation_report`). Una colonna corrente senza data stampata non viene scartata dal filtro per anno.
 Su un import che quadra l'utente non vede nulla: un blocco «aperto» in un documento che torna è quasi sempre
 un limite del lettore, non un difetto del bilancio, e avvisarne l'utente sarebbe rumore. Il dato resta in
 `validation_report`.
@@ -487,9 +490,9 @@ blocco nominato non vuol dire che il bilancio sia a posto.
 **Misura sul campione** (78 documenti × 3 giri, 2026-11-06, contro la base `base-fase2-e3455d6`):
 
 - nessun import fallito per colpa del lettore; la chiave `lettore` c'è su ogni giro importato;
-- esito `ok` su tutti i documenti con testo, dopo la correzione della numerazione delle pagine di MinerU (da 0,
+- esito `ok` su tutti i documenti con testo salvo un giro su 234 andato in `tempo` (1540, 20,5 s), dopo la correzione della numerazione delle pagine di MinerU (da 0,
   il lettore conta da 1: prima della correzione i sei documenti arrivati da MinerU uscivano in `errore`); una
-  scansione senza tabelle utili esce `non_applicabile`; un solo giro su 234 ha toccato il tetto (20,5 s);
+  scansione senza tabelle utili esce `non_applicabile`;
 - tempo: mediana 0,39 s, media 0,92 s;
 - numeri invariati su 60 dei 64 documenti stabili della base; i quattro che cambiano cambiano anche a lettore
   spento (`LETTORE_DIAGNOSI=0`, verificato su due di essi): la causa è fuori dal lettore (variabilità del modello);

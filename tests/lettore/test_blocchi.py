@@ -164,3 +164,45 @@ def test_taglio_del_tratto_a_minimo_scarto(tmp_path):
     assert (b.somma, b.scarto) == (Decimal("450.00"), Decimal("10.00"))
     assert b.righe == (ids(doc)["Totale apertura"], ids(doc)["Totale"])
     assert "Totale apertura" in b.etichette
+
+
+def _riga_finta(i, etichetta, c0, c1, marcatore=None):
+    from importers.lettore.importi import Importo
+    from importers.lettore.righe import Riga
+
+    def imp(v):
+        return Importo(valore=Decimal(v), forma="importo", testo=str(abs(Decimal(v))).replace(".", ","),
+                       marcatore=marcatore)
+    return Riga(id=f"p1r{i}U", pagina=1, y=float(i * 10), lato="U", sezione="SP", codice="", etichetta=etichetta,
+                celle={0: imp(c0), 1: imp(c1)})
+
+
+def _doc_con_verso(secondo_totale):
+    """Un fondo i cui conti a marcatore «A» chiudono col segno rovesciato: sulla colonna 0 (che chiude, verso -1)
+    e, stampando gli stessi importi, sulla colonna 1."""
+    from datetime import date
+    from types import SimpleNamespace as NS
+
+    a = _riga_finta(1, "Conto uno", "-100.00", "-60.00", "A")
+    b = _riga_finta(2, "Conto due", "-50.00", "-40.00", "A")
+    t = _riga_finta(3, "Fondo", "150.00", secondo_totale)
+    t.totale = True
+    t.figli = {0: (a.id, b.id)}
+    t.verso = {0: -1}
+
+    def col(i, corrente, anno):
+        return NS(indice=i, ruolo="esercizio", fine=date(anno, 12, 31), mesi=12, corrente=corrente, lato="U")
+    profilo = NS(tipo="verifica", coppie={}, decimali={}, avvisi=[])
+    return Documento(righe=[a, b, t], colonne=[col(0, True, 2025), col(1, False, 2024)], contrapposto=False,
+                     avvisi=[], profilo=profilo)
+
+
+def test_totale_chiuso_su_un_altra_colonna_col_verso_di_quella_colonna():
+    # la colonna 1 somma -60 + -40 = -100 e col verso -1 della colonna che chiude fa 100: nessun blocco
+    assert blocchi_aperti(_doc_con_verso("100.00")) == []
+
+
+def test_verso_della_colonna_che_chiude_anche_con_scarto_vero():
+    # stampato 130 contro i 100 che i conti fanno col verso giusto: lo scarto e' 30, non 230 (verso +1)
+    (b,) = blocchi_aperti(_doc_con_verso("130.00"))
+    assert (b.colonna, b.stampato, b.somma, b.scarto) == (1, Decimal("130.00"), Decimal("100.00"), Decimal("30.00"))

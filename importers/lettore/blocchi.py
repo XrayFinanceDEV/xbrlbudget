@@ -15,8 +15,8 @@ from decimal import Decimal
 from importers.lettore.profilo import _norm
 from importers.lettore.righe import Documento, Riga
 from importers.lettore.totali import (
-    _RUOLI_VALORE, DICE_TOTALE, _Serie, _euro, _risultato_di_controllo, _serie, _su_schema, _tolleranza_cella,
-    valore_nel_totale)
+    _RUOLI_VALORE, DICE_TOTALE, _Serie, _euro, _priorita, _risultato_di_controllo, _serie, _su_schema,
+    _tolleranza_cella, _valore_nel_totale, valore_nel_totale)
 
 _TETTO_ETICHETTE = 12
 _NUMERO_RIGA = re.compile(r"r(\d+)")
@@ -54,6 +54,8 @@ def blocchi_aperti(doc: Documento) -> list[Blocco]:
     per_id = {r.id: r for r in doc.righe}
     pos = {r.id: k for k, r in enumerate(doc.righe)}
     trovati: list[tuple[Blocco, int, int]] = []
+    priorita = _priorita(doc)
+    schema = _su_schema(doc)
     for serie in _serie(doc):
         colonna = colonne.get(serie.colonna)
         if colonna is None:
@@ -63,11 +65,19 @@ def blocchi_aperti(doc: Documento) -> list[Blocco]:
         for i, r in enumerate(serie.righe):
             if _chiuso(r, serie.colonna, coppie):
                 continue
-            figli = _figli_altra_colonna(doc, r, serie.colonna, per_id) if r.totale else aperti.get(i)
+            verso = None
+            if r.totale:
+                figli, verso = _figli_altra_colonna(doc, r, serie.colonna, per_id, priorita)
+            else:
+                figli = aperti.get(i)
             if not figli or not any(serie.colonna in f.celle and f.celle[serie.colonna].valore for f in figli):
                 continue        # nessun figlio con un importo: un totale vuoto o a zero non ha nulla da chiudere
-            somma = sum((valore_nel_totale(doc, r, f, serie.colonna) for f in figli if serie.colonna in f.celle),
-                        Decimal(0))
+            if verso is None:
+                somma = sum((valore_nel_totale(doc, r, f, serie.colonna) for f in figli if serie.colonna in f.celle),
+                            Decimal(0))
+            else:   # come totali._confronta_colonne: il verso e' quello della colonna che chiude
+                somma = sum((_valore_nel_totale(r, f, serie.colonna, verso, schema)
+                             for f in figli if serie.colonna in f.celle), Decimal(0))
             stampato = r.celle[serie.colonna].valore
             scarto = stampato - somma
             if abs(scarto) <= _tolleranza_cella(doc, r, serie.colonna):
@@ -84,15 +94,13 @@ def blocchi_aperti(doc: Documento) -> list[Blocco]:
     return [b for b, _, _ in trovati]
 
 
-def _figli_altra_colonna(doc: Documento, t: Riga, colonna: int, per_id: dict[str, Riga]) -> list[Riga]:
-    """Un totale chiuso su un'altra colonna: gli stessi figli, scelti sulla colonna che chiude (come
-    `totali._confronta_colonne`, che li legge dalla colonna con la priorita' piu' alta, la corrente prima)."""
-    riferimento = min(t.figli, key=lambda c: (not _corrente(doc, c), c))
-    return [per_id[f] for f in t.figli[riferimento] if colonna in per_id[f].celle]
-
-
-def _corrente(doc: Documento, colonna: int) -> bool:
-    return any(c.indice == colonna and c.corrente for c in doc.colonne)
+def _figli_altra_colonna(doc: Documento, t: Riga, colonna: int, per_id: dict[str, Riga],
+                         priorita: dict[int, int]) -> tuple[list[Riga], int]:
+    """Un totale chiuso su un'altra colonna: gli stessi figli, scelti sulla colonna che chiude, e il verso di quella
+    colonna. Come `totali._confronta_colonne`: riferimento con `_priorita` (la corrente prima), somma con il verso
+    del riferimento, perche' `valore_nel_totale` su una colonna fuori da `t.figli` darebbe sempre +1."""
+    riferimento = min(t.figli, key=priorita.get)
+    return [per_id[f] for f in t.figli[riferimento] if colonna in per_id[f].celle], t.verso.get(riferimento, 1)
 
 
 def _candidati(doc: Documento, serie: _Serie, coppie: dict[int, int]) -> dict[int, list[Riga]]:

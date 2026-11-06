@@ -14,6 +14,10 @@ from importers.lettore.blocchi import Blocco, blocchi_aperti, frase_blocco
 from importers.lettore.celle import leggi_celle
 from importers.lettore.righe import Documento, leggi_pdf
 
+# Decisione del proprietario: fino a 1 EUR di differenza e' arrotondamento, non un blocco da dire all'utente.
+# Il blocco resta in `validation_report` (la diagnosi lo dichiara), ma `frasi_per_utente` non lo nomina.
+TOLLERANZA_ARROTONDAMENTO = Decimal("1.00")
+
 TETTO_SECONDI_DEFAULT = 20
 _MAX_BLOCCHI = 20
 _MAX_FRASI = 5
@@ -62,7 +66,9 @@ def _leggi(file_path: str, contesto, anno_corrente, anno_precedente) -> dict:
     anni = {a for a in (anno_corrente, anno_precedente) if a}
     blocchi = []
     for b in blocchi_aperti(doc):
-        if anni and not (b.fine and b.fine.year in anni):
+        # solo una colonna datata con un altro anno si scarta; una senza data (verifica senza periodo stampato) resta
+        # se e' la corrente: tacerla equivarrebbe a dichiararsi pulito
+        if anni and (b.fine.year not in anni if b.fine else not b.corrente):
             continue
         blocchi.append(_blocco_dict(b))
     return {
@@ -75,12 +81,17 @@ def _leggi(file_path: str, contesto, anno_corrente, anno_precedente) -> dict:
     }
 
 
+def diagnosi_vuota(esito: str, motivo: str | None) -> dict:
+    """La diagnosi senza lettura: stesse chiavi di una normale, anche a zero (a valle una chiave assente vale zero)."""
+    return {"esito": esito, "motivo": motivo, "ingresso": "pdf", "tipo": "", "contrapposto": False,
+            "colonne": [], "blocchi_aperti": [], "avvisi": [], "secondi": 0.0}
+
+
 def diagnosi_pdf(file_path: str, contesto_mineru=None, *, anno_corrente: int | None = None,
                  anno_precedente: int | None = None, tetto_secondi: float | None = None) -> dict:
     """La diagnosi di un import; mai un'eccezione. `esito`: ok | errore | tempo | non_applicabile."""
     inizio = time.monotonic()
-    base = {"esito": "errore", "motivo": None, "ingresso": "pdf", "tipo": "", "contrapposto": False,
-            "colonne": [], "blocchi_aperti": [], "avvisi": []}
+    base = diagnosi_vuota("errore", None)
     esecutore = None
     try:
         base["ingresso"] = "mineru" if getattr(contesto_mineru, "tables", None) else "pdf"
@@ -100,8 +111,8 @@ def diagnosi_pdf(file_path: str, contesto_mineru=None, *, anno_corrente: int | N
 
 def frasi_per_utente(diagnosi: dict, sezioni: set[str], *, anno_precedente: int | None = None) -> list[str]:
     """Le frasi d'avviso: l'intestazione e al piu' 5 blocchi della colonna corrente (o dell'anno precedente, se
-    richiesto) delle `sezioni`. Prima i blocchi dai figli noti, poi quelli individuati dal lettore, ciascun gruppo
-    dal piu' grande scarto in valore assoluto."""
+    richiesto) delle `sezioni`. Prima la colonna corrente, poi quelle dell'anno precedente; in ciascuna prima i
+    blocchi dai figli noti, poi quelli individuati dal lettore, ciascun gruppo dal piu' grande scarto."""
     try:
         if diagnosi.get("esito", "ok") != "ok":
             return []
@@ -109,12 +120,14 @@ def frasi_per_utente(diagnosi: dict, sezioni: set[str], *, anno_precedente: int 
         for d in diagnosi.get("blocchi_aperti") or []:
             if d.get("sezione") not in sezioni:
                 continue
+            if abs(Decimal(d["scarto"])) <= TOLLERANZA_ARROTONDAMENTO:
+                continue
             precedente = bool(anno_precedente and d.get("fine") and d["fine"][:4] == str(anno_precedente))
             if d.get("corrente") or precedente:
                 scelti.append(_blocco_da_dict(d))
         if not scelti:
             return []
-        scelti.sort(key=lambda b: (b.cercato, -abs(b.scarto)))
+        scelti.sort(key=lambda b: (not b.corrente, b.cercato, -abs(b.scarto)))
         return [_INTESTAZIONE] + [frase_blocco(b) + (_DA_VERIFICARE if b.cercato else "") for b in scelti[:_MAX_FRASI]]
     except Exception:  # noqa: BLE001 - una diagnosi malformata non produce frasi, mai un errore
         return []

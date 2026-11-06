@@ -1,4 +1,4 @@
-"""Lettore di righe unico (Fase 1): costruito accanto all'importatore, non ancora collegato."""
+"""Lettore di righe unico (Fase 1): collegato all'import solo in diagnosi (Fase 2): nessun numero importato ne dipende."""
 from importers.lettore.blocchi import Blocco, blocchi_aperti, frase_blocco
 from importers.lettore.celle import leggi_celle
 from importers.lettore.colonne import Colonna

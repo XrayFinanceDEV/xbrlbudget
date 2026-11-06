@@ -188,3 +188,55 @@ def test_frasi_diagnosi_malformata():
 
 def test_frasi_esito_non_ok():
     assert frasi_per_utente({"esito": "tempo", "blocchi_aperti": [_b(True)]}, {"SP"}) == []
+
+
+def test_filtro_per_anno_colonna_senza_data(monkeypatch):
+    """Una verifica senza periodo stampato lascia la colonna corrente senza data: il blocco resta, mai un «pulito»."""
+    from dataclasses import replace
+    senza_data = replace(_blocco(2025, 1), fine=None, voce="SenzaData")
+    precedente_senza_data = replace(_blocco(2025, 2), fine=None, corrente=False, voce="Vecchia")
+    _doc_finto(monkeypatch, [senza_data, precedente_senza_data, _blocco(2020)])
+    d = diagnosi_pdf("x.pdf", anno_corrente=2025, anno_precedente=2024)
+    assert [b["voce"] for b in d["blocchi_aperti"]] == ["SenzaData"]
+
+
+def test_frasi_prima_la_corrente_poi_l_anno_precedente():
+    """Un blocco grande dell'anno precedente non espelle i cinque dell'anno corrente dalle cinque frasi."""
+    dg = {"blocchi_aperti": [_b(False, scarto="9000.00", voce="Vecchio", fine="2024-12-31"),
+                             *[_b(True, scarto=f"{i}.00", voce=f"N{i}") for i in range(2, 7)]]}
+    frasi = frasi_per_utente(dg, {"SP"}, anno_precedente=2024)
+    assert len(frasi) == 6 and not any(f.startswith("Vecchio") for f in frasi)
+    dg["blocchi_aperti"].pop(5)
+    frasi = frasi_per_utente(dg, {"SP"}, anno_precedente=2024)
+    assert frasi[-1].startswith("Vecchio")
+
+
+def test_diagnosi_vuota_dichiara_le_chiavi():
+    v = mod.diagnosi_vuota("errore", "x")
+    assert v["blocchi_aperti"] == [] and v["avvisi"] == [] and v["colonne"] == []
+    assert set(v) == set(diagnosi_pdf("/non/esiste.pdf"))
+
+
+def test_diagnosi_mineru_pagine_da_uno(tmp_path):
+    """MinerU conta le pagine da 0 (page_idx), il lettore da 1: un blocco di una tabella a page_idx 0 e' a p. 1."""
+    t = _tabella(["", "31/12/2024", "31/12/2023"],
+                 ["Crediti verso clienti", "100,00", "90,00"], ["Altri crediti", "200,00", "80,00"],
+                 ["Totale crediti", "300,00", "170,00"])
+    aperto = _tabella(["Debiti verso fornitori", "500,00", "400,00"], ["Debiti tributari", "100,00", "50,00"],
+                      ["Totale debiti", "600,00", "450,00"])
+    sbagliata = _tabella(["Debiti verso banche", "10,00", "10,00"], ["Altri debiti", "20,00", "20,00"],
+                         ["Totale debiti finanziari", "30,00", "99,00"])
+    d = diagnosi_pdf(str(tmp_path / "x.pdf"), _Ctx([_T(t, 0), _T(aperto, 1), _T(sbagliata, 4)]),
+                     anno_corrente=2024, anno_precedente=2023)
+    assert d["ingresso"] == "mineru" and d["esito"] == "ok"
+    assert [(b["voce"], b["pagina"]) for b in d["blocchi_aperti"]] == [("Totale debiti finanziari", 5)]
+
+
+def test_frasi_non_nominano_un_blocco_entro_l_arrotondamento():
+    """Fino a 1,00 EUR e' arrotondamento: il blocco resta nella diagnosi ma non nelle frasi."""
+    assert mod.TOLLERANZA_ARROTONDAMENTO == __import__("decimal").Decimal("1.00")
+    assert frasi_per_utente({"blocchi_aperti": [_b(True, scarto="0.99")]}, {"SP"}) == []
+    assert frasi_per_utente({"blocchi_aperti": [_b(True, scarto="-1.00")]}, {"SP"}) == []
+    frasi = frasi_per_utente({"blocchi_aperti": [_b(True, scarto="0.99", voce="Piccolo"),
+                                                 _b(True, scarto="1.01", voce="Grande")]}, {"SP"})
+    assert len(frasi) == 2 and "Grande" in frasi[1]

@@ -426,6 +426,12 @@ def _classify_balance_failure(
     )
 
 
+# Sbilancio che i gate di import considerano rumore di arrotondamento (budget_305: 1,82 EUR): sotto non c'e' avviso
+# all'utente, quindi nemmeno le frasi del lettore. E' piu' larga della tolleranza di arrotondamento del lettore
+# (`diagnosi.TOLLERANZA_ARROTONDAMENTO`, 1 EUR, sui singoli blocchi): per l'innesco vale la maggiore.
+_TOL_QUADRATURA = Decimal("2")
+
+
 def _resolve_validation_status(warning_free: bool, forecastable: bool) -> str:
     """Stato di validazione a tre vie.
 
@@ -1203,10 +1209,15 @@ def _lettore_diagnosi_import(file_path, extraction_context, fiscal_year, qd, unb
         diagnosi = diagnosi_pdf(file_path, extraction_context, anno_corrente=anno, anno_precedente=anno - 1)
     except Exception as exc:  # noqa: BLE001 - il lettore non ferma mai un import
         logger.warning(f"Lettore di righe non eseguito: {exc}")
-        return {"esito": "errore", "motivo": f"{type(exc).__name__}: {exc}"}, []
+        try:
+            from importers.lettore.diagnosi import diagnosi_vuota
+            return diagnosi_vuota("errore", f"{type(exc).__name__}: {exc}"[:300]), []
+        except Exception:  # noqa: BLE001 - nemmeno l'import del lettore deve fermare l'import
+            return {"esito": "errore", "motivo": f"{type(exc).__name__}: {exc}"[:300], "ingresso": "pdf", "tipo": "",
+                    "contrapposto": False, "colonne": [], "blocchi_aperti": [], "avvisi": [], "secondi": 0.0}, []
     try:
         sezioni = set()
-        if abs(qd.sbilancio) > Decimal("0.01"):
+        if abs(qd.sbilancio) > _TOL_QUADRATURA:
             sezioni.add("SP")
         if not qd.utile_match:
             sezioni.add("CE")
@@ -2413,7 +2424,7 @@ def import_pdf_balance_sheet(
             # side, so the two side sums may differ by at most two euros while both
             # still agree with the same declared total (budget_305: EUR 1.82).
             _qd = check_quadratura(
-                balance_sheet_data, income_data, tol=Decimal('2')
+                balance_sheet_data, income_data, tol=_TOL_QUADRATURA
             )
             for _w in _qd.warnings:
                 logger.warning(f"quadratura: {_w}")

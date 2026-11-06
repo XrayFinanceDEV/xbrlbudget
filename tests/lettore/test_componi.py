@@ -120,3 +120,23 @@ def test_solo_sp_utile_stampato_non_e_un_falso_blocco():
     foglie = [F("a", 1000), F("p", 900, "R")]
     c = componi(foglie, {"a": C("sp06"), "p": C("sp16")}, [Ancora("utile", D(100), "Utile", ())])
     assert c.sp13_da == "stampato" and c.scarti["utile"] == 0 and c.blocchi == []
+
+
+# --- Task 9: la riga del risultato che non e' il risultato di questo periodo ----------------------------------
+
+def test_risultato_di_un_altro_esercizio_nelle_riserve():
+    # «Utile d'esercizio» 1.500 nel passivo, ma il CE del periodo da' 1.000: e' l'utile dell'esercizio prima, non
+    # destinato, un conto del patrimonio netto (riserva), non la cifra di chiusura
+    foglie = [F("a", 11500), F("p", 9000, "R"), F("u", 1500, "R", etichetta="Utile d'esercizio"),
+              F("r", 1000, "L", "CE", "ricavo")]
+    c = componi(foglie, {"a": C("sp06"), "p": C("sp16"), "u": C("sp13"), "r": C("ce01")}, [])
+    assert c.bs["sp13_utile_perdita"] == 1000 and c.bs["sp12g_utili_perdite_portati"] == 1500 and c.sbilancio == 0
+    assert any("u" in s for s in c.scelte)
+
+
+def test_riga_utile_nuda_e_il_risultato():
+    # «Utile» fra i costi, a pareggio: e' il risultato, non un costo
+    foglie = [F("a", 140), F("p", 100, "R"), F("r", 100, "R", "CE", "ricavo"), F("c", 60, "L", "CE", "costo"),
+              F("u", 40, "L", "CE", "costo", "Utile")]
+    c = componi(foglie, {"a": C("sp06"), "p": C("sp16"), "r": C("ce01"), "c": C("ce06")}, [])
+    assert c.bs["sp13_utile_perdita"] == 40 and c.sbilancio == 0 and c.senza_classe == 0

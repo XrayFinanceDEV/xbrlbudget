@@ -16,9 +16,9 @@ from calculations.ce_result import calculate_ce_result
 from importers.import_snello import percorsi
 from importers.lettore import tavola
 from importers.lettore.classifica import Classe
+from importers.import_snello.verifica import soglia as soglia_adozione
 from importers.lettore.diagnosi import TOLLERANZA_ARROTONDAMENTO
-from importers.lettore.foglie import Ancora, Foglia
-from importers.lettore.totali import _RISULTATO_ESERCIZIO, _norm
+from importers.lettore.foglie import Ancora, Foglia, e_riga_del_risultato
 from importers.rimanenze_ce import e_conto_rimanenze, natura_rimanenze
 
 _ZERO = Decimal(0)
@@ -79,8 +79,24 @@ def importo_sp(f: Foglia) -> Decimal:
 
 
 def e_risultato(f: Foglia) -> bool:
-    """La riga del risultato d'esercizio: mai una foglia, il risultato e' la cifra di chiusura."""
-    return bool(_RISULTATO_ESERCIZIO.search(_norm(f.etichetta)))
+    """La riga del risultato d'esercizio: nel CE mai una foglia, il risultato e' la cifra di chiusura; nello SP lo e'
+    solo se vale il risultato del periodo (`e_questo_risultato`)."""
+    return e_riga_del_risultato(f.etichetta)
+
+
+def risultato_con_segno(f: Foglia) -> Decimal | None:
+    """Il risultato che una riga di SP stampa: positivo (utile) nel passivo, negativo (perdita) nell'attivo."""
+    lato = lato_sp(f)
+    if lato is None:
+        return None
+    return importo_sp(f) if lato == "P" else -importo_sp(f)
+
+
+def e_questo_risultato(f: Foglia, risultato: Decimal, soglia: Decimal) -> bool:
+    """Una riga del risultato nello SP e' la cifra di chiusura di questo periodo solo se ne ha l'importo (a meno del
+    segno, che un «Perdita d'esercizio» stampato positivo nel passivo sbaglia); altrimenti e' il risultato di un
+    altro esercizio non ancora destinato, un conto del patrimonio netto (utili/perdite portati a nuovo)."""
+    return abs(abs(f.importo) - abs(risultato)) <= soglia
 
 
 def _bersaglio_sp(f: Foglia, classe: Classe | None) -> tuple[str | None, Decimal]:
@@ -118,11 +134,14 @@ def componi(foglie: list[Foglia], classi: dict[str, Classe], ancore: list[Ancora
     importi: dict[str, Decimal] = {}
     senza_classe = _ZERO
     scelte: list[str] = []
+    righe_risultato: list[Foglia] = []
     for f in foglie:
         if not f.importo:
             continue
         if e_risultato(f):
-            continue            # la riga del risultato non e' mai una foglia
+            if f.sezione == "SP":
+                righe_risultato.append(f)   # si decide dopo, contro il risultato del periodo
+            continue            # nel CE la riga del risultato non e' mai una foglia
         classe = classi.get(f.id)
         if classe is not None and classe.macro in ("sp13", "ce21"):
             continue            # il risultato e' la cifra di chiusura, mai una foglia
@@ -166,6 +185,15 @@ def componi(foglie: list[Foglia], classi: dict[str, Classe], ancore: list[Ancora
     else:
         sp13_da = "assente"
     bs, ce = _somma(importi)
+    if "sp13" in importi and righe_risultato:
+        s_ris = soglia_adozione(_totali(bs)[0])
+        for f in righe_risultato:
+            segno = risultato_con_segno(f)
+            if segno is None or e_questo_risultato(f, importi["sp13"], s_ris):
+                continue
+            _aggiungi(importi, "sp12g", segno)
+            scelte.append(f"risultato di un altro esercizio negli utili portati a nuovo (sp12g): {f.id}")
+        bs, ce = _somma(importi)
 
     att, pas = _totali(bs)
     gap = att - pas

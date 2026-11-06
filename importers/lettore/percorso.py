@@ -20,7 +20,8 @@ from importers import llm_provider
 from importers.import_snello import percorsi
 from importers.lettore.celle import leggi_celle
 from importers.lettore.classifica import classifica_dettagli, classifica_macro, rivota
-from importers.lettore.componi import Composizione, componi, e_risultato, importo_sp, lato_sp
+from importers.lettore.componi import (Composizione, componi, e_questo_risultato, e_risultato, importo_sp,
+                                       lato_sp, risultato_con_segno)
 from importers.lettore.foglie import ancore, colonne_utili, foglie_contabili, senza_colonna
 from importers.lettore.righe import Documento, leggi_pdf
 
@@ -59,36 +60,40 @@ def _contatore(chiama_json, diag: dict | None = None):
 def _foglie_non_in_pari(foglie, ancore=()) -> str | None:
     """Il motivo per cui le foglie, classificate comunque, non potrebbero mai quadrare (il lato lo decide la
     colonna, non il modello): nessuna foglia di SP, o attivo diverso da passivo piu' un risultato candidato oltre la
-    soglia di adozione. Lato, segno e riga del risultato come li tratta la composizione (`componi`). Candidati del
-    risultato: zero, l'utile delle foglie di CE (se ognuna ha il verso) e l'utile stampato col suo segno.
-    None se non si sa: una foglia di sezione ignota con un importo, o una foglia di SP senza lato."""
+    soglia di adozione. Lato, segno e righe del risultato come li tratta la composizione (`componi`): una riga del
+    risultato nello SP che non vale il risultato candidato e' un conto del patrimonio netto e resta sul suo lato.
+    Candidati del risultato: zero, l'utile delle foglie di CE (se ognuna ha il verso) e l'utile stampato col suo
+    segno. None se non si sa: una foglia di sezione ignota con un importo, o una foglia di SP senza lato."""
     from importers.import_snello.verifica import soglia
 
     if any(f.sezione not in ("SP", "CE") and f.importo for f in foglie):
         return None     # sezione ignota: potrebbe essere CE come SP, non lo so (e «non lo so» non blocca)
-    sp = [f for f in foglie if f.sezione == "SP" and f.importo and not e_risultato(f)]
+    sp = [f for f in foglie if f.sezione == "SP" and f.importo]
     if not sp:
         return "senza_foglie_sp"
-    attivo = passivo = _ZERO
-    for f in sp:
-        lato = lato_sp(f)
-        if lato is None:
-            return None
-        if lato == "A":
-            attivo += importo_sp(f)
-        else:
-            passivo += importo_sp(f)
+    if any(lato_sp(f) is None for f in sp):
+        return None
+    conti = [f for f in sp if not e_risultato(f)]
+    righe_risultato = [f for f in sp if e_risultato(f)]
+    attivo = sum((importo_sp(f) for f in conti if lato_sp(f) == "A"), _ZERO)
+    passivo = sum((importo_sp(f) for f in conti if lato_sp(f) == "P"), _ZERO)
     utili = [_ZERO]
     utili += [a.importo for a in ancore if a.chiave == "utile"]
     ce = [f for f in foglie if f.sezione == "CE" and f.importo and not e_risultato(f)]
-    if all(f.verso_ce in ("costo", "ricavo") for f in ce):
+    if not ce:
+        pass
+    elif all(f.verso_ce in ("costo", "ricavo") for f in ce):
         utili.append(sum((f.importo if f.verso_ce == "ricavo" else -f.importo for f in ce), _ZERO))
     else:
         return None     # un verso ignoto rende libero l'utile composto (sp13 viene dal CE, non dallo stampato)
     s = soglia(attivo)
-    if all(abs(attivo - (passivo + u)) > s for u in utili):
-        return "foglie_non_in_pari"
-    return None
+    senza_sp13 = not ce and len(utili) == 1     # ne' CE ne' utile stampato: `componi` non ha sp13 e toglie le righe
+    for u in utili:
+        altri = _ZERO if senza_sp13 else sum(
+            (risultato_con_segno(f) for f in righe_risultato if not e_questo_risultato(f, u, s)), _ZERO)
+        if abs(attivo - (passivo + altri + u)) <= s:
+            return None
+    return "foglie_non_in_pari"
 
 
 def _dati(c: Composizione) -> tuple[dict, dict]:

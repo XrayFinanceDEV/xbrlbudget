@@ -26,11 +26,31 @@ class RigaFisica:
     parole: list[Parola] = field(default_factory=list)  # ordinate per x0
 
 
+def _righe_non_orizzontali(pagina: "fitz.Page") -> list["fitz.Rect"]:
+    """I riquadri delle righe di testo che a schermo non sono orizzontali: timbri e note scritti in verticale sul
+    margine. Le loro parole sono alte quanto piu' righe contabili e le unirebbero in una sola (1531)."""
+    out = []
+    for b in pagina.get_text("dict")["blocks"]:
+        for linea in b.get("lines", ()):
+            dx, dy = linea["dir"]
+            if pagina.rotation:
+                v = fitz.Point(dx, dy) * pagina.rotation_matrix - fitz.Point(0, 0) * pagina.rotation_matrix
+                dx, dy = v.x, v.y
+            if abs(dy) > abs(dx):
+                out.append(fitz.Rect(linea["bbox"]))
+    return out
+
+
 def parole_pagina(pagina: "fitz.Page") -> list[Parola]:
-    """Parole della pagina; con la pagina ruotata le coordinate sono portate nel riferimento visualizzato."""
+    """Parole della pagina; con la pagina ruotata le coordinate sono portate nel riferimento visualizzato. Le parole
+    scritte in verticale a schermo (timbri, note a margine) non sono parole del prospetto e si tolgono."""
     risultato = []
+    verticali = _righe_non_orizzontali(pagina)
     for w in pagina.get_text("words", sort=True):
         rett = fitz.Rect(w[:4])
+        centro = fitz.Point((rett.x0 + rett.x1) / 2, (rett.y0 + rett.y1) / 2)
+        if any(centro in v for v in verticali):
+            continue
         if pagina.rotation:
             rett = rett * pagina.rotation_matrix
         risultato.append(Parola(rett.x0, rett.y0, rett.x1, rett.y1, w[4]))

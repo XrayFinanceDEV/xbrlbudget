@@ -201,3 +201,20 @@ def test_prompt_dettaglio_nomina_la_macro():
         return {i: "altri" for i in schema["properties"]}
     c.classifica_dettagli([F("a", "Banca", lato="R")], {"a": c.Classe("sp16", None, "modello")}, chiama_json=fa)
     assert "voce: sp16" in visti[0]
+
+
+# --- Task 9: «X» solo per cio' che non e' un conto ----------------------------------------------------------------
+
+def test_contesto_dice_il_lato_dello_stato_patrimoniale():
+    # il modello vede «attivo»/«passivo», non solo la colonna fisica: un debito in dare fra le attivita' e' un conto
+    finto = Finto("sp06")
+    c.classifica_macro([F("a", "Fornitori esteri", lato="L"), F("b", "Clienti", lato="R"),
+                        F("u", "Banca", lato="U", lato_sp="A")], chiama_json=finto)
+    testo = finto.chiamate[0][0][0]["content"]
+    riga = {r.split(" | ")[0]: r for r in testo.splitlines() if " | " in r}
+    assert "attivo" in riga["a"] and "passivo" in riga["b"] and "attivo" in riga["u"]
+
+
+def test_prompt_riserva_x_alle_righe_che_non_sono_conti():
+    p = c.PROMPT_MACRO.lower()
+    assert "lato invertito" in p and "voce ammessa piu' vicina" in p

@@ -25,6 +25,17 @@ from importers.schema_etichette_parser import percorso as _percorso_etichetta
 _ZERO = Decimal(0)
 _RUOLI_VALORE = ("esercizio", "saldo")
 
+# Un'etichetta fatta delle sole parole del risultato («Utile», «Perdita», «Utile (perdita)», «Risultato netto») e' il
+# risultato anche senza «esercizio»: fra i costi a pareggio di un conto economico contrapposto non e' un costo
+_RISULTATO_NUDO = re.compile(r"^\W*(?:utile|perdita|risultato)(?:\W+(?:utile|perdita|netto|netta|del|di|periodo))*\W*$")
+
+
+def e_riga_del_risultato(etichetta: str) -> bool:
+    """La riga del risultato d'esercizio: «Utile (perdita) dell'esercizio», o un'etichetta di sole parole del
+    risultato («Utile»)."""
+    n = _norm(etichetta)
+    return bool(_RISULTATO_ESERCIZIO.search(n) or _RISULTATO_NUDO.match(n))
+
 # L'enumeratore di una voce di legge stampato come titolo: «C)», «II -», «1)», «5-bis)», «c)». Il maiuscolo A-E
 # vuole la parentesi e il romano la parentesi o il trattino, cosi' «A. Rossi s.r.l.» e «I.V.A.» non sono voci.
 _ENUMERATORE = re.compile(
@@ -848,7 +859,7 @@ def ancore(doc: Documento, colonna: int) -> list[Ancora]:
     # risultato d'esercizio: il totale chiuso del conto economico, poi una sua riga, poi quello dello stato
     # patrimoniale (che e' una foglia del passivo); legato alle foglie che lo compongono se e' un totale
     cand = [r for r in righe if cella(r) is not None and r.sezione in ("CE", "SP")
-            and _RISULTATO_ESERCIZIO.search(_norm(r.etichetta)) and not _totale_generale(r)]
+            and e_riga_del_risultato(r.etichetta) and not _totale_generale(r)]
     cand.sort(key=lambda r: (r.sezione != "CE", not r.totale))
     if cand:
         r = cand[0]

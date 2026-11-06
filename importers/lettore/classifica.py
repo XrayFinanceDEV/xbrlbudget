@@ -28,7 +28,10 @@ PROMPT_MACRO = (
     "Sei un ragioniere italiano. Per ogni riga di un bilancio indica la voce di legge (art. 2424 stato "
     "patrimoniale, art. 2425 conto economico) a cui appartiene il conto, scegliendo SOLO fra i codici ammessi per "
     "quella riga. Il lato (attivo/passivo, costo/ricavo) e' gia' deciso dalla colonna in cui l'importo e' "
-    "stampato: non contraddirlo. Rispondi «X» se la riga non e' un conto (intestazione, nota, riferimento). "
+    "stampato: non contraddirlo. Un conto il cui nome sembra dell'altro lato (un fornitore, un debito o un rateo "
+    "passivo con saldo dare fra le attivita'; un cliente o un credito con saldo avere fra le passivita') e' un saldo "
+    "a lato invertito: e' comunque un conto e va sulla voce ammessa piu' vicina (crediti o debiti verso altri, "
+    "ratei e risconti). Rispondi «X» solo se la riga non e' un conto (intestazione, nota, totale, riferimento). "
     "Non scrivere mai importi. Rispondi solo con un JSON {id: codice}.")
 PROMPT_DETTAGLIO = (
     "Sei un ragioniere italiano. Ogni riga e' gia' stata assegnata a una voce di bilancio: indica la sotto-voce "
@@ -83,6 +86,10 @@ def _contesto(f: Foglia) -> str:
     parti.append({"L": "colonna sinistra", "R": "colonna destra", "U": "colonna unica"}.get(f.lato, f.lato))
     if f.sezione:
         parti.append(f.sezione)
+    if f.sezione != "CE":
+        lato = {"L": "A", "R": "P"}.get(f.lato) or (f.lato_sp if f.lato == "U" else None)
+        if lato:
+            parti.append("attivo" if lato == "A" else "passivo")
     if f.verso_ce:
         parti.append(f.verso_ce)
     return "; ".join(parti)

@@ -1201,7 +1201,10 @@ il lettore gira sul solo PDF.
    passivo sposta il pareggio senza che nessuno la veda.
 3. **Classificazione in due passi** (`classifica.py`). Passo 1: foglia → macro-voce. Il modello risponde con JSON
    guidato in cui **ogni id ha il proprio enum**, ristretto alle macro ammesse da *quel* lato e verso, più «X»
-   («non è un conto»). Una risposta fuori enum, «X» o assente lascia la foglia **senza classe** (fonte `nessuna`);
+   («non è un conto»), riservata a ciò che non è un conto: il prompt dice che un saldo a lato invertito (un
+   fornitore in dare fra le attività) è comunque un conto e va sulla voce ammessa più vicina, e il contesto di ogni
+   riga di SP dice «attivo»/«passivo», non solo la colonna fisica. Una risposta fuori enum, «X» o assente lascia la
+   foglia **senza classe** (fonte `nessuna`);
    un blocco che il provider non ha saputo evadere dà fonte `errore` (diverso da «X»). Il blocco troncato o
    troppo lungo si dimezza e si riprova fino a una foglia. Le foglie con la stessa etichetta, antenato, lato,
    sezione e verso si chiedono una volta (cache). Passo 2: solo dentro le macro con un KPI sopra
@@ -1218,7 +1221,12 @@ il lettore gira sul solo PDF.
    costa una macro sbagliata senza nessun modello a contestarla; uno mancante costa solo una chiamata. Una macro che
    il percorso dà ma il lato non ammette si scarta.
 5. **Composizione** (`componi.py`): ogni foglia somma una volta sul suo dettaglio o sul secchio «altri»; gli
-   aggregati sono la somma dei dettagli (`percorsi.completa`); `sp13` viene dal CE. Dettagli in
+   aggregati sono la somma dei dettagli (`percorsi.completa`); `sp13` viene dal CE. La riga del risultato
+   (`foglie.e_riga_del_risultato`: «Utile (perdita) dell'esercizio», o un'etichetta di sole parole del risultato
+   come «Utile» fra i costi a pareggio) nel CE non è mai una foglia; nello SP lo è solo se **non** vale il risultato
+   del periodo (a meno del segno, entro la soglia di adozione): allora è l'utile di un esercizio prima non ancora
+   destinato e va in `sp12g` (utili/perdite portati a nuovo), dichiarato in `scelte`. *Se si ignora:* togliendo
+   quella riga il passivo perde un conto vero del patrimonio netto e il foglio non quadra. Dettagli in
    [REGOLE-IMPORT-04 §14](REGOLE-IMPORT-04-QUADRATURE.md).
 6. **Voti sui blocchi che non tornano** (F3-11). Se una macro ancorata (`sp06`, `ce08`, …) non rifà il proprio
    totale stampato oltre 1 €, **solo le sue foglie** si rivotano, tre volte a temperatura 0 con **tre presentazioni
@@ -1256,6 +1264,11 @@ metà lascia il documento non adottato e l'import prosegue sul percorso di §10.
   sul flusso di lettura;
 - lato su tipo ignoto dedotto dalle sezioni;
 - lettera D/A staccata prima dell'importo riconosciuta (marcatore per colonna, §11);
+- (Task 9) un riepilogo di righe di chiusura subito sotto il titolo di sezione («Totale Costi: / Perdita
+  d'Esercizio:» sotto «Conto Economico») non chiude la pagina, e «COSTI, SPESE E PERDITE / RICAVI E PROFITTI» è il
+  titolo del conto economico: le pagine dopo non restano più senza sezione;
+- (Task 9) le parole scritte in verticale a schermo (un timbro sul margine) si tolgono prima di formare le righe:
+  alte quanto tre righe contabili, le univano in una sola e ne perdevano gli importi;
 - catene di voci a uguale importo (eco, k=1): contate una volta;
 - titolo di lato che porta il proprio totale («STATO PATRIMONIALE ATTIVO 217.368,86») ancora, solo se attivo e
   passivo coincidono: un titolo con un numero senza quella prova resta un titolo.

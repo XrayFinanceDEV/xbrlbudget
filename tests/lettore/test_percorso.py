@@ -307,3 +307,10 @@ def test_guardia_verso_ce_ignoto_non_blocca_neanche_con_utile_stampato():
     # l'utile composto viene dal CE, non dallo stampato: con un verso ignoto e' libero, quindi non si sa
     foglie = [_sp("a", 100000, "L", "A"), _sp("p", 50000, "R", "P"), _ce("c", 10, None, "Varie")]
     assert percorso._foglie_non_in_pari(foglie, [Ancora("utile", D(0), "Utile", ())]) is None
+
+
+def test_guardia_utile_di_un_altro_esercizio_resta_nel_passivo():
+    # l'utile stampato nel passivo non e' quello del CE: resta un conto del passivo (come in `componi`), quadra
+    foglie = [_sp("a", 11500, "L", "A"), _sp("p", 9000, "R", "P"), _sp("u", 1500, "R", "P", "Utile d'esercizio"),
+              _ce("r", 1000, "ricavo", "Ricavi")]
+    assert percorso._foglie_non_in_pari(foglie) is None

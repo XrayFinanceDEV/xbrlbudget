@@ -579,3 +579,84 @@ def test_precedente_senza_data_si_dichiara(tmp_path):
                                           colonne=(480, 560), testata=testata))
     assert prof.colonne[1].fine == date(2025, 12, 31)
     assert any("«precedente» senza data stampata" in a and "31/12/2025" in a for a in prof.avvisi)
+
+
+# --- Task 2b (Fase 3): sezioni che toglievano le foglie dal conto -------------------------------------------------
+
+def _doc_sezioni(tmp_path, pagine):
+    return profilo_documento(_righe(tmp_path, pagine))
+
+
+def test_titolo_di_sezione_con_i_totali_sulla_stessa_riga(tmp_path):
+    # 1440, 302: «STATO PATRIMONIALE ATTIVO 217.368,86 ...» e «Conto economico 0,00» sono titoli anche con gli importi
+    pagina1 = [(50, 120, "STATO PATRIMONIALE ATTIVO"), (480, 120, "7.190.401,00"), (560, 120, "6.000,00")] + \
+        _tabella(_SCHEMA, y0=140)
+    pagina2 = [(50, 120, "3360 Conto economico"), (480, 120, "0,00"), (560, 120, "0,00")] + \
+        _tabella(["A) Valore della produzione", "B) Costi della produzione", "7) Servizi"], y0=140)
+    prof = _doc_sezioni(tmp_path, [pagina1, pagina2])
+    assert prof.sezioni == {1: "SP", 2: "CE"}
+
+
+def test_utile_da_conto_economico_nel_passivo_non_apre_il_ce(tmp_path):
+    voci = [(50, 120, "STATO PATRIMONIALE PASSIVO")] + _tabella(_SCHEMA, y0=140)
+    voci += [(50, 280, "UTILE DA CONTO ECONOMICO"), (480, 280, "5.000,00"), (560, 280, "4.000,00")]
+    prof = _doc_sezioni(tmp_path, [voci])
+    assert prof.sezioni == {1: "SP"}
+
+
+def test_attivo_e_passivo_con_i_totali_aprono_lo_sp_solo_prima_di_ogni_sezione(tmp_path):
+    # 1540: «1 ATTIVO 30.278.599» apre lo SP; in coda a un CE «ATTIVO 1.464.996,42» e' un riepilogo (229)
+    apre = [[(50, 120, "1 ATTIVO"), (480, 120, "30.278.599,00"), (560, 120, "21.547.525,00")] +
+            _tabella(_SCHEMA, y0=140)]
+    assert _doc_sezioni(tmp_path, apre).sezioni == {1: "SP"}
+    riepilogo = [[(50, 120, "CONTO ECONOMICO")] + _tabella(["A) Valore della produzione", "7) Servizi"], y0=140) +
+                 [(50, 220, "ATTIVO"), (480, 220, "1.464.996,42"), (560, 220, "1.000,00")]]
+    assert _doc_sezioni(tmp_path, riepilogo).sezioni == {1: "CE"}
+
+
+def test_utile_dell_esercizio_dentro_il_patrimonio_netto_non_chiude_la_pagina(tmp_path):
+    # 381: l'utile sta nel PN e la pagina prosegue con TFR e debiti; la pagina dopo senza titolo e' ancora SP
+    pagina1 = [(50, 120, "Stato patrimoniale passivo"), (480, 120, "79.802,13")] + _tabella(
+        ["A) Patrimonio netto", "A.IX) Utile (Perdita) dell'esercizio", "C) Trattamento di fine rapporto",
+         "D) Debiti"], y0=140)
+    pagina2 = _tabella(["Esigibili entro l'esercizio successivo", "D.4) Debiti verso banche"], y0=140)
+    pagina3 = [(50, 120, "Conto economico")] + _tabella(["A) Valore della produzione"], y0=140)
+    assert _doc_sezioni(tmp_path, [pagina1, pagina2, pagina3]).sezioni == {1: "SP", 2: "SP", 3: "CE"}
+
+
+def test_totale_costi_della_produzione_non_chiude_il_conto_economico(tmp_path):
+    # 1553: «Totale Costi della produzione (B)» e' un sottototale di legge, il CE continua nella pagina dopo
+    pagina1 = [(50, 120, "CONTO ECONOMICO")] + _tabella(
+        ["A) Valore della produzione", "B) Costi della produzione", "7) Per servizi",
+         "Totale Costi della produzione (B)", "Differenza tra Valore e Costi della produzione (A - B)"], y0=140)
+    pagina2 = _tabella(["C) Proventi e oneri finanziari", "17) Interessi e altri oneri finanziari"], y0=140)
+    assert _doc_sezioni(tmp_path, [pagina1, pagina2]).sezioni == {1: "CE", 2: "CE"}
+
+
+def test_totali_dei_conti_patrimoniali_ed_economici_decidono_le_sezioni(tmp_path):
+    # 1561: nessun titolo; «TOTALE CONTI PATRIMONIALI» chiude lo SP a meta' pagina, «TOTALE CONTI ECONOMICI» il CE
+    voci = _tabella([f"1300{k} Conto patrimoniale" for k in range(4)], y0=140)
+    voci += [(50, 200, "TOTALE CONTI PATRIMONIALI PERDITA D'ESERCIZIO"), (480, 200, "38.122,74")]
+    voci += _tabella([f"7100{k} Conto economico {k}" for k in range(4)], y0=220)
+    voci += [(50, 280, "TOTALE CONTI ECONOMICI PERDITA D'ESERCIZIO"), (480, 280, "38.122,74")]
+    prof = _doc_sezioni(tmp_path, [voci])
+    assert prof.sezioni == {1: "SP+CE"}
+    sezioni = prof.sezioni_righe
+    per_y = sorted(sezioni.items(), key=lambda kv: kv[0][1])
+    assert [s for _, s in per_y][:5] == ["SP"] * 5 and [s for _, s in per_y][5:] == ["CE"] * (len(per_y) - 5)
+
+
+def test_perdite_e_profitti_ripetuto_in_testa_a_ogni_pagina_e_il_conto_economico(tmp_path):
+    # 1566: il titolo si ripete come un margine ma e' un titolo di sezione
+    def pagina(k):
+        return [(200, 30, "PERDITE E PROFITTI al 30/09/2026")] + _tabella(
+            [f"-Vendite {k}{j}" for j in range(6)], y0=140)
+    prof = _doc_sezioni(tmp_path, [pagina(1), pagina(2), pagina(3)])
+    assert prof.sezioni == {1: "CE", 2: "CE", 3: "CE"}
+
+
+def test_frase_del_risultato_e_quella_dei_totali_di_chiusura():
+    # il lessico C12 resta uno: la frase del risultato d'esercizio di `_chiude` sta dentro quella copiata
+    from importers.lettore._ereditati import _TOTALE_DI_CHIUSURA
+    from importers.lettore.profilo import _RISULTATO_DI_CHIUSURA
+    assert _RISULTATO_DI_CHIUSURA.pattern in _TOTALE_DI_CHIUSURA.pattern

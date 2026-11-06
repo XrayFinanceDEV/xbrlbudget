@@ -11,7 +11,7 @@ risolto dalla tavola; il lato e il verso dei conti vengono dalla colonna e dalla
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from decimal import Decimal
 
 from importers.lettore import tavola
@@ -146,12 +146,13 @@ def _tipo(gettone: str) -> int:
     return 0 if gettone.isupper() else 3
 
 
-def _scorri(righe: list[Riga]) -> dict[str, _Posizione]:
+def _scorri(righe: list[Riga], contrapposto: bool = True) -> dict[str, _Posizione]:
     """Per ogni riga: il lato dello stato patrimoniale (L/R dal lato fisico; su una colonna unica dal titolo
     «attivo»/«passivo», dal totale dell'attivo, o dalla lettera maiuscola che riparte da A dopo la B), l'outline di
     legge corrente (l'ultimo enumeratore visto a ogni livello, per lato e sezione) e la scadenza dichiarata. Le righe
     prima della prima prova sono dell'attivo solo se la prova e' un passaggio al passivo; altrimenti restano senza
-    lato. L'outline vale da solo: il percorso degli antenati del lettore non sempre porta il livello piu' alto."""
+    lato. Due tabelle affiancate che non sono contrapposte (1426) non hanno L = attivo e R = passivo: ogni tabella e'
+    una colonna unica. L'outline vale da solo: il percorso degli antenati del lettore non sempre porta il livello piu' alto."""
     out: dict[str, _Posizione] = {}
     stato: str | None = None
     prima_della_prova: list[str] = []
@@ -175,7 +176,8 @@ def _scorri(righe: list[Riga]) -> dict[str, _Posizione]:
         chiave = (r.sezione, r.lato)
         livelli = outline.setdefault(chiave, [None] * 4)
         gettoni = gettoni_di_legge(r.etichetta, r.codice)
-        if r.sezione == "SP" and r.lato == "U":
+        unico = r.lato == "U" or not contrapposto
+        if r.sezione == "SP" and unico:
             titolo = _lato_del_titolo(r, gettoni)
             if titolo == "A" and stato != "A":
                 stato = "A"
@@ -198,7 +200,7 @@ def _scorri(righe: list[Riga]) -> dict[str, _Posizione]:
             scadenze[chiave] = s_riga
         lato_sp = None
         if r.sezione == "SP":
-            lato_sp = {"L": "A", "R": "P"}.get(r.lato, stato)
+            lato_sp = {"L": "A", "R": "P"}.get(r.lato, stato) if contrapposto else stato
         out[r.id] = _Posizione(lato_sp, tuple(g for g in livelli if g), scadenze.get(chiave))
         if r.totale and not gettoni and not _totale_generale(r):
             # un totale chiuso senza numerazione («Totale crediti») chiude la voce che porta il suo nome: sotto di lui
@@ -209,7 +211,7 @@ def _scorri(righe: list[Riga]) -> dict[str, _Posizione]:
             for g in base[:-1]:
                 livelli[_tipo(g)] = g
             scadenze[chiave] = None
-        if r.sezione == "SP" and r.lato == "U":
+        if r.sezione == "SP" and unico:
             if stato is None:
                 prima_della_prova.append(r.id)
             if _totale_generale(r) == "attivo":
@@ -432,10 +434,31 @@ def _e_controllo(r: Riga) -> bool:
     return r.sezione == "CE" and bool(_CONTROLLO.search(n) or _risultato(r))
 
 
+def _e_saldo(doc: Documento, r: Riga, colonna: int) -> bool:
+    """La cella sta in una colonna di saldi (dare - avere, il testo della testata) di una tabella a lato unico, e il
+    documento stampa dei saldi negativi: un saldo che non e' mai negativo (1561: importi assoluti, la lettera D/A
+    sta nell'etichetta) non dice il lato dal segno."""
+    return (r.lato == "U" and any(c.indice == colonna and c.ruolo == "saldo" for c in doc.colonne)
+            and bool(doc.profilo.negativi & {"meno", "parentesi", "meno-finale", "meno-staccato", "meno-colonna"}))
+
+
+def _lato_dal_saldo(r: Riga, lato_sp: str | None, verso: str | None, v: Decimal) -> tuple[str | None, str | None, Decimal]:
+    """In una colonna di saldi il segno e' la colonna: il dare (positivo) e' attivo o costo, l'avere (negativo)
+    passivo o ricavo. Un lato o un verso gia' decisi dal documento (titolo, percorso di legge) restano; l'importo
+    arriva col segno normale del suo lato. Senza lato ne' verso lo decide il segno (1566)."""
+    if r.sezione == "SP":
+        lato_sp = lato_sp or ("A" if v > 0 else "P")
+        return lato_sp, verso, v if lato_sp == "A" else -v
+    if r.sezione == "CE":
+        verso = verso or ("costo" if v > 0 else "ricavo")
+        return lato_sp, verso, v if verso == "costo" else -v
+    return lato_sp, verso, v
+
+
 def foglie_contabili(doc: Documento, colonna: int) -> list[Foglia]:
     righe = doc.righe_del_prospetto()
     per_id = {r.id: r for r in righe}
-    pos = _scorri(righe)
+    pos = _scorri(righe, doc.contrapposto)
     perc = _Percorsi(righe, pos)
     out: list[Foglia] = []
     for r in righe:
@@ -452,9 +475,26 @@ def foglie_contabili(doc: Documento, colonna: int) -> list[Foglia]:
         v = _importo(doc, r, colonna, per_id, lato_sp, verso)
         if v is None or v == _ZERO:
             continue
+        if _e_saldo(doc, r, col):
+            lato_sp, verso, v = _lato_dal_saldo(r, lato_sp, verso, v)
         out.append(Foglia(r.id, r.etichetta, r.codice, r.lato, r.sezione, v, p, _antenati_verificati(r, per_id),
                           verso, lato_sp))
-    return out
+    return _costi_col_segno_normale(out)
+
+
+_MIN_COSTI_NEGATIVI = 5
+_QUOTA_COSTI_NEGATIVI = 0.7
+
+
+def _costi_col_segno_normale(foglie: list[Foglia]) -> list[Foglia]:
+    """Un conto economico che stampa i costi col meno («(1.558.295)» sul totale servizi, 1470) e' una convenzione del
+    documento, non uno storno per ogni conto: se almeno il 70% dei costi (cinque o piu') e' negativo, i costi
+    arrivano col segno normale, positivo (F3-1). Una lettura giusta del segno: il valore stampato resta nella cella."""
+    costi = [f for f in foglie if f.sezione == "CE" and f.verso_ce == "costo"]
+    negativi = sum(1 for f in costi if f.importo < _ZERO)
+    if len(costi) < _MIN_COSTI_NEGATIVI or negativi < _QUOTA_COSTI_NEGATIVI * len(costi):
+        return foglie
+    return [replace(f, importo=-f.importo) if f.sezione == "CE" and f.verso_ce == "costo" else f for f in foglie]
 
 
 # --------------------------------------------------------------------------------------
@@ -578,7 +618,7 @@ def _macro_del_totale(t: Riga, righe: list[Riga], perc: _Percorsi) -> tuple[str 
 def ancore(doc: Documento, colonna: int) -> list[Ancora]:
     righe = doc.righe_del_prospetto()
     per_id = {r.id: r for r in righe}
-    pos = _scorri(righe)
+    pos = _scorri(righe, doc.contrapposto)
     perc = _Percorsi(righe, pos)
     coppie = getattr(doc.profilo, "coppie", {})
     tutte = foglie_contabili(doc, colonna)

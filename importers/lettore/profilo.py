@@ -89,7 +89,7 @@ class Profilo:
     tipo_perche: str        # che cosa l'ha deciso (geometria, parole, indizio del classificatore)
     colonne: list[Colonna]  # da colonne_documento, con lato assegnato
     confine: float | None   # x del confine fra i lati; None = una sezione
-    negativi: frozenset[str]    # "meno" (-123), "parentesi" ((123)), "meno-finale" (123-), "marcatore" (123 D/A), "colonne-dare-avere"
+    negativi: frozenset[str]    # "meno" (-123), "parentesi" ((123)), "meno-finale" (123-), "meno-staccato" (- 123), "meno-colonna" (trattini allineati), "marcatore" (123 D/A), "colonne-dare-avere"
     decimali: dict[int, bool | None]   # per colonna: True = stampa i centesimi, False = interi, None = non visto
     codici: list[FormaCodice]          # le forme di codice del piano dei conti, piu' frequenti prima
     sezioni: dict[int, str]            # pagina -> "SP" | "CE" | "SP+CE" | "" (sconosciuta)
@@ -109,6 +109,11 @@ class Profilo:
     # Q1 (proprietario, 2026-11-05): colonna dei totali -> colonna dei parziali accanto, sullo stesso lato: i conti
     # stanno nei parziali (al centesimo), la voce che li somma nei totali (all'unita'), mai sulla stessa riga
     coppie: dict[int, int] = field(default_factory=dict)
+    # Due tabelle affiancate (confine fisico senza sezioni contrapposte, 1426: lo stato patrimoniale a sinistra, il
+    # conto economico a destra): la sezione di ogni lato ha i suoi titoli, chiave (pagina, y, "L"|"R")
+    sezioni_lati: dict[tuple[int, float, str], str] = field(default_factory=dict)
+    # (pagina, x destra) dei trattini che fanno da colonna dei segni meno (1426), vedi `meno_staccato`
+    segni_colonna: frozenset[tuple[int, int]] = frozenset()
 
 
 @dataclass(frozen=True)
@@ -238,22 +243,62 @@ def _scartata(r: RigaFisica, altezza: float, colonne: list[Colonna], ripetute: s
         return True     # «Generato automaticamente - Conforme alla tassonomia»: il trattino cade in colonna
     if _ha_celle(r, colonne):
         return False
-    if _nel_margine(r, altezza) and chiave_ripetuta(testo) in ripetute and not intestazione(testo):
+    if _nel_margine(r, altezza) and chiave_ripetuta(testo) in ripetute and not intestazione(testo) \
+            and not _PERDITE_E_PROFITTI.match(testo.strip()):
         return True
     return bool(PIEDE.search(_norm(testo)) or re.fullmatch(r"\d{1,3}", testo.strip())
                 or _e_riga_testata(r))
+
+
+_CODICE_IN_TESTA = re.compile(r"^[\d.]+$")
+
+
+def _titolo_con_importi(r: RigaFisica, colonne: list[Colonna]) -> str | None:
+    """Un titolo di sezione che stampa i totali sulla stessa riga («STATO PATRIMONIALE ATTIVO 217.368,86 ...»,
+    «Conto economico 0,00»): le parole fuori colonna cominciano col titolo, dopo l'eventuale numero d'ordine, e
+    sono poche. «UTILE DA CONTO ECONOMICO 5.000,00» nel passivo comincia altrimenti e non apre il CE."""
+    parole = [p.testo for p in r.parole if _in_colonna(p, colonne) is None]
+    while parole and _CODICE_IN_TESTA.fullmatch(parole[0]):
+        parole = parole[1:]
+    compatto = re.sub(r"\s+", "", " ".join(parole).upper())
+    if len(compatto) > 40:
+        return None
+    if compatto.startswith(("STATOPATRIMONIALE", "SITUAZIONEPATRIMONIALE")):
+        return "SP"
+    if compatto.startswith(("CONTOECONOMICO", "SITUAZIONEECONOMICA")):
+        return "CE"
+    return None
+
+
+def _titolo_debole(r: RigaFisica, colonne: list[Colonna]) -> str | None:
+    """«1 ATTIVO», «2 PASSIVO» con i totali accanto (1540): titolo dello stato patrimoniale solo finche' il
+    documento non ha aperto nessuna sezione. Piu' avanti «ATTIVO 1.464.996,42» e' un riepilogo in coda alle
+    contrapposte (229), non un titolo."""
+    parole = [p.testo for p in r.parole if _in_colonna(p, colonne) is None]
+    while parole and _CODICE_IN_TESTA.fullmatch(parole[0]):
+        parole = parole[1:]
+    if _ha_celle(r, colonne) and intestazione(" ".join(parole)) in (["Attivo"], ["Passivo"]):
+        return "SP"
+    return None
+
+
+# Il titolo del conto economico di certi gestionali, ripetuto in testa a ogni pagina come un'intestazione di sezione:
+# non e' un margine da scartare (1566)
+_PERDITE_E_PROFITTI = re.compile(r"perdite\s+e\s+profitti\b", re.I)
 
 
 def _titolo_sezione(r: RigaFisica, colonne: list[Colonna]) -> str | None:
     """La sezione che una riga-titolo apre (`detail_enrichment.collect_source_rows`); solo una riga senza
     importi: «UTILE DA CONTO ECONOMICO 5.000,00» nel passivo non apre il CE."""
     if _ha_celle(r, colonne):
-        return None
+        return _titolo_con_importi(r, colonne)
     compatto = re.sub(r"\s+", "", _testo(r).upper())
     if "STATOPATRIMONIALE" in compatto or "SITUAZIONEPATRIMONIALE" in compatto:
         return "SP"
-    if "CONTOECONOMICO" in compatto or "SITUAZIONEECONOMICA" in compatto:
-        return "CE"
+    if "CONTOECONOMICO" in compatto or "SITUAZIONEECONOMICA" in compatto or _PERDITE_E_PROFITTI.match(_testo(r)):
+        return "CE"     # «PERDITE E PROFITTI al 30/09/2026»: il conto economico di certi gestionali (1566)
+    if compatto.startswith(("CE-", "SP-")) and len(compatto) < 40:
+        return compatto[:2]     # «CE - Schema Ridotto» in testa a una delle due tabelle affiancate (1426)
     if "CONTINONASSEGNATI" in compatto or compatto.startswith("NOTAINTEGRATIVA"):
         return ""
     return None
@@ -263,6 +308,72 @@ def _tuple(righe: list[RigaFisica]) -> list[list[tuple]]:
     return [[(p.x0, p.y0, p.x1, p.y1, p.testo) for p in r.parole] for r in righe]
 
 
+# Il risultato d'esercizio come riga di chiusura: la stessa frase di `_ereditati._TOTALE_DI_CHIUSURA`
+# (test di parita'), qui separata dai totali.
+_RISULTATO_DI_CHIUSURA = re.compile(r"(?:UTILE|PERDITA)\S*\s+(?:D\W?\s*)?ESERCIZIO")
+
+
+_SUBTOTALE_DI_LEGGE = re.compile(r"TOTALE\s+(?:COSTI|VALORE|RICAVI)\b.*PRODUZIONE")
+
+
+def _chiude(grezze: list[list[tuple]]) -> bool:
+    """La pagina chiude la sua sezione (`chiude_sezione`), con due eccezioni. «Totale Costi della produzione (B)»
+    e' un sottototale dello schema di legge, non la fine del conto economico (1553: il CE continua nella pagina
+    dopo). Il risultato d'esercizio da solo chiude soltanto se e' fra le ultime due righe con importi: in uno
+    stato patrimoniale «Utile (Perdita) dell'esercizio» sta dentro il patrimonio netto e la pagina prosegue
+    con TFR e debiti (381). Un totale o un pareggio chiudono dove stanno."""
+    if not chiude_sezione(grezze):
+        return False
+
+    def testo(line):
+        return " ".join(str(w[4]) for w in line).upper()
+    righe = [line for line in grezze if not _SUBTOTALE_DI_LEGGE.search(testo(line))]
+    senza = [line for line in righe if not _RISULTATO_DI_CHIUSURA.search(testo(line))]
+    if chiude_sezione(senza):
+        return True
+    con_importi = [line for line in righe if any(leggi_importo(str(w[4])) is not None for w in line)]
+    return chiude_sezione(con_importi[-2:])
+
+
+_TOTALE_CONTI = re.compile(r"TOTALE\s+(?:DEI\s+)?CONTI\s+(PATRIMONIAL|ECONOMIC)")
+
+
+def _sezioni_dai_totali_di_conti(pagine: list[list[RigaFisica]], per_pagina: list[list[str]]) -> None:
+    """Un bilancio di verifica senza titoli di sezione ma con «TOTALE CONTI PATRIMONIALI» e «TOTALE CONTI
+    ECONOMICI» (1561, ordine «Conti Patrimoniali / Economici»): ogni riga ancora senza sezione e' della sezione
+    del primo di quei totali che la segue, anche a meta' pagina. Sono righe di chiusura, come i totali di
+    attivita'/passivita' che decidono la pagina in `sezione_della_chiusura`; senza un totale dopo, resta vuota."""
+    da_assegnare = []
+    for n, righe in enumerate(pagine):
+        for k, r in enumerate(righe):
+            if per_pagina[n][k] == "":
+                da_assegnare.append((n, k))
+            m = _TOTALE_CONTI.search(re.sub(r"\s+", " ", _testo(r).upper()))
+            if m:
+                sezione = "SP" if m.group(1) == "PATRIMONIAL" else "CE"
+                for i, j in da_assegnare:
+                    per_pagina[i][j] = sezione
+                da_assegnare = []
+
+
+def _sezioni_dei_lati(pagine: list[list[RigaFisica]], colonne: list[Colonna],
+                      confine: float) -> dict[tuple[int, float, str], str]:
+    """Due tabelle affiancate (1426: lo stato patrimoniale a sinistra, «CE - Schema Ridotto» a destra): in una
+    pagina dove ogni meta' stampa il suo titolo, ciascuna ha la sua sezione. Con un titolo in una meta' sola il
+    titolo vale per tutta la riga, come per un documento a una tabella (1430: i costi a sinistra e i ricavi a
+    destra del conto economico)."""
+    def meta(r: RigaFisica, lato: str) -> RigaFisica:
+        return RigaFisica(r.pagina, r.y, [p for p in r.parole if ((p.x0 + p.x1) / 2 < confine) == (lato == "L")])
+
+    per_lato = {lato: _sezioni([[meta(r, lato) for r in rr] for rr in pagine], colonne, []) for lato in ("L", "R")}
+    out: dict[tuple[int, float, str], str] = {}
+    for n, rr in enumerate(pagine):
+        if all(any(_titolo_sezione(meta(r, lato), colonne) is not None for r in rr) for lato in ("L", "R")):
+            for lato in ("L", "R"):
+                out.update({(r.pagina, r.y, lato): s for r, s in zip(rr, per_lato[lato][n])})
+    return out
+
+
 def _sezioni(pagine: list[list[RigaFisica]], colonne: list[Colonna], avvisi: list[str]) -> list[list[str]]:
     """Per pagina e riga, la sezione: l'ultimo titolo sopra la riga; sopra il primo titolo, la sezione della
     pagina prima finche' quella non si e' chiusa col suo totale; una pagina senza titoli che chiude con un
@@ -270,7 +381,13 @@ def _sezioni(pagine: list[list[RigaFisica]], colonne: list[Colonna], avvisi: lis
     ultima, chiusa = "", False
     out = []
     for righe in pagine:
-        titoli = [(r.y, s) for r in righe if (s := _titolo_sezione(r, colonne)) is not None]
+        titoli = []
+        for r in righe:
+            s = _titolo_sezione(r, colonne)
+            if s is None and not ultima:
+                s = _titolo_debole(r, colonne)
+            if s is not None:
+                titoli.append((r.y, s))
         grezze = _tuple(righe)
         chiusura = _SEZIONI.get(sezione_della_chiusura(grezze) or "")
         if ultima and not chiusa and (titoli or chiusura in (None, ultima)):
@@ -292,7 +409,8 @@ def _sezioni(pagine: list[list[RigaFisica]], colonne: list[Colonna], avvisi: lis
                           f"sua sezione e qui non c'e' un titolo)")
         out.append(sezioni)
         ultima = titoli[-1][1] if titoli else pagina
-        chiusa = chiude_sezione(grezze)
+        chiusa = _chiude(grezze)
+    _sezioni_dai_totali_di_conti(pagine, out)
     return out
 
 
@@ -721,12 +839,58 @@ def _parole_del_tipo(righe: list[RigaFisica], colonne: list[Colonna]) -> tuple[s
     return None, voci, quota, perche
 
 
-def _negativi(righe: list[RigaFisica], colonne: list[Colonna], intere: frozenset[int]) -> frozenset[str]:
+_TRATTINI = ("-", "\u2013")
+# Il segno meno staccato dal suo numero di un solo spazio: misurato 2,2-2,5 pt contro i 33 pt e oltre di un
+# separatore di descrizione in colonna (1426).
+_STACCO_SEGNO = 3.0
+
+
+def meno_staccato(parole: list[Parola], i: int, trovati: list, pagina: int = 0,
+                  segni_colonna: frozenset[tuple[int, int]] = frozenset()) -> bool:
+    """La parola `i` e' un trattino che fa da segno meno all'importo che la segue, e che sta in una colonna mentre il
+    trattino no. Due forme: a un soffio dall'importo («Utile (Perdita) dell'esercizio - 184.019», 1553; due trattini
+    di fila, «merci - - 30.517», 394, sono una convenzione che non si legge dal solo segno), oppure in una colonna di
+    segni, trattini allineati sulla stessa x in tre o piu' righe della pagina («Passivo B) IMMOBILIZZAZIONI - FONDI
+    -   1.043.969», 1426: a 33 pt dall'importo, ma sempre alla stessa x)."""
+    if i + 1 >= len(parole) or parole[i].testo not in _TRATTINI or trovati[i] is not None or trovati[i + 1] is None:
+        return False
+    imp = leggi_importo(parole[i + 1].testo)
+    if imp is None or imp.forma == "zero" or imp.valore <= 0:
+        return False
+    if (pagina, round(parole[i].x1)) in segni_colonna:
+        return True
+    if parole[i + 1].x0 - parole[i].x1 > _STACCO_SEGNO:
+        return False
+    return not (i > 0 and parole[i - 1].testo in _TRATTINI)
+
+
+def _segni_in_colonna(righe: list[RigaFisica], colonne: list[Colonna],
+                      intere: frozenset[int]) -> frozenset[tuple[int, int]]:
+    """(pagina, x destra) dei trattini che stanno in colonna di segni: tre o piu' trattini fuori colonna, ciascuno
+    subito prima di un importo in colonna ma a piu' di un soffio da lui, sulla stessa x."""
+    viste: Counter[tuple[int, int]] = Counter()
+    for r in righe:
+        trovati = [_in_colonna(p, colonne, intere) for p in r.parole]
+        for i, p in enumerate(r.parole[:-1]):
+            if p.testo in _TRATTINI and trovati[i] is None and trovati[i + 1] is not None \
+                    and r.parole[i + 1].x0 - p.x1 > _STACCO_SEGNO:
+                imp = leggi_importo(r.parole[i + 1].testo)
+                if imp is not None and imp.forma != "zero" and imp.valore > 0:
+                    viste[(r.pagina, round(p.x1))] += 1
+    return frozenset(k for k, n in viste.items() if n >= 3)
+
+
+def _negativi(righe: list[RigaFisica], colonne: list[Colonna], intere: frozenset[int],
+              segni_colonna: frozenset[tuple[int, int]] = frozenset()) -> frozenset[str]:
     """Le forme del negativo viste almeno due volte sulle celle; le colonne di differenza e di percentuale
     non contano (un negativo li' e' una variazione)."""
     viste: Counter[str] = Counter()
     for r in righe:
+        trovati = [_in_colonna(p, colonne, intere) for p in r.parole]
         for k, p in enumerate(r.parole):
+            if meno_staccato(r.parole, k, trovati, r.pagina, segni_colonna) and \
+                    trovati[k + 1][1].ruolo not in _RUOLI_ANALISI:
+                viste["meno-colonna" if (r.pagina, round(r.parole[k].x1)) in segni_colonna else "meno-staccato"] += 1
             trovato = _in_colonna(p, colonne, intere)
             if trovato is None or trovato[1].ruolo in _RUOLI_ANALISI or _rimando_di_nota(r.parole, k):
                 continue
@@ -742,6 +906,10 @@ def _negativi(righe: list[RigaFisica], colonne: list[Colonna], intere: frozenset
             elif testo.rstrip(")").endswith("-"):
                 viste["meno-finale"] += 1
     forme = {f for f, n in viste.items() if n >= _MIN_NEGATIVI}
+    if forme - {"meno-staccato", "meno-colonna", "marcatore"}:
+        # un documento che stampa gia' i negativi con una forma sua (394: «-235.559») non ne ha una seconda: il
+        # trattino a un soffio di un importo li' non e' un segno (dava +30.517 nella somma che chiude)
+        forme.discard("meno-staccato")
     ruoli = {c.ruolo for c in colonne}
     if {"dare", "avere"} <= ruoli:
         forme.add("colonne-dare-avere")
@@ -894,7 +1062,10 @@ def profilo_documento(righe: list[RigaFisica], *, altezze: dict[int, float] | No
 
     per_riga = _sezioni(pagine, colonne, avvisi)
     sezioni_righe = {(r.pagina, r.y): s for rr, ss in zip(pagine, per_riga) for r, s in zip(rr, ss)}
-    return Profilo(tipo, tipo_perche, colonne, confine, _negativi(prospetto, colonne, intere), decimali,
+    sezioni_lati = _sezioni_dei_lati(pagine, colonne, confine) if confine is not None and not contrapposto else {}
+    segni_colonna = _segni_in_colonna(prospetto, colonne, intere)
+    return Profilo(tipo, tipo_perche, colonne, confine, _negativi(prospetto, colonne, intere, segni_colonna), decimali,
                    _forme(_candidati(prospetto, colonne, confine)), _sezioni_pagina(pagine, per_riga),
                    frozenset(margini), avvisi, contrapposto, parti_pagina, bande, tabelle, scartate, sezioni_righe,
-                   parti_righe, _colonne_a_marcatore(prospetto, colonne, intere), _coppie(prospetto, colonne, intere))
+                   parti_righe, _colonne_a_marcatore(prospetto, colonne, intere), _coppie(prospetto, colonne, intere),
+                   sezioni_lati, segni_colonna)

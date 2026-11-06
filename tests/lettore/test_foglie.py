@@ -386,3 +386,69 @@ def test_lettera_che_non_divide_la_voce_si_toglie_e_la_base_deve_valere(tmp_path
     assert _percorso(r, _Posizione(None, ("A", "1", "a"), None))[0] == "CE.A.1"
     r2 = _riga_finta("y", "a) x")
     assert _percorso(r2, _Posizione("A", ("C", "1", "a"), None)) == (None, None)         # la base non vale: None
+
+
+# --- Task 2b (Fase 3): lato dal saldo, costi stampati col meno, due tabelle affiancate -----------------------------
+
+def test_saldo_con_segno_decide_il_lato_senza_titoli(tmp_path):
+    # 1566: colonna «Saldo», nessun titolo di lato: il dare (positivo) e' attivo, l'avere (negativo) passivo
+    voci = [(50, 100, "STATO PATRIMONIALE al 30/09/2026"), (500 - 28, 120, "Saldo")]
+    dati = [("Banca", "1.000,00"), ("Cassa", "50,00"), ("Fornitori", "700,00-"), ("Capitale", "350,00-"),
+            ("Clienti", "200,00"), ("Riserve", "200,00-")]
+    for k, (e, v) in enumerate(dati):
+        voci += [(50, 140 + k * 14, e), (500, 140 + k * 14, v)]
+    doc = _doc(tmp_path, voci)
+    assert [c.ruolo for c in doc.colonne] == ["saldo"]
+    foglie = _per_etichetta(foglie_contabili(doc, colonne_utili(doc)[0]))
+    assert {foglie[e].lato_sp for e in ("Banca", "Cassa", "Clienti")} == {"A"}
+    assert {foglie[e].lato_sp for e in ("Fornitori", "Capitale", "Riserve")} == {"P"}
+    assert foglie["Fornitori"].importo == Decimal("700.00")
+
+
+def test_saldo_senza_negativi_non_dice_il_lato(tmp_path):
+    # 1561: importi assoluti (la lettera D/A e' nell'etichetta): tutto positivo non vuol dire «tutto attivo»
+    voci = [(50, 100, "STATO PATRIMONIALE"), (500 - 28, 120, "Saldo")]
+    for k, e in enumerate(("Banca", "Cassa", "Fornitori", "Capitale")):
+        voci += [(50, 140 + k * 14, e), (500, 140 + k * 14, "1.000,00")]
+    doc = _doc(tmp_path, voci)
+    assert {f.lato_sp for f in foglie_contabili(doc, colonne_utili(doc)[0])} == {None}
+
+
+def test_costi_stampati_col_meno_arrivano_positivi(tmp_path):
+    # 1470: tutto il conto economico stampa i costi tra parentesi: e' la convenzione del documento (F3-1: segno normale)
+    voci = [(50, 100, "CONTO ECONOMICO")]
+    righe = [("A) Valore della produzione", None), ("1) Ricavi delle vendite e delle prestazioni", "9.000,00")]
+    righe += [("B) Costi della produzione", None)] + [(f"7) Per servizi {k}", f"({(k + 1) * 100},00)".replace(
+        "(100,00)", "(1.100,00)")) for k in range(6)]
+    for k, (e, v) in enumerate(righe):
+        voci.append((50, 140 + k * 14, e))
+        if v:
+            voci.append((480, 140 + k * 14, v))
+            voci.append((560, 140 + k * 14, v))
+    doc = _doc(tmp_path, voci)
+    costi = [f for f in foglie_contabili(doc, colonne_utili(doc)[0]) if f.etichetta.startswith("7) Per servizi")]
+    assert costi and all(f.importo > 0 for f in costi)
+
+
+def test_due_tabelle_affiancate_non_hanno_l_attivo_a_sinistra(tmp_path):
+    # 1426: a sinistra uno stato patrimoniale con attivo e passivo uno sotto l'altro, a destra il conto economico:
+    # L non e' l'attivo e R non e' il passivo; il lato viene dai titoli come su una colonna unica
+    sinistra = [("STATO PATRIMONIALE ATTIVO", "800,00"), ("B) Immobilizzazioni", "300,00"),
+                ("I - Immobilizzazioni immateriali", "300,00"), ("C) Attivo circolante", "500,00"),
+                ("I - Rimanenze", "500,00"), ("STATO PATRIMONIALE PASSIVO", "800,00"),
+                ("A) Patrimonio netto", "600,00"), ("I - Capitale", "600,00"), ("D) Debiti", "200,00"),
+                ("7) Debiti verso fornitori", "200,00")]
+    destra = [("A) Valore della produzione", "900,00"), ("1) Ricavi delle vendite", "900,00"),
+              ("B) Costi della produzione", "80,00"), ("6) Per materie prime", "50,00"), ("7) Per servizi", "30,00"),
+              ("9) Per il personale", "10,00"), ("Differenza A - B", "820,00"), ("17) Interessi", "5,00"),
+              ("20) Imposte", "3,00"), ("21) Utile dell'esercizio", "812,00")]
+    voci = [(40, 100, "STATO PATRIMONIALE - Schema"), (320, 100, "CE - Schema Ridotto")]
+    for k, ((a, va), (b, vb)) in enumerate(zip(sinistra, destra)):
+        y = 140 + k * 14
+        voci += [(40, y, a), (270, y, va), (320, y, b), (560, y, vb)]
+    doc = _doc(tmp_path, voci)
+    assert doc.profilo.confine is not None and not doc.contrapposto
+    foglie = _per_etichetta(foglie_contabili(doc, 0))
+    assert foglie["I - Immobilizzazioni immateriali"].lato_sp == "A" and foglie["I - Rimanenze"].lato_sp == "A"
+    assert foglie["I - Capitale"].lato_sp == "P" and foglie["7) Debiti verso fornitori"].lato_sp == "P"
+    assert foglie["6) Per materie prime"].sezione == "CE" and foglie["6) Per materie prime"].lato_sp is None

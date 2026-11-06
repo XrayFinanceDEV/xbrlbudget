@@ -861,3 +861,75 @@ def test_intero_nudo_dopo_un_marcatore_staccato_non_toglie_il_segno(tmp_path, x,
     cella = riga.celle[colonna]
     assert (cella.valore, cella.marcatore) == (valore, marcatore)
     assert marcatore not in riga.etichetta.split()
+
+
+# --- Task 2b (Fase 3): il segno meno staccato e le due tabelle affiancate ----------------------------------------
+
+def _con_meno(x_importo, y, importo, stacco=2.2):
+    """Un trattino a `stacco` pt dall'importo (scrivi_pdf allinea a destra gli importi, e anche «-» che e' uno zero)."""
+    larghezza = fitz.get_text_length(importo, fontsize=_CORPO)
+    return [(x_importo - larghezza - stacco, y, "-"), (x_importo, y, importo)]
+
+
+def _voci_con_meno(stacco=2.2, n=3, dopo=None):
+    voci = _riempi(140, colonne=(560,), n=4)
+    for k in range(n):
+        y = 220 + k * 14
+        voci += [(50, y, f"Differenza {k}")] + _con_meno(560, y, ("2.500,00", "12.500,00", "112.500,00")[k], stacco)
+    return voci + (dopo or [])
+
+
+def test_trattino_a_un_soffio_dall_importo_e_il_suo_segno(tmp_path):
+    # 1553: «Utile (Perdita) dell'esercizio - 184.019» e' -184.019, e il trattino lascia l'etichetta
+    doc = _leggi(tmp_path, [_voci_con_meno()])
+    riga = _riga(doc, "Differenza 0")
+    assert riga.celle[0].valore == Decimal("-2500.00")
+    assert not riga.etichetta.endswith("-")
+    assert doc.profilo.negativi == frozenset({"meno-staccato"})
+    assert not any("negativo" in a for a in doc.tutti_gli_avvisi())
+
+
+def test_trattino_lontano_dall_importo_resta_un_separatore(tmp_path):
+    # «FONDO - 6.138» a 33 pt (1426) con meno di tre trattini allineati: separatore, importo positivo
+    doc = _leggi(tmp_path, [_voci_con_meno(stacco=33.0, n=2)])
+    assert _riga(doc, "Differenza 0").celle[0].valore == Decimal("2500.00")
+    assert not doc.profilo.negativi
+
+
+def test_colonna_di_segni_allineati_vale_anche_lontano_dall_importo(tmp_path):
+    # 1426: i trattini stanno sempre alla stessa x, a 33-44 pt dall'importo; tre o piu' in una pagina fanno la colonna
+    voci = _riempi(140, colonne=(560,), n=4)
+    for k, importo in enumerate(("2.500,00", "12.500,00", "112.500,00")):
+        y = 220 + k * 14
+        voci += [(50, y, f"Fondo {k}"), (330, y, "-"), (560, y, importo)]
+    doc = _leggi(tmp_path, [voci])
+    assert doc.profilo.negativi == frozenset({"meno-colonna"})
+    assert [_riga(doc, f"Fondo {k}").celle[0].valore for k in range(3)] == [
+        Decimal("-2500.00"), Decimal("-12500.00"), Decimal("-112500.00")]
+
+
+def test_trattino_in_un_documento_con_i_negativi_di_sempre_non_e_un_segno(tmp_path):
+    # 394: i costi sono «-235.559» attaccati; il trattino a un soffio da un'altra cella non gira il segno (+30.517)
+    voci = _riempi(140, colonne=(560,), n=4)
+    voci += [(50, 220, "Costo uno"), (560, 220, "-235.559,00"), (50, 234, "Costo due"), (560, 234, "-35.535,00")]
+    for k in range(2):
+        voci += [(50, 250 + k * 14, f"Variazione {k}")] + _con_meno(560, 250 + k * 14, "30.517,00")
+    doc = _leggi(tmp_path, [voci])
+    assert "meno-staccato" not in doc.profilo.negativi
+    assert _riga(doc, "Variazione 0").celle[0].valore == Decimal("30517.00")
+
+
+def test_due_tabelle_affiancate_hanno_ognuna_la_sua_sezione(tmp_path):
+    # 1426: lo stato patrimoniale a sinistra, «CE - Schema Ridotto» a destra, sulla stessa pagina
+    sinistra = ["Attivo B) IMMOBILIZZAZIONI", "B.I) Immobilizzazioni immateriali", "C) ATTIVO CIRCOLANTE",
+                "C.IV) Disponibilita' liquide", "D) RATEI E RISCONTI", "A) PATRIMONIO NETTO", "D) DEBITI"]
+    destra = ["VALORE DELLA PRODUZIONE", "1 ricavi da vendite", "COSTI DELLA PRODUZIONE", "6 materie prime",
+              "7 per servizi", "14 oneri diversi", "Utile dell'esercizio"]
+    voci = [(40, 100, "STATO PATRIMONIALE - Schema Informativo"), (320, 100, "CE - Schema Ridotto")]
+    for k, (a, b) in enumerate(zip(sinistra, destra)):
+        y = 140 + k * 14
+        voci += [(40, y, a), (270, y, _VALORI[k]), (320, y, b), (560, y, _VALORI[-1 - k])]
+    doc = _leggi(tmp_path, [voci])
+    assert doc.profilo.confine is not None and not doc.contrapposto
+    assert {r.sezione for r in doc.righe if r.lato == "L"} == {"SP"}
+    assert {r.sezione for r in doc.righe if r.lato == "R"} == {"CE"}

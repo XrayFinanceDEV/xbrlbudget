@@ -305,48 +305,98 @@ def blocco_spiega(blocchi: list[dict], sbil: dict, tol: float = 1.0) -> bool:
     return False
 
 
+def sezione_giusta(blocchi: list[dict], sbil: dict) -> bool:
+    """Un blocco nominato sta sulla sezione dello sbilancio: SP per uno sbilancio di stato patrimoniale, CE per una
+    differenza fra utile del CE e sp13."""
+    voluta = {"SP"} if sbil["sp"] is not None else set()
+    voluta |= {"CE"} if sbil["utile"] is not None else set()
+    return any(str(b.get("sezione") or "").upper() in voluta for b in blocchi)
+
+
+def _colpa_del_lettore(g: dict) -> bool:
+    let = g.get("lettore")
+    return (isinstance(let, dict) and let.get("esito") == "errore") or "importers/lettore" in str(g.get("errore") or "")
+
+
 def analisi_lettore(giri_per_id: dict[str, list[dict]]) -> dict:
-    """La sezione «Lettore»: esito e tempo del lettore sui giri importati, e per i giri salvati sbilanciati
-    i blocchi nominati all'utente. Un giro senza la chiave `lettore` (esiti di prima della Fase 2) è «assente»."""
+    """La sezione «Lettore»: esito e tempo del lettore, i giri non importati, e per i documenti salvati sbilanciati
+    i blocchi nominati all'utente. Un giro senza la chiave `lettore` (esiti di prima della Fase 2) è «assente».
+    Un documento è «sbilanciato» se lo è la maggioranza (più della metà) dei suoi giri importati; è «ok» se lo sono
+    tutti i suoi giri importati; è «scansione» se per un giro importato il lettore dice non_applicabile."""
     esiti = defaultdict(int)
     secondi, assenti, importati = [], 0, 0
-    sbilanciati, bilanciati_con_blocchi, blocchi_su_bilanciati = [], set(), 0
-    n_sbil_giri = n_sbil_nominati = n_sbil_spiegati = 0
+    giri_ok = giri_testo = 0
+    doc_ok, doc_testo, scansioni, doc_non_ok = 0, 0, [], []
+    falliti, bilanciati_con_blocchi, blocchi_su_bilanciati = [], set(), 0
+    n_sbil_giri = 0
+    sbilanciati = []
     for id_, giri in giri_per_id.items():
+        imp = [g for g in giri if g.get("importato")]
         for g in giri:
             if not g.get("importato"):
-                continue
+                let = g.get("lettore")
+                falliti.append({"id": id_, "giro": g.get("giro"), "errore": str(g.get("errore") or "")[:120],
+                                "chiave_lettore": isinstance(let, dict),
+                                "esito_lettore": let.get("esito") if isinstance(let, dict) else None,
+                                "colpa_del_lettore": _colpa_del_lettore(g)})
+        esiti_doc = []
+        for g in imp:
             importati += 1
             let = g.get("lettore")
             if not isinstance(let, dict):
                 assenti += 1
+                esiti_doc.append(None)
             else:
-                esiti[let.get("esito") or "?"] += 1
+                e = let.get("esito") or "?"
+                esiti[e] += 1
+                esiti_doc.append(e)
+                if e != "non_applicabile":
+                    giri_testo += 1
+                    giri_ok += e == "ok"
                 if _num(let.get("secondi")) is not None:
                     secondi.append(_num(let["secondi"]))
-            blocchi = [b for b in ((let or {}).get("blocchi_aperti") or []) if isinstance(b, dict)]
+        if imp and None not in esiti_doc:
+            if "non_applicabile" in esiti_doc:
+                scansioni.append(id_)
+            else:
+                doc_testo += 1
+                if all(e == "ok" for e in esiti_doc):
+                    doc_ok += 1
+                else:
+                    doc_non_ok.append(id_)
+        sbil_giri = []
+        for g in imp:
             sbil = sbilancio_dichiarato(g)
+            blocchi = [b for b in ((g.get("lettore") or {}).get("blocchi_aperti") or []) if isinstance(b, dict)] \
+                if isinstance(g.get("lettore"), dict) else []
             if sbil is None:
                 if blocchi and g.get("quadra") is not False:
                     bilanciati_con_blocchi.add(id_)
                     blocchi_su_bilanciati += len(blocchi)
-                continue
-            n_sbil_giri += 1
-            spiega = bool(blocchi) and blocco_spiega(blocchi, sbil)
-            n_sbil_nominati += bool(blocchi)
-            n_sbil_spiegati += spiega
-            if g.get("giro") == 1 or not any(s["id"] == id_ for s in sbilanciati):
-                sbilanciati.append({"id": id_, "giro": g.get("giro"), "sbilancio": sbil,
-                                    "lettore": (let or {}).get("esito") if isinstance(let, dict) else None,
-                                    "blocchi": [{k: b.get(k) for k in ("voce", "sezione", "scarto", "cercato")}
-                                                for b in blocchi],
-                                    "spiega": spiega})
+            else:
+                n_sbil_giri += 1
+                sbil_giri.append((g, sbil, blocchi))
+        if imp and len(sbil_giri) * 2 > len(imp):
+            g, sbil, blocchi = sbil_giri[0]
+            sbilanciati.append({"id": id_, "giro": g.get("giro"), "giri_sbilanciati": f"{len(sbil_giri)}/{len(imp)}",
+                                "sbilancio": sbil,
+                                "lettore": g["lettore"].get("esito") if isinstance(g.get("lettore"), dict) else None,
+                                "blocchi": [{k: b.get(k) for k in ("voce", "sezione", "scarto", "cercato")} for b in blocchi],
+                                "sezione_giusta": bool(blocchi) and sezione_giusta(blocchi, sbil),
+                                "spiega": bool(blocchi) and blocco_spiega(blocchi, sbil)})
     s = sorted(secondi)
     return {"importati": importati, "assenti": assenti, "esiti": dict(esiti),
+            "giri_ok": giri_ok, "giri_con_testo": giri_testo, "documenti_ok": doc_ok, "documenti_con_testo": doc_testo,
+            "documenti_non_ok": doc_non_ok, "scansioni": scansioni,
+            "falliti": falliti, "falliti_per_colpa_del_lettore": sum(f["colpa_del_lettore"] for f in falliti),
             "secondi_media": round(sum(s) / len(s), 2) if s else None,
             "secondi_mediana": s[len(s) // 2] if s else None, "secondi_max": s[-1] if s else None,
-            "sbilanciati_giri": n_sbil_giri, "sbilanciati_con_blocchi": n_sbil_nominati,
-            "sbilanciati_spiegati": n_sbil_spiegati, "sbilanciati": sbilanciati,
+            "sbilanciati_giri": n_sbil_giri, "sbilanciati_documenti": len(sbilanciati),
+            "sbilanciati_con_blocco_giusto": sum(d["sezione_giusta"] for d in sbilanciati),
+            "sbilanciati_con_blocchi": sum(bool(d["blocchi"]) for d in sbilanciati),
+            "sbilanciati_spiegati": sum(d["spiega"] for d in sbilanciati),
+            "sbilanciati_senza_blocchi": [d["id"] for d in sbilanciati if not d["blocchi"]],
+            "sbilanciati": sbilanciati,
             "bilanciati_con_blocchi_documenti": sorted(bilanciati_con_blocchi),
             "bilanciati_blocchi": blocchi_su_bilanciati}
 
@@ -356,38 +406,40 @@ def _campi_esercizi(g: dict) -> dict:
 
 
 def _differenze(a: dict, b: dict, tol: float = 0.005) -> list[dict]:
-    """Confronta due giri (esito importato ed esercizi salvati) campo per campo."""
-    out = []
+    """Confronta due giri (esito importato ed esercizi salvati) campo per campo. Un campo presente da una parte sola
+    è una differenza, anche se vale zero."""
     if a.get("importato") != b.get("importato"):
         return [{"campo": "importato", "base": a.get("importato"), "nuovo": b.get("importato")}]
+    out = []
     ea, eb = _campi_esercizi(a), _campi_esercizi(b)
     for chiave in sorted(set(ea) | set(eb), key=str):
         if chiave not in ea or chiave not in eb:
             out.append({"campo": f"esercizio {chiave[0]}/{chiave[1]}", "base": chiave in ea, "nuovo": chiave in eb})
             continue
         for c in sorted(set(ea[chiave]) | set(eb[chiave])):
-            x, y = ea[chiave].get(c, 0.0), eb[chiave].get(c, 0.0)
-            if abs(x - y) > tol:
+            x, y = ea[chiave].get(c), eb[chiave].get(c)
+            if x is None or y is None or abs(x - y) > tol:
                 out.append({"campo": f"{chiave[0]}/{chiave[1]} {c}", "base": x, "nuovo": y})
     return out
 
 
 def numeri_invariati(base: dict[str, list[dict]], nuovi: dict[str, list[dict]]) -> dict:
     """Confronto campo per campo dei valori SALVATI con una base, sui documenti stabili nella base: stesso esito e
-    stessi valori in tutti gli esercizi salvati, su tutti i giri della base (la stabilità è qui misurata sugli
-    esiti grezzi, non sui soli campi del corrente). Ogni giro nuovo si confronta col primo giro della base."""
+    stessi valori in tutti gli esercizi salvati, su tutti i giri della base. Ogni giro nuovo si confronta col primo
+    giro della base. Un documento stabile senza giri nuovi conta come NON invariato (sta nel denominatore)."""
     stabili, invarianti, cambiati, instabili, mancanti = 0, 0, [], [], []
     for id_, bg in base.items():
-        if id_ not in nuovi or not nuovi[id_]:
-            mancanti.append(id_)
-            continue
         if any(_differenze(bg[0], g) for g in bg[1:]):
             instabili.append(id_)
             continue
         stabili += 1
+        if id_ not in nuovi or not nuovi[id_]:
+            mancanti.append(id_)
+            continue
         diff = {g.get("giro"): d for g in nuovi[id_] if (d := _differenze(bg[0], g))}
         if diff:
-            cambiati.append({"id": id_, "giri": sorted(diff), "differenze": next(iter(diff.values()))})
+            campi = [dict(x, giro=gi) for gi, d in sorted(diff.items()) for x in d]
+            cambiati.append({"id": id_, "giri": sorted(diff), "differenze": campi[:10], "campi_totali": len(campi)})
         else:
             invarianti += 1
     return {"documenti_base": len(base), "stabili": stabili, "invarianti": invarianti,
@@ -397,28 +449,47 @@ def numeri_invariati(base: dict[str, list[dict]], nuovi: dict[str, list[dict]]) 
 
 def righe_lettore(a: dict) -> list[str]:
     r = ["", "## Lettore di righe (Fase 2)", ""]
-    if not a["importati"]:
+    if not a["importati"] and not a["falliti"]:
         return r + ["Nessun documento importato."]
-    if a["assenti"] == a["importati"]:
-        return r + ["Lettore assente su tutti i giri (esiti di prima del collegamento: nessuna chiave `lettore`)."]
+    if a["importati"] and a["assenti"] == a["importati"]:
+        return r + ["Lettore assente su tutti i giri (esiti di prima del collegamento: nessuna chiave `lettore`). "
+                    f"Giri non importati: {len(a['falliti'])}."]
     f = lambda x: "—" if x is None else f"{x}"
-    r += [f"Giri importati: {a['importati']}, senza chiave `lettore`: {a['assenti']}.", "",
+    pc = lambda n, d: "—" if not d else f"{n}/{d} ({100 * n / d:.1f}%)"
+    r += [f"Giri importati: {a['importati']}, senza chiave `lettore`: {a['assenti']}, giri non importati: {len(a['falliti'])}. "
+          f"**Import falliti per colpa del lettore: {a['falliti_per_colpa_del_lettore']}** "
+          "(esito del lettore `errore`, o l'errore cita `importers/lettore`).", "",
           "| Misura | Valore |", "|---|---|",
-          f"| Esiti del lettore | {', '.join(f'{k} {v}' for k, v in sorted(a['esiti'].items())) or '—'} |",
+          f"| Esito `ok`, documenti con testo (tutti i giri ok) | {pc(a['documenti_ok'], a['documenti_con_testo'])} |",
+          f"| Esito `ok`, giri con testo (esclusi non_applicabile) | {pc(a['giri_ok'], a['giri_con_testo'])} |",
+          f"| Scansioni (non_applicabile), contate a parte | {len(a['scansioni'])} documenti: {', '.join(a['scansioni']) or '—'} |",
+          f"| Documenti con testo e lettore non ok | {', '.join(a['documenti_non_ok']) or '—'} |",
+          f"| Esiti dei giri | {', '.join(f'{k} {v}' for k, v in sorted(a['esiti'].items())) or '—'} |",
           f"| Secondi: media / mediana / massimo | {f(a['secondi_media'])} / {f(a['secondi_mediana'])} / {f(a['secondi_max'])} |",
           f"| Giri salvati sbilanciati | {a['sbilanciati_giri']} |",
-          f"| … con almeno un blocco nominato | {a['sbilanciati_con_blocchi']} |",
-          f"| … con un blocco che spiega lo sbilancio (scarto = sbilancio entro 1 €) | {a['sbilanciati_spiegati']} |",
+          f"| Documenti sbilanciati (più della metà dei giri importati) | {a['sbilanciati_documenti']} |",
+          f"| Documenti sbilanciati con un blocco nominato sulla sezione giusta (SP per lo sbilancio SP, CE per l'utile) | "
+          f"{a['sbilanciati_con_blocco_giusto']}/{a['sbilanciati_documenti']} |",
+          f"| … con almeno un blocco nominato | {a['sbilanciati_con_blocchi']}/{a['sbilanciati_documenti']} |",
+          f"| … con un blocco il cui scarto spiega lo sbilancio (entro 1 €) | {a['sbilanciati_spiegati']}/{a['sbilanciati_documenti']} |",
+          f"| Documenti sbilanciati senza blocchi | {', '.join(a['sbilanciati_senza_blocchi']) or 'nessuno'} |",
           f"| Documenti bilanciati con blocchi nominati (restano nel `validation_report`) | "
           f"{len(a['bilanciati_con_blocchi_documenti'])} ({a['bilanciati_blocchi']} blocchi) |", ""]
+    if a["falliti"]:
+        r += ["### Giri non importati", "", "| Id | Giro | Chiave lettore | Esito lettore | Colpa del lettore | Errore |", "|---|---|---|---|---|---|"]
+        for x in a["falliti"]:
+            r.append(f"| {x['id']} | {x['giro']} | {'sì' if x['chiave_lettore'] else 'no'} | {f(x['esito_lettore'])} | "
+                     f"{'sì' if x['colpa_del_lettore'] else 'no'} | {x['errore']} |")
+        r.append("")
     if a["sbilanciati"]:
         r += ["### Documenti sbilanciati (primo giro sbilanciato)", "",
-              "| Id | Sbilancio SP | Utile CE−SP | Lettore | Blocchi nominati (voce, sezione, scarto, cercato) | Spiega lo sbilancio |",
-              "|---|---|---|---|---|---|"]
+              "| Id | Giri sbilanciati | Sbilancio SP | Utile CE−SP | Lettore | Blocchi nominati (voce, sezione, scarto, cercato) | Sezione giusta | Spiega lo sbilancio |",
+              "|---|---|---|---|---|---|---|---|"]
         for d in a["sbilanciati"]:
             bl = "; ".join(f"{b['voce']} / {b['sezione']} / {b['scarto']} / {b['cercato']}" for b in d["blocchi"]) or "nessuno"
             sb = d["sbilancio"]
-            r.append(f"| {d['id']} | {f(sb['sp'])} | {f(sb['utile'])} | {f(d['lettore'])} | {bl} | {'sì' if d['spiega'] else 'no'} |")
+            r.append(f"| {d['id']} | {d['giri_sbilanciati']} | {f(sb['sp'])} | {f(sb['utile'])} | {f(d['lettore'])} | {bl} | "
+                     f"{'sì' if d['sezione_giusta'] else 'no'} | {'sì' if d['spiega'] else 'no'} |")
     return r
 
 
@@ -427,12 +498,13 @@ def righe_invarianti(inv: dict, etichetta_base: str) -> list[str]:
          f"Documenti stabili nella base: {inv['stabili']} su {inv['documenti_base']} "
          f"(instabili fra i giri della base, esclusi: {len(inv['instabili_nella_base'])}); "
          f"invariati: {inv['invarianti']} ({'—' if inv['quota'] is None else format(100 * inv['quota'], '.1f') + '%'}). "
-         f"Senza giri nuovi: {len(inv['senza_giri_nuovi'])}."]
+         f"Senza giri nuovi (contati come non invariati): {len(inv['senza_giri_nuovi'])}"
+         + (f" ({', '.join(inv['senza_giri_nuovi'])})." if inv['senza_giri_nuovi'] else ".")]
     if inv["cambiati"]:
         r += ["", "| Id | Giri | Prime differenze (campo: base → nuovo) |", "|---|---|---|"]
         for c in inv["cambiati"]:
-            d = "; ".join(f"{x['campo']}: {x['base']} → {x['nuovo']}" for x in c["differenze"][:5])
-            r.append(f"| {c['id']} | {c['giri']} | {d} ({len(c['differenze'])} campi) |")
+            d = "; ".join(f"g{x['giro']} {x['campo']}: {x['base']} → {x['nuovo']}" for x in c["differenze"])
+            r.append(f"| {c['id']} | {c['giri']} | {d} ({c['campi_totali']} campi, mostrati {len(c['differenze'])}) |")
     return r
 
 

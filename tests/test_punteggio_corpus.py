@@ -105,15 +105,16 @@ def test_un_confronto_infrannuale_salvato_come_anno_intero_si_segnala():
 
 # --- lettore di righe (Fase 2) e numeri invariati ----------------------------------------------------
 
-def _giro(giro=1, *, quadra=True, sbil=0.0, utile_ce=None, sp13=None, lettore="assente", campi=None, importato=True):
-    g = {"id": "D", "giro": giro, "importato": importato, "quadra": quadra, "sbilancio": sbil,
+def _giro(giro=1, *, quadra=True, sbil=0.0, utile_ce=None, sp13=None, lettore="assente", campi=None, importato=True,
+          errore=None):
+    g = {"id": "D", "giro": giro, "importato": importato, "quadra": quadra, "sbilancio": sbil, "errore": errore,
          "utile_ce": utile_ce, "sp13": sp13, "esercizi": [{"anno": 2025, "mesi": None, "campi": campi or {"sp09": 10.0}}]}
     if lettore != "assente":
         g["lettore"] = lettore
     return g
 
 
-def _blocco(scarto, voce="B.7 Debiti", sezione="passivo"):
+def _blocco(scarto, voce="B.7 Debiti", sezione="SP"):
     return {"voce": voce, "sezione": sezione, "scarto": scarto, "cercato": "debiti verso fornitori"}
 
 
@@ -127,7 +128,7 @@ def test_sbilanciato_con_blocco_che_spiega_lo_sbilancio():
     let = {"esito": "ok", "secondi": 1.5, "blocchi_aperti": [_blocco("12.00"), _blocco(-500.0)]}
     g = _giro(quadra=False, sbil=-500.4, lettore=let)
     a = P.analisi_lettore({"D": [g]})
-    assert (a["sbilanciati_giri"], a["sbilanciati_con_blocchi"], a["sbilanciati_spiegati"]) == (1, 1, 1)
+    assert (a["sbilanciati_documenti"], a["sbilanciati_con_blocco_giusto"], a["sbilanciati_spiegati"]) == (1, 1, 1)
     assert a["sbilanciati"][0]["spiega"] is True
     assert a["esiti"] == {"ok": 1} and a["secondi_max"] == 1.5
     md = "\n".join(P.righe_lettore(a))
@@ -138,6 +139,7 @@ def test_blocco_con_scarto_diverso_non_spiega_e_la_differenza_utile_conta():
     let = {"esito": "ok", "secondi": 1.0, "blocchi_aperti": [_blocco(300.0)]}
     no = P.analisi_lettore({"D": [_giro(quadra=False, sbil=-500.0, lettore=let)]})
     assert no["sbilanciati_con_blocchi"] == 1 and no["sbilanciati_spiegati"] == 0
+    assert no["sbilanciati_con_blocco_giusto"] == 1                # sezione SP per uno sbilancio SP, anche se lo scarto non coincide
     si = P.analisi_lettore({"D": [_giro(quadra=False, sbil=-500.0, utile_ce=1000.0, sp13=700.5, lettore=let)]})
     assert si["sbilanciati_spiegati"] == 1                       # 1000 - 700,5 = 299,5: entro 1 € da 300
 
@@ -148,14 +150,46 @@ def test_sbilanciato_senza_blocchi_e_bilanciato_con_blocchi():
     a = P.analisi_lettore({"A": [_giro(quadra=False, sbil=40.0, lettore=let_vuoto)],
                            "B": [_giro(quadra=True, lettore=let_blocchi)]})
     assert a["sbilanciati_giri"] == 1 and a["sbilanciati_con_blocchi"] == 0
+    assert a["sbilanciati_senza_blocchi"] == ["A"]
     assert a["sbilanciati"][0]["blocchi"] == []
     assert a["bilanciati_con_blocchi_documenti"] == ["B"] and a["bilanciati_blocchi"] == 2
 
 
-def test_un_rifiutato_non_conta_nel_lettore():
-    a = P.analisi_lettore({"D": [_giro(importato=False, quadra=None)]})
-    assert a["importati"] == 0
-    assert "Nessun documento importato" in P.righe_lettore(a)[-1]
+def test_un_rifiutato_resta_nel_lettore_e_si_dice_se_e_colpa_del_lettore():
+    a = P.analisi_lettore({
+        "R": [_giro(importato=False, quadra=None, errore="PDFImportError: solo CE")],
+        "L": [_giro(importato=False, quadra=None, errore="Boom in importers/lettore/righe.py",
+                    lettore={"esito": "errore", "secondi": 0.1}),
+              _giro(2, importato=False, quadra=None, errore="altro", lettore={"esito": "errore", "secondi": 0.1})]})
+    assert a["importati"] == 0 and len(a["falliti"]) == 3
+    assert a["falliti_per_colpa_del_lettore"] == 2
+    assert [f["chiave_lettore"] for f in a["falliti"]] == [False, True, True]
+    md = "\n".join(P.righe_lettore(a))
+    assert "falliti per colpa del lettore: 2" in md and "Giri non importati" in md
+
+
+def test_percentuale_ok_sui_documenti_con_testo_e_scansioni_a_parte():
+    ok = {"esito": "ok", "secondi": 1.0, "blocchi_aperti": []}
+    a = P.analisi_lettore({
+        "T1": [_giro(lettore=ok), _giro(2, lettore=ok)],
+        "T2": [_giro(lettore=ok), _giro(2, lettore={"esito": "tempo", "secondi": 20.0})],
+        "S": [_giro(lettore={"esito": "non_applicabile"}), _giro(2, lettore={"esito": "non_applicabile"})],
+        "E": [_giro(lettore={"esito": "errore", "secondi": 0.2})]})
+    assert (a["documenti_ok"], a["documenti_con_testo"]) == (1, 3)
+    assert (a["giri_ok"], a["giri_con_testo"]) == (3, 5)
+    assert a["scansioni"] == ["S"] and a["documenti_non_ok"] == ["T2", "E"]
+    md = "\n".join(P.righe_lettore(a))
+    assert "1/3 (33.3%)" in md and "3/5 (60.0%)" in md
+
+
+def test_sbilanciato_per_maggioranza_dei_giri_e_sezione_ce_per_l_utile():
+    ce = {"esito": "ok", "secondi": 1.0, "blocchi_aperti": [_blocco(77.0, sezione="CE")]}
+    a = P.analisi_lettore({"D": [_giro(quadra=False, sbil=0.0, utile_ce=100.0, sp13=0.0, lettore=ce),
+                                 _giro(2, lettore=ce), _giro(3, quadra=False, sbil=0.0, utile_ce=100.0, sp13=0.0, lettore=ce)],
+                           "M": [_giro(quadra=False, sbil=9.0, lettore=ce), _giro(2), _giro(3)]})
+    assert [d["id"] for d in a["sbilanciati"]] == ["D"]          # M e' sbilanciato in 1 giro su 3: non conta
+    assert a["sbilanciati"][0]["giri_sbilanciati"] == "2/3" and a["sbilanciati"][0]["sezione_giusta"] is True
+    assert a["sbilanciati"][0]["spiega"] is False                 # sezione giusta, scarto 77 != 100
 
 
 def test_numeri_invariati_solo_sui_documenti_stabili():
@@ -177,3 +211,25 @@ def test_numeri_invariati_solo_sui_documenti_stabili():
 def test_l_esito_diverso_dalla_base_e_una_differenza():
     r = P.numeri_invariati({"D": [_giro(1)]}, {"D": [_giro(1, importato=False)]})
     assert r["invarianti"] == 0 and r["cambiati"][0]["differenze"][0]["campo"] == "importato"
+
+
+def test_un_documento_stabile_senza_giri_nuovi_non_e_invariato():
+    base = {"S": [_giro(1), _giro(2)], "M": [_giro(1), _giro(2)]}
+    r = P.numeri_invariati(base, {"S": [_giro(1)]})
+    assert r["stabili"] == 2 and r["invarianti"] == 1 and r["quota"] == 0.5
+    assert r["senza_giri_nuovi"] == ["M"]
+    assert "(M)" in "\n".join(P.righe_invarianti(r, "b"))
+
+
+def test_un_campo_presente_da_una_parte_sola_e_una_differenza_anche_se_zero():
+    r = P.numeri_invariati({"D": [_giro(1, campi={"sp09": 1.0})]}, {"D": [_giro(1, campi={"sp09": 1.0, "ce01": 0.0})]})
+    assert r["invarianti"] == 0
+    assert r["cambiati"][0]["differenze"][0]["campo"] == "2025/None ce01"
+
+
+def test_i_campi_differenti_di_tutti_i_giri_con_tetto_di_dieci():
+    campi = {f"sp{n:02d}": 1.0 for n in range(1, 16)}
+    nuovi = {"D": [_giro(1, campi=dict(campi, sp01=5.0)), _giro(2, campi={k: 2.0 for k in campi})]}
+    r = P.numeri_invariati({"D": [_giro(1, campi=campi)]}, nuovi)
+    c = r["cambiati"][0]
+    assert c["giri"] == [1, 2] and c["campi_totali"] == 16 and len(c["differenze"]) == 10

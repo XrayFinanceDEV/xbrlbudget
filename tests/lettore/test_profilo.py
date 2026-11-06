@@ -660,3 +660,26 @@ def test_frase_del_risultato_e_quella_dei_totali_di_chiusura():
     from importers.lettore._ereditati import _TOTALE_DI_CHIUSURA
     from importers.lettore.profilo import _RISULTATO_DI_CHIUSURA
     assert _RISULTATO_DI_CHIUSURA.pattern in _TOTALE_DI_CHIUSURA.pattern
+
+
+# --- Task 9 (Fase 3): sezioni perse a meta' documento ------------------------------------------------------------
+
+def test_riepilogo_sotto_il_titolo_del_conto_economico_non_chiude_la_pagina(tmp_path):
+    # il CE comincia in fondo alla pagina col riepilogo «Totale Costi: / Perdita d'Esercizio:» sotto il titolo;
+    # e' un riepilogo, non la chiusura: le pagine dopo, senza titolo, restano CE
+    pagina1 = [(50, 120, "Stato Patrimoniale")] + _tabella(_SCHEMA, y0=140) + \
+        [(50, 400, "Conto Economico"),
+         (50, 414, "Totale Costi:"), (480, 414, "1.500,00"),
+         (50, 428, "Perdita d'Esercizio:"), (480, 428, "100,00"),
+         (50, 442, "COSTI"), (50, 456, "Costi per materie"), (480, 456, "700,00")]
+    pagina2 = _tabella([f"Acquisti diversi {k}" for k in range(6)], y0=140)
+    prof = _doc_sezioni(tmp_path, [pagina1, pagina2])
+    assert prof.sezioni == {1: "SP+CE", 2: "CE"}
+
+
+def test_costi_spese_e_perdite_e_il_titolo_del_conto_economico(tmp_path):
+    # lo SP chiude a pareggio a pagina 1; «COSTI, SPESE E PERDITE» apre il CE a pagina 2
+    pagina1 = [(50, 120, "STATO PATRIMONIALE")] + _tabella(_SCHEMA, y0=140) + \
+        [(50, 300, "TOTALE A PAREGGIO"), (480, 300, "9.000,00")]
+    pagina2 = [(50, 120, "COSTI, SPESE E PERDITE")] + _tabella([f"Spesa {k}" for k in range(6)], y0=140)
+    assert _doc_sezioni(tmp_path, [pagina1, pagina2]).sezioni == {1: "SP", 2: "CE"}

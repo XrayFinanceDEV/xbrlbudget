@@ -133,6 +133,18 @@ def anno_del_periodo(fine: str | None) -> int | None:
     return int(fine[:4]) if fine and fine[:4].isdigit() else None
 
 
+def _snello_compatto(rec: dict) -> dict | None:
+    """Del `validation_report["import_snello"]` solo ciò che serve al punteggio: fonte, percorso del lettore, tappo,
+    plug. Mai importi di foglie."""
+    sn = rec.get("import_snello")
+    if not isinstance(sn, dict):
+        return None
+    tappo = (sn.get("tappo") or {}).get("corrente")
+    return {"fonte": sn.get("fonte"), "esito": sn.get("esito"), "lettore_percorso": sn.get("lettore_percorso"),
+            "tappo_importo": tappo.get("importo") if isinstance(tappo, dict) else None,
+            "plug_residual": rec.get("plug_residual")}
+
+
 def importa(percorso: Path, period_months: int | None, fiscal_year: int | None = None) -> dict:
     """Un giro dell'importatore di produzione: ciò che ha salvato, per esercizio. Non solleva mai."""
     sys.path.insert(0, str(ROOT))
@@ -149,7 +161,8 @@ def importa(percorso: Path, period_months: int | None, fiscal_year: int | None =
              "importato": bool(rec.get("ok")) and not rec.get("error"), "errore": rec.get("error"),
              "estrattore": rec.get("extraction_method"), "quadra": rec.get("quadra"),
              "sbilancio": rec.get("sbilancio"), "utile_ce": rec.get("utile_ce"), "sp13": rec.get("sp13"),
-             "lettore": rec.get("lettore"), "avvisi": rec.get("warnings", []), "esercizi": []}
+             "lettore": rec.get("lettore"), "snello": _snello_compatto(rec), "avvisi": rec.get("warnings", []),
+             "esercizi": []}
     # Tutti gli esercizi salvati per l'azienda creata dal giro (anno corrente e, se c'è, precedente).
     # Ogni giro cancella le sue aziende, quindi l'unica presente è quella appena creata (il nome
     # può essere quello letto nel documento, non quello del file).
@@ -493,6 +506,197 @@ def righe_lettore(a: dict) -> list[str]:
     return r
 
 
+# --- percorso del lettore (Fase 3) -----------------------------------------------------------------------
+
+FONTE_LETTORE = "deterministico:lettore"
+BERSAGLI = ["161", "1426", "1440", "1432", "1523", "1531", "1561", "1566", "1567"]   # PDF quadra, import no (Fase 2)
+
+
+def _sn(g: dict) -> dict | None:
+    s = g.get("snello")
+    return s if isinstance(s, dict) else None
+
+
+def _lp(g: dict) -> dict:
+    s = _sn(g)
+    lp = s.get("lettore_percorso") if s else None
+    return lp if isinstance(lp, dict) else {}
+
+
+def adottato_dal_lettore(g: dict) -> bool:
+    s = _sn(g)
+    return bool(g.get("importato") and s and s.get("fonte") == FONTE_LETTORE)
+
+
+def fonte_del_giro(g: dict) -> str:
+    s = _sn(g)
+    if not g.get("importato"):
+        return "rifiutato"
+    return (s or {}).get("fonte") or g.get("estrattore") or "?"
+
+
+def motivo_non_adozione(g: dict) -> str:
+    """Perché il lettore non ha adottato: il motivo dichiarato dal percorso, altrimenti cancello/esito, altrimenti «assente»."""
+    lp = _lp(g)
+    if not lp:
+        return "percorso assente (fonte " + str(fonte_del_giro(g)) + ")"
+    return str(lp.get("motivo") or lp.get("cancello") or lp.get("errore") or lp.get("esito") or "?")
+
+
+def _mediana_max(v: list[float]) -> tuple[float | None, float | None]:
+    s = sorted(v)
+    return (s[len(s) // 2], s[-1]) if s else (None, None)
+
+
+def _chiusura_dichiarata(g: dict) -> bool:
+    s = _sn(g) or {}
+    for k in ("tappo_importo", "plug_residual"):
+        x = _num(s.get(k))
+        if x is not None and 0 < abs(x) <= 1.0 + 1e-9:
+            return True
+    return False
+
+
+def analisi_percorso(giri_per_id: dict[str, list[dict]], campione: dict, base: dict[str, list[dict]] | None = None) -> dict:
+    """La sezione «Percorso del lettore»: adozioni, i 9 bersagli, sbilanciati, chiamate/voti/secondi, chiusure, anno
+    precedente. `presente` è falso quando nessun giro porta la chiave `snello` (esiti di prima della Fase 3)."""
+    tutti = [g for giri in giri_per_id.values() for g in giri]
+    if not any(_sn(g) for g in tutti):
+        return {"presente": False}
+    per_tipo = defaultdict(lambda: {"documenti": 0, "adottati": 0})
+    documenti = []
+    for id_, giri in giri_per_id.items():
+        n = sum(adottato_dal_lettore(g) for g in giri)
+        tipo = campione.get(id_, {}).get("tipologia", "?")
+        per_tipo[tipo]["documenti"] += 1
+        per_tipo[tipo]["adottati"] += n > 0
+        if n:
+            documenti.append({"id": id_, "tipologia": tipo, "giri_adottati": n, "giri": len(giri), "instabile": n < len(giri)})
+    adottati = [g for g in tutti if adottato_dal_lettore(g)]
+    chiamate, voti, secondi = ([_num(_lp(g).get(k)) for g in adottati if _num(_lp(g).get(k)) is not None]
+                               for k in ("chiamate", "voti", "secondi"))
+    bersagli = []
+    for id_ in BERSAGLI:
+        giri = giri_per_id.get(id_, [])
+        righe = [{"giro": g.get("giro"), "quadrato": bool(g.get("importato") and g.get("quadra") is True),
+                  "adottato": adottato_dal_lettore(g), "motivo": None if adottato_dal_lettore(g) else motivo_non_adozione(g)}
+                 for g in giri]
+        bersagli.append({"id": id_, "giri": righe,
+                         "salvato_quadrato": bool(righe) and all(r["quadrato"] for r in righe)})
+    sbil_ora = analisi_lettore(giri_per_id)["sbilanciati"]
+    sbil_base = analisi_lettore(base)["sbilanciati"] if base else None
+    prior = []
+    for id_, giri in giri_per_id.items():
+        for g in giri:
+            if len(g.get("esercizi") or []) > 1 and adottato_dal_lettore(g):
+                for e in g["esercizi"][1:]:
+                    prior.append({"id": id_, "giro": g.get("giro"), "anno": e["anno"], "mesi": e.get("mesi"),
+                                  "mesi_percorso": _lp(g).get("mesi_precedente")})
+    prior_mesi = [dict(id=id_, giro=g.get("giro"), anno=e["anno"], mesi=e["mesi"])
+                  for id_, giri in giri_per_id.items() for g in giri if g.get("importato")
+                  for e in (g.get("esercizi") or [])[1:] if e.get("mesi") is not None]
+    cm, xm = _mediana_max(chiamate)
+    vm, xv = _mediana_max(voti)
+    sm, xs = _mediana_max(secondi)
+    chiusure = sorted({id_ for id_, giri in giri_per_id.items() for g in giri if adottato_dal_lettore(g) and _chiusura_dichiarata(g)})
+    return {"presente": True, "giri_adottati": len(adottati), "giri_totali": len(tutti),
+            "documenti_adottati": documenti, "per_tipologia": {t: dict(v) for t, v in sorted(per_tipo.items())},
+            "documenti_instabili_adozione": [d["id"] for d in documenti if d["instabile"]],
+            "bersagli": bersagli, "bersagli_quadrati": sum(b["salvato_quadrato"] for b in bersagli),
+            "sbilanciati_ora": [d["id"] for d in sbil_ora],
+            "sbilanciati_base": None if sbil_base is None else [d["id"] for d in sbil_base],
+            "chiamate": {"mediana": cm, "max": xm}, "voti": {"mediana": vm, "max": xv},
+            "secondi": {"mediana": sm, "max": xs},
+            "tetto_chiamate": sorted({id_ for id_, giri in giri_per_id.items() for g in giri if _lp(g).get("tetto_chiamate")}),
+            "chiusure_documenti": chiusure,
+            "precedente_salvato": prior, "precedente_con_mesi": prior_mesi}
+
+
+def _punteggio_medio(d: dict, cat: str) -> float | None:
+    v = [g["periodi"][0][cat]["giusti"] / g["periodi"][0][cat]["totali"]
+         for g in d["giri"] if g["periodi"] and g["periodi"][0][cat]["totali"]]
+    return sum(v) / len(v) if v else None
+
+
+def _fonti(giri: list[dict]) -> str:
+    c = defaultdict(int)
+    for g in giri:
+        c[fonte_del_giro(g)] += 1
+    return ", ".join(f"{k} ×{n}" for k, n in sorted(c.items()))
+
+
+def peggiorati(nuovi: list[dict], base: list[dict], giri_nuovi: dict, giri_base: dict, tol: float = 1e-9) -> list[dict]:
+    """Documenti il cui punteggio medio (macro o KPI, corrente) scende rispetto alla base, con la fonte prima → dopo:
+    una regressione si attribuisce al percorso del lettore o no."""
+    b = {d["id"]: d for d in base}
+    out = []
+    for d in nuovi:
+        if d["id"] not in b:
+            continue
+        calo = {}
+        for cat in ("macro", "kpi"):
+            x, y = _punteggio_medio(b[d["id"]], cat), _punteggio_medio(d, cat)
+            if x is not None and y is not None and y < x - tol:
+                calo[cat] = (round(x, 4), round(y, 4))
+        if calo:
+            fb, fn = _fonti(giri_base.get(d["id"], [])), _fonti(giri_nuovi.get(d["id"], []))
+            out.append({"id": d["id"], "calo": calo, "fonte_prima": fb, "fonte_dopo": fn,
+                        "dal_lettore": any(adottato_dal_lettore(g) for g in giri_nuovi.get(d["id"], []))})
+    return out
+
+
+def _riga_mesi(x: dict) -> str:
+    return "%s g%s %s/%s" % (x["id"], x["giro"], x["anno"], x["mesi"])
+
+
+def righe_percorso(a: dict, pegg: list[dict] | None = None, etichetta_base: str = "base") -> list[str]:
+    r = ["", "## Percorso del lettore (Fase 3)", ""]
+    if not a["presente"]:
+        return r + ["Percorso del lettore assente: gli esiti non portano la chiave `snello` (esiti di prima della Fase 3)."]
+    f = lambda x: "—" if x is None else f"{x:g}" if isinstance(x, float) else f"{x}"
+    r += [f"Giri adottati dal lettore: {a['giri_adottati']}/{a['giri_totali']}; documenti adottati in almeno un giro: "
+          f"{len(a['documenti_adottati'])}; **instabili nell'adozione**: {len(a['documenti_instabili_adozione'])} "
+          f"({', '.join(a['documenti_instabili_adozione']) or '—'}).", "",
+          "| Tipologia | Documenti | Adottati dal lettore |", "|---|---|---|"]
+    r += [f"| {t} | {v['documenti']} | {v['adottati']} |" for t, v in a["per_tipologia"].items()]
+    r += ["", "| Documento | Tipologia | Giri adottati |", "|---|---|---|"]
+    r += [f"| {d['id']} | {d['tipologia']} | {d['giri_adottati']}/{d['giri']}{' (instabile)' if d['instabile'] else ''} |"
+          for d in a["documenti_adottati"]]
+    nb = len(a["bersagli"])
+    r += ["", f"### I {nb} bersagli (PDF quadra, import no, alla Fase 2)", "",
+          f"**{a['bersagli_quadrati']}/{nb} salvati quadrati** (in tutti i giri).", "",
+          "| Id | Giro | Salvato quadrato | Adottato dal lettore | Motivo se non adottato |", "|---|---|---|---|---|"]
+    for b in a["bersagli"]:
+        if not b["giri"]:
+            r.append(f"| {b['id']} | — | — | — | nessun giro |")
+        r += [f"| {b['id']} | {x['giro']} | {'sì' if x['quadrato'] else 'no'} | {'sì' if x['adottato'] else 'no'} | {x['motivo'] or ''} |"
+              for x in b["giri"]]
+    sb = a["sbilanciati_base"]
+    r += ["", "### Costo, chiusure, anno precedente", "", "| Misura | Valore |", "|---|---|",
+          f"| Documenti salvati sbilanciati ora / in {etichetta_base} | {len(a['sbilanciati_ora'])} ({', '.join(a['sbilanciati_ora']) or '—'}) / "
+          f"{'—' if sb is None else str(len(sb)) + ' (' + (', '.join(sb) or '—') + ')'} |",
+          f"| Chiamate al modello per giro adottato: mediana / max | {f(a['chiamate']['mediana'])} / {f(a['chiamate']['max'])} |",
+          f"| Voti per giro adottato: mediana / max | {f(a['voti']['mediana'])} / {f(a['voti']['max'])} |",
+          f"| Secondi del lettore per giro adottato: mediana / max | {f(a['secondi']['mediana'])} / {f(a['secondi']['max'])} |",
+          f"| Documenti che hanno toccato il tetto di chiamate | {len(a['tetto_chiamate'])} ({', '.join(a['tetto_chiamate']) or '—'}) |",
+          f"| Documenti adottati con una chiusura ≤ 1 € dichiarata (tappo o plug) | {len(a['chiusure_documenti'])} ({', '.join(a['chiusure_documenti']) or '—'}) |",
+          f"| Anno precedente salvato dal percorso del lettore (giri) | {len(a['precedente_salvato'])} |",
+          f"| Anno precedente salvato con mesi ≠ None (qualunque fonte) | "
+          f"{', '.join(_riga_mesi(x) for x in a['precedente_con_mesi']) or 'nessuno'} |"]
+    if a["precedente_salvato"]:
+        r += ["", "| Id | Giro | Anno | Mesi salvati | Mesi dichiarati dal percorso |", "|---|---|---|---|---|"]
+        r += [f"| {x['id']} | {x['giro']} | {x['anno']} | {f(x['mesi'])} | {f(x['mesi_percorso'])} |" for x in a["precedente_salvato"]]
+    if pegg is not None:
+        r += ["", f"### Documenti peggiorati contro {etichetta_base} (macro o KPI del corrente)", ""]
+        if not pegg:
+            r.append("Nessuno.")
+        else:
+            r += ["| Id | Calo (prima → dopo) | Fonte prima | Fonte dopo | Adottato dal lettore |", "|---|---|---|---|---|"]
+            r += [f"| {p['id']} | {'; '.join(f'{k} {x:.3f} → {y:.3f}' for k, (x, y) in p['calo'].items())} | "
+                  f"{p['fonte_prima']} | {p['fonte_dopo']} | {'sì' if p['dal_lettore'] else 'no'} |" for p in pegg]
+    return r
+
+
 def righe_invarianti(inv: dict, etichetta_base: str) -> list[str]:
     r = ["", f"## Numeri invariati contro {etichetta_base}", "",
          f"Documenti stabili nella base: {inv['stabili']} su {inv['documenti_base']} "
@@ -509,8 +713,10 @@ def righe_invarianti(inv: dict, etichetta_base: str) -> list[str]:
 
 
 def scrivi_rapporto(cartella: Path, documenti: list[dict], sin: dict, meta: dict,
-                    lettore: dict | None = None, invarianti: dict | None = None) -> None:
-    json.dump({"meta": meta, "sintesi": sin, "lettore": lettore, "invarianti": invarianti, "documenti": documenti},
+                    lettore: dict | None = None, invarianti: dict | None = None,
+                    percorso: dict | None = None, peggiorati_: list[dict] | None = None) -> None:
+    json.dump({"meta": meta, "sintesi": sin, "lettore": lettore, "invarianti": invarianti, "percorso": percorso,
+               "peggiorati": peggiorati_, "documenti": documenti},
               open(cartella / "punteggio.json", "w", encoding="utf-8"), indent=1, ensure_ascii=False)
     pct = lambda x: "—" if x is None else f"{100 * x:.1f}%"
     r = [f"# Punteggio importatore — {meta['etichetta']}", "",
@@ -540,6 +746,8 @@ def scrivi_rapporto(cartella: Path, documenti: list[dict], sin: dict, meta: dict
         r.append(f"| {d['id']} | {d['giudizio_atteso']} | {esito} | {macro} | {kpi} | {err} |")
     if lettore is not None:
         r += righe_lettore(lettore)
+    if percorso is not None:
+        r += righe_percorso(percorso, peggiorati_, meta.get("confronto") or "base")
     if invarianti is not None:
         r += righe_invarianti(invarianti, meta.get("confronto") or "base")
     (cartella / "punteggio.md").write_text("\n".join(r) + "\n", encoding="utf-8")
@@ -612,7 +820,7 @@ def main() -> None:
             "data": time.strftime("%Y-%m-%d %H:%M")}
     sin = sintesi(documenti, campione)
     lettore = analisi_lettore({i: giri[i] for i in ids if giri.get(i)})
-    invarianti = None
+    invarianti, base_giri, pegg = None, None, None
     if args.confronta:
         base = defaultdict(list)
         for riga in open(USCITA / args.confronta / "esiti.jsonl", encoding="utf-8"):
@@ -620,9 +828,13 @@ def main() -> None:
             base[e["id"]].append(e)
         for v in base.values():
             v.sort(key=lambda e: e["giro"])
-        invarianti = numeri_invariati({i: v for i, v in base.items() if i in ids}, {i: giri[i] for i in ids if giri.get(i)})
+        base_giri = {i: v for i, v in base.items() if i in ids}
+        invarianti = numeri_invariati(base_giri, {i: giri[i] for i in ids if giri.get(i)})
+        doc_base = [punteggio_documento(carica_verita(i), base_giri[i]) for i in ids if base_giri.get(i) and carica_verita(i)]
+        pegg = peggiorati(documenti, doc_base, giri, base_giri)
         meta["confronto"] = args.confronta
-    scrivi_rapporto(cartella, documenti, sin, meta, lettore, invarianti)
+    percorso = analisi_percorso({i: giri[i] for i in ids if giri.get(i)}, campione, base_giri)
+    scrivi_rapporto(cartella, documenti, sin, meta, lettore, invarianti, percorso, pegg)
     print(json.dumps(sin, indent=1, ensure_ascii=False))
     print(f"rapporto: {cartella / 'punteggio.md'}")
 

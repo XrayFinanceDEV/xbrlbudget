@@ -233,3 +233,107 @@ def test_i_campi_differenti_di_tutti_i_giri_con_tetto_di_dieci():
     r = P.numeri_invariati({"D": [_giro(1, campi=campi)]}, nuovi)
     c = r["cambiati"][0]
     assert c["giri"] == [1, 2] and c["campi_totali"] == 16 and len(c["differenze"]) == 10
+
+
+# --- percorso del lettore (Fase 3) ----------------------------------------------------------------------
+
+def _g3(giro=1, *, adottato=False, quadra=True, motivo=None, chiamate=2, voti=3, secondi=4.0, tetto=None,
+        tappo=None, precedente="no", id_="D", importato=True, estrattore="llm"):
+    lp = {"esito": "adottato" if adottato else "non_adottato", "chiamate": chiamate, "voti": voti, "secondi": secondi}
+    if motivo:
+        lp["motivo"] = motivo
+    if tetto:
+        lp["tetto_chiamate"] = 40
+    esercizi = [{"anno": 2025, "mesi": None, "campi": {"sp09": 10.0}}]
+    if precedente != "no":
+        esercizi.append({"anno": 2024, "mesi": precedente, "campi": {"sp09": 9.0}})
+    return {"id": id_, "giro": giro, "importato": importato, "quadra": quadra, "estrattore": estrattore, "esercizi": esercizi,
+            "snello": {"fonte": "deterministico:lettore" if adottato else "llm", "lettore_percorso": lp,
+                       "tappo_importo": tappo, "plug_residual": None}}
+
+
+CAMP = {"D": {"tipologia": "contrapposte"}, "E": {"tipologia": "ivcee/2-anni"}, "161": {"tipologia": "conti/colonne"},
+        "1426": {"tipologia": "conti/colonne"}}
+
+
+def test_percorso_assente_negli_esiti_vecchi_non_solleva_e_si_dice():
+    a = P.analisi_percorso({"D": [_giro(), _giro(2)]}, CAMP)
+    assert a == {"presente": False}
+    assert "Percorso del lettore assente" in "\n".join(P.righe_percorso(a))
+
+
+def test_adozione_per_tipologia_e_instabilita():
+    giri = {"D": [_g3(1, adottato=True), _g3(2, adottato=True), _g3(3, adottato=True)],
+            "E": [_g3(1, adottato=True, id_="E"), _g3(2, id_="E"), _g3(3, id_="E")]}
+    a = P.analisi_percorso(giri, CAMP)
+    assert a["giri_adottati"] == 4 and a["giri_totali"] == 6
+    assert a["per_tipologia"] == {"contrapposte": {"documenti": 1, "adottati": 1},
+                                  "ivcee/2-anni": {"documenti": 1, "adottati": 1}}
+    assert a["documenti_instabili_adozione"] == ["E"]
+    assert "1/3 (instabile)" in "\n".join(P.righe_percorso(a))
+
+
+def test_bersagli_quadrati_motivo_e_titolo():
+    giri = {"161": [_g3(1, adottato=True, id_="161"), _g3(2, adottato=True, id_="161")],
+            "1426": [_g3(1, quadra=False, motivo="foglie_non_in_pari", id_="1426"), _g3(2, quadra=True, id_="1426")]}
+    a = P.analisi_percorso(giri, CAMP)
+    assert a["bersagli_quadrati"] == 1                       # 1426 e' quadrato in un giro solo: non conta
+    b1426 = next(b for b in a["bersagli"] if b["id"] == "1426")
+    assert b1426["giri"][0]["motivo"] == "foglie_non_in_pari" and b1426["giri"][0]["quadrato"] is False
+    md = "\n".join(P.righe_percorso(a))
+    assert "**1/9 salvati quadrati**" in md and "foglie_non_in_pari" in md
+    assert P.motivo_non_adozione(_g3(1, id_="x")) == "non_adottato"
+
+
+def test_costo_chiusure_tetto_e_sbilanciati_contro_la_base():
+    giri = {"D": [_g3(1, adottato=True, chiamate=2, voti=3, secondi=5.0, tappo="0.4"),
+                  _g3(2, adottato=True, chiamate=10, voti=9, secondi=50.0, tetto=True)],
+            "E": [_g3(1, quadra=False, id_="E"), _g3(2, quadra=False, id_="E")]}
+    base = {"E": [_giro(1, quadra=False, sbil=5.0), _giro(2, quadra=False, sbil=5.0)],
+            "D": [_giro(1, quadra=False, sbil=7.0), _giro(2, quadra=False, sbil=7.0)]}
+    a = P.analisi_percorso(giri, CAMP, base)
+    assert a["chiamate"] == {"mediana": 10, "max": 10} and a["voti"]["max"] == 9 and a["secondi"]["max"] == 50.0
+    assert a["tetto_chiamate"] == ["D"] and a["chiusure_documenti"] == ["D"]
+    assert a["sbilanciati_ora"] == ["E"] and sorted(a["sbilanciati_base"]) == ["D", "E"]
+
+
+def test_anno_precedente_e_mesi_diversi_da_none():
+    giri = {"D": [_g3(1, adottato=True, precedente=None), _g3(2, adottato=True, precedente=9)]}
+    a = P.analisi_percorso(giri, CAMP)
+    assert len(a["precedente_salvato"]) == 2
+    assert a["precedente_con_mesi"] == [{"id": "D", "giro": 2, "anno": 2024, "mesi": 9}]
+    assert "D g2 2024/9" in "\n".join(P.righe_percorso(a))
+
+
+def test_peggiorati_con_fonte_prima_e_dopo():
+    vero = {"id": "D", "giudizio_atteso": "importabile",
+            "periodi": [{"fine": "2025-12", "periodo": None, "campi": _vero(sp09=10.0, ce01=50.0)}]}
+    base_g = [_giro(1, campi={"sp09": 10.0, "ce01": 50.0})]
+    base_g[0]["estrattore"] = "llm"
+    nuovo_g = [_g3(1, adottato=True)]
+    nuovo_g[0]["esercizi"][0]["campi"] = {"sp09": 10.0, "ce01": 1.0}
+    p = P.peggiorati([P.punteggio_documento(vero, nuovo_g)], [P.punteggio_documento(vero, base_g)], {"D": nuovo_g}, {"D": base_g})
+    assert p[0]["id"] == "D" and p[0]["calo"]["macro"] == (1.0, 0.5)
+    assert p[0]["fonte_prima"] == "llm ×1" and p[0]["fonte_dopo"] == "deterministico:lettore ×1" and p[0]["dal_lettore"]
+    uguale = P.peggiorati([P.punteggio_documento(vero, base_g)], [P.punteggio_documento(vero, base_g)], {"D": base_g}, {"D": base_g})
+    assert uguale == []
+
+
+def test_rapporto_completo_si_scrive_con_e_senza_percorso(tmp_path):
+    vero = {"id": "D", "giudizio_atteso": "importabile",
+            "periodi": [{"fine": "2025-12", "periodo": None, "campi": _vero(sp09=10.0)}]}
+    giri = {"D": [_g3(1, adottato=True)]}
+    doc = [P.punteggio_documento(vero, giri["D"])]
+    sin = P.sintesi(doc, CAMP)
+    meta = {"etichetta": "x", "documenti": 1, "ripetizioni": 1, "commit": "abc", "data": "oggi", "confronto": "b"}
+    for percorso in (P.analisi_percorso(giri, CAMP), {"presente": False}):
+        P.scrivi_rapporto(tmp_path, doc, sin, meta, P.analisi_lettore(giri), None, percorso, [])
+        assert "Percorso del lettore" in (tmp_path / "punteggio.md").read_text()
+
+
+def test_il_probe_registra_fonte_e_percorso_del_lettore():
+    rec = {"import_snello": {"fonte": "deterministico:lettore", "esito": "ok", "lettore_percorso": {"esito": "adottato"},
+                             "tappo": {"corrente": {"importo": "0.3"}}}, "plug_residual": "0.3"}
+    s = P._snello_compatto(rec)
+    assert s["fonte"] == "deterministico:lettore" and s["lettore_percorso"] == {"esito": "adottato"} and s["tappo_importo"] == "0.3"
+    assert P._snello_compatto({}) is None

@@ -324,3 +324,53 @@ def test_conti_di_una_coppia_parziali_totali(tmp_path):
     nomi = {f.etichetta: f.importo for f in foglie_contabili(doc, corrente)}
     assert nomi["Crediti verso privati"] == Decimal("98180.13")
     assert "1) Crediti verso clienti" not in nomi            # la voce dei totali non e' foglia: i suoi conti si contano
+
+
+# --- Fix round 2: F3-9, un percorso o e' ben formato o e' None ------------------------------------------------
+
+def test_validatore_accetta_le_famiglie_di_lettere_dello_schema():
+    from importers.lettore.foglie import percorso_valido
+    for p in ("CE.B.9.a", "CE.B.9.b", "CE.B.9.c", "CE.B.9.e", "CE.B.10.a", "CE.B.10.d", "SPA.C.II.1.E",
+              "SPA.B.III.2.O", "SPP.D.4.E", "SPP.A.IV", "SPA.C.II", "CE.B.7", "SPP.E", "SPA.C.II.5-bis.O"):
+        assert percorso_valido(p), p
+
+
+def test_validatore_rifiuta_i_percorsi_mal_formati():
+    from importers.lettore.foglie import percorso_valido
+    for p in ("SPA.C.1", "SPA.C.II.1.a", "SPA.C.II.1.a.E", "CE.C.16.a", "SPP.E.O", "SPA.C.II.1.2", "SPP.A.4",
+              "SPA.B.II.1.E", "XX.A.1", "SPA", "CE.B.9.A"):
+        assert not percorso_valido(p), p
+
+
+def test_mastro_senza_numero_non_perde_il_romano(tmp_path):
+    # probe 1: «1) Rossi» sotto un mastro senza enumeratore non e' un livello C.1
+    voci = _crediti_attivo(("Crediti v/clienti", "300,00"), ("1) Rossi srl", "100,00"), ("2) Bianchi spa", "200,00"),
+                           ("Banca c/c", "517,00"), ("Cassa", "23,00"), ("Magazzino", "71,00"))
+    f = _per_etichetta(foglie_contabili(_doc(tmp_path, voci), 0))
+    assert f["1) Rossi srl"].percorso_legale is None and f["2) Bianchi spa"].percorso_legale is None
+
+
+def test_elenco_con_lettere_di_clienti_non_e_un_livello(tmp_path):
+    # probe 2: «a) Rossi» sotto «1) verso clienti» (gia' sp06a) e' un conto
+    voci = _crediti_attivo(("1) verso clienti", "300,00"), ("a) Rossi srl", "100,00"), ("b) Bianchi spa", "200,00"),
+                           ("Banca c/c", "517,00"), ("Cassa", "23,00"), ("Magazzino", "71,00"))
+    f = _per_etichetta(foglie_contabili(_doc(tmp_path, voci), 0))
+    assert f["a) Rossi srl"].percorso_legale is None and f["b) Bianchi spa"].percorso_legale is None
+
+
+def test_arabo_posizionale_senza_romano_sopra_e_none(tmp_path):
+    # probe 3: nessun padre verificato (nessuna somma stampata) e nessun romano sopra l'arabo
+    voci = [(50, 112, "STATO PATRIMONIALE ATTIVO")] + _righe(140, [
+        ("C) ATTIVO CIRCOLANTE",), ("1) Rossi srl", "101,00"), ("2) Bianchi spa", "217,00"),
+        ("Banca c/c", "519,00"), ("Cassa", "23,00"), ("Magazzino", "71,00"), ("Impianti", "37,00")])
+    f = _per_etichetta(foglie_contabili(_doc(tmp_path, voci), 0))
+    assert f["1) Rossi srl"].percorso_legale is None
+
+
+def test_lettera_di_scadenza_non_e_un_livello(tmp_path):
+    voci = _crediti_attivo(("5-bis) crediti tributari", "700,00"), ("a) Erario esigibili entro", "300,00"),
+                           ("b) Erario esigibili oltre", "400,00"), ("Banca c/c", "517,00"), ("Cassa", "23,00"),
+                           ("Magazzino", "71,00"))
+    f = _per_etichetta(foglie_contabili(_doc(tmp_path, voci), 0))
+    assert f["a) Erario esigibili entro"].percorso_legale == "SPA.C.II.5-bis.E"
+    assert f["b) Erario esigibili oltre"].percorso_legale == "SPA.C.II.5-bis.O"

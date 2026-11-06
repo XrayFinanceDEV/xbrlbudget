@@ -223,13 +223,61 @@ def _scorri(righe: list[Riga]) -> dict[str, _Posizione]:
     return out
 
 
+def _campo(p: str) -> str | None:
+    return tavola.campo_da_percorso_legale(p)
+
+
+def _lettera_significativa(base: str, lettera: str) -> bool:
+    """La lettera divide davvero la voce `base` in sotto-voci: il resolver della legge la manda su un campo diverso
+    da quello della voce (CE.B.9.a-e, CE.B.10.a-d). Sotto «1) verso clienti» (gia' sp06a) «a)» e' un conto."""
+    figlio = _campo(f"{base}.{lettera}")
+    return figlio is not None and figlio != _campo(base)
+
+
+def _scadenza_significativa(base: str) -> bool:
+    """La voce ha una ripartizione entro/oltre: E e O cadono su campi diversi (crediti, debiti, B.III.2)."""
+    e, o = _campo(f"{base}.E"), _campo(f"{base}.O")
+    return e is not None and o is not None and e != o
+
+
+def percorso_valido(p: str) -> bool:
+    """F3-9: un percorso di legge si assegna solo se e' ben formato nello schema che il codice conosce
+    (`percorsi.campo_da_percorso`): livelli in ordine (capitale, romano, arabo, lettera) senza ripetizioni, voce che il
+    resolver sa tradurre (cosi' un arabo senza il romano sopra, «SPA.C.1», cade), lettera solo dove divide la voce,
+    scadenza solo dove la voce ha entro/oltre."""
+    parti = p.split(".")
+    if len(parti) < 2 or parti[0] not in ("SPA", "SPP", "CE"):
+        return False
+    livelli = parti[1:]
+    scad = livelli[-1] if len(livelli) > 1 and livelli[-1] in ("E", "O") else None
+    if scad:
+        livelli = livelli[:-1]
+    if not livelli or _campo(p) is None:
+        return False
+    tipi = [_tipo(g) for g in livelli]
+    if any(b <= a for a, b in zip(tipi, tipi[1:])):
+        return False
+    base = ".".join((parti[0], *livelli))
+    if tipi[-1] == 3 and not _lettera_significativa(".".join((parti[0], *livelli[:-1])), livelli[-1]):
+        return False
+    return scad is None or _scadenza_significativa(base)
+
+
 def _percorso(r: Riga, pos: _Posizione) -> tuple[str | None, str | None]:
-    """(percorso di legge, campo) dall'outline della riga; None se il lato o la tavola non lo risolvono."""
+    """(percorso di legge, campo) dall'outline della riga; (None, None) se il lato manca o il percorso non e' ben
+    formato (F3-9: un percorso mancante costa una chiamata al modello, uno sbagliato una macro sbagliata). Una lettera
+    che non divide la voce ma la ripartizione entro/oltre («a) … esigibili entro») e' la scadenza, non un livello."""
     prefisso = _prefisso(r, pos.lato_sp)
     if prefisso is None or not pos.livelli:
         return None, None
-    p = ".".join((prefisso, *pos.livelli, *((pos.scad,) if pos.scad else ())))
-    return p, tavola.campo_da_percorso_legale(p)
+    livelli = list(pos.livelli)
+    if pos.scad and len(livelli) > 1 and _tipo(livelli[-1]) == 3 \
+            and not _lettera_significativa(".".join((prefisso, *livelli[:-1])), livelli[-1]):
+        livelli.pop()
+    p = ".".join((prefisso, *livelli, *((pos.scad,) if pos.scad else ())))
+    if not percorso_valido(p):
+        return None, None
+    return p, _campo(p)
 
 
 def _colonna_della_riga(doc: Documento, colonna: int, r: Riga) -> int | None:

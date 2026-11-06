@@ -1237,7 +1237,10 @@ il lettore gira sul solo PDF.
 8. **Guardia di costo e tetto** (F3-15). Prima di ogni chiamata, se i lati delle foglie sono noti e attivo ≠ passivo
    (più l'utile letto dal CE) oltre la soglia di adozione, il percorso esce non adottabile con
    `motivo: foglie_non_in_pari` (o `senza_foglie_sp`) **senza chiamare il modello**: nessuna classe può rimediare,
-   perché la colonna decide il lato. Un lato ignoto non attiva la guardia (non lo so, non blocca). Tetto di
+   perché la colonna decide il lato. La guardia usa **la stessa regola della composizione** (`componi.lato_sp`,
+   `importo_sp`, `e_risultato`): somma solo le foglie di sezione `SP`, la riga del risultato non conta, e il
+   risultato candidato è zero, l'utile delle foglie di CE o l'utile stampato col suo segno. Un lato ignoto, una
+   foglia di sezione ignota con un importo o un verso di CE ignoto non attivano la guardia (non lo so, non blocca). Tetto di
    `MAX_CHIAMATE = 40` per documento: oltre, il modello non è più chiamato, le foglie restano senza classe e il
    report dichiara `tetto_chiamate`.
 

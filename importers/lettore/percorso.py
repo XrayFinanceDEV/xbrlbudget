@@ -20,7 +20,7 @@ from importers import llm_provider
 from importers.import_snello import percorsi
 from importers.lettore.celle import leggi_celle
 from importers.lettore.classifica import classifica_dettagli, classifica_macro, rivota
-from importers.lettore.componi import Composizione, componi
+from importers.lettore.componi import Composizione, componi, e_risultato, importo_sp, lato_sp
 from importers.lettore.foglie import ancore, colonne_utili, foglie_contabili, senza_colonna
 from importers.lettore.righe import Documento, leggi_pdf
 
@@ -56,29 +56,35 @@ def _contatore(chiama_json, diag: dict | None = None):
     return chiama, conto
 
 
-def _foglie_non_in_pari(foglie) -> str | None:
+def _foglie_non_in_pari(foglie, ancore=()) -> str | None:
     """Il motivo per cui le foglie, classificate comunque, non potrebbero mai quadrare (il lato lo decide la
-    colonna, non il modello): nessuna foglia di SP, o attivo diverso da passivo (piu' l'utile letto dal CE, quando
-    le foglie del passivo non lo contengono) oltre la soglia di adozione. None se non si sa (lato ignoto)."""
+    colonna, non il modello): nessuna foglia di SP, o attivo diverso da passivo piu' un risultato candidato oltre la
+    soglia di adozione. Lato, segno e riga del risultato come li tratta la composizione (`componi`). Candidati del
+    risultato: zero, l'utile delle foglie di CE (se ognuna ha il verso) e l'utile stampato col suo segno.
+    None se non si sa: una foglia di sezione ignota con un importo, o una foglia di SP senza lato."""
     from importers.import_snello.verifica import soglia
 
-    sp = [f for f in foglie if f.sezione != "CE"]      # sezione ignota ("") conta come SP: il lato dira' se si sa
+    if any(f.sezione not in ("SP", "CE") and f.importo for f in foglie):
+        return None     # sezione ignota: potrebbe essere CE come SP, non lo so (e «non lo so» non blocca)
+    sp = [f for f in foglie if f.sezione == "SP" and f.importo and not e_risultato(f)]
     if not sp:
         return "senza_foglie_sp"
     attivo = passivo = _ZERO
     for f in sp:
-        if f.lato == "L" or f.lato_sp == "A":
-            attivo += f.importo
-        elif f.lato == "R" or f.lato_sp == "P":
-            passivo += f.importo
-        else:
+        lato = lato_sp(f)
+        if lato is None:
             return None
-    ce = [f for f in foglie if f.sezione == "CE"]
+        if lato == "A":
+            attivo += importo_sp(f)
+        else:
+            passivo += importo_sp(f)
     utili = [_ZERO]
-    if ce and all(f.verso_ce in ("costo", "ricavo") for f in ce):
+    utili += [a.importo for a in ancore if a.chiave == "utile"]
+    ce = [f for f in foglie if f.sezione == "CE" and f.importo and not e_risultato(f)]
+    if all(f.verso_ce in ("costo", "ricavo") for f in ce):
         utili.append(sum((f.importo if f.verso_ce == "ricavo" else -f.importo for f in ce), _ZERO))
-    elif ce:
-        return None
+    else:
+        return None     # un verso ignoto rende libero l'utile composto (sp13 viene dal CE, non dallo stampato)
     s = soglia(attivo)
     if all(abs(attivo - (passivo + u)) > s for u in utili):
         return "foglie_non_in_pari"
@@ -113,7 +119,7 @@ def _importa(file_path, contesto_mineru, chiama_json, diag: dict) -> dict:
     ids_c = {f.id for f in foglie_c}
     tutte = foglie_c + [f for f in foglie_p if f.id not in ids_c]   # un solo giro per le due colonne
     diag.update(foglie=len(foglie_c), ancore=len(anc_c), voti=0, foglie_rivotate=0)
-    motivo = _foglie_non_in_pari(foglie_c)
+    motivo = _foglie_non_in_pari(foglie_c, anc_c)
     if motivo:      # guardia di costo (F3-15): nessuna classe puo' sistemarlo, quindi nessuna chiamata al modello
         diag["motivo"] = motivo
         diag.setdefault("mesi_precedente", None)

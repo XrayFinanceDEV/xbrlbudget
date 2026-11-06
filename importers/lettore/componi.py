@@ -38,7 +38,9 @@ class Composizione:
     scelte: list[str] = field(default_factory=list)   # scelte dichiarate (es. ce17 senza verso trattato da costo)
 
 
-def _lato_sp(f: Foglia) -> str | None:
+def lato_sp(f: Foglia) -> str | None:
+    """«A» | «P» | None: decide la colonna (L/R); sulla colonna unica il lato di legge della foglia (F3-7).
+    La stessa regola vale per la guardia di costo del percorso."""
     lato = f.lato
     if lato == "U":
         lato = {"A": "L", "P": "R"}.get(f.lato_sp or "", "U")
@@ -69,14 +71,24 @@ def _bersaglio_ce(f: Foglia, classe: Classe | None) -> tuple[str | None, Decimal
     return (classe.dettaglio or tavola.altri_di(macro)), importo
 
 
+def importo_sp(f: Foglia) -> Decimal:
+    """L'importo che una foglia di SP somma sul suo lato."""
+    if f.percorso_legale and percorsi.e_fondo(f.percorso_legale) and f.importo > 0:
+        return -f.importo       # un fondo rettifica il cespite: sempre in diminuzione (F3-1)
+    return f.importo
+
+
+def e_risultato(f: Foglia) -> bool:
+    """La riga del risultato d'esercizio: mai una foglia, il risultato e' la cifra di chiusura."""
+    return bool(_RISULTATO_ESERCIZIO.search(_norm(f.etichetta)))
+
+
 def _bersaglio_sp(f: Foglia, classe: Classe | None) -> tuple[str | None, Decimal]:
-    importo = f.importo
-    if f.percorso_legale and percorsi.e_fondo(f.percorso_legale) and importo > 0:
-        importo = -importo      # un fondo rettifica il cespite: sempre in diminuzione (F3-1)
+    importo = importo_sp(f)
     macro = classe.macro if classe else None
     if macro:
         return (classe.dettaglio or tavola.altri_di(macro)), importo
-    lato = _lato_sp(f)
+    lato = lato_sp(f)
     if lato == "A":
         return tavola.altri_di("sp06"), importo
     if lato == "P":
@@ -109,7 +121,7 @@ def componi(foglie: list[Foglia], classi: dict[str, Classe], ancore: list[Ancora
     for f in foglie:
         if not f.importo:
             continue
-        if _RISULTATO_ESERCIZIO.search(_norm(f.etichetta)):
+        if e_risultato(f):
             continue            # la riga del risultato non e' mai una foglia
         classe = classi.get(f.id)
         if classe is not None and classe.macro in ("sp13", "ce21"):

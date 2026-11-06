@@ -70,7 +70,7 @@ def _importa(file_path, contesto_mineru, chiama_json, diag: dict) -> dict:
     doc = _leggi(file_path, contesto_mineru)
     if not doc.righe:
         raise ValueError("nessun testo e nessuna tabella")
-    corrente, _ = colonne_utili(doc)
+    corrente, precedente = colonne_utili(doc)
     if corrente is None:
         raise ValueError("nessuna colonna di esercizio")
     base = chiama_json or llm_provider.chiama_gx10_json
@@ -78,7 +78,8 @@ def _importa(file_path, contesto_mineru, chiama_json, diag: dict) -> dict:
 
     foglie_c = foglie_contabili(doc, corrente)
     anc_c = ancore(doc, corrente)
-    foglie_p: list = []
+    foglie_p = foglie_contabili(doc, precedente) if precedente is not None else []
+    anc_p = ancore(doc, precedente) if precedente is not None else []
     ids_c = {f.id for f in foglie_c}
     tutte = foglie_c + [f for f in foglie_p if f.id not in ids_c]   # un solo giro per le due colonne
     diag.update(foglie=len(foglie_c), ancore=len(anc_c), voti=0)
@@ -106,6 +107,19 @@ def _importa(file_path, contesto_mineru, chiama_json, diag: dict) -> dict:
     stampati = {f"totale_{a.chiave}": a.importo for a in anc_c if a.chiave in ("attivo", "passivo")}
     if stampati:
         out["stampati"] = stampati
+    prec = next((c for c in doc.colonne if c.indice == precedente), None)
+    diag["mesi_precedente"] = prec.mesi if prec else None
+    if prec is not None and prec.fine is not None:
+        out["anno_precedente"] = prec.fine.year
+    if foglie_p:
+        comp_p = componi(foglie_p, classi, anc_p)
+        if _blocchi(comp_p):
+            out["prior_stato"] = "scartato"
+            diag["prior_blocchi"] = _blocchi(comp_p)
+        else:
+            out["prior_bs"], out["prior_ce"] = _dati(comp_p)
+            out["prior_stato"] = "letto"
+
     diag.update(
         blocchi=_blocchi(comp), voti=voti, chiamate=conto["n"],
         classi_per_fonte=dict(Counter(classi[f.id].fonte for f in foglie_c if f.id in classi)),

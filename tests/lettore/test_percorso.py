@@ -1,5 +1,6 @@
 """Task 5-6 (Fase 3): il percorso del lettore, anno corrente e anno precedente. Qwen sempre finto."""
 import re
+from datetime import date
 from decimal import Decimal as D
 from types import SimpleNamespace
 
@@ -136,3 +137,55 @@ def test_errore_non_solleva(tmp_path):
     r = importa_col_lettore(str(tmp_path / "non_esiste.pdf"), chiama_json=_mai)
     assert r["bs"] == {} and r["ce"] == {} and r["diagnostica"]["errore"]
     assert _esito("lettore", r["bs"], r["ce"], None)["esito"] == "vuoto"
+
+
+def test_due_anni_stesse_classi(tmp_path):
+    finto = Finto(_REGOLE)
+    # niente percorso di legge: etichette semplici, due colonne; il modello e' chiamato una volta per etichetta
+    voci = [_testata(373, 120, "31/12/2025"), _testata(453, 120, "31/12/2024")]
+    sx = [("Banca c/c", "110,00", "100,00"), ("Clienti Rossi", "210,00", "190,00"), ("Magazzino merci", "330,00", "300,00"),
+          ("Impianti", "450,00", "410,00")]
+    voci += _righe(140, sx + [("Fornitori Alfa", "400,00", "350,00"), ("Capitale sociale", "700,00", "650,00")])
+    r = importa_col_lettore(_pdf(tmp_path, voci), chiama_json=finto)
+    d = r["diagnostica"]
+    assert finto.macro == 1 and "errore" not in d        # un blocco, ogni etichetta una volta sola
+    assert r["prior_bs"]["sp09_disponibilita_liquide"] == D("100.00")
+    assert r["prior_bs"]["sp06_crediti_breve"] == D("190.00") and r["prior_bs"]["sp11_capitale"] == D("650.00")
+    assert r["bs"]["sp09_disponibilita_liquide"] == D("110.00")
+    assert r["anno_precedente"] == 2024
+
+
+def test_foglia_solo_nel_precedente_stesso_giro(monkeypatch):
+    corr = [_f("a", 100, "L", "Clienti"), _f("p", 100, "R", "Capitale")]
+    prec = [_f("a", 90, "L", "Clienti"), _f("b", 20, "L", "Banca"), _f("p", 110, "R", "Capitale")]
+    cols = [Colonna(0, 0.0, "U", "esercizio", date(2025, 12, 31), None, 12, True),
+            Colonna(1, 0.0, "U", "esercizio", date(2024, 12, 31), None, 12, False)]
+    _finta_lettura(monkeypatch, corr, [], cols)
+    monkeypatch.setattr(percorso, "colonne_utili", lambda d: (0, 1))
+    monkeypatch.setattr(percorso, "foglie_contabili", lambda d, c: corr if c == 0 else prec)
+    finto = Finto(_REGOLE)
+    r = importa_col_lettore("x.pdf", chiama_json=finto)
+    assert finto.macro == 1
+    assert r["prior_stato"] == "letto" and r["prior_bs"]["sp09_disponibilita_liquide"] == D("20")
+    assert r["prior_bs"]["sp06_crediti_breve"] == D("90")
+
+
+def test_precedente_di_nove_mesi(tmp_path):
+    voci = _schema_di_legge(intestazioni=("dal 01/01/2026 al 30/09/2026", "dal 01/01/2025 al 30/09/2025"))
+    r = importa_col_lettore(_pdf(tmp_path, voci), chiama_json=_mai)
+    assert r["diagnostica"]["mesi_precedente"] == 9 and r["anno_precedente"] == 2025
+
+
+def test_precedente_che_non_torna_scartato(tmp_path):
+    # il deposito del precedente vale 540 invece di 550: l'attivo stampato (1.700) non torna
+    prec = ("700,00", "450,00", "540,00", "950,00", "100,00", "650,00", "2.470,00", "30,00", "2.400,00",
+            "1.700,00", "1.700,00", "100,00")
+    r = importa_col_lettore(_pdf(tmp_path, _schema_di_legge(prec=prec)), chiama_json=_mai)
+    assert r["prior_stato"] == "scartato" and r["prior_bs"] is None and r["prior_ce"] is None
+    assert r["diagnostica"]["blocchi"] == []
+    assert _esito("lettore", r["bs"], r["ce"], r["stampati"])["adottato"]
+
+
+def test_una_colonna_niente_precedente(tmp_path):
+    r = importa_col_lettore(_pdf(tmp_path, _schema_di_legge(due_colonne=False)), chiama_json=_mai)
+    assert r["prior_bs"] is None and r["prior_stato"] == "assente" and r["anno_precedente"] is None

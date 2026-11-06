@@ -172,7 +172,8 @@ def componi(foglie: list[Foglia], classi: dict[str, Classe], ancore: list[Ancora
         elif a.chiave == "passivo":
             composto = pas
         elif a.chiave == "utile":
-            composto = _utile(ce)
+            # senza CE l'utile stampato e' la cifra di sp13 (letta, non da rifare dal CE): nessun falso blocco
+            composto = _utile(ce) if sp13_da == "ce" else importi.get("sp13", _ZERO)
         else:
             pieno = percorsi.NOMI.get(a.chiave)
             composto = (bs if a.chiave.startswith("sp") else ce).get(pieno, _ZERO) if pieno else _ZERO

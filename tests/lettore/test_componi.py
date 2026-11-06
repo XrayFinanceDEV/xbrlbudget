@@ -114,3 +114,9 @@ def test_fondo_positivo_negato():
 def test_rimanenze_segno_invertito():
     c = componi([F("x", 30, "L", "CE", "costo", "Rimanenze iniziali prodotti finiti")], {"x": C("ce12")}, [])
     assert c.ce["ce02_variazioni_rimanenze"] == -30
+
+
+def test_solo_sp_utile_stampato_non_e_un_falso_blocco():
+    foglie = [F("a", 1000), F("p", 900, "R")]
+    c = componi(foglie, {"a": C("sp06"), "p": C("sp16")}, [Ancora("utile", D(100), "Utile", ())])
+    assert c.sp13_da == "stampato" and c.scarti["utile"] == 0 and c.blocchi == []

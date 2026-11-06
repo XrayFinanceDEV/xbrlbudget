@@ -9,6 +9,7 @@ import pytest
 from importers.import_snello.deterministico import _esito
 from importers.lettore import percorso
 from importers.lettore.classifica import PROMPT_MACRO
+from importers.llm_provider import LLMProviderError
 from importers.lettore.colonne import Colonna
 from importers.lettore.foglie import Ancora, Foglia
 from importers.lettore.percorso import importa_col_lettore
@@ -86,7 +87,7 @@ def test_schema_di_legge_senza_modello(tmp_path):
     r = importa_col_lettore(_pdf(tmp_path, _schema_di_legge()), chiama_json=_mai)
     d = r["diagnostica"]
     assert d["chiamate"] == 0 and d["blocchi"] == [] and "errore" not in d
-    assert d["classi_per_fonte"] == {"legale": 9}
+    assert d["classi_per_fonte"] == {"legale": 9} and r["prior_stato"] == "letto"
     assert r["bs"]["sp03_immob_materiali"] == D("800.00") and r["bs"]["sp13_utile_perdita"] == D("400.00")
     esito = _esito("lettore", r["bs"], r["ce"], r["stampati"])
     assert esito["adottato"] and esito["esito"] == "ok"
@@ -122,7 +123,7 @@ def test_blocco_rivotato(monkeypatch):
     finto = Finto(_REGOLE | {"client": "sp06"}, sbaglia={"c1": "sp05"})
     r = importa_col_lettore("x.pdf", chiama_json=finto)
     d = r["diagnostica"]
-    assert d["blocchi"] == [] and d["voti"] > 0
+    assert d["blocchi"] == [] and d["foglie_rivotate"] == 3 and d["voti"] == 9
     assert d["classi_per_fonte"].get("voto") == 3
     assert r["bs"]["sp06_crediti_breve"] == D("300")
 
@@ -149,20 +150,16 @@ def test_due_anni_stesse_classi(tmp_path):
     r = importa_col_lettore(_pdf(tmp_path, voci), chiama_json=finto)
     d = r["diagnostica"]
     assert finto.macro == 1 and "errore" not in d        # un blocco, ogni etichetta una volta sola
-    assert r["prior_bs"]["sp09_disponibilita_liquide"] == D("100.00")
-    assert r["prior_bs"]["sp06_crediti_breve"] == D("190.00") and r["prior_bs"]["sp11_capitale"] == D("650.00")
     assert r["bs"]["sp09_disponibilita_liquide"] == D("110.00")
     assert r["anno_precedente"] == 2024
+    # solo SP: il cancello `_esito` (bs e ce) non adotta il precedente, come non adotta il corrente
+    assert r["prior_stato"] == "scartato" and r["diagnostica"]["prior_rifiuto"]["controllo"] == "vuoto"
 
 
 def test_foglia_solo_nel_precedente_stesso_giro(monkeypatch):
-    corr = [_f("a", 100, "L", "Clienti"), _f("p", 100, "R", "Capitale")]
-    prec = [_f("a", 90, "L", "Clienti"), _f("b", 20, "L", "Banca"), _f("p", 110, "R", "Capitale")]
-    cols = [Colonna(0, 0.0, "U", "esercizio", date(2025, 12, 31), None, 12, True),
-            Colonna(1, 0.0, "U", "esercizio", date(2024, 12, 31), None, 12, False)]
-    _finta_lettura(monkeypatch, corr, [], cols)
-    monkeypatch.setattr(percorso, "colonne_utili", lambda d: (0, 1))
-    monkeypatch.setattr(percorso, "foglie_contabili", lambda d, c: corr if c == 0 else prec)
+    corr = _anno(100, 60)
+    prec = _anno(90, 70, extra=[_f("b", 20, "L", "Banca")])
+    _due_anni(monkeypatch, corr, prec)
     finto = Finto(_REGOLE)
     r = importa_col_lettore("x.pdf", chiama_json=finto)
     assert finto.macro == 1
@@ -189,3 +186,67 @@ def test_precedente_che_non_torna_scartato(tmp_path):
 def test_una_colonna_niente_precedente(tmp_path):
     r = importa_col_lettore(_pdf(tmp_path, _schema_di_legge(due_colonne=False)), chiama_json=_mai)
     assert r["prior_bs"] is None and r["prior_stato"] == "assente" and r["anno_precedente"] is None
+
+
+def _ce(id, importo, verso, etichetta):
+    return Foglia(id, etichetta, "", "U", "CE", D(importo), None, (), verso, None)
+
+
+def _due_anni(monkeypatch, corr, prec):
+    cols = [Colonna(0, 0.0, "U", "esercizio", date(2025, 12, 31), None, 12, True),
+            Colonna(1, 0.0, "U", "esercizio", date(2024, 12, 31), None, 12, False)]
+    _finta_lettura(monkeypatch, corr, [], cols)
+    monkeypatch.setattr(percorso, "colonne_utili", lambda d: (0, 1))
+    monkeypatch.setattr(percorso, "foglie_contabili", lambda d, c: corr if c == 0 else prec)
+
+
+_REGOLE_CE = _REGOLE | {"ricavi": "ce01", "costi": "ce06", "xyz": "X"}
+
+
+def _anno(a, capitale, extra=()):
+    return [_f("a", a, "L", "Clienti"), *extra, _f("p", capitale, "R", "Capitale"),
+            _ce("r", 100, "ricavo", "Ricavi vendite"), _ce("c", 60, "costo", "Costi servizi")]
+
+
+def test_precedente_con_massa_non_classificata_scartato(monkeypatch):
+    # il precedente quadra (la massa va nel secchio «altri») ma 5.000 EUR non hanno classe: non si adotta
+    corr = _anno(100, 60)
+    prec = _anno(100, 5060, extra=[_f("x", 5000, "L", "Xyz")])
+    _due_anni(monkeypatch, corr, prec)
+    r = importa_col_lettore("x.pdf", chiama_json=Finto(_REGOLE_CE))
+    assert _esito("lettore", r["bs"], r["ce"], r["stampati"])["esito"] == "ok"
+    assert r["prior_stato"] == "scartato" and r["prior_bs"] is None
+    assert r["diagnostica"]["prior_rifiuto"]["controllo"] == "massa_non_classificata"
+
+
+def test_precedente_pulito_letto_con_il_cancello(monkeypatch):
+    _due_anni(monkeypatch, _anno(100, 60), _anno(90, 50))
+    r = importa_col_lettore("x.pdf", chiama_json=Finto(_REGOLE_CE))
+    assert r["prior_stato"] == "letto" and r["prior_bs"]["sp06_crediti_breve"] == D("90")
+
+
+def test_modello_che_fallisce_non_adottato(monkeypatch):
+    def cade(*a, **k):
+        raise LLMProviderError("gx10 giu'")
+    _finta_lettura(monkeypatch, _anno(5000, 4960), [])
+    r = importa_col_lettore("x.pdf", chiama_json=cade)
+    assert r["diagnostica"]["classi_per_fonte"] == {"errore": 4}
+    assert _esito("lettore", r["bs"], r["ce"], r["stampati"])["esito"] != "ok"
+
+
+def test_errore_imprevisto_dict_completo(tmp_path):
+    r = importa_col_lettore(str(tmp_path / "no.pdf"), chiama_json=_mai)
+    assert r["prior_bs"] is None and r["prior_ce"] is None and r["prior_stato"] == "assente"
+    assert r["stampati"] == {} and r["diagnostica"]["mesi_precedente"] is None
+
+
+def test_chiamate_due_anni_come_un_anno(tmp_path):
+    righe = [("Banca c/c", "110,00", "100,00"), ("Clienti Rossi", "210,00", "190,00"),
+             ("Magazzino merci", "330,00", "300,00"), ("Impianti", "450,00", "410,00"),
+             ("Fornitori Alfa", "400,00", "350,00"), ("Capitale sociale", "700,00", "650,00")]
+    due = [_testata(373, 120, "31/12/2025"), _testata(453, 120, "31/12/2024")] + _righe(140, righe)
+    uno = [_testata(373, 120, "31/12/2025")] + _righe(140, [(a, b) for a, b, _ in righe])
+    f2, f1 = Finto(_REGOLE), Finto(_REGOLE)
+    importa_col_lettore(_pdf(tmp_path, due, "2.pdf"), chiama_json=f2)
+    importa_col_lettore(_pdf(tmp_path, uno, "1.pdf"), chiama_json=f1)
+    assert f2.chiamate == f1.chiamate >= 1

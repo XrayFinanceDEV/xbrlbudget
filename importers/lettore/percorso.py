@@ -25,6 +25,7 @@ from importers.lettore.foglie import ancore, colonne_utili, foglie_contabili, se
 from importers.lettore.righe import Documento, leggi_pdf
 
 _ZERO = Decimal(0)
+_VOTI = 3          # i turni di `rivota` per foglia (il suo default)
 _MACRO_ANCORATE = set(percorsi.NOMI)
 
 
@@ -55,12 +56,6 @@ def _dati(c: Composizione) -> tuple[dict, dict]:
     return ({**c.bs, "_plug_residual": plug, "_unclassified_mass": c.senza_classe}, dict(c.ce))
 
 
-def _blocchi(c: Composizione) -> list[str]:
-    """I blocchi della composizione. Senza CE (`sp13_da != "ce"`) l'utile stampato e' la cifra di `sp13`, non
-    un totale da rifare dal CE: `componi` lo confronta con un utile di CE assente, e non e' un blocco."""
-    return [b for b in c.blocchi if not (b == "utile" and c.sp13_da != "ce")]
-
-
 def _somma_macro(c: Composizione, chiave: str) -> Decimal:
     pieno = percorsi.NOMI.get(chiave)
     return (c.bs if chiave.startswith("sp") else c.ce).get(pieno, _ZERO) if pieno else _ZERO
@@ -82,21 +77,22 @@ def _importa(file_path, contesto_mineru, chiama_json, diag: dict) -> dict:
     anc_p = ancore(doc, precedente) if precedente is not None else []
     ids_c = {f.id for f in foglie_c}
     tutte = foglie_c + [f for f in foglie_p if f.id not in ids_c]   # un solo giro per le due colonne
-    diag.update(foglie=len(foglie_c), ancore=len(anc_c), voti=0)
+    diag.update(foglie=len(foglie_c), ancore=len(anc_c), voti=0, foglie_rivotate=0)
 
     cache: dict = {}
     classi = classifica_macro(tutte, chiama_json=chiama, cache=cache, diagnostica=diag)
     comp = componi(foglie_c, classi, anc_c)
-    voti = 0
+    voti = rivotate = 0
     for a in anc_c:
-        if a.chiave not in _blocchi(comp) or a.chiave not in _MACRO_ANCORATE:
+        if a.chiave not in comp.blocchi or a.chiave not in _MACRO_ANCORATE:
             continue
         sotto = [f for f in foglie_c if f.id in set(a.foglie)]
         if not sotto:
             continue
         classi = rivota(sotto, classi, chiama_json=chiama, ancora=a, somma=_somma_macro(comp, a.chiave),
                         cache=cache)
-        voti += len(sotto)
+        rivotate += len(sotto)
+        voti += len(sotto) * _VOTI
         comp = componi(foglie_c, classi, anc_c)
     classifica_dettagli(tutte, classi, chiama_json=chiama, cache=cache)
     comp = componi(foglie_c, classi, anc_c)
@@ -104,24 +100,34 @@ def _importa(file_path, contesto_mineru, chiama_json, diag: dict) -> dict:
 
     out = {"bs": bs, "ce": ce, "prior_bs": None, "prior_ce": None, "anno_precedente": None,
            "prior_stato": "assente"}
-    stampati = {f"totale_{a.chiave}": a.importo for a in anc_c if a.chiave in ("attivo", "passivo")}
-    if stampati:
-        out["stampati"] = stampati
+    out["stampati"] = {f"totale_{a.chiave}": a.importo for a in anc_c if a.chiave in ("attivo", "passivo")}
     prec = next((c for c in doc.colonne if c.indice == precedente), None)
     diag["mesi_precedente"] = prec.mesi if prec else None
     if prec is not None and prec.fine is not None:
         out["anno_precedente"] = prec.fine.year
     if foglie_p:
         comp_p = componi(foglie_p, classi, anc_p)
-        if _blocchi(comp_p):
+        if comp_p.blocchi:
             out["prior_stato"] = "scartato"
-            diag["prior_blocchi"] = _blocchi(comp_p)
+            diag["prior_rifiuto"] = {"controllo": "blocchi", "blocchi": list(comp_p.blocchi)}
         else:
-            out["prior_bs"], out["prior_ce"] = _dati(comp_p)
-            out["prior_stato"] = "letto"
+            # lo stesso cancello dell'anno corrente e di `_con_precedente`: adottato e "ok" (niente tappo, massa
+            # non classificata sotto soglia), altrimenti il precedente si scarta e si dice perche'
+            from importers.import_snello import deterministico as _det   # import tardivo: niente cicli col T7
+            bs_p, ce_p = _dati(comp_p)
+            ps = {f"totale_{a.chiave}": a.importo for a in anc_p if a.chiave in ("attivo", "passivo")}
+            e = _det._esito("lettore", bs_p, ce_p, ps)
+            if e["adottato"] and e["esito"] == "ok":
+                out["prior_bs"], out["prior_ce"] = e["bs"], e["ce"]
+                out["prior_stato"] = "letto"
+            else:
+                out["prior_stato"] = "scartato"
+                diag["prior_rifiuto"] = {"controllo": e["esito"],
+                                         **({"unclassified_mass": e["unclassified_mass"]}
+                                            if "unclassified_mass" in e else {})}
 
     diag.update(
-        blocchi=_blocchi(comp), voti=voti, chiamate=conto["n"],
+        blocchi=list(comp.blocchi), voti=voti, foglie_rivotate=rivotate, chiamate=conto["n"],
         classi_per_fonte=dict(Counter(classi[f.id].fonte for f in foglie_c if f.id in classi)),
         scarti={k: str(v) for k, v in comp.scarti.items()}, sbilancio=str(comp.sbilancio),
         chiusure=[{**x, "importo": str(x["importo"])} for x in comp.chiusure], scelte=list(comp.scelte),
@@ -133,12 +139,14 @@ def _importa(file_path, contesto_mineru, chiama_json, diag: dict) -> dict:
 def importa_col_lettore(file_path: str, contesto_mineru=None, *, chiama_json=None) -> dict:
     """SP e CE del PDF, corrente e precedente. Mai un'eccezione: un errore da' bs/ce vuoti e `diagnostica["errore"]`."""
     inizio = time.monotonic()
-    diag: dict = {"foglie": 0, "ancore": 0, "blocchi": [], "voti": 0, "chiamate": 0, "classi_per_fonte": {},
+    diag: dict = {"foglie": 0, "ancore": 0, "blocchi": [], "voti": 0, "foglie_rivotate": 0, "chiamate": 0, "classi_per_fonte": {},
                   "secondi": 0.0}
     try:
         out = _importa(file_path, contesto_mineru, chiama_json, diag)
     except Exception as e:  # noqa: BLE001 - il percorso non fa mai fallire un import
         diag["errore"] = f"{type(e).__name__}: {e}"[:300]
-        out = {"bs": {}, "ce": {}, "diagnostica": diag}
+        diag.setdefault("mesi_precedente", None)
+        out = {"bs": {}, "ce": {}, "prior_bs": None, "prior_ce": None, "anno_precedente": None,
+               "prior_stato": "assente", "stampati": {}, "diagnostica": diag}
     diag["secondi"] = round(time.monotonic() - inizio, 3)
     return out

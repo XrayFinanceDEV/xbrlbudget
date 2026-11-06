@@ -24,7 +24,7 @@ from importers.lettore.totali import assegna_padri, marca_totali
 from importers.lettore.profilo import (
     _PERCORSO_LEGGE, _RUOLI_ANALISI, _SEPARATORE, _STACCO_SEPARATORE, _SEPARATORE_CODICE, _TOL_X_CODICE, _VALUTA, _VOCE_NUMERATA,
     FormaCodice, Profilo, TabellaNota, _capitale_in_anagrafica, _codice_in_testa, _decimali, _in_colonna, _norm,
-    _rimando_di_nota, _valuta_davanti, _voce_di_legge, marcatore_dopo, meno_staccato, in_colonna_di_segni, profilo_documento, senza_filetti)
+    _rimando_di_nota, _valuta_davanti, _voce_di_legge, _posto_marcatore, marcatore_dopo, meno_staccato, in_colonna_di_segni, profilo_documento, senza_filetti)
 
 _X0_MINIMO = 150.0          # come `colonne._in_colonna`
 # Una riga senza importi piu' vicina di cosi' (frazione dell'interlinea) alla riga sopra ne e' il seguito
@@ -254,7 +254,7 @@ def _celle_del_lato(parole: list[Parola], colonne: list[Colonna], lato: str, pag
             imp = Importo(-imp.valore, imp.forma, stampato, imp.marcatore)
         marcatore = marcatore_dopo(parole, i) if c.indice in marcatori and imp.marcatore is None else None
         if marcatore is not None:
-            segni.add(i + 1)
+            segni.update(range(i + 1, _posto_marcatore(parole, i) + 1))   # i filetti e la lettera
             stampato = f"{stampato} {marcatore}"
             imp = Importo(imp.valore, imp.forma, stampato, marcatore)
         celle[c.indice] = costruite[i] = segno_del_lato(Importo(imp.valore, imp.forma, stampato, imp.marcatore), lato)

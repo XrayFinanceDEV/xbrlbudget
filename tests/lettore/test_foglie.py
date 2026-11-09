@@ -827,3 +827,20 @@ def test_validatore_rifiuta_un_arabo_del_ce_fuori_dalla_sua_lettera():
     from importers.lettore.foglie import percorso_valido
     assert not percorso_valido("CE.C.5") and not percorso_valido("CE.A.9") and not percorso_valido("CE.B.16")
     assert percorso_valido("CE.C.16") and percorso_valido("CE.B.9.a") and percorso_valido("CE.C.17-bis")
+
+
+def test_proventi_da_consolidato_fiscale_si_sottraggono_dalle_imposte(tmp_path):
+    # 1553: «Totale delle imposte» = correnti + anticipate - proventi da consolidato. Senza la regola il totale non si
+    # verifica, i tre conti restano costi positivi e l'utile composto si sposta di due volte il provento
+    voci = [(50, 112, "CONTO ECONOMICO")] + _righe(140, [
+        ("A) Valore della produzione",), ("1) Ricavi delle vendite", "1.000,00"), ("5) Altri ricavi", "200,00"),
+        ("Totale valore della produzione", "1.200,00"), ("B) Costi della produzione",), ("7) Per servizi", "700,00"),
+        ("8) Godimento beni di terzi", "400,00"), ("Totale costi della produzione", "1.100,00"),
+        ("Risultato prima delle imposte", "100,00"), ("20) Imposte sul reddito",),
+        ("a) Imposte correnti", "300,00"), ("d) Imposte anticipate", "50,00"),
+        ("f) Proventi (oneri) da consolidato fiscale", "600,00"), ("Totale delle imposte sul reddito", "-250,00"),
+        ("21) Utile (perdita) dell'esercizio", "350,00")])
+    doc = _doc(tmp_path, voci)
+    imposte = {f.etichetta: f.importo for f in foglie_contabili(doc, 0) if f.percorso_legale == "CE.20"}
+    assert imposte["f) Proventi (oneri) da consolidato fiscale"] == Decimal("-600.00")
+    assert sum(imposte.values()) == Decimal("-250.00")

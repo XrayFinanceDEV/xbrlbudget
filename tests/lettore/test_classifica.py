@@ -310,7 +310,7 @@ def test_debito_senza_scadenza_stampata_torna_a_breve():
 def test_debito_con_oltre_nell_etichetta_o_nel_mastro_va_oltre():
     foglie = [F("a", "Erario c/iva oltre 12 mesi", lato="R"),
               F("b", "Debiti v/INPS", lato="R", antenati=("DEBITI", "DEBITI PREVID./ASSIC. OLTRE 12 M")),
-              F("c", "CRA C/FINANZIAMENTO (LUNGO TERMINE)", lato="R"),
+              F("c", "BANCA C/FINANZIAMENTO (LUNGO TERMINE)", lato="R"),
               F("d", "Banca X", lato="R", antenati=("MUTUI A MEDIO/LUNGO TERMINE",))]
     out, _ = c.scadenza_dei_debiti(foglie, {k: _M("sp16") for k in "abcd"})
     assert all(out[k].macro == "sp17" for k in "abcd")
@@ -375,7 +375,7 @@ def test_rettifica_dell_altro_lato_solo_per_un_conto_che_lo_dice():
     # una banca in avere fra le passivita' e' un debito verso banche, non un «fondo» che netta i crediti: l'enum
     # offre le rettifiche solo a un conto che si dice fondo/ammortamento/svalutazione (o perdite, azioni proprie)
     finto = Finto("X")
-    c.classifica_macro([F("a", "BPER Banca S.p.A.", lato="R"), F("b", "F/AMM.COSTI IMPIANTO", lato="R"),
+    c.classifica_macro([F("a", "Banca Alfa S.p.A.", lato="R"), F("b", "F/AMM.COSTI IMPIANTO", lato="R"),
                         F("c", "Crediti verso clienti", lato="R"), F("d", "Perdite esercizi precedenti", lato="L"),
                         F("e", "Prelevamenti soci", lato="L"), F("f", "-F.Amm.ord.Consul Matrix", lato="R")],
                        chiama_json=finto)

@@ -346,3 +346,41 @@ def test_chiamate_del_passo_2_dichiarate(tmp_path):
     d = r["diagnostica"]
     # magazzino e impianti hanno dettagli: il passo 2 li chiede (prima solo le macro KPI)
     assert d["chiamate_dettagli"] >= 1 and d["chiamate_dettagli"] <= d["chiamate"] == finto.chiamate
+
+
+def test_scadenza_dei_debiti_dal_testo_non_dal_modello(monkeypatch):
+    # il modello manda il finanziamento senza scadenza oltre e il debito «oltre 12 mesi» a breve: decide il testo
+    foglie = [_f("c", 1000, "L", "Cassa"), _f("m", 600, "R", "Mutuo banca"),
+              _f("o", 400, "R", "Erario c/iva oltre 12 mesi")]
+    _finta_lettura(monkeypatch, foglie, [])
+    finto = Finto({"cassa": "sp09", "mutuo": "sp17", "erario": "sp16"})
+    r = importa_col_lettore("x.pdf", chiama_json=finto)
+    assert r["bs"]["sp16_debiti_breve"] == D("600") and r["bs"]["sp17_debiti_lungo"] == D("400")
+    assert r["diagnostica"]["sbilancio"] == "0.00" and len(r["diagnostica"]["scadenze"]) == 2
+
+
+def test_saldo_negativo_spostato_e_i_totali_stampati_seguono(monkeypatch):
+    foglie = [_f("c", 1000, "L", "Cassa"), _f("n", -100, "L", "Crediti diversi"), _f("p", 900, "R", "Fornitori")]
+    _finta_lettura(monkeypatch, foglie, [Ancora("attivo", D(900), "r1", ("c", "n")),
+                                         Ancora("passivo", D(900), "r2", ("p",))])
+    finto = Finto({"cassa": "sp09", "crediti": "sp06", "fornitori": "sp16"})
+    r = importa_col_lettore("x.pdf", chiama_json=finto)
+    assert r["stampati"] == {"totale_attivo": D(1000), "totale_passivo": D(1000)}
+    assert r["bs"]["sp16_debiti_breve"] == D(1000)
+    # attivo composto = cassa 1.000 (il credito negativo e' ora un debito): uguale al totale stampato corretto
+    assert r["bs"]["sp09_disponibilita_liquide"] + r["bs"].get("sp06_crediti_breve", 0) == D(1000)
+    assert r["diagnostica"]["blocchi"] == [] and all(D(v) == 0 for v in r["diagnostica"]["scarti"].values())
+
+
+def test_scadenza_non_rompe_un_ancora_stampata_che_tornava(monkeypatch):
+    # il documento stampa il totale dei debiti oltre (sp17) che contiene il mutuo: la classe del modello lo chiude, la
+    # regola «senza prova a breve» lo romperebbe. Il totale stampato decide, e la scelta si dichiara.
+    foglie = [_f("c", 1000, "L", "Cassa"), _f("m", 600, "R", "Mutuo banca"), _f("d", 400, "R", "Fornitori")]
+    _finta_lettura(monkeypatch, foglie, [Ancora("sp17", D(600), "Debiti oltre", ("m",)),
+                                         Ancora("sp16", D(400), "Debiti entro", ("d",))])
+    finto = Finto({"cassa": "sp09", "mutuo": "sp17", "fornitori": "sp16"})
+    r = importa_col_lettore("x.pdf", chiama_json=finto)
+    assert r["bs"]["sp17_debiti_lungo"] == D("600") and r["bs"]["sp16_debiti_breve"] == D("400")
+    assert r["diagnostica"]["blocchi"] == []
+    assert any("ancora" in s and s.endswith(": m") for s in r["diagnostica"]["scadenze"])
+    assert not any(s.startswith("debito a breve") and s.endswith(": m") for s in r["diagnostica"]["scadenze"])

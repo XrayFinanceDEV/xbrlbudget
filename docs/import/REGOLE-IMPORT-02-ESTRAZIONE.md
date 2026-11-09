@@ -1271,6 +1271,49 @@ il lettore gira sul solo PDF.
    fondi dal più grande); altrimenti resta la classe del modello e si dichiara in `scelte`. *Se si ignora:* fondo e
    cespite su macro diverse spostano massa fra `sp02` e `sp03` senza toccare il totale (budget_395, 1531): nessun
    cancello la vede.
+5-bis. **Regole di testo e di aritmetica dopo il modello** (Task 11). Il modello sceglie la classe, ma alcune
+   decisioni le prende il testo stampato o l'aritmetica, sempre dichiarate per id:
+   - **Il contesto è il mastro, anche non verificato.** `Foglia.mastri` = `Riga.percorso` (i titoli sopra il conto,
+     dalla sezione al padre); `Foglia.contesto` (i mastri, o gli antenati verificati se più lunghi) va nel prompt
+     («sotto: …»), nella chiave della cache, nella scadenza dei debiti e nella natura delle rimanenze, mai negli
+     importi. *Se si ignora:* il mastro di una catena di un solo conto («ALTRI DEBITI VERSO FORNITORI» sopra «FATTURE DA
+     RICEVERE», «DEBITI VERSO BANCHE OLTRE 12 M» sopra un mutuo) non è un antenato verificato, e il modello giudica
+     l'etichetta nuda, cambiando idea da una corsa all'altra.
+   - **La scadenza dei debiti la decide il testo** (`classifica.scadenza_dei_debiti`, prima del passo 2): un debito
+     del modello va su `sp17` solo con una prova stampata nel conto o nel mastro («oltre 12 mesi/l'esercizio», «lungo
+     termine», «medio/lungo», «m/l», le sigle «(OE)»/«(EE)» dei gestionali), altrimenti su `sp16` (CLAUDE.md, «Debito senza scadenza dichiarata → a breve»;
+     il mastro «medio/lungo» è una scadenza dichiarata, gli interessi sotto di lui restano entro). Il dettaglio passa
+     alla stessa lettera. Le classi `legale` portano già la loro scadenza. `diagnostica["scadenze"]`.
+   - **Imposte anticipate senza scadenza stampata oltre 12 mesi** (`imposte_anticipate_oltre`, dopo il passo 2,
+     regola D14 del proprietario): `sp06f` → `sp07f` salvo un «entro» nel percorso, nel conto o nel mastro.
+   - **Un saldo negativo passa all'altro lato, per natura** (`componi.saldi_negativi`, regole D2/D12/D15): la
+     liquidità negativa (una banca, una carta di credito) è un debito verso banche (`sp16a`) conto per conto; un credito
+     o un debito negativo passa di lato **solo se il campo su cui somma esce negativo** (credito → `sp16e` se
+     tributario, altrimenti `sp16g`; debito → `sp06e` se tributario, `sp09` se verso banche, altrimenti `sp06g`): una nota di credito da
+     ricevere fra i fornitori rettifica una voce che resta positiva e lì resta nettata.
+     Attivo e passivo salgono della stessa massa: il pareggio resta, e le ancore (di partenza e di arrivo) e i totali
+     passati al cancello contano la massa spostata (`Composizione.spostati`, `percorso._stampati`). Fondi e rettifiche
+     col meno restano dove sono. *Se si ignora:* il secchio «altri» esce negativo.
+   - **Un contro-conto si riconosce dal nome**: l'enum offre i `.F` solo a un conto che si dice fondo, ammortamento,
+     svalutazione o rettifica, i `.N` solo a perdite, azioni proprie o riserve negative. *Se si ignora:* il modello
+     usa il `.F` per un conto che non trova posto sul lato (banche in avere sotto le disponibilità liquide nettate sui
+     crediti verso clienti), massa spostata fra lati che nessun cancello vede.
+   - **Una foglia di SP che il modello chiama risultato** (`sp13`) si tratta come la riga del risultato: lo è solo se
+     ne vale l'importo, altrimenti va su `sp12g`. *Se si ignora:* «Utili portati a nuovo» scartato, foglio sbilanciato.
+   - **Lavori in corso su ordinazione in A.3** (`rimanenze_ce.voce_rimanenze`, regola W4): le commesse vanno su `ce03`;
+     `natura_rimanenze` resta invariata per i lettori di oggi.
+   - **Il fondo segue il cespite anche nel secchio «altri»**: un cespite senza dettaglio somma sul secchio della macro
+     e il suo fondo abbinato va lì, non sull'aggregato.
+   - **Il prompt porta le regole di classificazione del proprietario** (natura sul mastro del gestionale: amministratori
+     in B.7, somministrato in B.9, cauzioni fra le immobilizzazioni finanziarie, versamenti in conto capitale fra le
+     riserve, migliorie su beni di terzi fra gli immateriali, TFR solo il fondo; nel passo 2 carte di credito verso banche, soci e finanziamenti agevolati verso altri finanziatori, fatture da ricevere
+     verso fornitori, acconti dei clienti e debiti verso il gruppo fra gli altri debiti, ammortamenti senza categoria
+     sui materiali, riserve di rivalutazione di legge, merci fra i prodotti finiti e merci).
+   - **Dopo l'adozione dettagli e scadenze non si rifanno** (`pdf_importer._dettagli_gia_letti` →
+     `dettagli_letti_dal_lettore`, come per il reso XBRL). *Se si ignora:* la ricerca dei dettagli rilegge il documento
+     e `reclassify_ledger_maturities` riscrive `sp16`/`sp17` contro la scadenza decisa dal testo: la correzione del lettore
+     non arriva al DB. (Dal 2026-11-09 quella funzione non ha più l'eccezione «finanziamenti e mutui oltre 12 mesi»:
+     senza scadenza stampata ogni debito, mutui compresi, va a breve; politica `default-short-v2`.)
 6. **Voti sui blocchi che non tornano** (F3-11). Se una macro ancorata (`sp06`, `ce08`, …) non rifà il proprio
    totale stampato oltre 1 €, **solo le sue foglie** si rivotano, tre volte a temperatura 0 con **tre presentazioni
    diverse** (altrimenti la stessa domanda darebbe tre volte la stessa risposta): ogni riga coi soli antenati;

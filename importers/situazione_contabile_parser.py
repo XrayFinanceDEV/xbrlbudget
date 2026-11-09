@@ -7364,6 +7364,11 @@ def _vseg_is_financing(u: str) -> bool:
     return 'FINANZIAMENT' in u or 'MUTU' in u
 
 
+def _vseg_ha_prova_lungo(u: str) -> bool:
+    return ('MEDIO/LUNGO' in u or 'MEDIO LUNGO' in u or 'M/L' in u
+            or 'LUNGO TERMINE' in u or 'OLTRE' in u)
+
+
 def _vseg_debt_field(u: str) -> Optional[str]:
     """IV-CEE field for a financing DETAIL caption, or None when unrecognised.
 
@@ -7374,11 +7379,18 @@ def _vseg_debt_field(u: str) -> Optional[str]:
         # bank. Keyed on SOCIO alone and NOT on 'FINANZ', which the OCR mangles
         # ("C/FINANZIAMEN" -> "C/FINANANZIAMEN"); the caller has already scoped these
         # rows to the financing mastro, so the word carries the meaning on its own.
-        return 'sp17b_debiti_altri_finanz_lungo'
+        # Senza scadenza stampata e' breve (owner, 2026-11-09): sp17b solo con una prova.
+        if _vseg_ha_prova_lungo(u):
+            return 'sp17b_debiti_altri_finanz_lungo'
+        return 'sp16b_debiti_altri_finanz_breve'
     if 'ANTICIPAZ' in u:
         return 'sp16a_debiti_banche_breve'          # advances revolve within the year
-    if 'MEDIO/LUNGO' in u or 'MEDIO LUNGO' in u or 'M/L' in u or 'MUTUO' in u:
+    if _vseg_ha_prova_lungo(u):
         return 'sp17a_debiti_banche_lungo'
+    if 'MUTU' in u:
+        # La parola MUTUO da sola non e' una scadenza (owner, 2026-11-09): senza
+        # MEDIO/LUNGO, M/L o OLTRE stampati il debito va a breve.
+        return 'sp16a_debiti_banche_breve'
     return None
 
 
@@ -7746,6 +7758,10 @@ def parse_bilancio_verifica_segno(
                     bs['sp16a_debiti_banche_breve'] -= amount
                     bs['sp17'] += amount
                     bs[field] += amount
+                elif field != 'sp16a_debiti_banche_breve':
+                    # breve ma non banca (soci senza scadenza): sp16 non cambia
+                    bs['sp16a_debiti_banche_breve'] -= amount
+                    bs[field] = bs.get(field, Decimal('0')) + amount
 
     ricavi = sum(ce.get(k, Decimal('0')) for k in _VSEG_RICAVI_KEYS)
     costi = sum(ce.get(k, Decimal('0')) for k in _VSEG_COSTI_KEYS)

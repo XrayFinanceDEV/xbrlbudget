@@ -22,7 +22,7 @@ from importers.lettore.classifica import Classe
 from importers.import_snello.verifica import soglia as soglia_adozione
 from importers.lettore.diagnosi import TOLLERANZA_ARROTONDAMENTO
 from importers.lettore.foglie import Ancora, Foglia, e_riga_del_risultato
-from importers.rimanenze_ce import e_conto_rimanenze, natura_rimanenze
+from importers.rimanenze_ce import e_conto_rimanenze, voce_rimanenze
 
 _ZERO = Decimal(0)
 _CENT = Decimal("0.01")
@@ -42,6 +42,8 @@ class Composizione:
     rettifiche: Decimal = _ZERO      # massa delle rettifiche passate dalla colonna opposta: i totali stampati la
                                      # contano, attivo e passivo composti no (entrambi scendono di tanto)
     tagliate: list = field(default_factory=list)      # [[campo, eccedenza]]: fondo oltre il cespite, azzerato
+    spostati: Decimal = _ZERO        # massa dei saldi negativi passati all'altro lato (D12): attivo e passivo composti
+                                     # ne salgono entrambi, i totali stampati no
 
 
 def lato_sp(f: Foglia) -> str | None:
@@ -58,10 +60,10 @@ def _bersaglio_ce(f: Foglia, classe: Classe | None) -> tuple[str | None, Decimal
     importo = f.importo
     natura = None
     if e_conto_rimanenze(f.etichetta):
-        natura = natura_rimanenze(f.etichetta, *reversed(f.antenati))
+        natura = voce_rimanenze(f.etichetta, *reversed(f.contesto))
     if natura:
-        # ce02 e' un ricavo, ce10 un costo: la rimanenza dal verso opposto toglie
-        proprio = "ricavo" if natura == "ce02" else "costo"
+        # ce02/ce03 sono ricavi, ce10 un costo: la rimanenza dal verso opposto toglie
+        proprio = "costo" if natura == "ce10" else "ricavo"
         if f.verso_ce and f.verso_ce != proprio:
             importo = -importo
         return natura, importo
@@ -105,9 +107,57 @@ def e_questo_risultato(f: Foglia, risultato: Decimal, soglia: Decimal) -> bool:
     return abs(abs(f.importo) - abs(risultato)) <= soglia
 
 
-def _bersaglio_sp(f: Foglia, classe: Classe | None) -> tuple[str | None, Decimal]:
+# Saldi negativi (proprietario, regole D2/D12/D15 del 2026-10-28): un saldo negativo fra le attivita' e' un debito -
+# verso banche se e' liquidita', tributario se e' un credito tributario, altrimenti fra gli altri debiti; un debito
+# negativo e' un credito (tributario o altro). Non e' il ribaltamento per descrizione (vietato): e' aritmetica, e attivo
+# e passivo salgono della stessa massa, quindi il pareggio resta. Un fondo o una rettifica col meno restano dove sono.
+# La liquidita' negativa (una banca, una carta di credito) e' un debito verso banche conto per conto (D2, D15); un
+# credito o un debito negativo passa solo quando il campo su cui somma esce negativo: una nota di credito da ricevere
+# fra i fornitori rettifica una voce che resta positiva, e li' resta nettata; un secchio «altri» negativo invece non
+# esiste (Task 11).
+_SALDO_NEGATIVO_ATTIVO = {"sp06": "sp16g", "sp07": "sp16g", "sp09": "sp16a"}
+_SALDO_NEGATIVO_PASSIVO = {"sp16": "sp06g", "sp17": "sp06g"}
+# per natura: tributario contro tributario, un debito verso banche in dare e' liquidita' (revisione Task 11)
+_TRIBUTARI = {"sp06e": "sp16e", "sp07e": "sp16e", "sp16e": "sp06e", "sp17e": "sp06e", "sp16a": "sp09", "sp17a": "sp09"}
+_CONTO_PER_CONTO = {"sp09"}
+_RETTIFICA_NEL_NOME = re.compile(r"\bF(?:ONDO|\.\s*DO|/DO|DO)\b|SVALUT|RETTIFIC|\bAMM(?:\.|TO|ORT)", re.I)
+
+
+def _candidato_saldo_negativo(f: Foglia, classe: Classe | None) -> str | None:
+    """Il campo dell'altro lato su cui andrebbe una foglia di SP a saldo negativo, o None se non e' un candidato."""
+    if f.sezione != "SP" or classe is None or classe.macro is None or classe.rettifica or importo_sp(f) >= 0:
+        return None
+    if (f.percorso_legale and percorsi.e_fondo(f.percorso_legale)) or _RETTIFICA_NEL_NOME.search(f.etichetta):
+        return None
+    tabella = {"A": _SALDO_NEGATIVO_ATTIVO, "P": _SALDO_NEGATIVO_PASSIVO}.get(lato_sp(f) or "", {})
+    if classe.macro not in tabella:
+        return None
+    return _TRIBUTARI.get(classe.dettaglio or "") or tabella[classe.macro]
+
+
+def saldi_negativi(foglie: list[Foglia], classi: dict[str, Classe]) -> dict[str, str]:
+    """{id: campo dell'altro lato} delle foglie a saldo negativo che passano di lato: la liquidita' conto per conto,
+    crediti e debiti solo se il campo su cui sommano esce negativo."""
+    somme: dict[str, Decimal] = {}
+    for f in foglie:
+        c = classi.get(f.id)
+        if f.sezione == "SP" and f.importo and c is not None and c.macro and not c.rettifica:
+            campo = c.dettaglio or tavola.altri_di(c.macro)
+            somme[campo] = somme.get(campo, _ZERO) + importo_sp(f)
+    out: dict[str, str] = {}
+    for f in foglie:
+        c = classi.get(f.id)
+        altro = _candidato_saldo_negativo(f, c)
+        if altro and (c.macro in _CONTO_PER_CONTO or somme.get(c.dettaglio or tavola.altri_di(c.macro), _ZERO) < 0):
+            out[f.id] = altro
+    return out
+
+
+def _bersaglio_sp(f: Foglia, classe: Classe | None, altro_lato: str | None = None) -> tuple[str | None, Decimal]:
     importo = importo_sp(f)
     macro = classe.macro if classe else None
+    if altro_lato:
+        return altro_lato, -importo
     if macro and classe.rettifica:
         # rettifica della colonna opposta: in diminuzione del bene o del netto, sul dettaglio se noto, altrimenti
         # sull'aggregato (senza dettaglio si netta all'aggregato, come `conti.py`). Il segno e' l'opposto di quello
@@ -162,6 +212,12 @@ def _nomina(fondo: list[str], cespite: list[str]) -> int:
     return len(usate)
 
 
+def _campo_del_cespite(c: Classe) -> str:
+    """Il campo su cui il cespite somma davvero: il suo dettaglio, o il secchio «altri» della macro. Il fondo va
+    li', non sull'aggregato: un cespite nel secchio con il fondo sull'aggregato lascia il secchio lordo."""
+    return c.dettaglio or tavola.altri_di(c.macro)
+
+
 def _abbina_fondi(foglie: list[Foglia], classi: dict[str, Classe]) -> tuple[dict[str, Classe], list[str]]:
     """F3-16: un fondo ammortamento si netta sulla macro (e sul dettaglio) del suo cespite, anche se il modello ha
     nominato un'altra categoria. Prima l'etichetta: il fondo che nomina un solo cespite (ogni sua parola e' l'inizio
@@ -200,7 +256,7 @@ def _abbina_fondi(foglie: list[Foglia], classi: dict[str, Classe]) -> tuple[dict
         if voti and (len(voti) == 1 or voti[0][0] > voti[1][0]):
             c = voti[0][1]
             residuo[c.id] -= fondo.importo
-            assegna(fondo, classi[c.id].macro, classi[c.id].dettaglio, "etichetta")
+            assegna(fondo, classi[c.id].macro, _campo_del_cespite(classi[c.id]), "etichetta")
             continue
         cat = _categoria_cespite(fondo.etichetta)
         stessi = [c for c in cespiti if cat is not None and famiglia[c.id] == cat]
@@ -212,7 +268,7 @@ def _abbina_fondi(foglie: list[Foglia], classi: dict[str, Classe]) -> tuple[dict
         for c in stessi:
             per_macro[classi[c.id].macro] = per_macro.get(classi[c.id].macro, _ZERO) + importo_sp(c)
         macro = max(sorted(per_macro), key=lambda m: per_macro[m])
-        dettagli = {classi[c.id].dettaglio for c in stessi if classi[c.id].macro == macro}
+        dettagli = {_campo_del_cespite(classi[c.id]) for c in stessi if classi[c.id].macro == macro}
         resta = fondo.importo
         for c in sorted(stessi, key=lambda c: -residuo[c.id]):
             preso = min(resta, residuo[c.id])
@@ -250,9 +306,12 @@ def componi(foglie: list[Foglia], classi: dict[str, Classe], ancore: list[Ancora
     righe_risultato: list[Foglia] = []
     classi, scelte_fondi = _abbina_fondi(foglie, classi)
     scelte += scelte_fondi
+    spostabili = saldi_negativi(foglie, classi)
     rettifiche = _ZERO
     rettificate: dict[str, Decimal] = {}      # id -> importo con cui la sua colonna (e il suo totale) la conta
     rettifiche_in: dict[str, Decimal] = {}    # macro -> massa portata dalle rettifiche (col loro segno)
+    spostate: dict[str, Decimal] = {}         # id -> importo (negativo) dei saldi passati all'altro lato
+    spostate_in: dict[str, Decimal] = {}      # macro di arrivo -> massa (positiva) che vi e' arrivata
     for f in foglie:
         if not f.importo:
             continue
@@ -261,6 +320,11 @@ def componi(foglie: list[Foglia], classi: dict[str, Classe], ancore: list[Ancora
                 righe_risultato.append(f)   # si decide dopo, contro il risultato del periodo
             continue            # nel CE la riga del risultato non e' mai una foglia
         classe = classi.get(f.id)
+        if classe is not None and classe.macro == "sp13" and f.sezione == "SP":
+            # il modello lo dice risultato: lo e' solo se ne vale l'importo, altrimenti e' un conto del netto (sp12g),
+            # come la riga del risultato di un altro esercizio - mai una massa persa che sbilancia il foglio
+            righe_risultato.append(f)
+            continue
         if classe is not None and classe.macro in ("sp13", "ce21"):
             continue            # il risultato e' la cifra di chiusura, mai una foglia
         if (f.sezione == "CE" and classe is not None and classe.macro == "ce17"
@@ -269,9 +333,13 @@ def componi(foglie: list[Foglia], classi: dict[str, Classe], ancore: list[Ancora
         if f.sezione == "CE":
             campo, valore = _bersaglio_ce(f, classe)
         else:
-            campo, valore = _bersaglio_sp(f, classe)
+            campo, valore = _bersaglio_sp(f, classe, spostabili.get(f.id))
         if classe is None or classe.macro is None:
             senza_classe += abs(f.importo)
+        elif f.sezione != "CE" and f.id in spostabili:
+            spostate[f.id] = importo_sp(f)
+            spostate_in[tavola.macro_di(campo)] = spostate_in.get(tavola.macro_di(campo), _ZERO) - importo_sp(f)
+            scelte.append(f"saldo negativo sull'altro lato ({campo}): {f.id}")
         elif f.sezione != "CE" and classe.rettifica:
             rettifiche += importo_sp(f)
             rettificate[f.id] = importo_sp(f)
@@ -327,12 +395,13 @@ def componi(foglie: list[Foglia], classi: dict[str, Classe], ancore: list[Ancora
         bs, ce, tagliate = _somma(importi)
         att, pas = _totali(bs)
 
+    spostati = -sum(spostate.values(), _ZERO)     # positivo: attivo e passivo composti ne salgono entrambi
     scarti: dict[str, Decimal] = {}
     for a in ancore:
         if a.chiave == "attivo":
-            composto = att + rettifiche     # il totale stampato e' lordo delle rettifiche
-        elif a.chiave == "passivo":
-            composto = pas + rettifiche
+            composto = att + rettifiche - spostati   # il totale stampato e' lordo delle rettifiche e conta i
+        elif a.chiave == "passivo":                  # saldi negativi sul loro lato
+            composto = pas + rettifiche - spostati
         elif a.chiave == "utile":
             # senza CE l'utile stampato e' la cifra di sp13 (letta, non da rifare dal CE): nessun falso blocco
             composto = _utile(ce) if sp13_da == "ce" else importi.get("sp13", _ZERO)
@@ -341,10 +410,12 @@ def componi(foglie: list[Foglia], classi: dict[str, Classe], ancore: list[Ancora
             composto = (bs if a.chiave.startswith("sp") else ce).get(pieno, _ZERO) if pieno else _ZERO
             # una macro stampata conta le rettifiche sotto di lei, non quelle portate dall'altra colonna
             composto += (sum((rettificate[i] for i in a.foglie if i in rettificate), _ZERO)
-                         - rettifiche_in.get(a.chiave, _ZERO))
+                         - rettifiche_in.get(a.chiave, _ZERO)
+                         + sum((spostate[i] for i in a.foglie if i in spostate), _ZERO)
+                         - spostate_in.get(a.chiave, _ZERO))
         scarti[a.chiave] = a.importo - composto
     blocchi = [k for k, s in scarti.items() if abs(s) > soglia]
     if abs(att - pas) > soglia:
         blocchi.append("pareggio")
     return Composizione(bs, ce, scarti, blocchi, chiusure, senza_classe, att - pas, sp13_da, scelte,
-                        rettifiche, tagliate)
+                        rettifiche, tagliate, spostati)

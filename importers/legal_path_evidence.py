@@ -117,7 +117,7 @@ def extract_path_source(file_path):
                             err.append('conflicting maturity: '+key)
                         quotas[maturity]=amount
                 if not quotas:
-                    quotas={'long' if debt and any(w in label.lower() for w in ('finanz','mutu')) else 'short':value}
+                    quotas={'short':value}  # nessuna scadenza stampata: a breve, anche mutui e finanziamenti (owner, 2026-11-09)
                 if sum(quotas.values(),ZERO)!=value:
                     err.append('incomplete maturity: '+key)
                 for maturity,index in (('short',short),('long',long)):

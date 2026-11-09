@@ -168,10 +168,12 @@ spiegandola come residuo. Non inventare controllate/collegate.
 Gli ID :residual sono differenze padre meno figli già provati: classifica solo
 il residuo nella famiglia del padre, senza inventare un dettaglio non documentato.
 Scadenze esplicite ENTRO/OLTRE/ESIG.OLTRE ES.SUCC. prevalgono, anche abbreviate.
-Senza scadenza: entro 12 mesi. Eccezione gestionale per MUTUI/FINANZIAMENTI: oltre
-12 mesi. Un generico padre MUTUI non rende lunghe le anticipazioni bancarie figlie:
-BANCA C/ANTICIPAZIONI e C/C, carte e interessi maturati sono brevi senza altra scadenza.
-FINANZIAMENTI SOCI sono altri finanziatori (sp17b), NON banche. Utili già assegnati
+Senza scadenza stampata: entro 12 mesi, anche per MUTUI e FINANZIAMENTI (la parola
+MUTUO o FINANZIAMENTO da sola non e' una scadenza). Prevale una scadenza esplicita
+(oltre 12 mesi, oltre l'esercizio, sigla OE, colonna oltre) o un mastro/conto
+medio-lungo termine (M/L). Le anticipazioni bancarie, C/C, carte e interessi maturati
+sono brevi senza altra scadenza.
+FINANZIAMENTI SOCI sono altri finanziatori (sp16b entro 12 mesi, sp17b solo con scadenza oltre stampata), NON banche. Utili già assegnati
 ai soci (competenze soci) sono altri debiti brevi, distinti dall'utile precedente nel PN.
 AMMINISTRATORI/COLLABORATORI C/COMPENSI sono altri debiti, NON banche: C/COMPENSI non è C/C.
 Ritenute sindacali non sono erario. FSBA/EBNA/SAN.ARTI/previdenza integrativa sono

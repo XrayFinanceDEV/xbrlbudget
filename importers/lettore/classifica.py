@@ -11,6 +11,7 @@ proprietario, 2026-11-09: «max details if possible, if not generic accounts»).
 """
 from __future__ import annotations
 
+import re
 from collections import Counter
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, replace
@@ -38,11 +39,27 @@ PROMPT_MACRO = (
     "svalutazione stampato fra le passivita' rettifica il bene dell'attivo (codice .F del bene); perdite portate a "
     "nuovo o azioni proprie stampate fra le attivita' stanno in diminuzione del netto (codice .N). Fondi rischi, "
     "TFR e fondi imposte restano passivita'. "
-    "Rispondi «X» solo se la riga non e' un conto (intestazione, nota, totale, riferimento). "
+    "Rispondi «X» solo se la riga non e' un conto (intestazione, nota, totale, riferimento): ogni riga che ti "
+    "mando ha un importo che conta, e una riga col nome di una voce di legge («Immobilizzazioni immateriali», «Crediti "
+    "entro l'esercizio») e' il conto di quella voce, non un'intestazione. "
+    "Conta la natura del conto, non il mastro del gestionale: compensi e contributi degli amministratori sono "
+    "servizi (B.7); il lavoro somministrato o interinale e' costo del personale (B.9); i depositi cauzionali versati "
+    "sono immobilizzazioni finanziarie; i versamenti dei soci in conto capitale o a copertura perdite sono riserve, "
+    "non capitale sociale; migliorie, lavori e spese incrementative su beni di terzi sono immobilizzazioni "
+    "immateriali; il trattamento di fine rapporto (C) e' solo il fondo TFR, mentre i debiti verso dipendenti per "
+    "retribuzioni o ferie e verso fondi pensione sono debiti. "
     "Non scrivere mai importi. Rispondi solo con un JSON {id: codice}.")
 PROMPT_DETTAGLIO = (
     "Sei un ragioniere italiano. Ogni riga e' gia' stata assegnata a una voce di bilancio: indica la sotto-voce "
     "che la descrive, scegliendo SOLO fra quelle ammesse per quella riga, oppure «altri» se nessuna calza. "
+    "Regole: conti correnti bancari o postali con saldo avere, carte di credito e anticipi bancari sono debiti "
+    "verso banche; i finanziamenti dei soci e i finanziamenti "
+    "agevolati di enti pubblici sono debiti verso altri finanziatori; fatture da ricevere sono debiti verso fornitori; "
+    "acconti ricevuti dai clienti, debiti verso controllanti, collegate o altre societa' del gruppo, verso dipendenti "
+    "e amministratori sono altri debiti; i crediti verso controllanti o collegate vanno nella loro sotto-voce. "
+    "Un ammortamento che non dice la categoria va sulle immobilizzazioni materiali. Le riserve che citano una legge "
+    "di rivalutazione o di riallineamento sono riserve di rivalutazione. Le rimanenze di merci sono prodotti finiti "
+    "e merci, non materie prime. "
     "Non scrivere mai importi. Rispondi solo con un JSON {id: codice}.")
 NOTA_VOTO = "Nota: questo blocco non torna contro il totale stampato nel documento; rileggi con attenzione ogni riga."
 
@@ -67,12 +84,30 @@ def _ammesse(f: Foglia) -> tuple[str, ...]:
     return tavola.macro_ammesse(_lato_colonna(f), f.sezione or "SP", f.verso_ce)
 
 
+# Un contro-conto si riconosce dal nome (decisione del proprietario, 2026-11-09: «contro-conti riconosciuti»): un
+# fondo ammortamento o svalutazione, una rettifica di valore; dall'attivo perdite portate a nuovo o azioni proprie.
+# Senza, il modello usava il «.F» per un conto qualunque che non trovava posto sul lato (una banca in avere sotto le
+# disponibilita' liquide nettata sui crediti verso clienti): una massa spostata fra lati senza che nessun cancello
+# la veda.
+# Un fondo e' un contro-conto solo se dice di che cosa: ammortamento, svalutazione, deprezzamento, rettifica, o un fondo
+# sui crediti (il «fondo rischi su crediti» tassato e' la svalutazione crediti). «Fondi pensione», il fondo TFR, un
+# fondo rischi e oneri sono debiti o fondi del passivo, mai una rettifica dell'attivo (revisione Task 11).
+_TESTA_FONDO = r"(?:\bF(?:ONDO|ONDI|DO|DI)\b|\bF\s*[./]\s*(?:D[OI]\b|(?=AMM|SVAL)))"
+_FONDO = re.compile(rf"AMMORT|SVALUT|DEPREZZ|RETTIFIC|{_TESTA_FONDO}.*(?:\bAMM|SVAL|CREDIT)", re.I)
+_NETTO_IN_DIMINUZIONE = re.compile(r"PERDIT|AZION\w*\s+PROPRI|RISERV\w*\s+NEGATIV", re.I)
+
+
 def _rettifiche(f: Foglia) -> tuple[str, ...]:
     """Le rettifiche del lato opposto che la foglia puo' essere (solo SP; un fondo dal passivo, il netto in
-    diminuzione dall'attivo): l'unica eccezione a «la colonna decide il lato»."""
+    diminuzione dall'attivo): l'unica eccezione a «la colonna decide il lato», e solo per un conto che il nome dice
+    contro-conto."""
     if (f.sezione or "SP") != "SP":
         return ()
-    return tavola.rettifiche_ammesse(_lato_colonna(f))
+    ammesse = tavola.rettifiche_ammesse(_lato_colonna(f))
+    if not ammesse:
+        return ()
+    nome = _FONDO if ammesse[0].endswith(".F") else _NETTO_IN_DIMINUZIONE
+    return ammesse if nome.search(f.etichetta) else ()
 
 
 def _classe(codice: str | None, fonte: str, voti: tuple[str, ...] = ()) -> Classe:
@@ -89,7 +124,7 @@ def _classe(codice: str | None, fonte: str, voti: tuple[str, ...] = ()) -> Class
 
 
 def _chiave(f: Foglia) -> tuple:
-    return (_norm(f.etichetta), _norm(f.antenati[-1]) if f.antenati else "", f.lato, f.sezione, f.verso_ce,
+    return (_norm(f.etichetta), _norm(f.contesto[-1]) if f.contesto else "", f.lato, f.sezione, f.verso_ce,
             f.lato_sp)
 
 
@@ -114,8 +149,8 @@ def _schema(enum_per_id: dict[str, list[str]]) -> dict:
 
 def _contesto(f: Foglia) -> str:
     parti = []
-    if f.antenati:
-        parti.append("sotto: " + " > ".join(f.antenati[-3:]))
+    if f.contesto:     # i mastri sopra il conto, anche quelli di una catena non verificata: ne dicono la natura
+        parti.append("sotto: " + " > ".join(f.contesto[-3:]))
     parti.append({"L": "colonna sinistra", "R": "colonna destra", "U": "colonna unica"}.get(f.lato, f.lato))
     if f.sezione:
         parti.append(f.sezione)
@@ -129,7 +164,7 @@ def _contesto(f: Foglia) -> str:
 
 
 def _fratelli(f: Foglia, blocco: list[Foglia]) -> str:
-    stessi = [g.etichetta for g in blocco if g.id != f.id and g.antenati[-1:] == f.antenati[-1:]]
+    stessi = [g.etichetta for g in blocco if g.id != f.id and g.contesto[-1:] == f.contesto[-1:]]
     return "; fratelli: " + ", ".join(stessi[:4]) if stessi else ""
 
 
@@ -346,3 +381,79 @@ def classifica_dettagli(foglie: list[Foglia], classi: dict[str, Classe], *, chia
             cache[k] = det
         for f in gruppo:
             classi[f.id].dettaglio = det
+
+
+# --- scadenza dei debiti ------------------------------------------------------------------------------------------
+# Regola del proprietario (CLAUDE.md, «Debito senza scadenza dichiarata → a breve»): un debito va oltre 12 mesi solo con
+# una prova stampata - «oltre 12 mesi / l'esercizio», «lungo termine», «medio/lungo», «m/l» - nel conto o nel suo mastro
+# (eccezione del 2026-10-28: il mastro «medio/lungo termine» e' una scadenza dichiarata). Senza prova si va a breve:
+# anticipare una scadenza peggiora gli indici di liquidita', non li abbellisce. Il modello sceglie fra sp16 e sp17
+# dall'etichetta e da una corsa all'altra cambia idea (un «FINANZIAMENTI PASSIVI» va oltre in una corsa e no
+# nell'altra): la scadenza la decide il testo, non lui.
+_PERIODO = r"(?:I\s*)?(?:12\s*M|L\W?\s*(?:ANNO|ESERCIZIO)|ES\.?\s*SUCC|ESERCIZIO\s+SUCC)"
+# «(OE)»/«(EE)»: le sigle «oltre/entro l'esercizio» dei gestionali, come le legge `detail_enrichment._ledger_maturity`
+_OLTRE = re.compile(rf"\bOLTRE\s*{_PERIODO}|\bLUNGO\s+TERMINE|\bM(?:EDIO)?\s*/\s*L(?:UNGO)?\b|\bA\s+LUNGO\b"
+                    r"|\(OE[)\s-]")
+_ENTRO = re.compile(rf"\bENTRO\s*{_PERIODO}|\bBREVE\s+TERMINE|\bA\s+BREVE\b|\(EE[)\s-]")
+# interessi maturati in un mastro «medio/lungo» sono dovuti entro l'anno (proprietario, P3 del 2026-11-04)
+_INTERESSI = re.compile(r"\bINTERESS|\bRATEI\b")
+
+
+def scadenza_stampata(testo: str) -> str | None:
+    """«E» | «O» se il testo dichiara una scadenza (una sola), altrimenti None."""
+    t = (testo or "").upper()
+    entro, oltre = bool(_ENTRO.search(t)), bool(_OLTRE.search(t))
+    return None if entro == oltre else ("E" if entro else "O")
+
+
+def _scadenza_del_debito(f: Foglia) -> str | None:
+    """La scadenza che il documento stampa per la foglia: prima il suo conto, poi i mastri dal piu' vicino."""
+    propria = scadenza_stampata(f.etichetta)
+    if propria:
+        return propria
+    for a in reversed(f.contesto):
+        s = scadenza_stampata(a)
+        if s:
+            return "E" if s == "O" and _INTERESSI.search(f.etichetta.upper()) else s
+    return None
+
+
+_DEBITI = {"E": "sp16", "O": "sp17"}
+
+
+def scadenza_dei_debiti(foglie: list[Foglia], classi: dict[str, Classe]) -> tuple[dict[str, Classe], list[str]]:
+    """Debiti verso sp16/sp17 dalla scadenza stampata, senza prova a breve. Solo le classi del modello (il percorso
+    di legge porta gia' la sua scadenza) e solo fra sp16 e sp17: la natura resta, il dettaglio passa alla stessa
+    lettera dell'altra parte (sp17a -> sp16a). Ritorna copie e le scelte dichiarate."""
+    nuove = dict(classi)
+    scelte: list[str] = []
+    for f in foglie:
+        k = classi.get(f.id)
+        if k is None or k.fonte == "legale" or k.rettifica or k.macro not in ("sp16", "sp17"):
+            continue
+        s = _scadenza_del_debito(f)
+        voluta = _DEBITI.get(s or "E")
+        if voluta == k.macro:
+            continue
+        dettaglio = voluta + k.dettaglio[4:] if k.dettaglio else None
+        nuove[f.id] = replace(k, macro=voluta, dettaglio=dettaglio)
+        perche = "scadenza stampata" if s else "nessuna scadenza stampata"
+        scelte.append(f"debito {'oltre' if voluta == 'sp17' else 'a breve'} ({perche}): {f.id}")
+    return nuove, scelte
+
+
+def imposte_anticipate_oltre(foglie: list[Foglia], classi: dict[str, Classe]) -> tuple[dict[str, Classe], list[str]]:
+    """Imposte anticipate senza scadenza stampata -> oltre 12 mesi (sp07f), regola D14 del proprietario
+    (2026-10-28): per un credito la prudenza e' l'opposto dei debiti, e il percorso di legge «5-ter» non dice la
+    scadenza. Resta entro solo con un «entro» stampato (nel percorso, nel conto o nel mastro). Copie, scelte dichiarate."""
+    nuove = dict(classi)
+    scelte: list[str] = []
+    for f in foglie:
+        k = classi.get(f.id)
+        if k is None or k.rettifica or k.dettaglio != "sp06f":
+            continue
+        if (f.percorso_legale or "").endswith(".E") or _scadenza_del_debito(f) == "E":
+            continue
+        nuove[f.id] = replace(k, macro="sp07", dettaglio="sp07f")
+        scelte.append(f"imposte anticipate oltre 12 mesi (nessuna scadenza stampata): {f.id}")
+    return nuove, scelte

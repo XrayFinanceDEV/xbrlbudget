@@ -264,6 +264,7 @@ def test_contesto_dice_il_lato_dello_stato_patrimoniale():
 def test_prompt_riserva_x_alle_righe_che_non_sono_conti():
     p = c.PROMPT_MACRO.lower()
     assert "lato invertito" in p and "voce ammessa piu' vicina" in p
+    assert "non un'intestazione" in p      # una riga col nome della voce e un importo e' il conto di quella voce
 
 
 def test_lato_opposto_solo_rettifiche_nell_enum():
@@ -292,3 +293,115 @@ def test_voto_tiene_la_rettifica():
     f = F("a", "Fondo amm. impianti", lato="R")
     out = c.rivota([f], {"a": c.Classe(None, None, "nessuna")}, chiama_json=Finto("sp03.F"))
     assert out["a"].macro == "sp03" and out["a"].rettifica == "SPA.B.II.F" and out["a"].fonte == "voto"
+
+
+# --- scadenza dei debiti (Task 11): senza prova stampata a breve, con «oltre»/«medio-lungo» oltre -----------------
+
+def _M(macro, fonte="modello", dettaglio=None):
+    return c.Classe(macro, dettaglio, fonte)
+
+
+def test_debito_senza_scadenza_stampata_torna_a_breve():
+    foglie = [F("a", "FINANZIAMENTI PASSIVI BANCA 2", lato="R"), F("b", "MUTUO PASSIVO", lato="R")]
+    out, scelte = c.scadenza_dei_debiti(foglie, {"a": _M("sp17"), "b": _M("sp16")})
+    assert out["a"].macro == "sp16" and out["b"].macro == "sp16"
+    assert any("a" in s for s in scelte) and not any(s.endswith(": b") for s in scelte)
+
+
+def test_debito_con_oltre_nell_etichetta_o_nel_mastro_va_oltre():
+    foglie = [F("a", "Erario c/iva oltre 12 mesi", lato="R"),
+              F("b", "Debiti v/INPS", lato="R", antenati=("DEBITI", "DEBITI PREVID./ASSIC. OLTRE 12 M")),
+              F("c", "BANCA C/FINANZIAMENTO (LUNGO TERMINE)", lato="R"),
+              F("d", "Banca X", lato="R", antenati=("MUTUI A MEDIO/LUNGO TERMINE",))]
+    out, _ = c.scadenza_dei_debiti(foglie, {k: _M("sp16") for k in "abcd"})
+    assert all(out[k].macro == "sp17" for k in "abcd")
+
+
+def test_etichetta_del_conto_vince_sul_mastro_e_interessi_a_breve():
+    foglie = [F("a", "Deb.v/INPS entro 12 mesi", lato="R", antenati=("DEBITI OLTRE 12 MESI",)),
+              F("b", "Interessi maturati", lato="R", antenati=("MUTUI A MEDIO/LUNGO TERMINE",)),
+              F("c", "UNICREDIT C/FINANZIAMENTO A BREVE", lato="R")]
+    out, _ = c.scadenza_dei_debiti(foglie, {k: _M("sp17") for k in "abc"})
+    assert all(out[k].macro == "sp16" for k in "abc")
+
+
+def test_scadenza_non_tocca_legale_altre_macro_ne_dettaglio_gia_detto():
+    foglie = [F("a", "Debiti verso banche", lato="R", percorso="SPP.D.4.O"), F("b", "Fornitori", lato="R"),
+              F("c", "Banca oltre 12 mesi", lato="R")]
+    classi = {"a": _M("sp17", "legale", "sp17a"), "b": _M("sp18"), "c": _M("sp16", dettaglio="sp16a")}
+    out, _ = c.scadenza_dei_debiti(foglie, classi)
+    assert out["a"].macro == "sp17" and out["b"].macro == "sp18"
+    assert out["c"].macro == "sp17" and out["c"].dettaglio == "sp17a"     # stessa lettera dall'altra parte
+    assert classi["c"].macro == "sp16"                                    # le classi del chiamante non si mutano
+
+
+def _FM(id, etichetta, mastri, lato="R"):
+    return Foglia(id, etichetta, "", lato, "SP", Decimal(10), None, (), None, None, mastri)
+
+
+def test_il_mastro_non_verificato_entra_nel_contesto_del_modello():
+    finto = Finto("sp16")
+    c.classifica_macro([_FM("a", "FATTURE DA RICEVERE", ("SP", "ALTRI DEBITI VERSO FORNITORI"))], chiama_json=finto)
+    assert "sotto: SP > ALTRI DEBITI VERSO FORNITORI" in finto.chiamate[0][0][0]["content"]
+
+
+def test_scadenza_dal_mastro_non_verificato():
+    out, _ = c.scadenza_dei_debiti([_FM("a", "Debiti v/INPS", ("DEBITI", "DEBITI PREVIDENZIALI OLTRE 12 MESI"))],
+                                   {"a": _M("sp16")})
+    assert out["a"].macro == "sp17"
+
+
+def test_imposte_anticipate_senza_scadenza_oltre():
+    # D14 del proprietario: imposte anticipate senza scadenza stampata -> oltre 12 mesi (sp07f), anche dal percorso
+    foglie = [F("a", "5-ter) Imposte anticipate", percorso="SPA.C.II.5-ter"),
+              F("b", "Imposte anticipate entro 12 mesi"), F("c", "Crediti per imposte anticipate"),
+              F("d", "Imposte anticipate", percorso="SPA.C.II.5-ter.E")]
+    classi = {"a": _M("sp06", "legale", "sp06f"), "b": _M("sp06", dettaglio="sp06f"),
+              "c": _M("sp06", dettaglio="sp06f"), "d": _M("sp06", "legale", "sp06f")}
+    out, scelte = c.imposte_anticipate_oltre(foglie, classi)
+    assert (out["a"].macro, out["a"].dettaglio) == ("sp07", "sp07f") and out["c"].dettaglio == "sp07f"
+    assert out["b"].dettaglio == "sp06f" and out["d"].dettaglio == "sp06f" and len(scelte) == 2
+
+
+def test_prompt_porta_le_regole_di_classificazione_del_proprietario():
+    # regole del 2026-10-28 e 2026-11-04 che il modello non sa da solo: natura, non nome del mastro del gestionale
+    m, d = c.PROMPT_MACRO.lower(), c.PROMPT_DETTAGLIO.lower()
+    assert "amministratori" in m and "somministrato" in m and "depositi cauzionali" in m
+    assert "conto capitale" in m and "beni di terzi" in m and "fondi pensione" in m
+    assert "conti correnti bancari" in d and "carte di credito" in d and "acconti" in d and "controllanti" in d and "fatture da ricevere" in d
+    assert "materiali" in d and "rivalutazione" in d and "merci" in d
+
+
+def test_rettifica_dell_altro_lato_solo_per_un_conto_che_lo_dice():
+    # una banca in avere fra le passivita' e' un debito verso banche, non un «fondo» che netta i crediti: l'enum
+    # offre le rettifiche solo a un conto che si dice fondo/ammortamento/svalutazione (o perdite, azioni proprie)
+    finto = Finto("X")
+    c.classifica_macro([F("a", "Banca Alfa S.p.A.", lato="R"), F("b", "F/AMM.COSTI IMPIANTO", lato="R"),
+                        F("c", "Crediti verso clienti", lato="R"), F("d", "Perdite esercizi precedenti", lato="L"),
+                        F("e", "Prelevamenti soci", lato="L"), F("f", "-F.Amm.ord.Consul Matrix", lato="R")],
+                       chiama_json=finto)
+    p = finto.chiamate[0][1]["properties"]
+    assert "sp06.F" not in p["a"]["enum"] and "sp06.F" not in p["c"]["enum"] and "sp16" in p["a"]["enum"]
+    assert "sp02.F" in p["b"]["enum"] and "sp02.F" in p["f"]["enum"]
+    assert "sp12g.N" in p["d"]["enum"] and "sp12g.N" not in p["e"]["enum"]
+
+
+def test_scadenza_con_le_sigle_ee_oe_del_gestionale():
+    foglie = [_FM("a", "Finanziamento banca n. 1", ("DEBITI", "DEBITI VERSO BANCHE (OE)")),
+              _FM("b", "Finanziamento banca (EE) n. 2", ("DEBITI", "DEBITI VERSO BANCHE (OE)"))]
+    out, _ = c.scadenza_dei_debiti(foglie, {"a": _M("sp16"), "b": _M("sp17")})
+    assert out["a"].macro == "sp17" and out["b"].macro == "sp16"
+
+
+def test_fondi_che_sono_debiti_non_sono_contro_conti():
+    # «DEBITI V/FONDI PENSIONE», il fondo TFR, un fondo rischi stanno nel passivo: nessun «.F» nell'enum
+    finto = Finto("X")
+    c.classifica_macro([F("a", "DEBITI V/FONDI PENSIONE", lato="R"), F("b", "Fondo T.F.R.", lato="R"),
+                        F("c", "Fondo rischi e oneri", lato="R"), F("d", "Debiti v/amm.ri", lato="R"),
+                        F("e", "F.do amm.fabbricati", lato="R"), F("f", "FONDO SVALUTAZIONE CREDITI", lato="R"),
+                        F("g", "Ammortamenti accumulati impianti", lato="R"), F("h", "F/AMM.COSTI IMPIANTO", lato="R"),
+                        F("i", "F/DO RISCHI SU CREDITI TASSATO", lato="R"), F("j", "-F.Amm.ord.Consul Matrix", lato="R")],
+                       chiama_json=finto)
+    p = finto.chiamate[0][1]["properties"]
+    assert all("sp03.F" not in p[k]["enum"] for k in "abcd")
+    assert all("sp03.F" in p[k]["enum"] for k in "efghij")     # «rischi su crediti» e' la svalutazione crediti

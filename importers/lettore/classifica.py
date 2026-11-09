@@ -79,12 +79,27 @@ def _ammesse(f: Foglia) -> tuple[str, ...]:
     return tavola.macro_ammesse(_lato_colonna(f), f.sezione or "SP", f.verso_ce)
 
 
+# Un contro-conto si riconosce dal nome (decisione del proprietario, 2026-11-09: «contro-conti riconosciuti»): un
+# fondo ammortamento o svalutazione, una rettifica di valore; dall'attivo perdite portate a nuovo o azioni proprie.
+# Senza, il modello usava il «.F» per un conto qualunque che non trovava posto sul lato (una banca in avere sotto le
+# disponibilita' liquide nettata sui crediti verso clienti): una massa spostata fra lati senza che nessun cancello
+# la veda.
+_FONDO = re.compile(r"\bF(?:ONDO|ONDI|DO|DI)\b|\bF\s*[./]\s*(?:DO|DI|AMM|SVAL)|AMMORT|\bAMM\.?\s*TO\b|SVALUT|RETTIFIC",
+                    re.I)
+_NETTO_IN_DIMINUZIONE = re.compile(r"PERDIT|AZION\w*\s+PROPRI|RISERV\w*\s+NEGATIV", re.I)
+
+
 def _rettifiche(f: Foglia) -> tuple[str, ...]:
     """Le rettifiche del lato opposto che la foglia puo' essere (solo SP; un fondo dal passivo, il netto in
-    diminuzione dall'attivo): l'unica eccezione a «la colonna decide il lato»."""
+    diminuzione dall'attivo): l'unica eccezione a «la colonna decide il lato», e solo per un conto che il nome dice
+    contro-conto."""
     if (f.sezione or "SP") != "SP":
         return ()
-    return tavola.rettifiche_ammesse(_lato_colonna(f))
+    ammesse = tavola.rettifiche_ammesse(_lato_colonna(f))
+    if not ammesse:
+        return ()
+    nome = _FONDO if ammesse[0].endswith(".F") else _NETTO_IN_DIMINUZIONE
+    return ammesse if nome.search(f.etichetta) else ()
 
 
 def _classe(codice: str | None, fonte: str, voti: tuple[str, ...] = ()) -> Classe:

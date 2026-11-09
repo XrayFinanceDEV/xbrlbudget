@@ -1306,7 +1306,7 @@ il lettore gira sul solo PDF.
      e il suo fondo abbinato va lì, non sull'aggregato.
    - **Il prompt porta le regole di classificazione del proprietario** (natura sul mastro del gestionale: amministratori
      in B.7, somministrato in B.9, cauzioni fra le immobilizzazioni finanziarie, versamenti in conto capitale fra le
-     riserve, migliorie su beni di terzi fra gli immateriali, TFR solo il fondo; nel passo 2 carte di credito verso banche, soci e SIMEST verso altri finanziatori, fatture da ricevere
+     riserve, migliorie su beni di terzi fra gli immateriali, TFR solo il fondo; nel passo 2 carte di credito verso banche, soci e finanziamenti agevolati verso altri finanziatori, fatture da ricevere
      verso fornitori, acconti dei clienti e debiti verso il gruppo fra gli altri debiti, ammortamenti senza categoria
      sui materiali, riserve di rivalutazione di legge, merci fra i prodotti finiti e merci).
    - **Dopo l'adozione dettagli e scadenze non si rifanno** (`pdf_importer._dettagli_gia_letti` →

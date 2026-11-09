@@ -43,7 +43,9 @@ PROMPT_MACRO = (
     "Conta la natura del conto, non il mastro del gestionale: compensi e contributi degli amministratori sono "
     "servizi (B.7); il lavoro somministrato o interinale e' costo del personale (B.9); i depositi cauzionali versati "
     "sono immobilizzazioni finanziarie; i versamenti dei soci in conto capitale o a copertura perdite sono riserve, "
-    "non capitale sociale. "
+    "non capitale sociale; migliorie, lavori e spese incrementative su beni di terzi sono immobilizzazioni "
+    "immateriali; il trattamento di fine rapporto (C) e' solo il fondo TFR, mentre i debiti verso dipendenti per "
+    "retribuzioni o ferie e verso fondi pensione sono debiti. "
     "Non scrivere mai importi. Rispondi solo con un JSON {id: codice}.")
 PROMPT_DETTAGLIO = (
     "Sei un ragioniere italiano. Ogni riga e' gia' stata assegnata a una voce di bilancio: indica la sotto-voce "

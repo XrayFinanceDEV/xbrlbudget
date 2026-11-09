@@ -366,7 +366,7 @@ def test_prompt_porta_le_regole_di_classificazione_del_proprietario():
     # regole del 2026-10-28 e 2026-11-04 che il modello non sa da solo: natura, non nome del mastro del gestionale
     m, d = c.PROMPT_MACRO.lower(), c.PROMPT_DETTAGLIO.lower()
     assert "amministratori" in m and "somministrato" in m and "depositi cauzionali" in m
-    assert "conto capitale" in m
+    assert "conto capitale" in m and "beni di terzi" in m and "fondi pensione" in m
     assert "carte di credito" in d and "acconti" in d and "controllanti" in d and "fatture da ricevere" in d
     assert "materiali" in d and "rivalutazione" in d and "merci" in d
 

@@ -475,7 +475,7 @@ numeri falsi".
 - I correttori LLM in `pdf_extractor_llm.py` non applicano plug negativi o sovradimensionati in
   silenzio: cappano la correzione, mai sotto zero, ed emettono `BILANCIO NON QUADRATO`.
 - Dual-year: si scarta un anno precedente fabbricato quando il PDF ha una sola colonna importi.
-- `ce03_lavori_interni` incluso nel Valore della Produzione (entrambi gli anni); le imposte
+- `ce03_lavori_interni` (A.3) e `ce03a_incrementi_immobilizzazioni` (A.4) inclusi nel Valore della Produzione (entrambi gli anni); le imposte
   estratte non vengono sovrascritte per forzare il cross-check di utile.
 - **Malformed Haiku column tolerance** (`_coerce_year_blob`): se Haiku serializza un'intera colonna
   come *stringa* JSON-ish con numeri italiani (`1.234.567,89`), un `field_validator(mode="before")`

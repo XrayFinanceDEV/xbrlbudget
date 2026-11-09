@@ -728,8 +728,8 @@ debiti decidono la scadenza, le lettere di B.9/B.10 il dettaglio del personale e
 ammortamenti; le sotto-righe del gestionale ("B.6.2) Materie prime", "(Fondi di ammortamento)",
 il percorso ripetuto sulla riga sotto) e i conti non entrano mai. **Ogni totale stampato deve
 essere la somma delle voci lette sotto di lui**, altrimenti l'anno non si adotta e `rifiuto`
-nomina il totale più interno che non torna. A.3/A.4 seguono `data/iv_cee_tree.json` (A.4 →
-`ce03`), non la tabella dello snello. Gira in tre punti: qui in F0, e nel percorso di sempre
+nomina il totale più interno che non torna. A.3/A.4 seguono le colonne del DB, in ogni importatore dal Task 5-bis (2026-11-09): A.3 → `ce03`, A.4 →
+`ce03a` (`data/iv_cee_tree.json`, `lettore.tavola`, estrattore LLM, parole chiave di route C). Gira in tre punti: qui in F0, e nel percorso di sempre
 (`_schema_etichette_extract` in testa a `_llm_extract`) sul testo del PDF **e sulle tabelle
 MinerU di una scansione** (`estrai_da_mineru`: la colonna Differenza ricompone le cifre che l'OCR
 sposta da una cella alla successiva). Prima questa famiglia andava al modello, che prendeva

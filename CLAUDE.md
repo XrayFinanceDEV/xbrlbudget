@@ -938,7 +938,7 @@ comes from a DIO measured on **materials consumption** (`ce05 + ce10`), not on r
 stock lines keep the revenue-based DIO. (From R07, below, the consumption itself is what grows; purchases are the balance.) An explicit `dio_days` therefore now means
 days of materials on consumption, never on sales, and materials are no longer a valid target of
 `_CAMPI_NEUTRI_RESIDUO['sp05_rimanenze']` (a CE↔SP boundary, like the financial rows).
-**R07 (#63, owner's decision 2026-10-09, `ENGINE_VERSION` "4"): materials grow on CONSUMPTION, not on purchases — this reverses the
+**R07 (#63, owner's decision 2026-10-09, `ENGINE_VERSION` "4", now "5"): materials grow on CONSUMPTION, not on purchases — this reverses the
 "stock drives the P&L" half of B01 above.** Consumption = `ce05 + ce10`; each year it grows from the previous one (variable
 and fixed share with their own percentages), closing stock = consumption × days / 360, and purchases are the balancing
 figure: `ce05 = consumo + RF − RI` (never below zero — then `ce05 = 0`, closing stock = opening − consumption, declared in
@@ -954,8 +954,11 @@ raw materials + semi-finished (`sp05a + sp05b`) on consumption; the new `dio_pf_
 `BudgetAssumptions`, `migrate_db.py`) = finished goods and merchandise (`sp05d`) on revenue; `sp05c`/`sp05e`
 get days derived from revenue, no input. `ce02_variazioni_rimanenze` = Δ(`sp05b + sp05d`) is derived
 (`ce02_override` wins and `sp05d` follows; below zero it raises). **`ce03_lavori_interni` is NOT derived from
-`sp05c`** (the importers write the A.4 line there, so the field is ambiguous): R04 (#63, owner's decision 2026-10-09)
-makes it **zero in every plan year unless `ce03_override`**, like `ce18`/`ce19` (E05) — repeating the base gave revenue with
+`sp05c`**: since the owner's decision of 2026-11-09 (Task 5-bis) `ce03` is **A.3** (change in contract work in progress) and
+`ce03a_incrementi_immobilizzazioni` is **A.4** (own work capitalised) in every importer, the engine and the Rettifiche
+(the column names are the truth; `ce03` is not renamed). R04 (#63, owner's decision 2026-10-09)
+makes `ce03` **zero in every plan year unless `ce03_override`**, and from `ENGINE_VERSION` "5" `ce03a` is the same, **zero
+unless `ce03a_override`**, like `ce18`/`ce19` (E05) — repeating the base gave revenue with
 no balance-sheet counterpart, i.e. phantom cash (+10.000/year on AMBIENTA). The `sp05c` movement is cash only, declared
 `details['rimanenze']['lavori_in_corso']['contropartita'] = 'nessuna'`. `_CAMPI_NEUTRI_RESIDUO['sp05_rimanenze']`
 is now `sp05e` alone. Explicit days that move a group by more than 50% of its opening stock (tested only when the opening is
@@ -1022,7 +1025,7 @@ ENGINE_VERSION, "pareggio": details['pareggio']}` on every generation. The local
 migration run once (`python migrate_db.py financial_analysis.db`) — without it the column does not
 exist and every forecast read answers 500, not just a missing signature. `ENGINE_VERSION`
 (`calculations/forecast_engine.py`) is a string constant bumped whenever a lotto changes the
-engine's numbers — it is now `"4"` (#63 R07). Existing budget `ForecastYear` rows have `engine_meta =
+engine's numbers — it is now `"5"` (#63 R07 made it 4; Task 5-bis made `ce03a` zero in plan years, 5). Existing budget `ForecastYear` rows have `engine_meta =
 NULL`: that means **«da rigenerare»** (owner's decision 2026-10-05, old data do not count);
 infrannuale never raises the warning.
 

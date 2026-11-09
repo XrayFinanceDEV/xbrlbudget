@@ -312,3 +312,27 @@ def test_percento_in_una_descrizione_non_fa_testata(tmp_path):
     from importers.lettore.colonne import _norm_testata
     assert _norm_testata("%Scost.") == "%" and _norm_testata("Diff.%") == "%"
     assert _norm_testata("TELEFONIA(80%)") != "%" and _norm_testata("100%") != "%"
+
+
+# --- Task 2b (Fase 3): «Saldo Costi Ricavi Costi Ricavi» (1566) -----------------------------------------------------
+
+def _testata_saldo_e_lati(parole):
+    bordi = [330, 400, 470, 540, 590]
+    return [_testata(x, 110, p) for x, p in zip(bordi, parole)], bordi
+
+
+def test_saldo_con_costi_e_ricavi_e_una_testata_con_un_saldo(tmp_path):
+    testata, bordi = _testata_saldo_e_lati(["Saldo", "Costi", "Ricavi", "Costi", "Ricavi"])
+    valori = [(a, b, c, b, c) for a, b, c in zip(_A, _B, _A)]
+    cols = _colonne(tmp_path, testata + _righe_dati(bordi, valori))
+    # il saldo e' un saldo; le altre colonne restano valori (i totali dei mastri stanno li')
+    assert [c.ruolo for c in cols][0] == "saldo"
+    assert {c.ruolo for c in cols[1:]} <= {"esercizio", "mastro"}
+
+
+def test_costi_e_ricavi_senza_saldo_restano_testata_di_lato(tmp_path):
+    # le testate di lato delle contrapposte non dicono un ruolo: senza un «Saldo» accanto non cambiano nulla
+    voci = [_testata(430, 110, "Costi"), _testata(540, 110, "Ricavi")]
+    voci += _righe_dati([430, 540], list(zip(_A, _B)))
+    cols = _colonne(tmp_path, voci)
+    assert {c.ruolo for c in cols} == {"esercizio"}

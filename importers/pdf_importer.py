@@ -954,9 +954,15 @@ def _dettagli_gia_letti(snello_report: Optional[dict], mineru_tabelle: bool,
       stampato, e il prospetto sintetico un dettaglio non lo stampa affatto (le sue voci
       sono dichiarate nell'avviso PROSPETTO SINTETICO). Col testo pulito di
       MinerU 4 la ricerca partiva su Qwen e ne respingeva ogni proposta (budget_1319: 70-115 s
-      invece di 6-9, e otto avvisi «DETTAGLI NON APPLICATI» su un foglio gia' dettagliato)."""
+      invece di 6-9, e otto avvisi «DETTAGLI NON APPLICATI» su un foglio gia' dettagliato).
+    - Percorso del lettore adottato (Fase 3): dettagli e scadenze sono gia' decisi foglia per foglia."""
     if snello_report is not None and snello_report.get("fonte") == "deterministico:xbrl_reso_parser":
         return "dettagli_letti_dal_prospetto_xbrl"
+    if snello_report is not None and snello_report.get("fonte") == "deterministico:lettore":
+        # Fase 3, Task 11: il lettore ha gia' deciso per ogni foglia il dettaglio piu' fine e la scadenza dal testo
+        # stampato (senza prova a breve); la ricerca rileggeva il documento con la regola gestionale «finanziamenti e
+        # mutui oltre 12 mesi» e spostava sp16/sp17 contro quella decisione
+        return "dettagli_letti_dal_lettore"
     if mineru_tabelle:
         return "dettagli_letti_dalle_tabelle_mineru"
     if da_mineru and (bs.get("_source_schema_etichette") or bs.get("_source_xbrl_reso")
@@ -2771,7 +2777,15 @@ def import_pdf_balance_sheet(
                 # di chiusura stampata. Un semestre salvato come anno intero diventa un anno base
                 # falso e sostituisce l'anno vero gia' importato.
                 durata_ignota = False
-                if period_months is not None:
+                # Fase 3 (F3-14): se il lettore ha adottato il documento e dichiara la durata della colonna di
+                # confronto (< 12 mesi), vale anche a periodo pieno: un precedente di 9 mesi non e' un anno intero.
+                _mesi_lettore = ((_snello_report or {}).get("lettore_percorso") or {}).get("mesi_precedente") \
+                    if (_snello_report or {}).get("fonte") == "deterministico:lettore" else None
+                if isinstance(_mesi_lettore, int) and _mesi_lettore < 12:
+                    prior_mesi = _mesi_lettore
+                elif isinstance(_mesi_lettore, int):
+                    pass                                   # il lettore dichiara un anno intero: durata nota
+                elif period_months is not None:
                     from importers.durata_comparato import mesi_del_comparato, testo_di_testa
                     _mesi = mesi_del_comparato(testo_di_testa(file_path), fiscal_year)
                     if _mesi is None:

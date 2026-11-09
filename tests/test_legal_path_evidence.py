@@ -10,7 +10,7 @@ from importers.detail_enrichment import SourceRow
 from importers.iv_cee_hierarchy import check_quadratura
 
 
-def miniature(tmp_path, monkeypatch, damaged=False):
+def miniature(tmp_path, monkeypatch, damaged=False, finanziatori=False):
     path = tmp_path / 'dated.pdf'
     with fitz.open() as doc:
         page = doc.new_page(width=750)
@@ -27,6 +27,8 @@ def miniature(tmp_path, monkeypatch, damaged=False):
         ('A) Produzione', '100'), ('A.1) Ricavi', '100'), ('B) Costi', '90'),
         ('B.7) Servizi', '90'), ('Risultato prima delle imposte', '10'),
         ('21) Utile esercizio', '10')]
+    if finanziatori:  # un finanziamento senza quota entro/oltre stampata
+        values[10:12] = [('D.5) verso altri finanziatori', '60')]
     rows = [SourceRow(str(i), 1, 'T', f'{i+1} '+label,
                       (D(i+1), D(value), D(value), D('999999')),
                       positions=(40, 420, 520, 620)) for i, (label, value) in enumerate(values)]
@@ -43,6 +45,13 @@ def test_dated_columns_ignore_row_indices_and_differences(tmp_path, monkeypatch)
         assert bs['sp06g_crediti_altri_breve'] == 30
         assert bs['totale_attivo'] == bs['totale_passivo'] == 100
         assert check_quadratura(bs, ce).semantic_valid
+
+
+def test_finanziamento_senza_scadenza_stampata_va_a_breve(tmp_path, monkeypatch):
+    for bs, _ce, audit in lp.extract_path_source(miniature(tmp_path, monkeypatch, finanziatori=True)):
+        assert audit['status'] == 'verified', audit
+        assert bs['sp16b_debiti_altri_finanz_breve'] == 60
+        assert bs['sp17b_debiti_altri_finanz_lungo'] == 0 and bs['sp17_debiti_lungo'] == 0
 
 
 def test_incomplete_family_declines_current_without_contaminating_prior(tmp_path, monkeypatch):

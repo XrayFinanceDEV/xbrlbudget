@@ -505,3 +505,53 @@ blocco nominato non vuol dire che il bilancio sia a posto.
 Da qui la regola della Fase 3 (decisione del proprietario, 2026-11-06): un PDF che quadra si importa quadrato,
 con gli aggregati ancorati ai totali stampati verificati dal lettore; i dettagli si distribuiscono dentro
 l'aggregato e non possono sbilanciare il foglio.
+
+## 14. Prima quadrato, poi i dettagli (Fase 3)
+
+> Codice: `importers/lettore/componi.py`, `importers/lettore/percorso.py`. Il percorso è descritto in
+> [REGOLE-IMPORT-02 §11](REGOLE-IMPORT-02-ESTRAZIONE.md).
+
+**La regola del proprietario (2026-11-06):** la priorità è importare PDF quadrati; la ricerca dei dettagli per la
+classificazione corretta viene dopo, e **i dettagli non devono sbilanciare il foglio importato**. Un dettaglio sbagliato
+è un errore dentro un aggregato (l'utente lo rifinisce in Rettifiche); un foglio sbilanciato è un numero su cui non si
+può decidere.
+
+**Perché un PDF che quadra esce quadrato per costruzione.**
+
+- **Ogni foglia conta una volta**, mai un mastro coi suoi figli.
+- **La colonna decide il lato**: attivo solo su `sp01`-`sp10`, passivo su `sp11`-`sp18`, costi e ricavi per
+  sezione e colonna, mai per descrizione. Anche con la macro-voce sbagliata la foglia resta sul suo lato, quindi il
+  pareggio non si muove.
+- **Una rettifica stampata nella colonna opposta** (un fondo ammortamento fra le passività, perdite portate a nuovo
+  fra le attività) si netta sul bene o sul netto: sparisce da un lato e scende dall'altro della stessa massa, quindi
+  il pareggio resta. È l'unico conto che attraversa il lato, e solo se il modello lo nomina come rettifica
+  (`tavola.RETTIFICHE`). Un fondo oltre il proprio cespite si azzera e l'eccedenza resta sbilancio dichiarato, come
+  in `conti.py`. I totali stampati sono lordi: il cancello li confronta al netto di `_netted_contra` e al lordo di `spostati` (i saldi negativi passati all'altro lato,
+  `percorso._stampati`). Un fondo si
+  netta sulla macro del cespite della sua famiglia (F3-16), così la massa non passa fra `sp02` e `sp03`.
+- **I dettagli stanno dentro la loro macro-voce**: il secondo passo sceglie solo fra le sotto-voci della macro
+  assegnata; l'aggregato resta la somma delle sue foglie. Dal 2026-11-09 il dettaglio è il più fine possibile (ogni
+  macro che ne ha, e quello del percorso di legge si tiene), «altri» solo se ignoto: più dettagli non muovono il
+  pareggio, perché nessuno esce dalla sua macro.
+- **`sp13` è la cifra di chiusura**: l'utile del CE se il documento ha un CE; il risultato stampato se c'è solo lo
+  SP (una cifra letta, non inventata, `sp13_da: "stampato"`); altrimenti assente. Mai una foglia (la riga del
+  risultato e le classi `sp13`/`ce21` non si sommano).
+- Una foglia **senza classe** cade nel secchio «altri» del suo lato (`sp06g`/`sp16g`, `ce06` fra i costi, `ce04` fra
+  i ricavi), mai su un aggregato né su `TIER0_FIELDS`; se anche il lato è ignoto non entra da nessuna parte.
+
+**Chiusura fino a 1 € per controllo, dichiarata** (le chiusure possibili sono due, utile/CE e attivo/passivo: al più 2 € in totale). Decisione del proprietario: fino a 1 € è arrotondamento, si chiude da sé, senza
+avviso all'utente. Utile stampato contro utile del CE: lo scarto va su `ce04` (utile stampato più alto) o `ce06`;
+attivo contro passivo: su `sp16g` (manca passivo) o `sp06g` (manca attivo). Ogni chiusura è registrata
+(`diagnostica["chiusure"]`) e la loro somma è `_plug_residual`. Il tappo snello fino a 10 € di §12 resta com'è e
+non è questo. **Oltre 1 €** nulla si muove: lo scarto si misura, le ancore che non tornano restano in
+`blocchi` e il cancello comune (`deterministico.esito`) decide l'adozione.
+
+**La massa non classificata si dichiara**, non si copre: `_unclassified_mass` è il valore assoluto delle foglie
+senza macro, sempre presente anche a zero (a valle una chiave assente vale zero). Il cancello respinge un
+documento con troppa massa non classificata.
+
+**Mai un plug.** Un divario oltre 1 € non si tappa: o il documento non è adottato e prosegue il percorso di §10,
+o si salva con lo sbilancio dichiarato come per ogni lettore. *Se si ignora:* un plug attribuisce a un conto vero un
+importo che nessuno ha letto, e il foglio quadra lo stesso: è il guasto che questa regola esiste per evitare.
+
+Misura sul campione (78 documenti × 3 giri, `tests/corpus/punteggio.py`, giro `fase3-4de18b6`, 2026-11-09, contro `fase3-502f078` del primo innesto): dei 9 documenti il cui PDF quadra ma l'import no alla Fase 2, **7 escono quadrati in tutti i giri** (contro 2); i due fuori sono attesi (massa non classificabile; foglie davvero non in pari, attivo e passivo affiancati). Documenti salvati sbilanciati 12 → 7, nessuno nuovo. 11 documenti adottati dal lettore, nessuno instabile nell'adozione. Macro-voci esatte 78,7% → 80,6%, dettagli KPI 76,4% → 80,3%, altri dettagli 75,5% → 78,7%. Costo per import adottato: mediana 6 chiamate al modello (max 9, tetto 40 mai toccato), 66 s di lettore (max 153 s).

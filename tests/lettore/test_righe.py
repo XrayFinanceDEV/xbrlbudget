@@ -861,3 +861,138 @@ def test_intero_nudo_dopo_un_marcatore_staccato_non_toglie_il_segno(tmp_path, x,
     cella = riga.celle[colonna]
     assert (cella.valore, cella.marcatore) == (valore, marcatore)
     assert marcatore not in riga.etichetta.split()
+
+
+# --- Task 2b (Fase 3): il segno meno staccato e le due tabelle affiancate ----------------------------------------
+
+def _con_meno(x_importo, y, importo, stacco=2.2):
+    """Un trattino a `stacco` pt dall'importo (scrivi_pdf allinea a destra gli importi, e anche «-» che e' uno zero)."""
+    larghezza = fitz.get_text_length(importo, fontsize=_CORPO)
+    return [(x_importo - larghezza - stacco, y, "-"), (x_importo, y, importo)]
+
+
+def _voci_con_meno(stacco=2.2, totale="7.800,00", x_trattino=None):
+    """Due ricavi, due righe con il trattino davanti all'importo e il totale stampato."""
+    voci = _riempi(140, colonne=(560,), n=4)
+    righe = [("Ricavi uno", "6.000,00", False), ("Ricavi due", "4.500,00", False),
+             ("Rettifica uno", "2.000,00", True), ("Rettifica due", "700,00", True), ("Totale", totale, False)]
+    for k, (e, v, meno) in enumerate(righe):
+        y = 220 + k * 14
+        voci.append((50, y, e))
+        voci += _con_meno(560, y, v, stacco) if meno else [(560, y, v)]
+    return voci
+
+
+def test_trattino_a_un_soffio_dall_importo_e_il_suo_segno_se_il_totale_lo_conferma(tmp_path):
+    # «Utile (Perdita) dell'esercizio - 2.000» e' -2.000 perche' il totale stampato (7.800) chiude solo cosi'
+    doc = _leggi(tmp_path, [_voci_con_meno()])
+    riga = _riga(doc, "Rettifica uno")
+    assert riga.celle[0].valore == Decimal("-2000.00")
+    assert not riga.etichetta.endswith("-")
+    assert _riga(doc, "Totale").totale
+    assert doc.profilo.negativi == frozenset({"meno-staccato"})
+    assert not any("negativo" in a for a in doc.tutti_gli_avvisi())
+
+
+def test_trattino_senza_un_totale_che_lo_confermi_resta_un_separatore(tmp_path):
+    # «Rettifica - 2.000,00» in un documento di soli positivi: il totale (13.200) chiude con gli importi positivi
+    doc = _leggi(tmp_path, [_voci_con_meno(totale="13.200,00")])
+    assert _riga(doc, "Rettifica uno").celle[0].valore == Decimal("2000.00")
+    assert not doc.profilo.negativi
+    assert _riga(doc, "Totale").totale
+
+
+def test_trattino_lontano_dall_importo_resta_un_separatore(tmp_path):
+    # «FONDO - 1.000» a 33 pt (1426) con meno di tre trattini allineati: separatore, importo positivo
+    doc = _leggi(tmp_path, [_voci_con_meno(stacco=33.0, totale="13.200,00")])
+    assert _riga(doc, "Rettifica uno").celle[0].valore == Decimal("2000.00")
+    assert not doc.profilo.negativi
+
+
+def test_colonna_di_segni_allineati_vale_anche_lontano_dall_importo(tmp_path):
+    # 1426: i trattini stanno alla stessa x (con un po' di oscillazione), a 33-44 pt dall'importo; tre o piu' in una
+    # pagina fanno la colonna, e il totale stampato (89.000) chiude solo con i fondi negativi
+    voci = _riempi(140, colonne=(560,), n=4)
+    righe = [("Costo storico A", "60.000,00", None), ("Costo storico B", "40.000,00", None), ("Fondo uno", "2.500,00", 330.0), ("Fondo due", "8.500,00", 330.6),
+             ("Fondo tre", "100,00", 329.5), ("Totale netto", "88.900,00", None)]
+    for k, (e, v, x) in enumerate(righe):
+        y = 220 + k * 14
+        voci.append((50, y, e))
+        if x:
+            voci.append((x, y, "-"))
+        voci.append((560, y, v))
+    doc = _leggi(tmp_path, [voci])
+    assert doc.profilo.negativi == frozenset({"meno-colonna"})
+    assert [_riga(doc, f).celle[0].valore for f in ("Fondo uno", "Fondo due", "Fondo tre")] == [
+        Decimal("-2500.00"), Decimal("-8500.00"), Decimal("-100.00")]
+
+
+def test_trattino_in_un_documento_con_i_negativi_di_sempre_non_e_un_segno(tmp_path):
+    # i costi sono «-2.350» attaccati; il trattino a un soffio da un'altra cella non gira il segno (+300)
+    voci = _riempi(140, colonne=(560,), n=4)
+    voci += [(50, 220, "Costo uno"), (560, 220, "-2.350,00"), (50, 234, "Costo due"), (560, 234, "-35.535,00")]
+    for k in range(2):
+        voci += [(50, 250 + k * 14, f"Variazione {k}")] + _con_meno(560, 250 + k * 14, "300,00")
+    doc = _leggi(tmp_path, [voci])
+    assert "meno-staccato" not in doc.profilo.negativi
+    assert _riga(doc, "Variazione 0").celle[0].valore == Decimal("300.00")
+
+
+def test_due_tabelle_affiancate_hanno_ognuna_la_sua_sezione(tmp_path):
+    # 1426: lo stato patrimoniale a sinistra, «CE - Schema Ridotto» a destra, sulla stessa pagina
+    sinistra = ["Attivo B) IMMOBILIZZAZIONI", "B.I) Immobilizzazioni immateriali", "C) ATTIVO CIRCOLANTE",
+                "C.IV) Disponibilita' liquide", "D) RATEI E RISCONTI", "A) PATRIMONIO NETTO", "D) DEBITI"]
+    destra = ["VALORE DELLA PRODUZIONE", "1 ricavi da vendite", "COSTI DELLA PRODUZIONE", "6 materie prime",
+              "7 per servizi", "14 oneri diversi", "Utile dell'esercizio"]
+    voci = [(40, 100, "STATO PATRIMONIALE - Schema Informativo"), (320, 100, "CE - Schema Ridotto")]
+    for k, (a, b) in enumerate(zip(sinistra, destra)):
+        y = 140 + k * 14
+        voci += [(40, y, a), (270, y, _VALORI[k]), (320, y, b), (560, y, _VALORI[-1 - k])]
+    doc = _leggi(tmp_path, [voci])
+    assert doc.profilo.confine is not None and not doc.contrapposto
+    assert {r.sezione for r in doc.righe if r.lato == "L"} == {"SP"}
+    assert {r.sezione for r in doc.righe if r.lato == "R"} == {"CE"}
+
+
+# --- Task 2c: il marcatore D/A dopo l'importo, a distanze e in grafie che prima non leggeva -------------------
+
+
+def _verifica_marcatore_lontano(stacco):
+    """1561: come `_verifica_a_marcatore`, ma la lettera sta in una sua colonna, piu' staccata dall'importo."""
+    return [(x, y, t) if k != 3 else (480 + stacco, y, t)
+            for (x, y, t), k in ((v, i % 4) for i, v in enumerate(_verifica_a_marcatore()))]
+
+
+def test_marcatore_in_colonna_a_dieci_punti_dall_importo(tmp_path):
+    # 1561: la lettera D/A e' in una colonna propria, 10 pt dopo il bordo dell'importo (prima il limite era 8)
+    doc = _leggi(tmp_path, [_verifica_marcatore_lontano(10)])
+    assert doc.profilo.marcatori == frozenset({0})
+    cassa = _riga(doc, "CASSA E VALORI BOLLATI")
+    assert cassa.etichetta == "CASSA E VALORI BOLLATI"
+    assert cassa.celle[0].valore == Decimal("-1199.64")
+    assert _riga(doc, "CASSA CONTANTI").celle[0].valore == Decimal("839.66")
+
+
+def test_marcatore_troppo_lontano_resta_testo(tmp_path):
+    # oltre il limite (30 pt) la lettera non e' piu' del suo importo: nessuna colonna a marcatore
+    doc = _leggi(tmp_path, [_verifica_marcatore_lontano(30)])
+    assert doc.profilo.marcatori == frozenset()
+
+
+def test_marcatore_con_sottolineatura_e_lettera_sottolineata(tmp_path):
+    # 1562: sotto ai conti l'importo e' «sottolineato» (token di underscore sul suo stesso spazio) e la lettera
+    # stampa «D__»: il marcatore e' ancora il segno della cella, e nessuno dei due resta nell'etichetta
+    voci = []
+    for k, (x, y, t) in enumerate(_verifica_a_marcatore()):
+        voci.append((x, y, t))
+        if k % 4 == 2:
+            voci.append((480 - fitz.get_text_length(t, fontsize=9.0) + 0.5, y, "_" * (len(t) - 1)))
+        if k % 4 == 3:
+            voci[-1] = (484, y, t + "__")
+    doc = _leggi(tmp_path, [voci])
+    assert doc.profilo.marcatori == frozenset({0})
+    cassa = _riga(doc, "CASSA E VALORI BOLLATI")
+    assert cassa.celle[0].valore == Decimal("-1199.64")
+    assert "_" not in cassa.etichetta and not cassa.etichetta.endswith(" A")
+    assert _riga(doc, "CASSA CONTANTI").celle[0].valore == Decimal("839.66")
+    assert "_" not in _riga(doc, "CASSA CONTANTI").etichetta

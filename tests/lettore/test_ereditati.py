@@ -5,12 +5,15 @@ Un test di deriva cade quando il modulo vecchio cambia: decidi se portare la cor
 """
 import ast
 import re
+from decimal import Decimal
 from pathlib import Path
 
 import pytest
 
 from importers import (detail_enrichment, mineru_adapter, schema_legge_generico, standard_ivcee_parser,
                        xbrl_reso_parser)
+from importers import situazione_contabile_parser as scp
+from importers.import_snello import conti as conti_snello
 from importers.import_snello import righe as righe_snello
 from importers.lettore import _ereditati as e
 
@@ -185,3 +188,45 @@ def test_deriva_table_html_parser():
         assert a.rows == b.rows, (
             f"TableHTMLParser ha preso una strada diversa da mineru_adapter su {html!r}: decidi se portare la "
             "correzione in importers/lettore/_ereditati.py")
+
+
+IMPORTI_FONDI = [
+    {}, {"sp03b": Decimal("-200"), "sp03": Decimal("50")}, {"sp02a": Decimal("10"), "sp02g": Decimal("-5")},
+    {"sp04d": Decimal("-1"), "sp06a": Decimal("-3")}, {"sp03": Decimal("-7")}, {"sp03b": Decimal("0")},
+]
+
+
+def test_deriva_netta_fondi_negativi():
+    assert e.IMMOBILIZZAZIONI == conti_snello._IMMOBILIZZAZIONI
+    for imp in IMPORTI_FONDI:
+        assert e.netta_fondi_negativi(dict(imp)) == conti_snello._netta_fondi_negativi(dict(imp)), (
+            f"netta_fondi_negativi ha preso una strada diversa da import_snello.conti su {imp!r}: decidi se portare "
+            "la correzione in importers/lettore/_ereditati.py")
+
+
+def test_deriva_clamp_immobilizzazioni_negative():
+    for bs in ({}, {"sp03_immob_materiali": Decimal("-200")}, {"sp02_immob_immateriali": Decimal("5"),
+               "sp04_immob_finanziarie": Decimal("-0.5")}, {"sp06_crediti_breve": Decimal("-9")}):
+        a, b = dict(bs), dict(bs)
+        assert e.clamp_immobilizzazioni_negative(a) == conti_snello._clamp_immobilizzazioni_negative(b) and a == b, (
+            f"clamp_immobilizzazioni_negative ha preso una strada diversa da import_snello.conti su {bs!r}: decidi "
+            "se portare la correzione in importers/lettore/_ereditati.py")
+
+
+DESCRIZIONI_CESPITI = [
+    "F/AMM. LAV. STR. SU BENI DI TERZ", "LAV. STR. SU BENI DI TERZI", "F.DO AMM.TO AUTOMEZZI", "IMPIANTI GENERICI",
+    "FONDO AMMORTAMENTO IMPIANTI DI PRODU", "F.DO AMM. MACCH. ORD. UFF", "COSTI DI IMPIANTO", "SOFTWARE", "AVVIAMENTO",
+    "TERRENI", "ATTREZZATURA VARIA", "IMMOBILIZZAZIONI IN CORSO", "F.DO AMM.COSTR.LEGGERE", "DIRITTI UTILIZZO", "",
+    "CASSA", "F/AMM.IMP.GENERICI/SPECIFICI", "MOBILI E ARREDI", "F.DI AMMOR.TO MARCHI",
+]
+
+
+def test_deriva_dettagli_dei_cespiti():
+    for d in DESCRIZIONI_CESPITI:
+        assert e.dettaglio_sp02(d) == scp._sp02_detail_field(d) and e.dettaglio_sp03(d) == scp._sp03_detail_field(d), (
+            f"dettaglio_sp02/03 ha preso una strada diversa da situazione_contabile_parser su {d!r}: decidi se "
+            "portare la correzione in importers/lettore/_ereditati.py")
+
+
+def test_deriva_testa_del_fondo():
+    _costante(e.FONDO_AMM_HEAD_RE, scp._FONDO_AMM_HEAD_RE, "FONDO_AMM_HEAD_RE", "situazione_contabile_parser")

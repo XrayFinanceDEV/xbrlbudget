@@ -175,7 +175,10 @@ ciò che non si può non sapere. Ogni voce dice la regola e **cosa si rompe** a 
   correzione la fa l'utente in Rettifiche. Non cercare un bug dentro un plug che non esiste — per
   molto tempo questo file ne ha descritti di inesistenti, ed è il guasto che ha motivato lo
   snellimento.
-- **Debito senza scadenza dichiarata → a breve**, per prudenza: anticipare una scadenza peggiora
+- **Debito senza scadenza dichiarata → a breve**, per prudenza, **mutui e finanziamenti compresi** (la parola «MUTUO» o
+  «FINANZIAMENTO» non è una scadenza; eccezione di 2026-11-09 alla vecchia regola gestionale «a lungo», tolta ovunque): fa eccezione
+  solo una prova stampata — «oltre 12 mesi/l'esercizio», la sigla (OE), una colonna oltre, un mastro o conto «medio/lungo
+  termine». Anticipare una scadenza peggiora
   gli indici di liquidità, non li abbellisce, e l'utente lo sposta in Rettifiche. Vale per ogni
   estrattore. Attenzione: `sp16` e `sp17` stanno **entrambi nel passivo**, quindi il pareggio non
   vede l'appiattimento — lo vedono CCN, current ratio e il circolante di Altman.
@@ -204,7 +207,9 @@ ciò che non si può non sapere. Ogni voce dice la regola e **cosa si rompe** a 
   ha letto, e il foglio quadra lo stesso. → `docs/import/REGOLE-IMPORT-02-ESTRAZIONE.md` §4-bis
 - **Le rimanenze di un elenco di conti vanno per natura, mai nel ripiego**: prodotti (anche
   lavori in corso su ordinazione) in `ce02`, materie e merci in `ce10`, una regola sola per
-  tutti i lettori (`importers/rimanenze_ce.py`). Un mastro si legge dai suoi conti quando
+  tutti i lettori (`importers/rimanenze_ce.py`); il percorso del lettore applica in più la regola
+  W4 del proprietario (2026-11-04): i lavori in corso su ordinazione vanno in A.3, `ce03`
+  (`voce_rimanenze`). Un mastro si legge dai suoi conti quando
   sommano al totale stampato, anche contro il nome del mastro; un conto muto prende la natura
   del capo opposto. Iniziali in `ce12` e finali in `ce04` quadrano lo stesso e gonfiano valore
   e costi della produzione; un capo in `ce02` e l'altro in `ce10` fanno lo stesso con entrambi
@@ -252,7 +257,7 @@ ciò che non si può non sapere. Ogni voce dice la regola e **cosa si rompe** a 
   squadrato di partenza»). Un riepilogo di poche macro-voci tipo export
   xlsx non è un bilancio e si rifiuta (`PDFImportError`). Su uno schema di legge uno squadrato è un
   difetto del lettore da correggere; resta ammesso per bilanci di verifica e sezioni contrapposte.
-  Il ripiego sull'importatore attuale resta solo per un'estrazione vuota, una struttura non
+  Fra i lettori deterministici e il modello c'è ora il **percorso del lettore** (le foglie del lettore di righe, classe per id dal modello, mai un importo; si adotta solo attraverso lo stesso cancello `deterministico.esito`; interruttore `IMPORT_LETTORE=0`; → `docs/import/REGOLE-IMPORT-02-ESTRAZIONE.md` §11, `REGOLE-IMPORT-04-QUADRATURE.md` §14). Il ripiego sull'importatore attuale resta solo per un'estrazione vuota, una struttura non
   riconosciuta o un'eccezione imprevista. Il divieto di plug e il contratto "riferimenti, non
   importi" valgono per l'importatore attuale.
 

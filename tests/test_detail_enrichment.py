@@ -249,7 +249,7 @@ def test_gx10_provider_lets_enrich_pdf_details_search_without_anthropic_key(monk
     monkeypatch.setenv('PDF_LLM_PROVIDER_DETTAGLI', 'gx10')
     monkeypatch.setenv('GX10_API_KEY', 'chiave-di-prova')
     monkeypatch.delenv('ANTHROPIC_API_KEY', raising=False)
-    rows = [ledger_row('soci', '40', '31', 'Soci c/finanziamento', 'R'),
+    rows = [ledger_row('soci', '40', '31', 'Soci c/finanziamento oltre 12 mesi', 'R'),
             ledger_row('suppliers', '50', '33', 'Fornitori', 'R')]
     monkeypatch.setattr(de, 'collect_source_rows', lambda *a, **kw: rows)
     calls = []
@@ -393,7 +393,7 @@ def test_credit_ledger_defaults_to_short_and_explicit_maturity_wins():
     assert actual[TAX] == 50 and actual[CREDIT] == 100 and actual[LONG_CREDIT] == 0
 
 
-def test_financing_defaults_long_explicit_short_wins_and_unknown_residue_stays_short():
+def test_financing_without_printed_maturity_goes_short_explicit_long_and_short_win():
     long = 'sp17_debiti_lungo'
     long_bank = 'sp17a_debiti_banche_lungo'
     long_soci = 'sp17b_debiti_altri_finanz_lungo'
@@ -405,12 +405,13 @@ def test_financing_defaults_long_explicit_short_wins_and_unknown_residue_stays_s
             ledger_row('bank', '5', '19', 'Banca c/c', 'R')]
     initial = {DEBT: D('100.03'), OTHER: D('100.03'), 'totale_passivo': D('250')}
     actual, report = de.reclassify_ledger_maturities(initial, rows)
-    assert actual[DEBT] == D('35.03') and actual[long] == 65
-    assert actual[BANK] == 25 and actual[long_bank] == 50 and actual[long_soci] == 15
+    # Task 12 (2026-11-09): FINANZ/MUTU senza scadenza stampata = breve; resta lungo solo il mutuo «oltre 12 mesi».
+    assert actual[DEBT] == D('50.03') and actual[long] == 50
+    assert actual[BANK] == 25 and actual[long_bank] == 50 and actual[long_soci] == 0
     assert actual[OTHER] == D('10.03') and actual['totale_passivo'] == 250
     evidence = {e['row']: e for e in report['families'][DEBT]['evidence']}
     assert evidence['quota']['basis'] == 'documented'
-    assert evidence['soci']['basis'] == 'management_financing_long'
+    assert evidence['soci']['basis'] == 'management_default_short'
     assert evidence['bank']['basis'] == 'management_default_short'
     assert 'root' not in evidence
     assert de.reclassify_ledger_maturities(actual, rows)[0] == actual
@@ -427,7 +428,7 @@ def test_explicit_note_maturity_prevents_ledger_default_reclassification():
 
 def test_local_enrichment_applies_maturity_policy_and_audits_it(monkeypatch):
     monkeypatch.delenv('ANTHROPIC_API_KEY', raising=False)
-    rows = [ledger_row('soci', '40', '31', 'Soci c/finanziamento', 'R'),
+    rows = [ledger_row('soci', '40', '31', 'Soci c/finanziamento oltre 12 mesi', 'R'),
             ledger_row('suppliers', '50', '33', 'Fornitori', 'R')]
     monkeypatch.setattr(de, 'collect_source_rows', lambda *a, **kw: rows)
     current, prior, report = de.enrich_pdf_details('unused', {DEBT: D('100')}, {DEBT: D('80')})
@@ -474,11 +475,11 @@ def test_tm_children_explain_inventory_and_prevent_pn_becoming_debt(filename, de
     assert local[RAW] == 21250 and local[GOODS] == 170000 and local[WIP] == 40000
     expected = ('268242.15', '2455.95', '133144.56', '1971.81', '14300.34', '27118.02') if '590' in filename else (
         '349991.50', '6455.95', '310448.41', '23113.67', '18817.63', '28547.26')
-    fields = ('sp17a_debiti_banche_lungo', 'sp17b_debiti_altri_finanz_lungo', SUPPLIER, 'sp16e_debiti_tributari_breve',
+    fields = ('sp17a_debiti_banche_lungo', 'sp16b_debiti_altri_finanz_breve', SUPPLIER, 'sp16e_debiti_tributari_breve',
               'sp16f_debiti_previdenza_breve', OTHER)
     assert [local[f] for f in fields] == list(map(D, expected))
     assert local[DEBT] + local['sp17_debiti_lungo'] == D(debts)
-    assert local['sp17_debiti_lungo'] == sum(map(D, expected[:2]))
+    assert local['sp17_debiti_lungo'] == D(expected[0])  # il finanziamento soci senza scadenza e' a breve (sp16b)
     assert de.reclassify_ledger_maturities(matured, rows)[0] == matured
     assert not maturity_report['families'][DEBT]['rejected']
     expected_credits = ('271202.44', '129413.95', '6020.18') if '590' in filename else (
@@ -645,3 +646,18 @@ def test_n2_l_avviso_all_utente_c_e_solo_su_inversione():
     base["periods"]["current"]["famiglie_segno_invertito"] = []
     rep = ds.finish_search_report(dict(base), {"current": {DEBT: D("10")}, "prior": None})
     assert not any("SEGNO DEBITI" in w for w in rep["warnings"])
+
+
+def test_medio_lungo_termine_su_mastro_o_conto_di_debito_e_una_scadenza_stampata():
+    for caption in ('Finanziamenti a medio/lungo termine', 'Mutuo medio lungo', 'Debiti M/L banca', 'Finanz. lungo termine'):
+        rows = [ledger_row('root', '70', '31', caption, 'R'), ledger_row('c', '10', '31.01', 'Banca alfa', 'R')]
+        assert de._ledger_maturity(rows[1], rows, debt=True) == ('long', 'documented'), caption
+    rows = [ledger_row('c', '10', '31.01', 'Mutuo banca alfa', 'R')]
+    assert de._ledger_maturity(rows[0], rows, debt=True) == ('short', 'management_default_short')
+    rows = [ledger_row('r', '10', '31', 'Finanziamenti di terzi', 'R'), ledger_row('c', '10', '31.01', 'Finanziamento soci', 'R')]
+    assert de._ledger_maturity(rows[1], rows, debt=True)[0] == 'short'
+
+
+def test_il_nome_della_politica_non_cita_piu_il_lungo_dei_finanziamenti():
+    _, report = de.reclassify_ledger_maturities({DEBT: D('10')}, [ledger_row('a', '10', '31', 'Mutuo', 'R')])
+    assert report['policy'] == 'default-short-v2'

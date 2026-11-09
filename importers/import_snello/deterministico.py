@@ -140,6 +140,10 @@ def _esito(nome: str, bs_raw: dict, ce_raw: dict, stampati_raw: dict | None) -> 
             "tappo": tappo, "misura": m}
 
 
+
+# Nome pubblico del cancello di adozione: lo usa anche il percorso del lettore (importers/lettore/percorso.py).
+esito = _esito
+
 def _prova_xbrl_reso(file_path: str) -> dict | None:
     """Il PDF reso da un XBRL depositato (Task 25): tassonomia nel piede di pagina, prospetti come
     elenco di righe, totali stampati che il lettore deve riprodurre al centesimo

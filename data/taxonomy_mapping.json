@@ -126,7 +126,7 @@
     "itcc-ci-2018-11-04:RicaviVenditePrestazioni": "ce01_ricavi_vendite",
     "itcc-ci-2018-11-04:VariazioniRimanenze": "ce02_variazioni_rimanenze",
     "itcc-ci:ValoreProduzioneVariazioniRimanenzeProdottiCorsoLavorazioneSemilavoratiFinitiLavoriCorsoOrdinazione": "ce02_variazioni_rimanenze",
-    "itcc-ci-2018-11-04:IncrImmobPerLavoriInterni": "ce03_lavori_interni",
+    "itcc-ci-2018-11-04:IncrImmobPerLavoriInterni": "ce03a_incrementi_immobilizzazioni",
     "itcc-ci-2018-11-04:AltriRicaviProventi": "ce04_altri_ricavi",
 
     "itcc-ci-2018-11-04:MateriePrimeSussidiarie": "ce05_materie_prime",
@@ -209,7 +209,7 @@
     "income_statement": {
       "Ricavi delle vendite": "ce01_ricavi_vendite",
       "Variazioni delle rimanenze": "ce02_variazioni_rimanenze",
-      "Incrementi di immobilizzazioni": "ce03_lavori_interni",
+      "Incrementi di immobilizzazioni": "ce03a_incrementi_immobilizzazioni",
       "Altri ricavi e proventi": "ce04_altri_ricavi",
 
       "Materie prime": "ce05_materie_prime",

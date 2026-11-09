@@ -255,7 +255,7 @@
       "priority_5": "itcc-ci:ValoreProduzioneVariazioniRimanenzeProdottiCorsoLavorazioneSemilavoratiFiniti"
     },
 
-    "ce03_lavori_interni": {
+    "ce03a_incrementi_immobilizzazioni": {
       "priority_1": "itcc-ci:ValoreProduzioneIncrementiImmobilizzazioniLavoriInterni",
       "priority_2": "itcc-ci:ValoreProduzioneIncrementoImmobilizzazioniLavoriInterni",
       "priority_3": "itcc-ci-2018-11-04:IncrImmobPerLavoriInterni",

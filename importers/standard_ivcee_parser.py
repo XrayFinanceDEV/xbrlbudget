@@ -1667,8 +1667,10 @@ def _parse_income_column(
         a_chain = (a1, a2, a3, a4, a5, b_i)
         ce01 = _chain_value(a_chain, a1)
         ce02 = _chain_value(a_chain, a2)
-        # A.3 is not represented in the application schema; it must be zero for
-        # this strict fallback, otherwise declining is safer than losing a value.
+        # A.3 ha un campo (`ce03_lavori_interni`) ma questo fallback stretto non lo
+        # legge: deve essere zero, altrimenti declinare e' piu' sicuro che perdere un
+        # valore (scrivere A.3 qui vorrebbe dire anche ricomporre il totale A e il suo
+        # controllo: lo fa il lettore, non questo parser congelato).
         a3_value = _chain_value(a_chain, a3)
         ce03 = _chain_value(a_chain, a4)
         ce04 = _block_value(ce_rows, a5, b_i, column)

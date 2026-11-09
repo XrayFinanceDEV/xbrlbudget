@@ -337,3 +337,21 @@ def test_il_probe_registra_fonte_e_percorso_del_lettore():
     s = P._snello_compatto(rec)
     assert s["fonte"] == "deterministico:lettore" and s["lettore_percorso"] == {"esito": "adottato"} and s["tappo_importo"] == "0.3"
     assert P._snello_compatto({}) is None
+
+
+def test_ripiego_classico_usato_e_rifiutati_a_classico_spento():
+    a1 = _g3(1); a1["snello"]["ripiego_classico"] = {"usato": True, "motivo": "ripiego"}
+    a2 = _g3(2); a2["snello"]["ripiego_classico"] = {"usato": False, "motivo": None}
+    s1 = _g3(1, id_="E"); s1["snello"]["ripiego_classico"] = {"usato": True, "motivo": "non_applicabile"}
+    r1 = _g3(2, id_="E", importato=False); r1["snello"] = None
+    r1["errore"] = "percorso classico spento (IMPORT_RIPIEGO_CLASSICO=0): nessun'altra strada"
+    a = P.analisi_percorso({"D": [a1, a2], "E": [s1, r1]}, CAMP)
+    rc = a["ripiego_classico"]
+    assert rc["giri"] == 2 and rc["documenti"] == ["D", "E"]
+    assert rc["motivi"] == {"non_applicabile": ["E"], "ripiego": ["D"]}
+    assert rc["rifiutati_classico_spento"] == {"E": 1}
+    md = "\n".join(P.righe_percorso(a))
+    assert "| Ripiego classico usato: giri / documenti / motivi | 2 / 2 / non_applicabile (E); ripiego (D) |" in md
+    assert "| Rifiutati a classico spento (documento ×giri) | E ×1 |" in md
+    rec = {"import_snello": {"fonte": "llm", "ripiego_classico": {"usato": True, "motivo": "ripiego"}}}
+    assert P._snello_compatto(rec)["ripiego_classico"] == {"usato": True, "motivo": "ripiego"}

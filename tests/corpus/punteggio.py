@@ -142,7 +142,7 @@ def _snello_compatto(rec: dict) -> dict | None:
     tappo = (sn.get("tappo") or {}).get("corrente")
     return {"fonte": sn.get("fonte"), "esito": sn.get("esito"), "lettore_percorso": sn.get("lettore_percorso"),
             "tappo_importo": tappo.get("importo") if isinstance(tappo, dict) else None,
-            "plug_residual": rec.get("plug_residual")}
+            "plug_residual": rec.get("plug_residual"), "ripiego_classico": sn.get("ripiego_classico")}
 
 
 def importa(percorso: Path, period_months: int | None, fiscal_year: int | None = None) -> dict:
@@ -599,6 +599,7 @@ def analisi_percorso(giri_per_id: dict[str, list[dict]], campione: dict, base: d
     vm, xv = _mediana_max(voti)
     sm, xs = _mediana_max(secondi)
     chiusure = sorted({id_ for id_, giri in giri_per_id.items() for g in giri if adottato_dal_lettore(g) and _chiusura_dichiarata(g)})
+    ripiego = analisi_ripiego(giri_per_id)
     return {"presente": True, "giri_adottati": len(adottati), "giri_totali": len(tutti),
             "documenti_adottati": documenti, "per_tipologia": {t: dict(v) for t, v in sorted(per_tipo.items())},
             "documenti_instabili_adozione": [d["id"] for d in documenti if d["instabile"]],
@@ -609,7 +610,27 @@ def analisi_percorso(giri_per_id: dict[str, list[dict]], campione: dict, base: d
             "secondi": {"mediana": sm, "max": xs},
             "tetto_chiamate": sorted({id_ for id_, giri in giri_per_id.items() for g in giri if _lp(g).get("tetto_chiamate")}),
             "chiusure_documenti": chiusure,
-            "precedente_salvato": prior, "precedente_con_mesi": prior_mesi}
+            "precedente_salvato": prior, "precedente_con_mesi": prior_mesi, "ripiego_classico": ripiego}
+
+
+RIFIUTO_CLASSICO_SPENTO = "percorso classico spento"
+
+
+def analisi_ripiego(giri_per_id: dict[str, list[dict]]) -> dict:
+    """Ripiego sul percorso classico (Fase 4, `IMPORT_RIPIEGO_CLASSICO`): giri e documenti che l'hanno usato, per motivo;
+    e, a classico spento, i giri rifiutati perché non c'era un'altra strada."""
+    giri_usati, motivi, rifiutati = 0, defaultdict(set), defaultdict(int)
+    for id_, giri in giri_per_id.items():
+        for g in giri:
+            rc = (_sn(g) or {}).get("ripiego_classico")
+            if isinstance(rc, dict) and rc.get("usato"):
+                giri_usati += 1
+                motivi[rc.get("motivo") or "?"].add(id_)
+            if RIFIUTO_CLASSICO_SPENTO in str(g.get("errore") or ""):
+                rifiutati[id_] += 1
+    return {"giri": giri_usati, "documenti": sorted({i for ids in motivi.values() for i in ids}),
+            "motivi": {m: sorted(ids) for m, ids in sorted(motivi.items())},
+            "rifiutati_classico_spento": dict(sorted(rifiutati.items()))}
 
 
 def _punteggio_medio(d: dict, cat: str) -> float | None:
@@ -672,6 +693,7 @@ def righe_percorso(a: dict, pegg: list[dict] | None = None, etichetta_base: str 
         r += [f"| {b['id']} | {x['giro']} | {'sì' if x['quadrato'] else 'no'} | {'sì' if x['adottato'] else 'no'} | {x['motivo'] or ''} |"
               for x in b["giri"]]
     sb = a["sbilanciati_base"]
+    rc = a.get("ripiego_classico") or {"giri": 0, "documenti": [], "motivi": {}, "rifiutati_classico_spento": {}}
     r += ["", "### Costo, chiusure, anno precedente", "", "| Misura | Valore |", "|---|---|",
           f"| Documenti salvati sbilanciati ora / in {etichetta_base} | {len(a['sbilanciati_ora'])} ({', '.join(a['sbilanciati_ora']) or '—'}) / "
           f"{'—' if sb is None else str(len(sb)) + ' (' + (', '.join(sb) or '—') + ')'} |",
@@ -680,6 +702,10 @@ def righe_percorso(a: dict, pegg: list[dict] | None = None, etichetta_base: str 
           f"| Secondi del lettore per giro adottato: mediana / max | {f(a['secondi']['mediana'])} / {f(a['secondi']['max'])} |",
           f"| Documenti che hanno toccato il tetto di chiamate | {len(a['tetto_chiamate'])} ({', '.join(a['tetto_chiamate']) or '—'}) |",
           f"| Documenti adottati con una chiusura ≤ 1 € dichiarata (tappo o plug) | {len(a['chiusure_documenti'])} ({', '.join(a['chiusure_documenti']) or '—'}) |",
+          f"| Ripiego classico usato: giri / documenti / motivi | {rc['giri']} / {len(rc['documenti'])} / "
+          f"{'; '.join(m + ' (' + ', '.join(ids) + ')' for m, ids in rc['motivi'].items()) or '—'} |",
+          f"| Rifiutati a classico spento (documento ×giri) | "
+          f"{', '.join(f'{i} ×{n}' for i, n in rc['rifiutati_classico_spento'].items()) or 'nessuno'} |",
           f"| Anno precedente salvato dal percorso del lettore (giri) | {len(a['precedente_salvato'])} |",
           f"| Anno precedente salvato con mesi ≠ None (qualunque fonte) | "
           f"{', '.join(_riga_mesi(x) for x in a['precedente_con_mesi']) or 'nessuno'} |"]

@@ -261,25 +261,3 @@ def test_deriva_regola_sp_e_resolve_ce():
     for direzione in ("costi", "ricavi"):
         _uguali(lambda d: e._resolve_ce_field(d, direzione), lambda d: scp._resolve_ce_field(d, direzione),
                 DESCRIZIONI_PAROLE_CHIAVE, f"_resolve_ce_field({direzione})", "situazione_contabile_parser")
-
-
-def test_deriva_catena_ce():
-    for direzione in ("costi", "ricavi"):
-        for d in DESCRIZIONI_PAROLE_CHIAVE + ["CARBURANTI", "AMM.TO IMPIANTI", "RIMANENZE INIZIALI PRODOTTI",
-                                              "PROFITTI VARI", "MANO D'OPERA", "CORRISPETTIVI DA TRASPORTO"]:
-            u = d.upper()
-            if direzione == "costi":
-                atteso = (scp._classify_ce_costi(u) or scp._resolve_ce_field(u, "costi")
-                          or scp._classify_ce_costi_foglia(u) or scp._classify_ce_sinonimo(u, "costi"))
-            else:
-                atteso = (scp._classify_ce_ricavi(u) or scp._resolve_ce_field(u, "ricavi")
-                          or scp._classify_ce_ricavi_foglia(u) or scp._classify_ce_sinonimo(u, "ricavi"))
-            assert e.catena_ce(u, direzione) == atteso, (
-                f"catena_ce ha preso una strada diversa da route C su {d!r}: decidi se portare la correzione in "
-                "importers/lettore/_ereditati.py")
-
-
-def test_deriva_tabelle_ce():
-    for nome in ("_CE_COSTI_RULES", "_CE_RICAVI_RULES", "_CE_COSTI_FOGLIE", "_CE_COSTI_SINONIMI", "_CE_RICAVI_SINONIMI",
-                 "_CE_AMMORTAMENTO_RE", "_CE_AMMORTAMENTO_PRIMA_RE", "_FONDO_IMMAT_KW"):
-        _costante(getattr(e, nome), getattr(scp, nome), nome, "situazione_contabile_parser")

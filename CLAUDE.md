@@ -175,7 +175,10 @@ ciò che non si può non sapere. Ogni voce dice la regola e **cosa si rompe** a 
   correzione la fa l'utente in Rettifiche. Non cercare un bug dentro un plug che non esiste — per
   molto tempo questo file ne ha descritti di inesistenti, ed è il guasto che ha motivato lo
   snellimento.
-- **Debito senza scadenza dichiarata → a breve**, per prudenza: anticipare una scadenza peggiora
+- **Debito senza scadenza dichiarata → a breve**, per prudenza, **mutui e finanziamenti compresi** (la parola «MUTUO» o
+  «FINANZIAMENTO» non è una scadenza; eccezione di 2026-11-09 alla vecchia regola gestionale «a lungo», tolta ovunque): fa eccezione
+  solo una prova stampata — «oltre 12 mesi/l'esercizio», la sigla (OE), una colonna oltre, un mastro o conto «medio/lungo
+  termine». Anticipare una scadenza peggiora
   gli indici di liquidità, non li abbellisce, e l'utente lo sposta in Rettifiche. Vale per ogni
   estrattore. Attenzione: `sp16` e `sp17` stanno **entrambi nel passivo**, quindi il pareggio non
   vede l'appiattimento — lo vedono CCN, current ratio e il circolante di Altman.

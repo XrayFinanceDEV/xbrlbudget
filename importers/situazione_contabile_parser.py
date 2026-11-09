@@ -7377,8 +7377,13 @@ def _vseg_debt_field(u: str) -> Optional[str]:
         return 'sp17b_debiti_altri_finanz_lungo'
     if 'ANTICIPAZ' in u:
         return 'sp16a_debiti_banche_breve'          # advances revolve within the year
-    if 'MEDIO/LUNGO' in u or 'MEDIO LUNGO' in u or 'M/L' in u or 'MUTUO' in u:
+    if ('MEDIO/LUNGO' in u or 'MEDIO LUNGO' in u or 'M/L' in u
+            or 'LUNGO TERMINE' in u or 'OLTRE' in u):
         return 'sp17a_debiti_banche_lungo'
+    if 'MUTU' in u:
+        # La parola MUTUO da sola non e' una scadenza (owner, 2026-11-09): senza
+        # MEDIO/LUNGO, M/L o OLTRE stampati il debito va a breve.
+        return 'sp16a_debiti_banche_breve'
     return None
 
 

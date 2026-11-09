@@ -59,8 +59,8 @@ def test_split_reads_maturity_from_the_detail_rows():
     split = _vseg_financing_split(FINANZIAMENTI, FINANZIAMENTI_TOTAL)
 
     assert split is not None
-    assert split["sp16a_debiti_banche_breve"] == D("120000.60")
-    assert split["sp17a_debiti_banche_lungo"] == D("741000.68")
+    assert split["sp16a_debiti_banche_breve"] == D("361000.78")  # anticipazioni + 2 mutui senza scadenza
+    assert split["sp17a_debiti_banche_lungo"] == D("500000.50")
     assert split["sp17b_debiti_altri_finanz_lungo"] == D("60000.00")
     # The split may never create or destroy mass.
     assert sum(split.values()) == FINANZIAMENTI_TOTAL
@@ -120,3 +120,12 @@ def test_repair_is_not_applied_when_raw_rows_already_tie():
     ]
     split = _vseg_financing_split(rows, D("100000"))
     assert split["sp16a_debiti_banche_breve"] == D("50000")
+
+
+def test_mutuo_senza_scadenza_stampata_va_a_breve_con_prova_va_a_lungo():
+    from importers.situazione_contabile_parser import _vseg_debt_field
+
+    assert _vseg_debt_field("MUTUO BANCO ALFA N.1") == "sp16a_debiti_banche_breve"
+    assert _vseg_debt_field("MUTUO OLTRE 12 MESI") == "sp17a_debiti_banche_lungo"
+    assert _vseg_debt_field("MUTUO M/L BETA") == "sp17a_debiti_banche_lungo"
+    assert _vseg_debt_field("MUTUO LUNGO TERMINE") == "sp17a_debiti_banche_lungo"

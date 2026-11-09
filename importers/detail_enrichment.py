@@ -2,7 +2,7 @@
 
 The LLM classifies numbered source cells, never supplies amounts. The reducer
 keeps existing specific details and accepts evidenced partial breakdowns.
-A separate audited management policy classifies unspecified ledger maturities.
+Ledger maturities without a printed proof go short (no management exception).
 No database or balancing writes; combined credit/debt totals never change.
 """
 from collections import defaultdict
@@ -506,10 +506,9 @@ usano il valore di fine in sp06f secondo la convenzione del modello dati.
 Debiti: banche, soci/altri finanziatori, titoli, fornitori (incluse fatture da
 ricevere), tributari, previdenziali, altri. I fondi ammortamento non sono debiti;
 utili portati a nuovo sono patrimonio netto. Natura e scadenza sono distinte:
-Le scadenze esplicite prevalgono. In loro assenza applica la regola gestionale:
-debiti non dettagliati entro 12 mesi; mutui e finanziamenti (bancari, soci o altri
-finanziatori) oltre 12 mesi. Un conto corrente bancario non è da solo un mutuo.
-Questa è una convenzione gestionale, non una scadenza provata dal documento.
+Le scadenze esplicite prevalgono (oltre 12 mesi, sigla OE, mastro o conto medio/lungo
+termine). In loro assenza ogni debito, mutui e finanziamenti compresi, è entro 12 mesi:
+la parola MUTUO o FINANZIAMENTO da sola non è una scadenza.
 Fatture da ricevere e fornitori sono componenti distinte: usa DEBITI COMMERCIALI
 se li comprende entrambi oppure cita entrambe le componenti, mai solo FORNITORI.
 Immobilizzazioni: usa valori NETTI; non proporre un costo storico come valore
@@ -837,7 +836,7 @@ def _credit_ledger_maturity(row: SourceRow, rows: list[SourceRow], aggregate: st
 
 
 def _ledger_maturity(row: SourceRow, rows: list[SourceRow], *, debt: bool) -> tuple[str, str]:
-    """Explicit maturities win; otherwise apply the user's management policy."""
+    """Printed maturities win; with none the debt goes short (owner, 2026-11-09)."""
     context = _credit_context(row, rows)
     # A child's explicit quota overrides a generic parent caption.
     for caption in (row.text.upper(), context):
@@ -846,17 +845,12 @@ def _ledger_maturity(row: SourceRow, rows: list[SourceRow], *, debt: bool) -> tu
         short = short or bool(re.search(r'\(EE[)\s-]', caption))
         long = long or bool(re.search(r'\(OE[)\s-]', caption))
         long = long or bool(re.search(r'OLTRE\s+(?:ES\.?\s*SUCC|ESERCIZIO\s+SUCCESSIVO)', caption))
+        if debt:  # un mastro/conto medio-lungo termine e' una scadenza stampata
+            long = long or bool(re.search(r'MEDIO[\s/-]*LUNGO|\bM/L\b|LUNGO\s+TERMINE', caption))
         if short != long:
             return ('short' if short else 'long'), 'documented'
         if short and long:
             return 'unknown', 'conflicting_maturities'
-    if debt and any(w in context for w in ('FINANZ', 'MUTU')):
-        child = row.text.upper()
-        if (not any(w in child for w in ('FINANZ', 'MUTU'))
-                and (re.search(r'\bC[/.]C(?:\.|\b)', child)
-                     or any(w in child for w in ('ANTICIP', 'INTERESS', 'CARTA', 'CARTE', 'SCOPERT')))):
-            return 'short', 'management_default_short'
-        return 'long', 'management_financing_long'
     return 'short', 'management_default_short'
 
 
@@ -985,7 +979,7 @@ def reclassify_ledger_maturities(bs: dict, rows: list[SourceRow]) -> tuple[dict,
     detail conservatively, then move documented or policy-based long portions.
     Unexplained balances default to short, as requested by the user.
     """
-    result, report = dict(bs), {'policy': 'default-short-financing-long-v1', 'families': {}}
+    result, report = dict(bs), {'policy': 'default-short-v2', 'families': {}}
     source = {r.id: r for r in rows}
     note_aggregates = {p.aggregate for p in note_details(rows) if p.period == 'current'}
     for short, long, side in (('sp06_crediti_breve', 'sp07_crediti_lungo', 'L'),

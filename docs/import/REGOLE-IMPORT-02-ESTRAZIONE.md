@@ -1311,8 +1311,9 @@ il lettore gira sul solo PDF.
      sui materiali, riserve di rivalutazione di legge, merci fra i prodotti finiti e merci).
    - **Dopo l'adozione dettagli e scadenze non si rifanno** (`pdf_importer._dettagli_gia_letti` →
      `dettagli_letti_dal_lettore`, come per il reso XBRL). *Se si ignora:* la ricerca dei dettagli rilegge il documento
-     e la sua regola gestionale «finanziamenti e mutui oltre 12 mesi» (`reclassify_ledger_maturities`) riscrive
-     `sp16`/`sp17` contro la scadenza decisa dal testo: la correzione del lettore non arriva al DB.
+     e `reclassify_ledger_maturities` riscrive `sp16`/`sp17` contro la scadenza decisa dal testo: la correzione del lettore
+     non arriva al DB. (Dal 2026-11-09 quella funzione non ha più l'eccezione «finanziamenti e mutui oltre 12 mesi»:
+     senza scadenza stampata ogni debito, mutui compresi, va a breve; politica `default-short-v2`.)
 6. **Voti sui blocchi che non tornano** (F3-11). Se una macro ancorata (`sp06`, `ce08`, …) non rifà il proprio
    totale stampato oltre 1 €, **solo le sue foglie** si rivotano, tre volte a temperatura 0 con **tre presentazioni
    diverse** (altrimenti la stessa domanda darebbe tre volte la stessa risposta): ogni riga coi soli antenati;

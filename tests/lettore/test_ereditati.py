@@ -230,3 +230,34 @@ def test_deriva_dettagli_dei_cespiti():
 
 def test_deriva_testa_del_fondo():
     _costante(e.FONDO_AMM_HEAD_RE, scp._FONDO_AMM_HEAD_RE, "FONDO_AMM_HEAD_RE", "situazione_contabile_parser")
+
+
+DESCRIZIONI_PAROLE_CHIAVE = [
+    "FABBRICATI INDUSTRIALI", "F.DO AMM. MACCHINARI", "FONDO AMMORTAMENTO IMMOBILIZZAZIONI", "CASSA", "BANCA C/C",
+    "CLIENTI ITALIA", "ERARIO C/IVA", "RIMANENZE FINALI MERCI", "FONDO TFR DIPENDENTI", "FONDI RISCHI E ONERI",
+    "CAPITALE SOCIALE", "RISERVA LEGALE", "DEBITI VERSO BANCHE", "MUTUI PASSIVI", "RATEI PASSIVI", "DEBITI TRIBUTARI",
+    "IRAP", "ACQUISTI", "SERVIZI", "Materie prime, sussidiarie, di consumo e di merci", "Costi per godimento di beni di terzi",
+    "Ricavi delle vendite e delle prestazioni", "Altri ricavi e proventi", "Interessi passivi e altri oneri finanziari",
+    "Ammortamento immobilizzazioni materiali", "Imposte sul reddito", "CARBURANTI", "Voce stranissima", "",
+]
+
+
+def test_deriva_tabelle_sp():
+    _costante(e._SP_ATTIVO_RULES, scp._SP_ATTIVO_RULES, "_SP_ATTIVO_RULES", "situazione_contabile_parser")
+    _costante(e._SP_PASSIVO_RULES, scp._SP_PASSIVO_RULES, "_SP_PASSIVO_RULES", "situazione_contabile_parser")
+    _costante(e._FONDO_AMM_CANON, scp._FONDO_AMM_CANON, "_FONDO_AMM_CANON", "situazione_contabile_parser")
+    _costante(e._CE_COST_FIELDS, scp._CE_COST_FIELDS, "_CE_COST_FIELDS", "situazione_contabile_parser")
+    _costante(e._CE_REVENUE_FIELDS, scp._CE_REVENUE_FIELDS, "_CE_REVENUE_FIELDS", "situazione_contabile_parser")
+
+
+def test_deriva_regola_sp_e_resolve_ce():
+    for lato in ("attivo", "passivo"):
+        _uguali(lambda d: e._regola_sp(d.upper(), lato), lambda d: scp._regola_sp(d.upper(), lato),
+                DESCRIZIONI_PAROLE_CHIAVE, f"_regola_sp({lato})", "situazione_contabile_parser")
+    _uguali(lambda d: e._canon_fondo_amm(d.upper()), lambda d: scp._canon_fondo_amm(d.upper()),
+            DESCRIZIONI_PAROLE_CHIAVE, "_canon_fondo_amm", "situazione_contabile_parser")
+    _uguali(lambda d: e._is_fondo_amm(d.upper()), lambda d: scp._is_fondo_amm(d.upper()),
+            DESCRIZIONI_PAROLE_CHIAVE, "_is_fondo_amm", "situazione_contabile_parser")
+    for direzione in ("costi", "ricavi"):
+        _uguali(lambda d: e._resolve_ce_field(d, direzione), lambda d: scp._resolve_ce_field(d, direzione),
+                DESCRIZIONI_PAROLE_CHIAVE, f"_resolve_ce_field({direzione})", "situazione_contabile_parser")

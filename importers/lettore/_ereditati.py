@@ -529,3 +529,374 @@ def dettaglio_sp03(desc_upper: str) -> Optional[str]:
             or re.search(r'\bIMP\b', desc_upper)):
         return 'sp03b_impianti_macchinari'
     return None
+
+
+# da importers/situazione_contabile_parser.py:_SP_ATTIVO_RULES, branch fase4 b224c95
+_SP_ATTIVO_RULES = [
+    # Fixed assets (gross — will be netted against depreciation)
+    (['IMMOBILIZZAZIONI IMMATERIALI'], 'gross_sp02'),
+    (['IMMOBILIZZAZIONI MATERIALI'], 'gross_sp03'),
+    (['IMMOBILIZZAZIONI FINANZIARIE'], 'gross_sp04'),
+    # "IMMOBILIZZI FINANZIARI" (budget_680): senza questa regola vinceva MOBILI, che e'
+    # sottostringa di IMMOBILIZZI, e i depositi cauzionali diventavano arredi
+    (['IMMOBILIZZI', 'FINANZ'], 'gross_sp04'),
+    # Immobilizzazioni in corso e acconti (B.II.5 / B.I.6) — a LEGITIMATE fixed
+    # asset. Must precede the ANTICIP rule below so a real immob. acconto is not
+    # demoted to a credit.
+    (['IMMOBILIZZAZIONI', 'CORSO'], 'gross_sp03'),
+    (['IMMOBILIZZAZIONI', 'ACCONT'], 'gross_sp03'),
+    # Credits explicitly labelled as immobilised belong to B.III even when the
+    # account number is gestionale-specific (AGO: "Crediti v/altri (EE-immob.)").
+    # non 'IMMOB' da solo: "Crediti vs. Ad Immobiliare" e' un credito (M.C.T. 30/06/2026)
+    (['CREDITI', 'IMMOBILIZZ'], 'gross_sp04'),
+    (['CREDITI', 'IMMOB.'], 'gross_sp04'),
+    (['CREDITI', 'IMMOBILE'], 'gross_sp04'),          # "Crediti per acquisto immobile" (AITEC)
+    # An advance on a CANONE / lease ("ANTICIPO X CANONI MACCHINARI") is a credit,
+    # not the machine — must precede the MACCHINAR category rule. Narrow to CANON on
+    # purpose: a blanket ANTICIP rule would (a) demote a genuine acconto to PURCHASE
+    # a cespite ("ANTICIPI SU MACCHINARI" = B.II.5 immobilizzazione) to crediti, and
+    # (b) leak into _semantic_section_from_desc, mis-guessing customer advances
+    # ("CLIENTI C/ANTICIPI" = a liability) onto the asset side. Generic supplier
+    # advances ("ANTICIPI A FORNITORI") already fall to the sp06 default below.
+    (['ANTICIP', 'CANON'], 'sp06'),
+    # AGO-style single-category descriptions (trial balance parent level)
+    (['ONERI', 'PLURIENN'], 'gross_sp02'),
+    (['COSTI', 'PLURIENN'], 'gross_sp02'),
+    (['COSTI', 'IMPIANTO'], 'gross_sp02'),
+    (['COSTI', 'AMPLIAMENT'], 'gross_sp02'),   # B.I.1 e' "costi di impianto E DI AMPLIAMENTO"
+    (['SOFTWARE'], 'gross_sp02'),
+    (['BREVETT'], 'gross_sp02'),
+    (['MARCHI'], 'gross_sp02'),
+    (['AVVIAMENTO'], 'gross_sp02'),
+    (['LICENZ'], 'gross_sp02'),
+    # B.I.7 "costi su beni di terzi" (migliorie/lavori su beni non di proprieta').
+    # Il repo lo tratta gia' come IMMATERIALE sul lato fondo (regola F.DO+AMM+MANUT
+    # "spese di manut.beni di ter(zi)"); senza la regola simmetrica qui il cespite
+    # finiva nei crediti mentre il suo fondo nettava le immobilizzazioni MATERIALI
+    # (budget_281: 4.500,00 in sp06 e 2.471,86 sottratti a sp03).
+    (['BENI DI TERZ'], 'gross_sp02'),
+    # Oneri pluriennali scritti per esteso (budget_367: "Altre spese ad utilita'
+    # pluriennale", "Manutenzioni e riparazioni da ammortizzare", "Disaggi su
+    # prestiti" — quest'ultimo gia' immateriale lato fondo, _FONDO_IMMAT_KW):
+    # finivano nel default crediti.
+    (['SPESE', 'PLURIENN'], 'gross_sp02'),
+    (['DA AMMORTIZZ'], 'gross_sp02'),
+    (['DISAGG'], 'gross_sp02'),
+    (['CONTENITOR'], 'gross_sp03'),
+    (['FABBRICAT'], 'gross_sp03'),
+    (['TERREN'], 'gross_sp03'),
+    (['MACCHINAR'], 'gross_sp03'),
+    (['MACCHINE'], 'gross_sp03'),
+    (['IMPIANT'], 'gross_sp03'),
+    # 'ATTREZ' e non 'ATTREZZ': "ATTREZ." compare troncato nelle stampe a colonna
+    # stretta. Allargamento per PREFISSO, quindi additivo (ogni ATTREZZ contiene ATTREZ).
+    (['ATTREZ'], 'gross_sp03'),
+    (['ATTR', 'MINUT'], 'gross_sp03'),   # "ATTR.VARIE E MINUTE (<516,46 E.)"
+    # Categorie di cespite gia' riconosciute lato FONDO (_FONDO_CATEGORY_KW) ma
+    # assenti qui: il fondo nettava sp03 mentre il suo cespite finiva nei crediti.
+    (['TELEFON'], 'gross_sp03'),
+    (['AUTOMEZZ'], 'gross_sp03'),
+    (['AUTOVEICOL'], 'gross_sp03'),
+    (['AUTOVETTUR'], 'gross_sp03'),
+    (['AUTOCARR'], 'gross_sp03'),                 # budget_238: finiva nei crediti
+    # budget_680: sigle e categorie che nessuna regola riconosceva
+    (['MACCHIN/'], 'gross_sp03'),
+    (['MACC.', 'IMP'], 'gross_sp03'),
+    (['HARDWARE'], 'gross_sp03'),
+    (['CELLULAR'], 'gross_sp03'),
+    (['CENTRALINO'], 'gross_sp03'),
+    (['COSTRUZIONI', 'LEGGER'], 'gross_sp03'),
+    (['CERTIFICAZION'], 'gross_sp02'),
+    # beni strumentali sotto 516,46 euro ("BENI DI VALORE UNITARIO INFERIORE")
+    (['BENI', 'VALORE', 'INFERIOR'], 'gross_sp03'),
+    (['CESPITI'], 'gross_sp03'),                 # "CESPITI INFERIORI A € 516,45" (Santini)
+    (['MEZZI', 'TRASP'], 'gross_sp03'),
+    (['AUTO', 'MOTO'], 'gross_sp03'),
+    (['ARREDAMENT'], 'gross_sp03'),
+    (['MOBILI'], 'gross_sp03'),
+    (['ALTRI', 'BENI', 'MATERIAL'], 'gross_sp03'),
+    (['PARTECIPAZ'], 'gross_sp04'),
+    # Current assets
+    (['RIMANENZE'], 'sp05'),
+    (['MAGAZZIN'], 'sp05'),
+    # Common trial-balance abbreviation: "Rim. mat. prime, sussid. e consumo".
+    (['RIM', 'MAT', 'PRIM'], 'sp05'),
+    (['GIACENZ'], 'sp05'),                       # "COLORANTI/GIACENZE" (budget_680)
+    (['RATEI', 'RISCONTI', 'ATTIV'], 'sp10'),
+    (['RATEI', 'ATTIV'], 'sp10'),
+    (['RISCONTI', 'ATTIV'], 'sp10'),
+    (['DISPONIBILIT'], 'sp09'),  # Disponibilità liquide (banks + cash)
+    (['DEPOSIT', 'BANCAR'], 'sp09'),
+    (['DEPOSIT', 'POSTAL'], 'sp09'),
+    (['DENARO'], 'sp09'),
+    (['CASSA'], 'sp09'),
+    # conto corrente bancario a saldo dare (budget_680: "BANCA DI ASTI C/C...", mastro
+    # "BANCHE"); a saldo avere sta nel passivo e lo leggono le regole di debito. Prima i
+    # crediti che nominano una banca ("CREDITI V/BANCHE PER RIMBORSO CARTA", AIC) e
+    # l'erario ("ritenute su C/C bancari", MBS): restano crediti, come prima.
+    (['CREDIT'], 'sp06'),
+    (['ERARIO'], 'sp06'),
+    (['DEBIT'], 'sp06'),        # "DEBITI V/BANCHE" stampato all'attivo (AIC): come prima
+    (['BANCA ', 'C/C'], 'sp09'),
+    (['BANCHE'], 'sp09'),
+    # Everything else in attivo = crediti (sp06)
+]
+
+# da importers/situazione_contabile_parser.py:_SP_PASSIVO_RULES, branch fase4 b224c95
+_SP_PASSIVO_RULES = [
+    # B.1 funds are not depreciation contra-accounts.  Keep these before every
+    # AMM rule: "amministratori" contains the substring "AMM" and previously
+    # made a fondo fine-mandato look like a tangible depreciation fund.
+    (['QUIESCENZA'], 'sp14'),
+    (['INDENNIT', 'MANDATO'], 'sp14'),
+    (['FINE', 'MANDATO'], 'sp14'),               # "F.DO TRATT.FINE MANDATO(TFM)"
+    (['T.F.M'], 'sp14'),                          # "F.DO T.F.M. AMMINISTRATORE" (Santini)
+    # "F.DO INDENNITA' ANZIANITA' DIPEND." e' il TFR col nome di prima del 1982
+    (['INDENNIT', 'ANZIANIT'], 'sp15'),
+    # Depreciation funds (will be netted against gross assets)
+    # Specific rules first (pluriennali/macchine disambiguate immat vs mat)
+    (['F.DO', 'AMM', 'PLURIENN'], 'depr_sp02'),
+    (['F.DO', 'AMM', 'IMMAT'], 'depr_sp02'),
+    (['F.DO', 'AMM', 'SOFTWARE'], 'depr_sp02'),
+    (['F.DO', 'AMM', 'BREVETT'], 'depr_sp02'),
+    (['F.DO', 'AMM', 'MARCHI'], 'depr_sp02'),
+    (['F.DO', 'AMM', 'AVVIAMENTO'], 'depr_sp02'),
+    # Truncated gestionale captions (budget_343/348, Bilancino 31-5-26): the
+    # column clips the description, so the canonical keywords above never fire
+    # and the fondo fell through to the tangible fallback.
+    (['F.DO', 'AMM', 'SW'], 'depr_sp02'),                  # "F.do amm.sw in concessione capitalizz"
+    (['F.DO', 'AMM', 'COSTI DI IMPIANTO'], 'depr_sp02'),   # B.I.1, before the IMPIANT→sp03 rule
+    (['F.DO', 'AMM', "COSTI D'IMPIANTO"], 'depr_sp02'),
+    (['F.DO', 'AMM', 'AMPLIAMENT'], 'depr_sp02'),          # idem B.I.1 (budget_158 CONA)
+    (['F.DO', 'AMM', 'MANUT'], 'depr_sp02'),               # "spese di manut.beni di ter(zi)" B.I.7
+    (['F.DO', 'AMM', 'BENI DI TERZ'], 'depr_sp02'),        # idem, grafia "lav. str. su beni di terzi"
+    (['F.DO', 'AMM', 'LICENZE'], 'depr_sp02'),
+    (['F.DO', 'AMM', 'OPERE INGE'], 'depr_sp02'),
+    (['F.DO', 'AMM', 'CERTIFICAZ'], 'depr_sp02'),           # budget_680, B.I immateriale          # "F.do amm.dir.brev.e utilizz.opere inge"
+    (['F.DO', 'AMM', 'DIR.BREV'], 'depr_sp02'),
+    (['F.DO', 'AMM', 'RICERCA'], 'depr_sp02'),             # B.I.2 sviluppo (Santini)
+    (['F.DO', 'AMM', 'DIRITTI'], 'depr_sp02'),             # "F.DO AMM.TO DIRITTI UTILIZZO" (budget_1343)
+    (['F.DO', 'AMM', 'SVILUPPO'], 'depr_sp02'),
+    (['FOND', 'AMM', 'IMMOBILIZZAZ. IMM'], 'depr_sp02'),   # mastro "FONDI AMMORT. IMMOBILIZZAZ. IMM"
+    (['F.DO', 'AMM', 'MACCHINE'], 'depr_sp03'),
+    (['F.DO', 'AMM', 'MACCHINAR'], 'depr_sp03'),
+    (['F.DO', 'AMM', 'IMPIANT'], 'depr_sp03'),
+    (['F.DO', 'AMM', 'ATTREZZ'], 'depr_sp03'),
+    (['F.DO', 'AMM', 'AUTO'], 'depr_sp03'),
+    (['F.DO', 'AMM', 'FABBRICAT'], 'depr_sp03'),
+    (['F.DO', 'AMM', 'MATER'], 'depr_sp03'),
+    (['F/AMM', 'IMMAT'], 'depr_sp02'),
+    (['F/AMM', 'MATER'], 'depr_sp03'),
+    (['AMMORTAM', 'IMMAT'], 'depr_sp02'),
+    (['AMMORTAM', 'MATER'], 'depr_sp03'),
+    # "FONDI/FONDO AMM.TO IMMOB. (IM)MATERIALI" — no 'F.DO' token, 'AMM.TO' not 'AMMORTAM'
+    # (BILAGRA "BILANCIO DI VERIFICA", e.g. AITEC). IMMAT must precede MATER because
+    # "IMMATERIALI" also contains the "MATER" substring.
+    (['FOND', 'AMM', 'IMMAT'], 'depr_sp02'),
+    (['FOND', 'AMM', 'MATER'], 'depr_sp03'),
+    # Safe tangible fallback.  Do not use bare "AMM": it also matches words
+    # such as AMMINISTRATORI.  Real depreciation captions use AMM. / AMM.TO or
+    # the full AMMORT... stem; asset-specific cases were handled above.
+    (['F.DO', 'AMM.'], 'depr_sp03'),
+    (['F.DO', 'AMMORT'], 'depr_sp03'),
+    # Crediti deduction
+    (['F.DO', 'SVAL', 'CREDITI'], 'deduct_crediti'),
+    (['RISCHI', 'CREDITI'], 'deduct_crediti'),
+    (['SVALUT', 'CREDITI'], 'deduct_crediti'),
+    # Banks avere = overdrafts
+    (['DISPONIBILIT'], 'bank_avere'),
+    # Equity (sub2 total and sub3 components)
+    (['PATRIMONIO NETTO'], 'equity_total'),
+    (['UTILI', 'DESTINAZ'], 'equity_total'),      # "Utili in attesa di destinaz." (Napolitano)
+    (['CAPITALE'], 'equity_total'),
+    (['RISERVA'], 'equity_total'),
+    (['RISERVE'], 'equity_total'),
+    (['UTILE', 'ESERCIZ'], 'equity_total'),
+    (['PERDITA', 'ESERCIZ'], 'equity_total'),
+    (['UTILI', 'PORTATI'], 'equity_total'),
+    (['UTILI', 'NUOVO'], 'equity_total'),
+    (['PERDITE', 'PORTATE'], 'equity_total'),
+    (['SOVRAPPREZZO'], 'equity_total'),
+    (['CAP.', 'SOC'], 'equity_total'),
+    # Fondi
+    (['FONDI', 'RISCHI'], 'sp14'),
+    (['FONDI', 'ONERI'], 'sp14'),
+    (['FONDO', 'RISCHI'], 'sp14'),
+    (['FONDO', 'ONERI'], 'sp14'),
+    # TFR
+    (['TFR'], 'sp15'),
+    (['T.F.R'], 'sp15'),
+    (['TRATTAMENTO', 'FINE', 'RAPPORTO'], 'sp15'),
+    (['TRATT', 'FINE', 'RAPPORTO'], 'sp15'),
+    # Debiti v/banche (need entro/oltre split — from details OR from "(EE)"/"(OE)" suffix)
+    (['DEBITI', 'BANCH'], 'debt_bank'),
+    (['DEBITI', 'FINANZIAT'], 'debt_bank'),
+    (['DEBITI', 'V/FINANZ'], 'debt_bank'),      # "DEBITI V/FINANZ.ESIG.ENTRO 12M" (budget_1401): anticipi factoring compresi
+    (['MUTUI'], 'debt_bank'),
+    # Santini: "FINANZIAMENTO 07797790 BANCO BPM", "ANTICIPI ESTERO BPER" sotto
+    # "ANTICIPI BANCARI", un conto bancario a saldo avere sotto "BANCHE"
+    (['FINANZIAMENT', 'SOCI'], 'sp16'),          # un socio non e' una banca: resta sp16b
+    (['FINANZIAMENT', 'TERZI'], 'sp16'),         # "FINANZIAMENTI DI TERZI" (AITEC): idem
+    (['FINANZIAMENT'], 'debt_bank'),
+    (['ANTICIP', 'BANC'], 'debt_bank'),
+    (['BANCHE'], 'debt_bank'),
+    (['OBBLIGAZION'], 'debt_bank'),
+    # Ratei e risconti passivi
+    (['RATEI', 'RISCONTI', 'PASSIV'], 'sp18'),
+    (['RATEI', 'PASSIV'], 'sp18'),
+    (['RISCONTI', 'PASSIV'], 'sp18'),
+    # Debiti tributari
+    (['DEBITI', 'TRIBUTAR'], 'sp16'),
+    (['DEBITI', 'TRIBUTARI'], 'sp16'),
+    # Debiti previdenziali
+    (['DEBITI', 'PREV'], 'sp16'),
+    (['DEBITI', 'SICUR'], 'sp16'),
+    (['DEBITI', 'INPS'], 'sp16'),
+    (['ISTIT', 'PREV'], 'sp16'),
+    # Specific debt categories → sp16 (breve by default)
+    (['DEBITI', 'FORNITOR'], 'sp16'),
+    (['ACCONTI'], 'sp16'),
+    (['ALTRI DEBITI'], 'sp16'),
+    (['ALTRI', 'DEBITI'], 'sp16'),
+    # SBF / crediti ceduti in passivo → sp16 (only when explicitly labeled as ceded)
+    (['CREDITI', 'CEDUT'], 'sp16'),
+    (['CREDITI', 'SMOBIL'], 'sp16'),
+]
+
+# da importers/situazione_contabile_parser.py:_FONDO_AMM_CANON, branch fase4 b224c95
+_FONDO_AMM_CANON = 'F.DO AMM. '
+
+# da importers/situazione_contabile_parser.py:_canon_fondo_amm, branch fase4 b224c95
+def _canon_fondo_amm(desc_upper: str) -> str:
+    """Collassa ogni grafia di "fondo ammortamento" sulla forma canonica `F.DO AMM.`.
+
+    `_SP_PASSIVO_RULES` copre la categoria del cespite (MACCHINAR, ATTREZZ, AUTO,
+    IMMAT...) SOLO in coppia con il token `F.DO`; la grafia con slash e' coperta
+    solo insieme a IMMAT/MATER, parole che compaiono nei mastri aggregati ma MAI
+    nei conti di dettaglio per categoria. Cosi' `F/AMM.MACCHINARI` non matcha
+    nessuna regola, cade nel default `sp16` e diventa un DEBITO: l'attivo resta
+    lordo, il passivo si gonfia della stessa massa, il bilancio pareggia lo stesso
+    e nessun gate protesta (budget_281: 5 fondi su 6, 124.893,64 di 124.936,25).
+
+    Normalizzare la TESTA una volta sola, invece di duplicare le 15 regole di
+    categoria per ogni grafia, e' cio' che tiene allineati i due riconoscitori di
+    fondo (`_is_fondo_amm` e questa tabella) — la loro divergenza E' il bug.
+
+    La riscrittura tocca SOLO le stringhe che `_is_fondo_amm` ha gia' dichiarato
+    fondi, quindi e' additiva per costruzione: si nettano piu' fondi, mai meno,
+    e "AMMINISTRATORI C/COMPENSI" non e' raggiungibile.
+    """
+    if not _is_fondo_amm(desc_upper):
+        return desc_upper
+    canon = FONDO_AMM_HEAD_RE.sub(_FONDO_AMM_CANON, desc_upper, count=1)
+    # Nessuna testa riconosciuta (dicitura non a inizio riga): meglio la stringa
+    # originale che una riscrittura a caso.
+    return canon if canon != desc_upper else desc_upper
+
+# da importers/situazione_contabile_parser.py:_is_fondo_amm, branch fase4 b224c95
+def _is_fondo_amm(desc_upper: str) -> bool:
+    """Recognise depreciation/amortisation funds at any aggregation level, incl. the
+    aggregate mastro 'FONDI AMMORTAMENTO IMMOBILIZ' the rule table below misses.
+
+    Questa funzione governa l'INTERO netting dei fondi, quindi il pareggio di
+    tutta la route C: un fondo non riconosciuto non viene sottratto dal cespite,
+    l'attivo resta lordo e il passivo gonfio della stessa massa, i due lati non
+    tornano e la differenza diventa residuo non classificato -> oltre l'1%
+    scatta QUADRATURA MASCHERATA e l'import viene rifiutato.
+
+    Il test a sottostringhe qui sotto e' tenuto INVARIATO (non puo' regredire
+    nulla) e viene solo AFFIANCATO dalla forma canonica del normalizzatore unico,
+    che collassa `F.di ammor.to`, `Fdo amm`, `Fondo amm.` su `fondo ammortamento`
+    — grafie reali che il solo test a sottostringhe non vede. L'allargamento e'
+    additivo per costruzione: si riconoscono piu' fondi, mai meno.
+    """
+    d = desc_upper
+    if (('AMMORT' in d or 'AMM.TO' in d or 'AMM.NTO' in d or 'F.DO AMM' in d or 'F/AMM' in d)
+            and ('FOND' in d or 'F.DO' in d or 'F/' in d)):
+        return True
+    try:
+        from importers.label_semantics import normalize_label
+    except Exception:
+        return False
+    # `fondo ammortamento` CONTIGUO: "Ammortamento immobilizzazioni immateriali" e
+    # "Quota ammortamento esercizio" sono COSTI del conto economico, non fondi
+    # dello stato patrimoniale, e non devono mai essere nettati.
+    return "fondo ammortamento" in normalize_label(d)
+
+# da importers/situazione_contabile_parser.py:_regola_sp, branch fase4 b224c95
+def _regola_sp(desc_upper: str, lato: str) -> Optional[str]:
+    """La voce di SP che una descrizione riconosce davvero, o None se nessuna regola la
+    nomina (i classificatori ripiegano allora su crediti/debiti generici)."""
+    if lato == 'attivo':
+        d = re.sub(r'\bRIM\.(?=\s|$|[A-Z])', 'RIMANENZE ', desc_upper)
+        regole = _SP_ATTIVO_RULES
+    else:
+        d = _canon_fondo_amm(desc_upper)
+        regole = _SP_PASSIVO_RULES
+    for keywords, field in regole:
+        if _kw_match(d, keywords):
+            return field
+    return None
+
+# da importers/situazione_contabile_parser.py:_CE_COST_FIELDS, branch fase4 b224c95
+_CE_COST_FIELDS = frozenset({
+    'ce05', 'ce06', 'ce07', 'ce08', 'ce09', 'ce10', 'ce11', 'ce11b', 'ce12',
+    'ce15',                      # C.17 interessi e altri oneri finanziari
+    'ce19',                      # E.21 oneri straordinari
+    'ce20',                      # imposte sul reddito
+})
+
+# da importers/situazione_contabile_parser.py:_CE_REVENUE_FIELDS, branch fase4 b224c95
+_CE_REVENUE_FIELDS = frozenset({
+    'ce01', 'ce02', 'ce03', 'ce04',   # A) valore della produzione
+    'ce13', 'ce14', 'ce16',           # C) proventi finanziari (ce16 netto)
+    'ce17',                           # D) rettifiche di valore (netto)
+    'ce18',                           # E.20 proventi straordinari
+})
+
+# da importers/situazione_contabile_parser.py:_resolve_field, branch fase4 b224c95
+def _resolve_field(desc: str, side: Optional[str] = None,
+                   statement: Optional[str] = None) -> Optional[str]:
+    """Shared-tree classification, returned as a SHORT route-C key.
+
+    `iv_cee_hierarchy.resolve` reasons in DB column names ('ce09_ammortamenti')
+    while the route-C parsers work in short keys ('ce09') until _map_sc_keys.
+    The short key is the db_field prefix up to the first underscore
+    ('sp04a_partecipazioni' -> 'sp04a'). That split is a mechanical string
+    operation, not a guarantee of routability on its own: every short key the
+    tree can actually produce must also be in `pdf_importer._SC_KEY_MAP` (or
+    already contain an underscore, in which case `_map_sc_keys` passes it
+    through unchanged) — otherwise `_map_sc_keys` silently drops the amount.
+    See `tests/test_classification_fallback.py` for the guard that checks
+    this holds for every node in `data/iv_cee_tree.json`.
+
+    Returns None when the tree does not know the description, or when it
+    resolves to the OTHER statement — a balance-sheet caption must never be
+    booked as a cost.
+    """
+    try:
+        from importers.iv_cee_hierarchy import resolve as _tree_resolve
+        node = _tree_resolve(desc, side, statement)
+    except Exception:
+        return None
+    if node is None or not node.db_field:
+        return None
+    if statement and node.statement and node.statement != statement:
+        return None
+    return node.db_field.split('_', 1)[0]
+
+# da importers/situazione_contabile_parser.py:_resolve_ce_field, branch fase4 b224c95
+def _resolve_ce_field(desc: str, direction: str) -> Optional[str]:
+    """Shared-tree CE classification constrained to `direction`.
+
+    `direction` is 'costi' or 'ricavi'. Returns None when the tree does not
+    know the description OR when it resolves to a voce of the OPPOSITE sign, so
+    the caller falls through to its catch-all exactly as it did before the tree
+    fallback was added. See _CE_COST_FIELDS / _CE_REVENUE_FIELDS for why the
+    tree cannot enforce this on its own.
+    """
+    field = _resolve_field(desc, direction, statement='ce')
+    if field is None:
+        return None
+    allowed = _CE_COST_FIELDS if direction == 'costi' else _CE_REVENUE_FIELDS
+    return field if field in allowed else None

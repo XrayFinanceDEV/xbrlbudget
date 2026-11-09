@@ -19,7 +19,7 @@ from decimal import Decimal
 
 from importers import llm_provider
 from importers.llm_provider import ContestoEccessivo, LLMProviderError, RispostaTroncata
-from importers.lettore import tavola
+from importers.lettore import _ereditati, tavola
 from importers.lettore.foglie import Ancora, Foglia, gettoni_di_legge
 from importers.lettore.totali import _norm
 
@@ -95,6 +95,32 @@ def _ammesse(f: Foglia) -> tuple[str, ...]:
 _TESTA_FONDO = r"(?:\bF(?:ONDO|ONDI|DO|DI)\b|\bF\s*[./]\s*(?:D[OI]\b|(?=AMM|SVAL)))"
 _FONDO = re.compile(rf"AMMORT|SVALUT|DEPREZZ|RETTIFIC|{_TESTA_FONDO}.*(?:\bAMM|SVAL|CREDIT)", re.I)
 _NETTO_IN_DIMINUZIONE = re.compile(r"PERDIT|AZION\w*\s+PROPRI|RISERV\w*\s+NEGATIV", re.I)
+
+
+# Le voci a parole chiave di route C per lo SP sono tag interni: solo quelli che sono una macro-voce (o il lordo di
+# una immobilizzazione) diventano un indizio. `equity_total` (capitale, riserve e utile insieme) e `debt_bank`
+# (breve o lungo) non nominano una macro: restano senza indizio, come i fondi (`depr_*`) e le voci di conto economico.
+_INDIZIO_SP = {"gross_sp02": "sp02", "gross_sp03": "sp03", "gross_sp04": "sp04", "sp05": "sp05", "sp06": "sp06",
+               "sp09": "sp09", "sp10": "sp10", "sp14": "sp14", "sp15": "sp15", "sp16": "sp16", "sp18": "sp18"}
+
+
+def indizio(f: Foglia) -> str | None:
+    """La macro-voce che i classificatori a parole chiave di oggi darebbero all'etichetta: un indizio per il
+    modello, mai un vincolo. CE: `_resolve_ce_field` nella direzione della colonna (mai `iv_cee_hierarchy.resolve`
+    con `side`: su un nodo CE non filtra nulla); SP: le regole a parole chiave di route C per il lato della
+    colonna. `None` se non decidono, se la direzione o il lato sono ignoti, o se l'esito non e' fra le macro
+    ammesse per il lato (un indizio contro la colonna non entra mai)."""
+    nome = f.etichetta.upper()
+    if (f.sezione or "SP") == "CE":
+        direzione = {"costo": "costi", "ricavo": "ricavi"}.get(f.verso_ce or "")
+        campo = _ereditati._resolve_ce_field(nome, direzione) if direzione else None
+    else:
+        lato = _lato_colonna(f)
+        if lato == "U":
+            return None
+        campo = _INDIZIO_SP.get(_ereditati._regola_sp(nome, "attivo" if lato == "L" else "passivo") or "")
+    macro = tavola.macro_di(campo) if campo else None
+    return macro if macro in _ammesse(f) else None
 
 
 def _rettifiche(f: Foglia) -> tuple[str, ...]:
@@ -175,6 +201,7 @@ def _richiesta(blocco: list[Foglia], enum_per_id: dict[str, list[str]], etichett
     legenda = "\n".join(f"{c}: {etichette[c]}" for c in usati)
     righe = "\n".join(
         f"{f.id} | {f.etichetta} | {_contesto(f)}{_fratelli(f, blocco) if fratelli else ''}"
+        + (f"; indizio dalle parole chiave: {i}" if not macro_assegnata and (i := indizio(f)) else "")
         + (f" | voce: {macro_assegnata[f.id]}" if macro_assegnata and f.id in macro_assegnata else "")
         + f" | ammessi: {', '.join(enum_per_id[f.id])}" for f in blocco)
     testo = ("Classifica queste righe.\n\nCodici:\n" + legenda + "\n\n" + (nota + "\n\n" if nota else "")

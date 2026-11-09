@@ -52,7 +52,8 @@ PROMPT_MACRO = (
 PROMPT_DETTAGLIO = (
     "Sei un ragioniere italiano. Ogni riga e' gia' stata assegnata a una voce di bilancio: indica la sotto-voce "
     "che la descrive, scegliendo SOLO fra quelle ammesse per quella riga, oppure «altri» se nessuna calza. "
-    "Regole: carte di credito e anticipi bancari sono debiti verso banche; i finanziamenti dei soci, SIMEST e i "
+    "Regole: conti correnti bancari o postali con saldo avere, carte di credito e anticipi bancari sono debiti "
+    "verso banche; i finanziamenti dei soci, SIMEST e i "
     "finanziamenti agevolati sono debiti verso altri finanziatori; fatture da ricevere sono debiti verso fornitori; "
     "acconti ricevuti dai clienti, debiti verso controllanti, collegate o altre societa' del gruppo, verso dipendenti "
     "e amministratori sono altri debiti; i crediti verso controllanti o collegate vanno nella loro sotto-voce. "

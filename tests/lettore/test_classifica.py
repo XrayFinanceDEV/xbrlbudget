@@ -368,7 +368,7 @@ def test_prompt_porta_le_regole_di_classificazione_del_proprietario():
     m, d = c.PROMPT_MACRO.lower(), c.PROMPT_DETTAGLIO.lower()
     assert "amministratori" in m and "somministrato" in m and "depositi cauzionali" in m
     assert "conto capitale" in m and "beni di terzi" in m and "fondi pensione" in m
-    assert "carte di credito" in d and "acconti" in d and "controllanti" in d and "fatture da ricevere" in d
+    assert "conti correnti bancari" in d and "carte di credito" in d and "acconti" in d and "controllanti" in d and "fatture da ricevere" in d
     assert "materiali" in d and "rivalutazione" in d and "merci" in d
 
 

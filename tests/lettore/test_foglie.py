@@ -804,3 +804,26 @@ def test_totale_coi_figli_che_portano_la_colonna_resta_fuori(tmp_path):
     mastro.totale, mastro.figli = True, {1: (per["Cliente Rossi"].id, per["Cliente Bianchi"].id)}
     nomi = [f.etichetta for f in foglie_contabili(doc, 0)]
     assert "Crediti verso clienti" not in nomi and "Cliente Rossi" in nomi
+
+
+def test_arabo_fuori_dalla_sua_lettera_del_ce_non_e_un_livello(tmp_path):
+    # 1553 (prospetto reso da XBRL): «5) da altri» sotto «C) 16) a)» e' l'elenco dei debitori, non la voce A.5: preso
+    # come livello manda il provento finanziario fra gli altri ricavi (CE.C.5 -> ce04)
+    voci = [(50, 112, "CONTO ECONOMICO")] + _righe(140, [
+        ("A) Valore della produzione",), ("1) Ricavi delle vendite e delle prestazioni", "1.000,00"),
+        ("Totale valore della produzione", "1.000,00"), ("C) Proventi e oneri finanziari",),
+        ("16) Altri proventi finanziari",), ("a) da crediti iscritti nelle immobilizzazioni",),
+        ("5) da altri", "80,00"), ("d) proventi diversi dai precedenti",), ("5) da altri", "18,00"),
+        ("17) Interessi e altri oneri finanziari",), ("e) verso altri", "40,00")])
+    doc = _doc(tmp_path, voci)
+    foglie = foglie_contabili(doc, 0)
+    da_altri = [f for f in foglie if f.etichetta == "5) da altri"]
+    assert [f.percorso_legale for f in da_altri] == ["CE.C.16", "CE.C.16"]
+    assert _per_etichetta(foglie)["1) Ricavi delle vendite e delle prestazioni"].percorso_legale == "CE.A.1"
+    assert _per_etichetta(foglie)["e) verso altri"].percorso_legale == "CE.C.17"
+
+
+def test_validatore_rifiuta_un_arabo_del_ce_fuori_dalla_sua_lettera():
+    from importers.lettore.foglie import percorso_valido
+    assert not percorso_valido("CE.C.5") and not percorso_valido("CE.A.9") and not percorso_valido("CE.B.16")
+    assert percorso_valido("CE.C.16") and percorso_valido("CE.B.9.a") and percorso_valido("CE.C.17-bis")

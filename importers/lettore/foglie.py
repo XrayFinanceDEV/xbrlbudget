@@ -165,6 +165,20 @@ def _tipo(gettone: str) -> int:
     return 0 if gettone.isupper() else 3
 
 
+# Art. 2425 c.c.: i numeri arabi di ogni lettera del conto economico. Un arabo fuori dalla sua lettera («5) da altri»
+# sotto «C) 16) a)», la numerazione dei debitori nel prospetto reso da XBRL) non e' una voce di legge: e' un elenco
+# dentro la voce, e prenderlo come livello manderebbe un provento finanziario fra gli altri ricavi (C.5 -> A.5).
+_ARABI_DEL_CE = {"A": (1, 5), "B": (6, 14), "C": (15, 17), "D": (18, 19)}
+
+
+def arabo_fuori_lettera(lettera: str | None, arabo: str) -> bool:
+    """L'arabo non appartiene alla lettera del conto economico sopra di lui (A 1-5, B 6-14, C 15-17-bis, D 18-19).
+    Imposte (20) e risultato (21) seguono le lettere senza una propria: valgono sotto qualunque lettera."""
+    limiti = _ARABI_DEL_CE.get(lettera or "")
+    m = re.match(r"\d+", arabo)
+    return bool(limiti and m and int(m.group()) < 20 and not limiti[0] <= int(m.group()) <= limiti[1])
+
+
 def _titoli_di_lato_sui_due_lati(righe: list[Riga]) -> bool:
     """Due tabelle affiancate dello stato patrimoniale con un titolo «attivo» a sinistra e uno «passivo» a destra:
     sono le sezioni contrapposte che il profilo ha tipato male, non due tabelle diverse. Il flusso sequenziale non puo'
@@ -237,6 +251,9 @@ def _scorri(righe: list[Riga], contrapposto: bool = True) -> dict[str, _Posizion
             elif gettoni and gettoni[0] == "A" and stato != "P" and livelli[0] in ("B", "C", "D"):
                 passa_al_passivo()          # la lettera A che riparte dopo la B: comincia il passivo
                 azzera()
+        if r.sezione == "CE" and len(gettoni) == 1 and _tipo(gettoni[0]) == 2 \
+                and arabo_fuori_lettera(livelli[0], gettoni[0]):
+            gettoni = ()
         for g in gettoni:
             t = _tipo(g)
             livelli[t] = g
@@ -306,6 +323,8 @@ def percorso_valido(p: str) -> bool:
         return False
     tipi = [_tipo(g) for g in livelli]
     if any(b <= a for a, b in zip(tipi, tipi[1:])):
+        return False
+    if parti[0] == "CE" and tipi[0] == 0 and any(arabo_fuori_lettera(livelli[0], g) for g, t in zip(livelli, tipi) if t == 2):
         return False
     base = ".".join((parti[0], *livelli))
     if tipi[-1] == 3 and not _lettera_significativa(".".join((parti[0], *livelli[:-1])), livelli[-1]):
@@ -823,6 +842,8 @@ class _Percorsi:
         for g in base if ancorato else ():
             slots[_tipo(g)] = g
         presenti = [i for i, g in enumerate(slots) if g]
+        if r.sezione == "CE" and len(propri) == 1 and _tipo(propri[0]) == 2 and arabo_fuori_lettera(slots[0], propri[0]):
+            propri = ()         # un elenco dentro la voce, non un livello (`arabo_fuori_lettera`)
         accettati = bool(propri) and (len(propri) > 1 or not presenti or _tipo(propri[0]) > max(presenti))
         if accettati and ancorato:
             if len(propri) > 1:

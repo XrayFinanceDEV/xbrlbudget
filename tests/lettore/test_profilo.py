@@ -704,3 +704,12 @@ def test_saldo_passivo_a_meta_del_ce_non_apre_lo_sp(tmp_path):
     pagina += [(50, 200, "SALDO PASSIVO"), (50, 214, "PASSIVO CORRENTE")]
     pagina += _tabella(["8) Godimento beni di terzi", "14) Oneri diversi di gestione"], y0=228)
     assert _doc_sezioni(tmp_path, [pagina]).sezioni == {1: "CE"}
+
+
+def test_colonna_a_interi_di_fatto_al_limite():
+    from importers.lettore.profilo import intera_di_fatto
+    assert intera_di_fatto(19, 1)          # 1 importo coi centesimi su 20: il 5%
+    assert not intera_di_fatto(18, 1)      # 1 su 19: sotto i 20 importi non e' una prova
+    assert intera_di_fatto(38, 2)          # 2 su 40: ancora il 5%
+    assert not intera_di_fatto(37, 3)      # 3 su 40: oltre il 5%
+    assert intera_di_fatto(5, 0) and not intera_di_fatto(0, 0) and not intera_di_fatto(0, 3)

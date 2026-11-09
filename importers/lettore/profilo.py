@@ -115,8 +115,11 @@ class Profilo:
     sezioni_lati: dict[tuple[int, float, str], str] = field(default_factory=dict)
     # (pagina, x destra) dei trattini che fanno da colonna dei segni meno (1426), vedi `meno_staccato`
     segni_colonna: frozenset[tuple[int, float]] = frozenset()
-    # le colonne dove un intero nudo («623», «82») e' un importo (`_colonne_intere_di_fatto`); None = quelle che
-    # `decimali` dice tutte senza centesimi
+    # le colonne dove un intero nudo («623», «82») e' un importo nella lettura delle celle
+    # (`_colonne_intere_di_fatto`); None = quelle che `decimali` dice tutte senza centesimi. Negativi, coppie
+    # parziali/totali e marcatori D/A restano sulle intere strette: contano forme e posizioni su tutte le righe, e un
+    # intero nudo letto come importo in una colonna che stampa anche i centesimi sposterebbe quei conteggi su ogni
+    # documento; a 1540 bastano le celle (le coppie le trova gia').
     intere: frozenset[int] | None = None
 
 
@@ -212,9 +215,14 @@ def _colonne_intere_di_fatto(righe: list[RigaFisica], colonne: list[Colonna]) ->
             trovato = _in_colonna(p, colonne)
             if trovato is not None and trovato[0].forma != "zero":
                 conti[trovato[1].indice]["," in p.testo] += 1
-    return frozenset(i for i, (senza, con) in conti.items()
-                     if senza and (not con or (senza + con >= _MIN_IMPORTI_INTERI
-                                               and con <= _QUOTA_CENTESIMI_AMMESSA * (senza + con))))
+    return frozenset(i for i, (senza, con) in conti.items() if intera_di_fatto(senza, con))
+
+
+def intera_di_fatto(senza: int, con: int) -> bool:
+    """`senza` importi senza centesimi e `con` coi centesimi: la colonna e' a interi se non ne ha coi centesimi, o
+    se ne ha al piu' il 5% su almeno 20 importi (1 su 20 si', 1 su 19 no)."""
+    totale = senza + con
+    return senza > 0 and (con == 0 or (totale >= _MIN_IMPORTI_INTERI and con <= _QUOTA_CENTESIMI_AMMESSA * totale))
 
 
 def _colonne_intere(righe: list[RigaFisica], colonne: list[Colonna]) -> frozenset[int]:

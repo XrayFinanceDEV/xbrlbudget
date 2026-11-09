@@ -218,3 +218,31 @@ def test_contesto_dice_il_lato_dello_stato_patrimoniale():
 def test_prompt_riserva_x_alle_righe_che_non_sono_conti():
     p = c.PROMPT_MACRO.lower()
     assert "lato invertito" in p and "voce ammessa piu' vicina" in p
+
+
+def test_lato_opposto_solo_rettifiche_nell_enum():
+    finto = Finto("X")
+    c.classifica_macro([F("a", "Fondo amm. impianti", lato="R"), F("b", "Perdite a nuovo", lato="L")], chiama_json=finto)
+    p = finto.chiamate[0][1]["properties"]
+    assert "sp03.F" in p["a"]["enum"] and "sp03" not in p["a"]["enum"] and "sp12g.N" not in p["a"]["enum"]
+    assert "sp12g.N" in p["b"]["enum"] and "sp12" not in p["b"]["enum"] and "sp03.F" not in p["b"]["enum"]
+
+
+def test_fondo_dal_modello_si_netta_sul_bene():
+    out = c.classifica_macro([F("a", "Fondo amm. impianti", lato="R")], chiama_json=Finto("sp03.F"))
+    assert out["a"].macro == "sp03" and out["a"].rettifica == "SPA.B.II.F" and out["a"].dettaglio is None
+    out = c.classifica_macro([F("a", "Fondo sval. crediti", lato="R")], chiama_json=Finto("sp06.F"))
+    assert out["a"].macro == "sp06" and out["a"].dettaglio == "sp06a" and out["a"].rettifica == "SPA.C.II.1.F"
+    out = c.classifica_macro([F("a", "Perdite a nuovo", lato="L")], chiama_json=Finto("sp12g.N"))
+    assert out["a"].macro == "sp12" and out["a"].dettaglio == "sp12g" and out["a"].rettifica == "SPP.A.VIII"
+
+
+def test_rettifica_dal_lato_sbagliato_scartata():
+    out = c.classifica_macro([F("a", "Impianti", lato="L")], chiama_json=Finto("sp03.F"))
+    assert out["a"].macro is None and out["a"].fonte == "nessuna"
+
+
+def test_voto_tiene_la_rettifica():
+    f = F("a", "Fondo amm. impianti", lato="R")
+    out = c.rivota([f], {"a": c.Classe(None, None, "nessuna")}, chiama_json=Finto("sp03.F"))
+    assert out["a"].macro == "sp03" and out["a"].rettifica == "SPA.B.II.F" and out["a"].fonte == "voto"

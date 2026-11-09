@@ -198,3 +198,20 @@ def test_report_senza_etichette_ne_importi(tmp_path, monkeypatch):
     for k in ("scarti", "chiusure", "scelte", "sbilancio", "senza_colonna", "sp13_da"):
         assert k not in r.report["lettore_percorso"]
     assert "impianti" not in testo.lower() and "2.000" not in testo
+
+
+def test_fondo_oltre_il_cespite_nelle_anomalie(tmp_path, monkeypatch):
+    # l'eccedenza tagliata dal lettore arriva nelle anomalie come per il percorso snello (`conti.py`)
+    _nessun_lettore_noto(monkeypatch)
+    vero = percorso.importa_col_lettore
+
+    def con_taglio(*a, **k):
+        out = vero(*a, **k)
+        out["diagnostica"]["immobilizzazioni_negative_tagliate"] = [["sp02_immob_immateriali", "4.00"]]
+        return out
+    monkeypatch.setattr(percorso, "importa_col_lettore", con_taglio)
+    monkeypatch.setattr(llm_provider, "chiama_gx10_json", _mai)
+    r = import_snello.importa(_pdf(tmp_path, _schema_di_legge()))
+    assert r.report["fonte"] == "deterministico:lettore"
+    assert ["sp02_immob_immateriali", "4.00"] in r.report["anomalie"]
+    assert r.report["diag"]["immobilizzazioni_negative_tagliate"] == [["sp02_immob_immateriali", "4.00"]]

@@ -99,7 +99,16 @@ def _foglie_non_in_pari(foglie, ancore=()) -> str | None:
 def _dati(c: Composizione) -> tuple[dict, dict]:
     """bs/ce con le chiavi diagnostiche sempre dichiarate: a valle una chiave assente vale zero."""
     plug = sum((x["importo"] for x in c.chiusure), _ZERO)
-    return ({**c.bs, "_plug_residual": plug, "_unclassified_mass": c.senza_classe}, dict(c.ce))
+    # `_netted_contra`: la massa rettificata che i totali stampati contano ancora (stessa chiave del percorso C)
+    return ({**c.bs, "_plug_residual": plug, "_unclassified_mass": c.senza_classe, "_netted_contra": c.rettifiche},
+            dict(c.ce))
+
+
+def _stampati(c: Composizione, anc) -> dict:
+    """Totale attivo e passivo stampati, al netto delle rettifiche passate dalla colonna opposta: il documento li
+    stampa lordi, il cancello li confronta con attivo e passivo composti (come `net_contra_accounts` chiede al
+    chiamante di ridurre l'ancora dichiarata)."""
+    return {f"totale_{a.chiave}": a.importo - c.rettifiche for a in anc if a.chiave in ("attivo", "passivo")}
 
 
 def _somma_macro(c: Composizione, chiave: str) -> Decimal:
@@ -152,7 +161,7 @@ def _importa(file_path, contesto_mineru, chiama_json, diag: dict) -> dict:
 
     out = {"bs": bs, "ce": ce, "prior_bs": None, "prior_ce": None, "anno_precedente": None,
            "prior_stato": "assente"}
-    out["stampati"] = {f"totale_{a.chiave}": a.importo for a in anc_c if a.chiave in ("attivo", "passivo")}
+    out["stampati"] = _stampati(comp, anc_c)
     prec = next((c for c in doc.colonne if c.indice == precedente), None)
     diag["mesi_precedente"] = prec.mesi if prec else None
     if prec is not None and prec.fine is not None:
@@ -167,7 +176,7 @@ def _importa(file_path, contesto_mineru, chiama_json, diag: dict) -> dict:
             # non classificata sotto soglia), altrimenti il precedente si scarta e si dice perche'
             from importers.import_snello.deterministico import esito as _esito_deterministico   # import tardivo: niente cicli col T7
             bs_p, ce_p = _dati(comp_p)
-            ps = {f"totale_{a.chiave}": a.importo for a in anc_p if a.chiave in ("attivo", "passivo")}
+            ps = _stampati(comp_p, anc_p)
             e = _esito_deterministico("lettore", bs_p, ce_p, ps)
             if e["adottato"] and e["esito"] == "ok":
                 out["prior_bs"], out["prior_ce"] = e["bs"], e["ce"]
@@ -183,7 +192,8 @@ def _importa(file_path, contesto_mineru, chiama_json, diag: dict) -> dict:
         classi_per_fonte=dict(Counter(classi[f.id].fonte for f in foglie_c if f.id in classi)),
         scarti={k: str(v) for k, v in comp.scarti.items()}, sbilancio=str(comp.sbilancio),
         chiusure=[{**x, "importo": str(x["importo"])} for x in comp.chiusure], scelte=list(comp.scelte),
-        sp13_da=comp.sp13_da, senza_colonna=list(senza_colonna(doc, corrente)))
+        sp13_da=comp.sp13_da, senza_colonna=list(senza_colonna(doc, corrente)), rettifiche=str(comp.rettifiche),
+        immobilizzazioni_negative_tagliate=list(comp.tagliate))
     out["diagnostica"] = diag
     return out
 

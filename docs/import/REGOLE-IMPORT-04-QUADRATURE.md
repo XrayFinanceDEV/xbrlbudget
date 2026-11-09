@@ -522,6 +522,11 @@ può decidere.
 - **La colonna decide il lato**: attivo solo su `sp01`-`sp10`, passivo su `sp11`-`sp18`, costi e ricavi per
   sezione e colonna, mai per descrizione. Anche con la macro-voce sbagliata la foglia resta sul suo lato, quindi il
   pareggio non si muove.
+- **Una rettifica stampata nella colonna opposta** (un fondo ammortamento fra le passività, perdite portate a nuovo
+  fra le attività) si netta sul bene o sul netto: sparisce da un lato e scende dall'altro della stessa massa, quindi
+  il pareggio resta. È l'unico conto che attraversa il lato, e solo se il modello lo nomina come rettifica
+  (`tavola.RETTIFICHE`). Un fondo oltre il proprio cespite si azzera e l'eccedenza resta sbilancio dichiarato, come
+  in `conti.py`. I totali stampati sono lordi: il cancello li confronta al netto di `_netted_contra`.
 - **I dettagli stanno dentro la loro macro-voce**: il secondo passo sceglie solo fra le sotto-voci della macro
   assegnata; l'aggregato resta la somma delle sue foglie.
 - **`sp13` è la cifra di chiusura**: l'utile del CE se il documento ha un CE; il risultato stampato se c'è solo lo

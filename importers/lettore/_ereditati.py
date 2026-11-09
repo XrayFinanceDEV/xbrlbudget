@@ -419,3 +419,45 @@ class TableHTMLParser(HTMLParser):
     def handle_data(self, data):
         if self._in_cell:
             self._buf.append(data)
+
+
+# da importers/import_snello/conti.py:_IMMOBILIZZAZIONI, main c57e232
+IMMOBILIZZAZIONI = ("sp02", "sp03", "sp04")
+
+
+# da importers/import_snello/conti.py:_netta_fondi_negativi, main c57e232
+def netta_fondi_negativi(importi: dict) -> dict:
+    """Un fondo puo' essere piu' fine del lordo stampato: se un dettaglio di immobilizzazioni
+    (sp02/sp03/sp04) resta negativo dopo la sottrazione del fondo, l'importo si sposta sul
+    valore diretto dell'aggregato e il dettaglio sparisce - senza dettaglio si netta
+    all'aggregato."""
+    from importers.import_snello.percorsi import NOMI
+    from importers.iv_cee_hierarchy import detail_fields
+
+    importi = dict(importi)
+    for aggregato in IMMOBILIZZAZIONI:
+        pieno = NOMI.get(aggregato)
+        if not pieno:
+            continue
+        for dettaglio_pieno in detail_fields(pieno):
+            codice = dettaglio_pieno.split("_")[0]
+            v = importi.get(codice)
+            if v is not None and v < 0:
+                importi[aggregato] = importi.get(aggregato, Decimal(0)) + importi.pop(codice)
+    return importi
+
+
+# da importers/import_snello/conti.py:_clamp_immobilizzazioni_negative, main c57e232
+def clamp_immobilizzazioni_negative(bs: dict) -> list:
+    """Un fondo non puo' mai superare il proprio cespite lordo: un'immobilizzazione netta ancora negativa a
+    livello di AGGREGATO (dopo ``netta_fondi_negativi``) si azzera - mai spostata su un altro campo, ne' lasciata
+    negativa - e l'eccedenza tagliata si dichiara (resta sbilancio dichiarato)."""
+    from importers.import_snello.percorsi import NOMI
+
+    tagliate = []
+    for breve in IMMOBILIZZAZIONI:
+        pieno = NOMI.get(breve)
+        if pieno and bs.get(pieno, Decimal(0)) < 0:
+            tagliate.append([pieno, str((-bs[pieno]).quantize(Decimal("0.01")))])
+            bs[pieno] = Decimal(0)
+    return tagliate

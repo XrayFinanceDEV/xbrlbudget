@@ -2,7 +2,8 @@
 
 Passo 1: foglia -> macro-voce. Una foglia con un percorso di legge ben formato prende la macro dalla tavola senza
 modello; le altre vanno a Qwen a blocchi, con JSON guidato: ogni id ha il proprio enum, le macro ammesse da *quel*
-lato e verso piu' «X» (non e' un conto). Qwen indica una classe per un id, mai un importo. Una risposta fuori
+lato e verso, le sole rettifiche che possono attraversare il lato (`tavola.rettifiche_ammesse`: un fondo dal passivo,
+il netto in diminuzione dall'attivo) piu' «X» (non e' un conto). Qwen indica una classe per un id, mai un importo. Una risposta fuori
 dall'enum e' scartata e la foglia resta senza classe (F3-6): la massa senza classe la dichiara chi compone.
 Passo 2: dentro le macro con un KPI sopra (`DETTAGLI_KPI`) la sotto-voce, o «altri»; la macro non cambia mai.
 """
@@ -31,7 +32,11 @@ PROMPT_MACRO = (
     "stampato: non contraddirlo. Un conto il cui nome sembra dell'altro lato (un fornitore, un debito o un rateo "
     "passivo con saldo dare fra le attivita'; un cliente o un credito con saldo avere fra le passivita') e' un saldo "
     "a lato invertito: e' comunque un conto e va sulla voce ammessa piu' vicina (crediti o debiti verso altri, "
-    "ratei e risconti). Rispondi «X» solo se la riga non e' un conto (intestazione, nota, totale, riferimento). "
+    "ratei e risconti). Uniche eccezioni, coi codici che finiscono in .F o .N: un fondo ammortamento o "
+    "svalutazione stampato fra le passivita' rettifica il bene dell'attivo (codice .F del bene); perdite portate a "
+    "nuovo o azioni proprie stampate fra le attivita' stanno in diminuzione del netto (codice .N). Fondi rischi, "
+    "TFR e fondi imposte restano passivita'. "
+    "Rispondi «X» solo se la riga non e' un conto (intestazione, nota, totale, riferimento). "
     "Non scrivere mai importi. Rispondi solo con un JSON {id: codice}.")
 PROMPT_DETTAGLIO = (
     "Sei un ragioniere italiano. Ogni riga e' gia' stata assegnata a una voce di bilancio: indica la sotto-voce "
@@ -46,13 +51,39 @@ class Classe:
     dettaglio: str | None      # "sp06a" solo per le macro di DETTAGLI_KPI, altrimenti None
     fonte: str                 # "legale" | "modello" | "voto" | "nessuna" | "errore" (il modello ha fallito)
     voti: tuple[str, ...] = ()
+    rettifica: str | None = None   # percorso di legge di una rettifica stampata nella colonna opposta (`tavola.RETTIFICHE`)
 
 
-def _ammesse(f: Foglia) -> tuple[str, ...]:
+def _lato_colonna(f: Foglia) -> str:
     lato = f.lato
     if lato == "U" and f.sezione != "CE":
         lato = {"A": "L", "P": "R"}.get(f.lato_sp or "", "U")
-    return tavola.macro_ammesse(lato, f.sezione or "SP", f.verso_ce)
+    return lato
+
+
+def _ammesse(f: Foglia) -> tuple[str, ...]:
+    return tavola.macro_ammesse(_lato_colonna(f), f.sezione or "SP", f.verso_ce)
+
+
+def _rettifiche(f: Foglia) -> tuple[str, ...]:
+    """Le rettifiche del lato opposto che la foglia puo' essere (solo SP; un fondo dal passivo, il netto in
+    diminuzione dall'attivo): l'unica eccezione a «la colonna decide il lato»."""
+    if (f.sezione or "SP") != "SP":
+        return ()
+    return tavola.rettifiche_ammesse(_lato_colonna(f))
+
+
+def _classe(codice: str | None, fonte: str, voti: tuple[str, ...] = ()) -> Classe:
+    """La classe di una risposta valida: una macro-voce, oppure una rettifica (campo dal percorso di legge, come
+    nel percorso snello: macro del bene o del netto, dettaglio se il percorso lo dice)."""
+    if codice is None:
+        return Classe(None, None, fonte, voti)
+    if codice in tavola.RETTIFICHE:
+        p = tavola.RETTIFICHE[codice]
+        campo = tavola.campo_da_percorso_legale(p)
+        macro = tavola.macro_di(campo)
+        return Classe(macro, campo if campo != macro else None, fonte, voti, rettifica=p)
+    return Classe(codice, None, fonte, voti)
 
 
 def _chiave(f: Foglia) -> tuple:
@@ -158,7 +189,11 @@ def _in_parallelo(chiamate: list) -> list:
 
 
 def _enum_macro(f: Foglia) -> list[str]:
-    return list(_ammesse(f)) + [NON_UN_CONTO]
+    return list(_ammesse(f)) + list(_rettifiche(f)) + [NON_UN_CONTO]
+
+
+def _valida(f: Foglia, risposta) -> str | None:
+    return risposta if risposta in _enum_macro(f) and risposta != NON_UN_CONTO else None
 
 
 def _chiama_default():
@@ -185,7 +220,7 @@ def classifica_macro(foglie: list[Foglia], *, chiama_json=None, cache: dict | No
         k = ("macro",) + _chiave(f)
         if k in cache:
             m = cache[k]
-            classi[f.id] = Classe(m, None, "modello") if m else Classe(None, None, "nessuna")
+            classi[f.id] = _classe(m, "modello") if m else Classe(None, None, "nessuna")
             continue
         da_chiedere.setdefault(k, []).append(f)
     rappresentanti = [gruppo[0] for gruppo in da_chiedere.values()]
@@ -205,11 +240,11 @@ def classifica_macro(foglie: list[Foglia], *, chiama_json=None, cache: dict | No
             diag["foglie_errore"] += len(gruppo)
             continue
         r = per_id.get(rep.id)
-        macro = r if r in _ammesse(rep) else None     # «X», fuori enum, assente: senza classe
+        macro = _valida(rep, r)     # «X», fuori enum, assente: senza classe
         if macro or rep.id in per_id:
             cache[k] = macro
         for f in gruppo:
-            classi[f.id] = Classe(macro, None, "modello") if macro else Classe(None, None, "nessuna")
+            classi[f.id] = _classe(macro, "modello") if macro else Classe(None, None, "nessuna")
     diag["blocchi_falliti"] = len(persi)
     return classi
 
@@ -261,11 +296,11 @@ def rivota(foglie: list[Foglia], classi: dict[str, Classe], *, voti: int = 3, ch
         macro_voto, n = (Counter(validi).most_common(1)[0] if validi else (None, 0))
         if macro_voto is not None and n * 2 > voti:
             macro = None if macro_voto == NON_UN_CONTO else macro_voto
-            nuove[f.id] = Classe(macro, None, "voto", v)
+            nuove[f.id] = _classe(macro, "voto", v)
             if cache is not None:
                 cache[("macro",) + _chiave(f)] = macro
         else:
-            nuove[f.id] = Classe(precedente.macro, precedente.dettaglio, "voto", v)
+            nuove[f.id] = Classe(precedente.macro, precedente.dettaglio, "voto", v, precedente.rettifica)
     return nuove
 
 

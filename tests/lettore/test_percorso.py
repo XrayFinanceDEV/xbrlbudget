@@ -314,3 +314,27 @@ def test_guardia_utile_di_un_altro_esercizio_resta_nel_passivo():
     foglie = [_sp("a", 11500, "L", "A"), _sp("p", 9000, "R", "P"), _sp("u", 1500, "R", "P", "Utile d'esercizio"),
               _ce("r", 1000, "ricavo", "Ricavi")]
     assert percorso._foglie_non_in_pari(foglie) is None
+
+
+def _contrapposte_con_fondo():
+    """Contrapposte con il fondo ammortamento nella colonna del passivo: i totali stampati sono lordi."""
+    sx = [("Impianti", "1.130,00"), ("Cassa", "470,00"), ("Clienti Rossi", "610,00"), ("Totale attivita", "2.210,00")]
+    dx = [("Fondo amm. impianti", "380,00"), ("Capitale sociale", "250,00"), ("Fornitori Alfa", "1.440,00"),
+          ("Utile d'esercizio", "140,00"), ("Totale passivita", "2.210,00")]
+    voci = [(40, 100, "STATO PATRIMONIALE"), (40, 120, "Attivo"), (310, 120, "Passivo")]
+    for k, (a, b) in enumerate(zip(sx + [("", "")], dx)):
+        y = 140 + 14 * k
+        voci += [(310, y, b[0]), (560, y, b[1])] + ([(40, y, a[0]), (280, y, a[1])] if a[0] else [])
+    return voci
+
+
+def test_fondo_nella_colonna_del_passivo_adottabile(tmp_path):
+    regole = {"fondo": "sp03.F", **_REGOLE}
+    r = importa_col_lettore(_pdf(tmp_path, _contrapposte_con_fondo()), chiama_json=Finto(regole))
+    bs = r["bs"]
+    assert bs["sp03_immob_materiali"] == D("750.00")
+    assert bs["_netted_contra"] == D("380.00") and bs["_unclassified_mass"] == 0
+    # i totali stampati sono lordi: il cancello li confronta al netto della rettifica
+    assert r["stampati"] == {"totale_attivo": D("1830.00"), "totale_passivo": D("1830.00")}
+    assert r["diagnostica"]["sbilancio"] == "0.00" and r["diagnostica"]["rettifiche"] == "380.00"
+    assert r["diagnostica"]["immobilizzazioni_negative_tagliate"] == []

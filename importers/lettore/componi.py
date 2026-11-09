@@ -15,6 +15,7 @@ from decimal import Decimal
 from calculations.ce_result import calculate_ce_result
 from importers.import_snello import percorsi
 from importers.lettore import tavola
+from importers.lettore._ereditati import clamp_immobilizzazioni_negative, netta_fondi_negativi
 from importers.lettore.classifica import Classe
 from importers.import_snello.verifica import soglia as soglia_adozione
 from importers.lettore.diagnosi import TOLLERANZA_ARROTONDAMENTO
@@ -36,6 +37,9 @@ class Composizione:
     sbilancio: Decimal = _ZERO       # attivo - passivo dopo la chiusura (0 = quadra)
     sp13_da: str = "assente"         # "ce" | "stampato" | "assente"
     scelte: list[str] = field(default_factory=list)   # scelte dichiarate (es. ce17 senza verso trattato da costo)
+    rettifiche: Decimal = _ZERO      # massa delle rettifiche passate dalla colonna opposta: i totali stampati la
+                                     # contano, attivo e passivo composti no (entrambi scendono di tanto)
+    tagliate: list = field(default_factory=list)      # [[campo, eccedenza]]: fondo oltre il cespite, azzerato
 
 
 def lato_sp(f: Foglia) -> str | None:
@@ -102,6 +106,11 @@ def e_questo_risultato(f: Foglia, risultato: Decimal, soglia: Decimal) -> bool:
 def _bersaglio_sp(f: Foglia, classe: Classe | None) -> tuple[str | None, Decimal]:
     importo = importo_sp(f)
     macro = classe.macro if classe else None
+    if macro and classe.rettifica:
+        # rettifica della colonna opposta: in diminuzione del bene o del netto, sul dettaglio se noto, altrimenti
+        # sull'aggregato (senza dettaglio si netta all'aggregato, come `conti.py`). Il segno e' l'opposto di quello
+        # con cui la colonna la conta, cosi' attivo e passivo scendono della stessa massa e il pareggio resta.
+        return (classe.dettaglio or macro), -importo
     if macro:
         return (classe.dettaglio or tavola.altri_di(macro)), importo
     lato = lato_sp(f)
@@ -112,8 +121,11 @@ def _bersaglio_sp(f: Foglia, classe: Classe | None) -> tuple[str | None, Decimal
     return None, importo
 
 
-def _somma(importi: dict[str, Decimal]) -> tuple[dict, dict]:
-    return percorsi.completa(importi)
+def _somma(importi: dict[str, Decimal]) -> tuple[dict, dict, list]:
+    """bs, ce e le immobilizzazioni tagliate: un fondo piu' fine del lordo si netta all'aggregato, un fondo oltre
+    il cespite azzera l'aggregato e si dichiara - le regole del percorso snello (`conti.py`), mai una seconda."""
+    bs, ce = percorsi.completa(netta_fondi_negativi(importi))
+    return bs, ce, clamp_immobilizzazioni_negative(bs)
 
 
 def _totali(bs: dict[str, Decimal]) -> tuple[Decimal, Decimal]:
@@ -135,6 +147,9 @@ def componi(foglie: list[Foglia], classi: dict[str, Classe], ancore: list[Ancora
     senza_classe = _ZERO
     scelte: list[str] = []
     righe_risultato: list[Foglia] = []
+    rettifiche = _ZERO
+    rettificate: dict[str, Decimal] = {}      # id -> importo con cui la sua colonna (e il suo totale) la conta
+    rettifiche_in: dict[str, Decimal] = {}    # macro -> massa portata dalle rettifiche (col loro segno)
     for f in foglie:
         if not f.importo:
             continue
@@ -154,6 +169,10 @@ def componi(foglie: list[Foglia], classi: dict[str, Classe], ancore: list[Ancora
             campo, valore = _bersaglio_sp(f, classe)
         if classe is None or classe.macro is None:
             senza_classe += abs(f.importo)
+        elif f.sezione != "CE" and classe.rettifica:
+            rettifiche += importo_sp(f)
+            rettificate[f.id] = importo_sp(f)
+            rettifiche_in[classe.macro] = rettifiche_in.get(classe.macro, _ZERO) - importo_sp(f)
         if campo is None:
             continue            # lato ignoto: dichiarata ma non sommata ne' di qua ne' di la'
         _aggiungi(importi, campo, valore)
@@ -165,7 +184,7 @@ def componi(foglie: list[Foglia], classi: dict[str, Classe], ancore: list[Ancora
         _aggiungi(importi, campo, importo)
         chiusure.append({"campo": campo, "importo": importo, "motivo": "arrotondamento"})
 
-    bs, ce = _somma(importi)
+    bs, ce, tagliate = _somma(importi)
     ha_ce = any(f.sezione == "CE" and f.importo for f in foglie)
     # utile stampato contro utile del CE: chiude sul secchio del lato che manca
     stampato = next((a.importo for a in ancore if a.chiave == "utile"), None)
@@ -174,7 +193,7 @@ def componi(foglie: list[Foglia], classi: dict[str, Classe], ancore: list[Ancora
         if _ZERO < abs(d) <= soglia:
             # utile stampato piu' alto: mancano ricavi; piu' basso: mancano costi
             chiudi(tavola.altri_di("ce04") if d > 0 else tavola.altri_di("ce06"), abs(d))
-            bs, ce = _somma(importi)
+            bs, ce, tagliate = _somma(importi)
 
     if ha_ce:
         importi["sp13"] = _utile(ce)
@@ -184,7 +203,7 @@ def componi(foglie: list[Foglia], classi: dict[str, Classe], ancore: list[Ancora
         sp13_da = "stampato"
     else:
         sp13_da = "assente"
-    bs, ce = _somma(importi)
+    bs, ce, tagliate = _somma(importi)
     if "sp13" in importi and righe_risultato:
         s_ris = soglia_adozione(_totali(bs)[0])
         for f in righe_risultato:
@@ -193,7 +212,7 @@ def componi(foglie: list[Foglia], classi: dict[str, Classe], ancore: list[Ancora
                 continue
             _aggiungi(importi, "sp12g", segno)
             scelte.append(f"risultato di un altro esercizio negli utili portati a nuovo (sp12g): {f.id}")
-        bs, ce = _somma(importi)
+        bs, ce, tagliate = _somma(importi)
 
     att, pas = _totali(bs)
     gap = att - pas
@@ -202,23 +221,27 @@ def componi(foglie: list[Foglia], classi: dict[str, Classe], ancore: list[Ancora
             chiudi(tavola.altri_di("sp16"), gap)      # manca passivo
         else:
             chiudi(tavola.altri_di("sp06"), -gap)     # manca attivo
-        bs, ce = _somma(importi)
+        bs, ce, tagliate = _somma(importi)
         att, pas = _totali(bs)
 
     scarti: dict[str, Decimal] = {}
     for a in ancore:
         if a.chiave == "attivo":
-            composto = att
+            composto = att + rettifiche     # il totale stampato e' lordo delle rettifiche
         elif a.chiave == "passivo":
-            composto = pas
+            composto = pas + rettifiche
         elif a.chiave == "utile":
             # senza CE l'utile stampato e' la cifra di sp13 (letta, non da rifare dal CE): nessun falso blocco
             composto = _utile(ce) if sp13_da == "ce" else importi.get("sp13", _ZERO)
         else:
             pieno = percorsi.NOMI.get(a.chiave)
             composto = (bs if a.chiave.startswith("sp") else ce).get(pieno, _ZERO) if pieno else _ZERO
+            # una macro stampata conta le rettifiche sotto di lei, non quelle portate dall'altra colonna
+            composto += (sum((rettificate[i] for i in a.foglie if i in rettificate), _ZERO)
+                         - rettifiche_in.get(a.chiave, _ZERO))
         scarti[a.chiave] = a.importo - composto
     blocchi = [k for k, s in scarti.items() if abs(s) > soglia]
     if abs(att - pas) > soglia:
         blocchi.append("pareggio")
-    return Composizione(bs, ce, scarti, blocchi, chiusure, senza_classe, att - pas, sp13_da, scelte)
+    return Composizione(bs, ce, scarti, blocchi, chiusure, senza_classe, att - pas, sp13_da, scelte,
+                        rettifiche, tagliate)

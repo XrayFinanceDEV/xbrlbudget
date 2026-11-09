@@ -56,10 +56,35 @@ MACRO_RICAVI: tuple[str, ...] = tuple(k for k in _MACRO_CE if k in {_MACRO_DI.ge
 MACRO_COSTI: tuple[str, ...] = tuple(k for k in _MACRO_CE if k not in MACRO_RICAVI or k == "ce17")
 MACRO_RICAVI = tuple(k for k in _MACRO_CE if k in MACRO_RICAVI)
 
-ETICHETTE_MACRO: dict[str, str] = {
-    m: percorsi.NOMI[m].split("_", 1)[1].replace("_", " ")
-    for m in MACRO_ATTIVO + MACRO_PASSIVO + MACRO_COSTI + MACRO_RICAVI
+# Le rettifiche stampate nella colonna opposta (decisione del proprietario, 2026-11-09: «riusare il sistema del
+# vecchio importatore»): i soli conti che possono attraversare il lato, nominati col percorso di legge del percorso
+# snello. Un fondo e' il percorso del bene + «.F» (`percorsi.e_fondo`, la legenda), un conto del netto in diminuzione
+# e' un percorso SPP.A (`percorsi.e_netto`). Il campo viene da `percorsi.campo_da_percorso`, come per `conti.py`.
+RETTIFICHE: dict[str, str] = {
+    "sp02.F": "SPA.B.I.F", "sp03.F": "SPA.B.II.F", "sp04.F": "SPA.B.III.F", "sp06.F": "SPA.C.II.1.F",
+    "sp12g.N": "SPP.A.VIII", "sp12h.N": "SPP.A.X",
 }
+_ETICHETTE_RETTIFICHE = {
+    "sp02.F": "fondo ammortamento delle immobilizzazioni immateriali (rettifica dell'attivo)",
+    "sp03.F": "fondo ammortamento o svalutazione delle immobilizzazioni materiali (rettifica dell'attivo)",
+    "sp04.F": "fondo svalutazione delle immobilizzazioni finanziarie (rettifica dell'attivo)",
+    "sp06.F": "fondo svalutazione crediti verso clienti (rettifica dell'attivo)",
+    "sp12g.N": "perdite portate a nuovo (in diminuzione del patrimonio netto)",
+    "sp12h.N": "azioni proprie, riserva negativa (in diminuzione del patrimonio netto)",
+}
+
+ETICHETTE_MACRO: dict[str, str] = {
+    **{m: percorsi.NOMI[m].split("_", 1)[1].replace("_", " ")
+       for m in MACRO_ATTIVO + MACRO_PASSIVO + MACRO_COSTI + MACRO_RICAVI},
+    **_ETICHETTE_RETTIFICHE,
+}
+
+
+def rettifiche_ammesse(lato: str) -> tuple[str, ...]:
+    """Le rettifiche che una foglia SP della colonna `lato` puo' essere: dal passivo (R) i fondi dei beni
+    dell'attivo, dall'attivo (L) i conti del netto in diminuzione; sulla colonna unica senza lato nessuna."""
+    voluto = {"R": "att", "L": "pas"}.get(lato)
+    return tuple(c for c, p in RETTIFICHE.items() if voluto and percorsi.lato_di(p) == voluto)
 
 
 def campo_da_percorso_legale(percorso: str) -> str | None:

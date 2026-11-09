@@ -1199,6 +1199,14 @@ il lettore gira sul solo PDF.
    dell'antenato o dal segno D/A (F3-2), `None` se ignoto. Su uno schema a colonna unica il lato SP viene dalla
    sezione di legge dell'antenato o dalla pagina (F3-7). *Se si ignora:* una foglia dell'attivo finita su un campo del
    passivo sposta il pareggio senza che nessuno la veda.
+   **L'unica eccezione sono le rettifiche stampate nella colonna opposta** (decisione del proprietario, 2026-11-09:
+   «riusare il sistema del vecchio importatore»): un fondo ammortamento o svalutazione nella colonna del passivo, perdite
+   portate a nuovo o azioni proprie in quella dell'attivo. L'enum di una foglia SP offre le macro del suo lato **più le
+   sole rettifiche di quel lato** (`tavola.rettifiche_ammesse`): dal passivo `sp02.F`, `sp03.F`, `sp04.F`, `sp06.F`
+   (fondo del bene, il percorso del bene + `.F` della legenda snello, `percorsi.e_fondo`), dall'attivo `sp12g.N`,
+   `sp12h.N` (percorsi `SPP.A.VIII`/`SPP.A.X`, `percorsi.e_netto`). Il campo viene da `percorsi.campo_da_percorso`
+   come nel percorso snello (`sp06.F` → `sp06a`). Nessun altro conto attraversa il lato; un fondo rischi, il TFR, un
+   fondo imposte restano passività.
 3. **Classificazione in due passi** (`classifica.py`). Passo 1: foglia → macro-voce. Il modello risponde con JSON
    guidato in cui **ogni id ha il proprio enum**, ristretto alle macro ammesse da *quel* lato e verso, più «X»
    («non è un conto»), riservata a ciò che non è un conto: il prompt dice che un saldo a lato invertito (un
@@ -1235,6 +1243,17 @@ il lettore gira sul solo PDF.
    destinato e va in `sp12g` (utili/perdite portati a nuovo), dichiarato in `scelte`. *Se si ignora:* togliendo
    quella riga il passivo perde un conto vero del patrimonio netto e il foglio non quadra. Dettagli in
    [REGOLE-IMPORT-04 §14](REGOLE-IMPORT-04-QUADRATURE.md).
+   **Una rettifica della colonna opposta si netta** sul bene o sul netto col segno opposto a quello con cui la sua
+   colonna la conta (sul dettaglio se noto, altrimenti sull'aggregato: «senza dettaglio si netta all'aggregato»):
+   attivo e passivo scendono della stessa massa e il pareggio resta. Poi le regole del percorso snello, riusate
+   tali e quali da `conti.py` (copie in `_ereditati.py` con test di deriva): un dettaglio di `sp02`/`sp03`/`sp04`
+   rimasto negativo passa all'aggregato (`netta_fondi_negativi`), un aggregato ancora negativo si azzera e
+   l'eccedenza si dichiara (`clamp_immobilizzazioni_negative` → `diagnostica["immobilizzazioni_negative_tagliate"]`,
+   nelle anomalie del report come per lo snello) e resta sbilancio dichiarato, mai spostata. I totali stampati sono
+   **lordi**: la massa rettificata si dichiara in `_netted_contra` (la chiave del percorso C) e si toglie dai totali
+   attivo e passivo che il cancello confronta (`percorso._stampati`), come `net_contra_accounts` chiede al chiamante;
+   una macro ancorata conta le rettifiche stampate sotto di lei, non quelle portate dall'altra colonna.
+   `fondi_gia_nettati` non serve qui: una voce netta e i conti che la ricostruiscono non sono mai entrambi foglie.
 6. **Voti sui blocchi che non tornano** (F3-11). Se una macro ancorata (`sp06`, `ce08`, …) non rifà il proprio
    totale stampato oltre 1 €, **solo le sue foglie** si rivotano, tre volte a temperatura 0 con **tre presentazioni
    diverse** (altrimenti la stessa domanda darebbe tre volte la stessa risposta): ogni riga coi soli antenati;

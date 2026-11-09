@@ -140,3 +140,50 @@ def test_riga_utile_nuda_e_il_risultato():
               F("u", 40, "L", "CE", "costo", "Utile")]
     c = componi(foglie, {"a": C("sp06"), "p": C("sp16"), "r": C("ce01"), "c": C("ce06")}, [])
     assert c.bs["sp13_utile_perdita"] == 40 and c.sbilancio == 0 and c.senza_classe == 0
+
+
+def R(macro, percorso, dettaglio=None):
+    return Classe(macro, dettaglio, "modello", rettifica=percorso)
+
+
+def test_fondo_sul_passivo_si_netta_sul_cespite_e_il_foglio_quadra():
+    # stampato lordo: attivo 1.600 = passivo 1.600 (il fondo sta nella colonna del passivo)
+    foglie = [F("i", 1000, etichetta="Impianti"), F("c", 600, etichetta="Cassa"),
+              F("f", 400, "R", etichetta="Fondo amm. impianti"), F("d", 1200, "R", etichetta="Debiti")]
+    classi = {"i": C("sp03"), "c": C("sp09"), "f": R("sp03", "SPA.B.II.F"), "d": C("sp16")}
+    ancore = [Ancora("attivo", D(1600), "r1", ("i", "c")), Ancora("passivo", D(1600), "r2", ("f", "d"))]
+    k = componi(foglie, classi, ancore)
+    assert k.bs["sp03_immob_materiali"] == D(600)
+    assert k.sbilancio == 0 and k.blocchi == [] and k.chiusure == []
+    assert k.rettifiche == D(400)          # attivo e passivo scendono entrambi di 400
+    assert k.scarti["attivo"] == 0 and k.scarti["passivo"] == 0
+    assert k.senza_classe == 0
+
+
+def test_perdite_portate_a_nuovo_nell_attivo_in_diminuzione_del_netto():
+    foglie = [F("c", 900, etichetta="Crediti"), F("p", 100, etichetta="Perdite a nuovo"),
+              F("k", 300, "R", etichetta="Capitale"), F("d", 700, "R", etichetta="Debiti")]
+    classi = {"c": C("sp06"), "p": R("sp12", "SPP.A.VIII", "sp12g"), "k": C("sp11"), "d": C("sp16")}
+    k = componi(foglie, classi, [Ancora("attivo", D(1000), "r1", ("c", "p"))])
+    assert k.bs["sp12g_utili_perdite_portati"] == D(-100)
+    assert k.sbilancio == 0 and k.rettifiche == D(100) and k.scarti["attivo"] == 0
+
+
+def test_fondo_nel_dettaglio_del_bene():
+    foglie = [F("i", 1000, etichetta="Impianti"), F("f", 400, "R", etichetta="Fondo amm. impianti"),
+              F("d", 600, "R", etichetta="Debiti")]
+    classi = {"i": C("sp03", "sp03b"), "f": R("sp03", "SPA.B.II.F", "sp03b"), "d": C("sp16")}
+    k = componi(foglie, classi, [])
+    assert k.bs["sp03b_impianti_macchinari"] == D(600) and k.sbilancio == 0
+
+
+def test_fondo_oltre_il_cespite_azzerato_e_dichiarato_come_conti():
+    # stessa regola del percorso snello: dettaglio negativo all'aggregato, aggregato negativo a zero, dichiarato
+    foglie = [F("i", 300, etichetta="Impianti"), F("c", 700, etichetta="Cassa"),
+              F("f", 500, "R", etichetta="Fondo amm. impianti"), F("d", 500, "R", etichetta="Debiti")]
+    classi = {"i": C("sp03", "sp03b"), "c": C("sp09"), "f": R("sp03", "SPA.B.II.F", "sp03b"), "d": C("sp16")}
+    k = componi(foglie, classi, [])
+    assert k.bs["sp03_immob_materiali"] == 0 and "sp03b_impianti_macchinari" not in k.bs
+    assert k.tagliate == [["sp03_immob_materiali", "200.00"]]
+    assert k.sbilancio == D(200)       # l'eccedenza tagliata resta sbilancio dichiarato, mai spostata
+    assert "pareggio" in k.blocchi

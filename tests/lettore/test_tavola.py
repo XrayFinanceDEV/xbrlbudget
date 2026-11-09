@@ -79,3 +79,19 @@ def test_lato_sconosciuto():
         t.macro_ammesse("X", "SP", None)
     with pytest.raises(ValueError):
         t.macro_ammesse("L", "ZZ", None)
+
+
+def test_rettifiche_del_lato_opposto_dai_percorsi_di_legge():
+    # un fondo (.F del bene) attraversa dal passivo, un conto del netto in diminuzione dall'attivo: niente altro
+    assert set(t.rettifiche_ammesse("R")) == {"sp02.F", "sp03.F", "sp04.F", "sp06.F"}
+    assert set(t.rettifiche_ammesse("L")) == {"sp12g.N", "sp12h.N"}
+    assert t.rettifiche_ammesse("U") == ()
+    for codice in t.rettifiche_ammesse("R"):
+        p = t.RETTIFICHE[codice]
+        assert percorsi.e_fondo(p) and percorsi.lato_di(p) == "att"
+        assert t.macro_di(percorsi.campo_da_percorso(p)) == codice[:4]
+    for codice in t.rettifiche_ammesse("L"):
+        p = t.RETTIFICHE[codice]
+        assert percorsi.e_netto(p) and percorsi.campo_da_percorso(p) == codice.split(".")[0]
+    for codice in t.RETTIFICHE:
+        assert t.ETICHETTE_MACRO[codice]

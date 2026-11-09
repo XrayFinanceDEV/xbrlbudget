@@ -237,7 +237,8 @@ def _risultato_deterministico(_det: dict, struttura, modo: str, t0: float) -> "R
     # che qui non si applica per costruzione (nessun voto di lato e' girato).
     _diag_det = {"non_mappati": [], "escluse": [], "risultato_stampato": None,
                  "lato_corretti": 0, "lato_irrisolti": [], "risultato_duplicato": [],
-                 "padri_esclusi": [], "fonte": _det["parser"]}
+                 "padri_esclusi": [], "fonte": _det["parser"],
+                 "immobilizzazioni_negative_tagliate": list(_det.get("immobilizzazioni_negative_tagliate") or [])}
     report = {
         "esito": _det["esito"], "modo": modo, "fonte": f"deterministico:{_det['parser']}",
         "struttura": struttura.report(),
@@ -301,6 +302,8 @@ def _tenta_lettore(file_path: str, _det: dict) -> tuple[dict | None, dict]:
             e["prior_stato"] = out["prior_stato"]
             if diag.get("prior_rifiuto"):
                 e["prior_rifiuto"] = diag["prior_rifiuto"]
+            # un fondo oltre il proprio cespite, azzerato dal lettore come da `conti.py`: va nelle anomalie
+            e["immobilizzazioni_negative_tagliate"] = list(d.get("immobilizzazioni_negative_tagliate") or [])
             return e, {"esito": "adottato", **rep}
         if "misura" in e.get("lettura", {}):
             rep["misura"] = {k: str(v) for k, v in e["lettura"]["misura"].items()}

@@ -1289,7 +1289,7 @@ il lettore gira sul solo PDF.
    - **Un saldo negativo passa all'altro lato, per natura** (`componi.saldi_negativi`, regole D2/D12/D15): la
      liquidità negativa (una banca, una carta di credito) è un debito verso banche (`sp16a`) conto per conto; un credito
      o un debito negativo passa di lato **solo se il campo su cui somma esce negativo** (credito → `sp16e` se
-     tributario, altrimenti `sp16g`; debito → `sp06e` se tributario, altrimenti `sp06g`): una nota di credito da
+     tributario, altrimenti `sp16g`; debito → `sp06e` se tributario, `sp09` se verso banche, altrimenti `sp06g`): una nota di credito da
      ricevere fra i fornitori rettifica una voce che resta positiva e lì resta nettata.
      Attivo e passivo salgono della stessa massa: il pareggio resta, e le ancore (di partenza e di arrivo) e i totali
      passati al cancello contano la massa spostata (`Composizione.spostati`, `percorso._stampati`). Fondi e rettifiche

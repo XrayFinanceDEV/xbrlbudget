@@ -117,7 +117,8 @@ def e_questo_risultato(f: Foglia, risultato: Decimal, soglia: Decimal) -> bool:
 # esiste (Task 11).
 _SALDO_NEGATIVO_ATTIVO = {"sp06": "sp16g", "sp07": "sp16g", "sp09": "sp16a"}
 _SALDO_NEGATIVO_PASSIVO = {"sp16": "sp06g", "sp17": "sp06g"}
-_TRIBUTARI = {"sp06e": "sp16e", "sp07e": "sp16e", "sp16e": "sp06e", "sp17e": "sp06e"}
+# per natura: tributario contro tributario, un debito verso banche in dare e' liquidita' (revisione Task 11)
+_TRIBUTARI = {"sp06e": "sp16e", "sp07e": "sp16e", "sp16e": "sp06e", "sp17e": "sp06e", "sp16a": "sp09", "sp17a": "sp09"}
 _CONTO_PER_CONTO = {"sp09"}
 _RETTIFICA_NEL_NOME = re.compile(r"\bF(?:ONDO|\.\s*DO|/DO|DO)\b|SVALUT|RETTIFIC|\bAMM(?:\.|TO|ORT)", re.I)
 

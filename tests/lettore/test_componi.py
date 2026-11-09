@@ -333,3 +333,27 @@ def test_saldo_negativo_dentro_una_voce_positiva_resta_nettato():
     assert k.bs["sp16d_debiti_fornitori_breve"] == D(700) and k.bs.get("sp06g_crediti_altri_breve", 0) == 0
     assert k.bs["sp09_disponibilita_liquide"] == D(1000) and k.bs["sp16a_debiti_banche_breve"] == D(300)
     assert k.sbilancio == 0 and k.spostati == D(300)
+
+
+def test_debiti_negativi_all_attivo_per_natura():
+    # revisione Task 11: un debito a saldo dare il cui campo esce negativo e' un credito, per natura: tributario ->
+    # sp06e, banca -> liquidita' (sp09), oltre 12 mesi come entro, il resto -> sp06g
+    foglie = [F("c", 1000, etichetta="Cassa"),
+              F("t", -50, "R", etichetta="Erario c/IVA"), F("l", -40, "R", etichetta="Erario c/IVA rateizzata oltre"),
+              F("b", -30, "R", etichetta="Banca c/finanziamento"), F("g", -20, "R", etichetta="Debiti diversi"),
+              F("p", 1140, "R", etichetta="Fornitori")]
+    classi = {"c": C("sp09"), "t": C("sp16", "sp16e"), "l": C("sp17", "sp17e"), "b": C("sp16", "sp16a"),
+              "g": C("sp17", "sp17g"), "p": C("sp16", "sp16d")}
+    k = componi(foglie, classi, [])
+    assert k.bs["sp06e_crediti_tributari_breve"] == D(90) and k.bs["sp09_disponibilita_liquide"] == D(1030)
+    assert k.bs["sp06g_crediti_altri_breve"] == D(20)
+    assert k.bs.get("sp16e_debiti_tributari_breve", 0) == 0 and k.bs.get("sp17_debiti_lungo", 0) == 0
+    assert k.sbilancio == 0 and k.spostati == D(140)
+
+
+def test_credito_tributario_negativo_fra_i_debiti_tributari():
+    foglie = [F("c", 1000, etichetta="Cassa"), F("t", -70, etichetta="Erario c/acconti"),
+              F("p", 930, "R", etichetta="Debiti")]
+    k = componi(foglie, {"c": C("sp09"), "t": C("sp06", "sp06e"), "p": C("sp16", "sp16g")}, [])
+    assert k.bs["sp16e_debiti_tributari_breve"] == D(70) and k.bs.get("sp06e_crediti_tributari_breve", 0) == 0
+    assert k.sbilancio == 0

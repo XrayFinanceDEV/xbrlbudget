@@ -736,3 +736,18 @@ def test_romano_col_punto_che_salta_un_numero_vale_se_e_una_voce_di_legge():
     pos = _scorri(righe)
     assert pos["r6"].livelli == ("C", "IV")
     assert pos["r7"].livelli == ("C", "IV")
+
+
+def test_mastro_di_una_catena_nel_contesto_anche_se_non_verificato(tmp_path):
+    # un mastro con un solo conto dello stesso importo e' una catena: padre non verificato, quindi fuori dagli
+    # antenati; il suo titolo resta il contesto che dice la natura del conto (Task 11)
+    righe = [(110, "46", "ALTRI DEBITI VERSO FORNITORI", "600,00"), (130, "4610000250", "Fatture da ricevere", "600,00"),
+             (110, "48", "DEBITI VARI", "550,00"), (130, "4880000500", "Debiti v/amministratori", "500,00"),
+             (130, "4880000750", "Caparre ricevute", "50,00")]
+    voci = []
+    for k, (x, codice, etichetta, importo) in enumerate(righe):
+        voci += [(40, 140 + k * 14, codice), (x, 140 + k * 14, etichetta), (480, 140 + k * 14, importo)]
+    doc = _doc(tmp_path, voci)
+    f = _per_etichetta(foglie_contabili(doc, 0))
+    assert f["Fatture da ricevere"].antenati == ()
+    assert f["Fatture da ricevere"].mastri[-1] == "ALTRI DEBITI VERSO FORNITORI"

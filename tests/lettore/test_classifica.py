@@ -332,3 +332,19 @@ def test_scadenza_non_tocca_legale_altre_macro_ne_dettaglio_gia_detto():
     assert out["a"].macro == "sp17" and out["b"].macro == "sp18"
     assert out["c"].macro == "sp17" and out["c"].dettaglio == "sp17a"     # stessa lettera dall'altra parte
     assert classi["c"].macro == "sp16"                                    # le classi del chiamante non si mutano
+
+
+def _FM(id, etichetta, mastri, lato="R"):
+    return Foglia(id, etichetta, "", lato, "SP", Decimal(10), None, (), None, None, mastri)
+
+
+def test_il_mastro_non_verificato_entra_nel_contesto_del_modello():
+    finto = Finto("sp16")
+    c.classifica_macro([_FM("a", "FATTURE DA RICEVERE", ("SP", "ALTRI DEBITI VERSO FORNITORI"))], chiama_json=finto)
+    assert "sotto: SP > ALTRI DEBITI VERSO FORNITORI" in finto.chiamate[0][0][0]["content"]
+
+
+def test_scadenza_dal_mastro_non_verificato():
+    out, _ = c.scadenza_dei_debiti([_FM("a", "Debiti v/INPS", ("DEBITI", "DEBITI PREVIDENZIALI OLTRE 12 MESI"))],
+                                   {"a": _M("sp16")})
+    assert out["a"].macro == "sp17"

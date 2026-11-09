@@ -58,6 +58,14 @@ class Foglia:
     antenati: tuple[str, ...]    # etichette degli antenati verificati, per il prompt
     verso_ce: str | None = None  # "costo" | "ricavo" | None se ignoto (F3-2)
     lato_sp: str | None = None   # "A" | "P" | None se ignoto (F3-7)
+    mastri: tuple[str, ...] = ()  # i titoli sopra il conto, verificati o no (`Riga.percorso`, dalla sezione al
+                                  # padre): il mastro di una catena di un solo conto non e' un antenato verificato ma
+                                  # ne dice la natura. Solo contesto per il modello e per le regole di testo, mai importi
+
+    @property
+    def contesto(self) -> tuple[str, ...]:
+        """I titoli sopra il conto per chi legge la natura: i mastri, o gli antenati verificati se mancano."""
+        return self.mastri if len(self.mastri) >= len(self.antenati) else self.antenati
 
 
 @dataclass(frozen=True)
@@ -668,7 +676,7 @@ def _foglie_grezze(doc: Documento, colonna: int) -> list[Foglia]:
             lato_sp, verso, v = _lato_dal_saldo(r, lato_sp, verso, v)
             dal_saldo += (lato_sp, verso) != prima
         out.append(Foglia(r.id, r.etichetta, r.codice, r.lato, r.sezione, v, p, _antenati_verificati(r, per_id),
-                          verso, lato_sp))
+                          verso, lato_sp, tuple(r.percorso)))
     if dal_saldo:
         avviso = (f"{dal_saldo} righe hanno avuto il lato (attivo/passivo) o il verso (costo/ricavo) dal segno del "
                   f"saldo: titoli e percorso di legge non lo dicevano")

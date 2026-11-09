@@ -60,7 +60,7 @@ def _bersaglio_ce(f: Foglia, classe: Classe | None) -> tuple[str | None, Decimal
     importo = f.importo
     natura = None
     if e_conto_rimanenze(f.etichetta):
-        natura = natura_rimanenze(f.etichetta, *reversed(f.antenati))
+        natura = natura_rimanenze(f.etichetta, *reversed(f.contesto))
     if natura:
         # ce02 e' un ricavo, ce10 un costo: la rimanenza dal verso opposto toglie
         proprio = "ricavo" if natura == "ce02" else "costo"

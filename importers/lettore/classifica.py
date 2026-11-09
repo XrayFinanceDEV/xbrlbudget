@@ -90,7 +90,7 @@ def _classe(codice: str | None, fonte: str, voti: tuple[str, ...] = ()) -> Class
 
 
 def _chiave(f: Foglia) -> tuple:
-    return (_norm(f.etichetta), _norm(f.antenati[-1]) if f.antenati else "", f.lato, f.sezione, f.verso_ce,
+    return (_norm(f.etichetta), _norm(f.contesto[-1]) if f.contesto else "", f.lato, f.sezione, f.verso_ce,
             f.lato_sp)
 
 
@@ -115,8 +115,8 @@ def _schema(enum_per_id: dict[str, list[str]]) -> dict:
 
 def _contesto(f: Foglia) -> str:
     parti = []
-    if f.antenati:
-        parti.append("sotto: " + " > ".join(f.antenati[-3:]))
+    if f.contesto:     # i mastri sopra il conto, anche quelli di una catena non verificata: ne dicono la natura
+        parti.append("sotto: " + " > ".join(f.contesto[-3:]))
     parti.append({"L": "colonna sinistra", "R": "colonna destra", "U": "colonna unica"}.get(f.lato, f.lato))
     if f.sezione:
         parti.append(f.sezione)
@@ -130,7 +130,7 @@ def _contesto(f: Foglia) -> str:
 
 
 def _fratelli(f: Foglia, blocco: list[Foglia]) -> str:
-    stessi = [g.etichetta for g in blocco if g.id != f.id and g.antenati[-1:] == f.antenati[-1:]]
+    stessi = [g.etichetta for g in blocco if g.id != f.id and g.contesto[-1:] == f.contesto[-1:]]
     return "; fratelli: " + ", ".join(stessi[:4]) if stessi else ""
 
 
@@ -375,7 +375,7 @@ def _scadenza_del_debito(f: Foglia) -> str | None:
     propria = scadenza_stampata(f.etichetta)
     if propria:
         return propria
-    for a in reversed(f.antenati):
+    for a in reversed(f.contesto):
         s = scadenza_stampata(a)
         if s:
             return "E" if s == "O" and _INTERESSI.search(f.etichetta.upper()) else s

@@ -1223,8 +1223,9 @@ il lettore gira sul solo PDF.
    PATRIMONIALE - ATTIVO») non è un livello di legge: la sua lettera numera il lato, e un totale di sezione
    verificato sotto di lui teneva la «A» al posto della propria «C» (161: rimanenze e liquidità finite in `sp01`).
    Il romano col punto («II. Crediti») è un livello quando è un totale sotto una voce con lettera, nella catena
-   verificata o in sequenza nell'outline (mai «V. ROSSI» fra i conti); «- entro/oltre esercizio successivo» è una
-   scadenza come «esigibili entro». *Se si ignora:* il percorso manca, decide il modello sull'etichetta nuda, e
+   verificata o nell'outline quando fa salire il romano aperto e divide davvero la voce del lato («SPA.C.IV» sì anche
+   se manca III, «SPA.C.V» no: mai «V. ROSSI» fra i conti); «- entro/oltre esercizio successivo» è una scadenza come
+   «esigibili entro», e come totale senza numero stampato sopra i suoi conti divide la voce, non la chiude. *Se si ignora:* il percorso manca, decide il modello sull'etichetta nuda, e
    «CREDITI V/SOCI» sotto «5-quater) verso altri» diventa crediti verso soci (`sp01`).
 5. **Composizione** (`componi.py`): ogni foglia somma una volta sul suo dettaglio o sul secchio «altri»; gli
    aggregati sono la somma dei dettagli (`percorsi.completa`); `sp13` viene dal CE. La riga del risultato

@@ -166,16 +166,18 @@ def _titoli_di_lato_sui_due_lati(righe: list[Riga]) -> bool:
     return ("L", "A") in titoli and ("R", "P") in titoli
 
 
-def _romano_in_sequenza(r: Riga, livelli: list[str | None]) -> tuple[str, ...]:
-    """«II. Crediti»: il romano col punto e' un livello dell'outline solo se e' un totale e continua la sequenza
-    aperta sotto una voce con lettera (I subito sotto «C)», poi II, III...), come in `_livelli_eco`; «V. ROSSI» fra
-    i conti no."""
+def _romano_in_sequenza(r: Riga, livelli: list[str | None], prefisso: str | None) -> tuple[str, ...]:
+    """«II. Crediti»: il romano col punto e' un livello dell'outline solo se e' un totale sotto una voce con lettera,
+    fa salire il romano aperto (I, II, poi IV se III manca) e divide davvero quella voce nello schema di legge del
+    lato («SPA.C.IV» si', «SPA.C.V» no); «V. ROSSI» fra i conti no."""
     m = _ROMANO_COL_PUNTO.match(r.etichetta)
-    if not m or not r.totale or not livelli[0] or m["n"] not in _VALORE_ROMANO:
+    if not m or not r.totale or not livelli[0] or not prefisso or m["n"] not in _VALORE_ROMANO:
         return ()
-    n = _VALORE_ROMANO[m["n"]]
-    aperto = _VALORE_ROMANO.get(livelli[1] or "", 0)
-    return (m["n"],) if n == aperto + 1 else ()
+    if _VALORE_ROMANO[m["n"]] <= _VALORE_ROMANO.get(livelli[1] or "", 0):
+        return ()
+    voce = f"{prefisso}.{livelli[0]}"
+    figlio = _campo(f"{voce}.{m['n']}")
+    return (m["n"],) if figlio is not None and figlio != _campo(voce) else ()
 
 
 def _scorri(righe: list[Riga], contrapposto: bool = True) -> dict[str, _Posizione]:
@@ -209,8 +211,11 @@ def _scorri(righe: list[Riga], contrapposto: bool = True) -> dict[str, _Posizion
         n = _nome(r)
         chiave = (r.sezione, r.lato)
         livelli = outline.setdefault(chiave, [None] * 4)
-        gettoni = gettoni_di_legge(r.etichetta, r.codice) or _romano_in_sequenza(r, livelli)
         unico = r.lato == "U" or not contrapposto
+        lato_qui = ({"L": "A", "R": "P"}.get(r.lato) if contrapposto and not unico else stato) \
+            if r.sezione == "SP" else None
+        gettoni = gettoni_di_legge(r.etichetta, r.codice) or _romano_in_sequenza(
+            r, livelli, {"A": "SPA", "P": "SPP"}.get(lato_qui or ""))
         if r.sezione == "SP" and unico:
             titolo = _lato_del_titolo(r, gettoni)
             if titolo == "A" and stato != "A":
@@ -236,7 +241,8 @@ def _scorri(righe: list[Riga], contrapposto: bool = True) -> dict[str, _Posizion
         if r.sezione == "SP":
             lato_sp = {"L": "A", "R": "P"}.get(r.lato, stato) if contrapposto else stato
         out[r.id] = _Posizione(lato_sp, tuple(g for g in livelli if g), scadenze.get(chiave))
-        if r.totale and not gettoni and not _totale_generale(r):
+        if r.totale and not gettoni and not _totale_generale(r) and not s_riga:
+            # (una ripartizione «- entro esercizio successivo» divide la voce per scadenza, non la chiude)
             # un totale chiuso senza numerazione («Totale crediti») chiude la voce che porta il suo nome: sotto di lui
             # i livelli tornano a quelli del titolo, meno quello chiuso
             titolo = _titolo_del_totale(r, righe[:k_riga])

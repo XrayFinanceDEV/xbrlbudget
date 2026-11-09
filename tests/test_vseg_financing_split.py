@@ -61,7 +61,7 @@ def test_split_reads_maturity_from_the_detail_rows():
     assert split is not None
     assert split["sp16a_debiti_banche_breve"] == D("361000.78")  # anticipazioni + 2 mutui senza scadenza
     assert split["sp17a_debiti_banche_lungo"] == D("500000.50")
-    assert split["sp17b_debiti_altri_finanz_lungo"] == D("60000.00")
+    assert split["sp16b_debiti_altri_finanz_breve"] == D("60000.00")  # soci senza scadenza: breve
     # The split may never create or destroy mass.
     assert sum(split.values()) == FINANZIAMENTI_TOTAL
 
@@ -71,6 +71,9 @@ def test_soci_rule_survives_the_ocr_mangling_the_caption():
     from importers.situazione_contabile_parser import _vseg_debt_field
 
     assert _vseg_debt_field("SOCIO ROSSI MARIO C/FINANANZIAMEN") == (
+        "sp16b_debiti_altri_finanz_breve"
+    )
+    assert _vseg_debt_field("SOCIO ROSSI C/FINANZ. OLTRE 12 MESI") == (
         "sp17b_debiti_altri_finanz_lungo"
     )
 

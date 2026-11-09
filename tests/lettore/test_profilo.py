@@ -696,3 +696,11 @@ def test_titolo_del_lato_con_la_testata_delle_colonne_apre_lo_sp(tmp_path):
     pagina4 = _tabella(["E Ratei e risconti", "Totale passivo e patrimonio netto"], y0=140)
     pagine = [pagina1, pagina2, pagina3, pagina4]
     assert _doc_sezioni(tmp_path, pagine).sezioni == {1: "SP", 2: "SP", 3: "SP", 4: "SP"}
+
+
+def test_saldo_passivo_a_meta_del_ce_non_apre_lo_sp(tmp_path):
+    # la regola del titolo di lato vale solo con le parole dei periodi in coda e nessuna sezione aperta
+    pagina = [(50, 120, "CONTO ECONOMICO")] + _tabella(["A) Valore della produzione", "7) Servizi"], y0=140)
+    pagina += [(50, 200, "SALDO PASSIVO"), (50, 214, "PASSIVO CORRENTE")]
+    pagina += _tabella(["8) Godimento beni di terzi", "14) Oneri diversi di gestione"], y0=228)
+    assert _doc_sezioni(tmp_path, [pagina]).sezioni == {1: "CE"}

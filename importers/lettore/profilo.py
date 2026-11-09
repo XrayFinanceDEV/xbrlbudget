@@ -314,16 +314,21 @@ _PERDITE_E_PROFITTI = re.compile(r"perdite\s+e\s+profitti\b", re.I)
 _COSTI_E_RICAVI = re.compile(r"(?:costi\W+spese\s+e\s+perdite|ricavi\W+(?:rendite\s+e\s+)?profitti)\b", re.I)
 
 
-# Le parole di una testata di colonna che una stampa mette sulla riga del titolo del lato («ATTIVITA' CORRENTE
-# PRECEDENTE», 1533): tolte quelle, resta il titolo.
-_TESTATA_SUL_TITOLO = {"corrente", "precedente", "esercizio", "periodo", "anno", "importi", "importo", "euro",
-                       "valori", "saldo", "saldi"}
+# Le parole di una testata di colonna che una stampa mette in coda al titolo del lato («ATTIVITA' CORRENTE
+# PRECEDENTE», 1533): tolte quelle, resta il titolo. Solo le parole dei periodi: «SALDO PASSIVO» non e' un titolo.
+_TESTATA_SUL_TITOLO = {"corrente", "precedente", "esercizio", "periodo", "anno"}
 
 
-def _titolo_di_lato(testo: str) -> bool:
-    """«ATTIVITA'», «PASSIVITA' E PATRIMONIO NETTO», anche con le parole della testata delle colonne accanto."""
-    parole = [w for w in testo.split() if _norm(w).strip("'’.:") not in _TESTATA_SUL_TITOLO]
-    return len(parole) < len(testo.split()) and intestazione(" ".join(parole)) in (["Attivo"], ["Passivo"])
+def _titolo_di_lato(r: RigaFisica, colonne: list[Colonna]) -> bool:
+    """«ATTIVITA'», «PASSIVITA' E PATRIMONIO NETTO» seguiti dalle parole della testata delle colonne, su una riga
+    senza importi."""
+    if _ha_celle(r, colonne):
+        return False
+    parole = _testo(r).split()
+    n = len(parole)
+    while parole and _norm(parole[-1]).strip("'’.:") in _TESTATA_SUL_TITOLO:
+        parole.pop()
+    return 0 < len(parole) < n and intestazione(" ".join(parole)) in (["Attivo"], ["Passivo"])
 
 
 def _titolo_sezione(r: RigaFisica, colonne: list[Colonna]) -> str | None:
@@ -341,8 +346,6 @@ def _titolo_sezione(r: RigaFisica, colonne: list[Colonna]) -> str | None:
         return compatto[:2]     # «CE - Schema Ridotto» in testa a una delle due tabelle affiancate (1426)
     if "CONTINONASSEGNATI" in compatto or compatto.startswith("NOTAINTEGRATIVA"):
         return ""
-    if _titolo_di_lato(_testo(r)):
-        return "SP"
     return None
 
 
@@ -441,6 +444,8 @@ def _sezioni(pagine: list[list[RigaFisica]], colonne: list[Colonna], avvisi: lis
             s = _titolo_sezione(r, colonne)
             if s is None and not ultima:
                 s = _titolo_debole(r, colonne)
+            if s is None and not titoli and (not ultima or chiusa) and _titolo_di_lato(r, colonne):
+                s = "SP"        # solo dove nessuna sezione e' aperta: a meta' di un CE «PASSIVO ...» resta un conto
             if s is not None:
                 titoli.append((r.y, s))
                 ultimo_titolo = k

@@ -383,3 +383,10 @@ def test_rettifica_dell_altro_lato_solo_per_un_conto_che_lo_dice():
     assert "sp06.F" not in p["a"]["enum"] and "sp06.F" not in p["c"]["enum"] and "sp16" in p["a"]["enum"]
     assert "sp02.F" in p["b"]["enum"] and "sp02.F" in p["f"]["enum"]
     assert "sp12g.N" in p["d"]["enum"] and "sp12g.N" not in p["e"]["enum"]
+
+
+def test_scadenza_con_le_sigle_ee_oe_del_gestionale():
+    foglie = [_FM("a", "Finanziamento banca n. 1", ("DEBITI", "DEBITI VERSO BANCHE (OE)")),
+              _FM("b", "Finanziamento banca (EE) n. 2", ("DEBITI", "DEBITI VERSO BANCHE (OE)"))]
+    out, _ = c.scadenza_dei_debiti(foglie, {"a": _M("sp16"), "b": _M("sp17")})
+    assert out["a"].macro == "sp17" and out["b"].macro == "sp16"

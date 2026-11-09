@@ -162,6 +162,12 @@ def _nomina(fondo: list[str], cespite: list[str]) -> int:
     return len(usate)
 
 
+def _campo_del_cespite(c: Classe) -> str:
+    """Il campo su cui il cespite somma davvero: il suo dettaglio, o il secchio «altri» della macro. Il fondo va
+    li', non sull'aggregato: un cespite nel secchio con il fondo sull'aggregato lascia il secchio lordo."""
+    return c.dettaglio or tavola.altri_di(c.macro)
+
+
 def _abbina_fondi(foglie: list[Foglia], classi: dict[str, Classe]) -> tuple[dict[str, Classe], list[str]]:
     """F3-16: un fondo ammortamento si netta sulla macro (e sul dettaglio) del suo cespite, anche se il modello ha
     nominato un'altra categoria. Prima l'etichetta: il fondo che nomina un solo cespite (ogni sua parola e' l'inizio
@@ -200,7 +206,7 @@ def _abbina_fondi(foglie: list[Foglia], classi: dict[str, Classe]) -> tuple[dict
         if voti and (len(voti) == 1 or voti[0][0] > voti[1][0]):
             c = voti[0][1]
             residuo[c.id] -= fondo.importo
-            assegna(fondo, classi[c.id].macro, classi[c.id].dettaglio, "etichetta")
+            assegna(fondo, classi[c.id].macro, _campo_del_cespite(classi[c.id]), "etichetta")
             continue
         cat = _categoria_cespite(fondo.etichetta)
         stessi = [c for c in cespiti if cat is not None and famiglia[c.id] == cat]
@@ -212,7 +218,7 @@ def _abbina_fondi(foglie: list[Foglia], classi: dict[str, Classe]) -> tuple[dict
         for c in stessi:
             per_macro[classi[c.id].macro] = per_macro.get(classi[c.id].macro, _ZERO) + importo_sp(c)
         macro = max(sorted(per_macro), key=lambda m: per_macro[m])
-        dettagli = {classi[c.id].dettaglio for c in stessi if classi[c.id].macro == macro}
+        dettagli = {_campo_del_cespite(classi[c.id]) for c in stessi if classi[c.id].macro == macro}
         resta = fondo.importo
         for c in sorted(stessi, key=lambda c: -residuo[c.id]):
             preso = min(resta, residuo[c.id])

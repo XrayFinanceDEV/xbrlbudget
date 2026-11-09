@@ -256,3 +256,16 @@ def test_fondo_a_trattino_con_ordinario_e_parita_per_copertura():
     k = componi(foglie, classi, [])
     assert k.bs["sp02b_costi_sviluppo"] == 0 and k.bs["sp03c_attrezzature"] == 0
     assert k.bs["sp02g_altre_immob_imm"] == D(500) and k.sbilancio == 0
+
+
+def test_fondo_segue_il_cespite_anche_nel_secchio_altri():
+    # il cespite senza dettaglio (passo 2 «altri») sta nel secchio della macro: il suo fondo si netta li', non
+    # sull'aggregato, altrimenti il secchio resta lordo e l'aggregato porta il fondo come valore diretto
+    foglie = [F("o", 500, etichetta="ONERI PLURIENNALI"), F("s", 200, etichetta="SOFTWARE"),
+              F("fo", 500, "R", etichetta="FONDO AMMORTAMENTO ONERI PLURIENNALI"),
+              F("fs", 100, "R", etichetta="FONDO AMMORTAMENTO SOFTWARE"), F("d", 100, "R", etichetta="Debiti")]
+    classi = {"o": C("sp02"), "s": C("sp02", "sp02b"), "fo": R("sp02", "SPA.B.I.F"), "fs": R("sp02", "SPA.B.I.F"),
+              "d": C("sp16")}
+    k = componi(foglie, classi, [])
+    assert k.bs["sp02g_altre_immob_imm"] == 0 and k.bs["sp02b_costi_sviluppo"] == D(100)
+    assert k.bs["sp02_immob_immateriali"] == D(100) and k.sbilancio == 0

@@ -780,6 +780,26 @@ def _modello_non_disponibile(messaggio_storico: str) -> str:
             "locali): fase saltata. Nessun lettore a regole ha riconosciuto il documento.")
 
 
+def _ripiego_classico_acceso() -> bool:
+    """Interruttore del ripiego sul percorso classico (Fase 4): acceso salvo
+    ``IMPORT_RIPIEGO_CLASSICO`` = 0/false/no/off. Spento, un documento che lo snello non adotta
+    esce con un ``PDFImportError`` chiaro invece di passare al classico."""
+    return os.environ.get("IMPORT_RIPIEGO_CLASSICO", "1").strip().lower() not in ("0", "false", "no", "off")
+
+
+def _motivo_ripiego_classico(snello_report: Optional[dict]) -> str:
+    """Perche' lo snello ha ceduto al classico, per ``validation_report['import_snello']``."""
+    if snello_report is None:
+        return "motore_classico"
+    if snello_report.get("esito") == "non_applicabile":
+        return "non_applicabile"
+    if snello_report.get("fase") == "eccezione":
+        return "eccezione"
+    if snello_report.get("fonte_testo") == "tabelle_mineru":
+        return "scansione_non_quadra"
+    return "ripiego"
+
+
 def _motore_snello() -> bool:
     """Il percorso snello e' il motore di default (decisione del proprietario, 2026-10-16:
     "devono essere tutti su snello"): lettori a regole prima di qualunque modello, poi gx10.
@@ -1518,6 +1538,22 @@ def import_pdf_balance_sheet(
                     _snello = None
                     logger.warning("Import snello non riuscito (%s): importatore attuale", type(exc).__name__)
                     _snello_report = {"esito": "ripiego", "fase": "eccezione", "errore": type(exc).__name__}
+
+        # Fase 4: lo snello cede qui al classico (o non e' stato tentato). Il motivo si dichiara
+        # sempre, anche quando il classico non gira; con IMPORT_RIPIEGO_CLASSICO=0 un documento
+        # non adottato dallo snello esce con un errore chiaro, prima di salvare qualunque cosa.
+        _ripiego_classico = {"usato": _snello is None, "motivo": None}
+        if _snello is None:
+            _ripiego_classico["motivo"] = _motivo_ripiego_classico(
+                _snello_report if _motore_snello() else None)
+            if _motore_snello() and not _ripiego_classico_acceso():
+                raise PDFImportError(
+                    "Import non riuscito: percorso classico spento (IMPORT_RIPIEGO_CLASSICO=0) "
+                    f"e il percorso snello non ha adottato il documento ({_ripiego_classico['motivo']}).")
+        if _snello_report is not None:
+            _snello_report["ripiego_classico"] = _ripiego_classico
+        else:
+            _snello_report_classico = {"ripiego_classico": _ripiego_classico}
 
         # Detect an explicitly contradictory legal statement before choosing an
         # extractor — but never reject it. Task 17 (decisione del proprietario,
@@ -2607,6 +2643,8 @@ def import_pdf_balance_sheet(
             _validation_payload["lettore"] = _lettore
         if _snello_report is not None:
             _validation_payload["import_snello"] = _snello_report
+        else:
+            _validation_payload["import_snello"] = _snello_report_classico
         if _mineru_tabelle:
             _validation_payload["mineru_contrapposte"] = True
         if _risultato_report:

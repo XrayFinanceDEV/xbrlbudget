@@ -618,7 +618,7 @@
    "path": "A.4",
    "level": 3,
    "label": "Incrementi di immobilizzazioni per lavori interni",
-   "db_field": "ce03_lavori_interni",
+   "db_field": "ce03a_incrementi_immobilizzazioni",
    "is_legal_leaf": true,
    "aliases": [
     "incrementi di immobilizzazioni per lavori interni",

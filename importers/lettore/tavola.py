@@ -8,6 +8,8 @@ proprietario, 2026-11-06 e 2026-11-09).
 
 Il conflitto A.3/A.4 segue le colonne del DB come `percorsi`: `ce03` = A.3 lavori in corso su ordinazione,
 `ce03a` = A.4 incrementi per lavori interni (`database/models.py`), e cosi' l'albero `iv_cee_tree.json`.
+Questa e' la convenzione del DB: le altre route (route C a parole chiave, estrattore LLM, riconciliazioni) e la regola
+R04 del previsionale (CLAUDE.md) scrivono ancora A.4 in `ce03` e sono da allineare (decisione del proprietario).
 """
 from __future__ import annotations
 

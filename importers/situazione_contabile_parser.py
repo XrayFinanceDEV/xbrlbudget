@@ -1119,7 +1119,7 @@ _CE_COST_FIELDS = frozenset({
     'ce20',                      # imposte sul reddito
 })
 _CE_REVENUE_FIELDS = frozenset({
-    'ce01', 'ce02', 'ce03', 'ce04',   # A) valore della produzione
+    'ce01', 'ce02', 'ce03', 'ce03a', 'ce04',   # A) valore della produzione (ce03a = A.4, ce03 = A.3)
     'ce13', 'ce14', 'ce16',           # C) proventi finanziari (ce16 netto)
     'ce17',                           # D) rettifiche di valore (netto)
     'ce18',                           # E.20 proventi straordinari
@@ -7654,7 +7654,7 @@ def _vseg_classify_ce(ce: Dict[str, Decimal], rows: list, side: int,
         ce[field] = ce.get(field, Decimal('0')) + amt
 
 
-_VSEG_RICAVI_KEYS = ('ce01', 'ce02', 'ce03', 'ce04', 'ce13', 'ce14', 'ce18')
+_VSEG_RICAVI_KEYS = ('ce01', 'ce02', 'ce03', 'ce03a', 'ce04', 'ce13', 'ce14', 'ce18')
 _VSEG_COSTI_KEYS = ('ce05', 'ce06', 'ce07', 'ce08', 'ce09', 'ce10', 'ce11', 'ce12', 'ce15', 'ce19', 'ce20')
 
 

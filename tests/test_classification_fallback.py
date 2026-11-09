@@ -129,7 +129,9 @@ def test_the_two_allowlists_partition_every_ce_leaf_in_the_tree():
     leaves = {db_field.split("_", 1)[0]
               for statement, db_field in _tree_nodes_with_db_field()
               if statement == "ce"}
-    assert leaves == known, (
+    # ce03 (A.3, lavori in corso su ordinazione) e' un campo di ricavo vero ma l'albero non ha un nodo A.3 (A.4 e' ce03a):
+    # resta nell'allowlist, raggiunto dalle parole chiave, e non e' un buco.
+    assert leaves == known - {'ce03'}, (
         f"income-statement leaves not classified by direction: {leaves ^ known}")
 
 

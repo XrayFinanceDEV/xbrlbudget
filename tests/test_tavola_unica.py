@@ -78,3 +78,26 @@ def test_la_tavola_e_una_sola():
     for modulo in ("importers.import_snello.conti", "importers.schema_etichette_parser"):
         sorgente = inspect.getsource(__import__(modulo, fromlist=["x"]))
         assert "campo_di_legge" in sorgente and "campo_da_percorso" not in sorgente, modulo
+
+
+def test_consumatori_dell_albero_accettano_ogni_campo_di_ce():
+    """Per ogni nodo CE di livello legale con un campo, la catena di route C (`_resolve_ce_field`) risolve un suo
+    alias nella direzione giusta: un campo che l'albero nomina e le allowlist di segno non conoscono finisce in
+    silenzio nel ripiego (era il caso di A.4 -> ce03a)."""
+    from importers.situazione_contabile_parser import _CE_COST_FIELDS, _resolve_ce_field
+    non_risolti = []
+    for n in _ALBERO["income_statement"]:
+        if not (n.get("is_legal_leaf") and n.get("db_field")):
+            continue
+        campo = _corto(n["db_field"])
+        direzione = "costi" if campo in _CE_COST_FIELDS else "ricavi"
+        for alias in (n["label"], *n.get("aliases", [])[:1]):
+            # ce17 e ce16 sono netti, e ce20 e' un nodo «totale»: il tema qui e' il buco di allowlist
+            if _resolve_ce_field(alias, direzione) is None:
+                non_risolti.append((n["path"], campo, alias))
+    assert not non_risolti, non_risolti
+
+
+def test_a4_lavori_interni_si_risolve_in_ce03a():
+    from importers.situazione_contabile_parser import _resolve_ce_field
+    assert _resolve_ce_field("Incrementi di immobilizzazioni per lavori interni", "ricavi") == "ce03a"

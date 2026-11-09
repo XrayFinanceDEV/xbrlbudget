@@ -751,3 +751,56 @@ def test_mastro_di_una_catena_nel_contesto_anche_se_non_verificato(tmp_path):
     f = _per_etichetta(foglie_contabili(doc, 0))
     assert f["Fatture da ricevere"].antenati == ()
     assert f["Fatture da ricevere"].mastri[-1] == "ALTRI DEBITI VERSO FORNITORI"
+
+
+def _attivo_con_voce_e_totale_sotto(tmp_path):
+    voci = [(50, 112, "Stato Patrimoniale - Attivo")] + _righe(140, [
+        ("B.I.3 Diritti di brevetto", "900,00"), ("Totale B.I Immobilizzazioni immateriali", "900,00"),
+        ("B.II.3 Attrezzature industriali", "7.400,00"), ("B.II.4 Altri beni", "2.600,00"),
+        ("Totale B.II Immobilizzazioni materiali", "10.000,00"),
+        ("C.IV.1 Depositi bancari", "1.000,00"), ("C.IV.3 Denaro in cassa", "50,00"),
+        ("Totale C.IV Disponibilita' liquide", "1.050,00"), ("TOTALE ATTIVO", "11.950,00")])
+    return _doc(tmp_path, voci)
+
+
+def test_voce_che_somma_solo_un_totale_stampato_sotto_resta_foglia(tmp_path):
+    # 1407: la catena di un solo importo letta a rovescio, la voce «somma» il suo «Totale B.I» stampato sotto. Il
+    # totale e' una riga di controllo e la voce un totale: nessuno dei due e' foglia, e la massa sparisce
+    doc = _attivo_con_voce_e_totale_sotto(tmp_path)
+    per = {r.etichetta: r for r in doc.righe}
+    voce, totale = per["B.I.3 Diritti di brevetto"], per["Totale B.I Immobilizzazioni immateriali"]
+    voce.totale, voce.figli, totale.totale, totale.figli = True, {0: (totale.id,)}, False, {}
+    totale.padre, totale.padre_verificato = voce.id, False
+    foglie = foglie_contabili(doc, 0)
+    assert _per_etichetta(foglie)["B.I.3 Diritti di brevetto"].importo == Decimal("900.00")
+    assert sum(f.importo for f in foglie) == Decimal("11950.00")
+    assert not any(a.riga == voce.id for a in ancore(doc, 0))     # la sua somma non prova niente: non e' un'ancora
+
+
+def test_voce_con_figli_solo_dove_vale_zero_resta_foglia(tmp_path):
+    # 1445: un conto a zero nel precedente «somma» due conti di pari importo e segno opposto su quella colonna
+    # (+x - x = 0 dovunque): nel corrente non ha figli, e toglierlo perde la sua massa
+    voci = [(50, 112, "Stato Patrimoniale - Attivo")] + _righe(140, [
+        ("Imm. immateriali in corso", "800,00", "0,00"), ("Altre immobilizzazioni", "1.500,00", "1.500,00"),
+        ("F.do amm. altre immobilizzazioni", "-1.500,00", "-1.500,00"), ("Banca", "200,00", "300,00"),
+        ("Cassa", "100,00", "200,00"), ("TOTALE ATTIVO", "1.100,00", "500,00")])
+    doc = _doc(tmp_path, voci)
+    per = {r.etichetta: r for r in doc.righe}
+    conto = per["Imm. immateriali in corso"]
+    conto.totale, conto.figli = True, {1: (per["Altre immobilizzazioni"].id, per["F.do amm. altre immobilizzazioni"].id)}
+    foglie = foglie_contabili(doc, 0)
+    assert _per_etichetta(foglie)["Imm. immateriali in corso"].importo == Decimal("800.00")
+    assert sum(f.importo for f in foglie) == Decimal("1100.00")
+
+
+def test_totale_coi_figli_che_portano_la_colonna_resta_fuori(tmp_path):
+    # il caso di sempre: un totale con figli solo nel precedente che nel corrente hanno un importo resta un totale
+    voci = [(50, 112, "Stato Patrimoniale - Attivo")] + _righe(140, [
+        ("Crediti verso clienti", "300,00", "250,00"), ("Cliente Rossi", "100,00", "100,00"),
+        ("Cliente Bianchi", "200,00", "150,00"), ("Banca", "500,00", "400,00"), ("TOTALE ATTIVO", "800,00", "650,00")])
+    doc = _doc(tmp_path, voci)
+    per = {r.etichetta: r for r in doc.righe}
+    mastro = per["Crediti verso clienti"]
+    mastro.totale, mastro.figli = True, {1: (per["Cliente Rossi"].id, per["Cliente Bianchi"].id)}
+    nomi = [f.etichetta for f in foglie_contabili(doc, 0)]
+    assert "Crediti verso clienti" not in nomi and "Cliente Rossi" in nomi

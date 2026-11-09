@@ -18,7 +18,7 @@ from importers.lettore import tavola
 from importers.lettore._ereditati import _CONNETTIVI, _scadenza as _scadenza_inizio, _scadenza_in_coda
 from importers.lettore.righe import Documento, Riga
 from importers.lettore.totali import (DICE_ATTIVO, DICE_PASSIVO, DICE_TOTALE, _CONTROLLO, _RISULTATO_DI_LEGGE,
-                                      _RISULTATO_ESERCIZIO, _costo_del_risultato, _norm, _risultato,
+                                      _RISULTATO, _RISULTATO_ESERCIZIO, _controllo_sotto, _costo_del_risultato, _norm, _risultato,
                                       _su_schema, _valore_di_somma, valore_nel_totale)
 from importers.schema_etichette_parser import percorso as _percorso_etichetta
 
@@ -646,16 +646,49 @@ def _senza_echi(doc: Documento, foglie: list[Foglia]) -> list[Foglia]:
     return [f for f in foglie if f.id not in eco]
 
 
+def _chiude_su(doc: Documento, r: Riga, col: int, per_id: dict[str, Riga], ordine: dict[str, int]) -> bool:
+    """La riga chiude dei conti sulla colonna `col`, quindi non e' una foglia: ha un gruppo su `col` (o sulla sua
+    colonna dei parziali) che non contiene una riga di controllo stampata sotto di lei (`totali._controllo_sotto`:
+    «B.I.3» che «somma» il «Totale B.I» stampato sotto, «C.16.d» = C.17 + «TOTALE C)» per caso). Un totale senza
+    gruppo su `col` chiude se un suo gruppo di un'altra colonna ha figli con un importo su `col`; un gruppo il cui
+    totale vale zero su quella colonna non prova niente (+x e -x sommano a zero dovunque: il conto «Imm. in corso» a
+    zero nel precedente, «sopra» due conti di un'altra voce). Altrimenti la massa della riga non la conterebbe nessuno."""
+    coppie = getattr(doc.profilo, "coppie", {})
+    gruppi = [r.figli[k] for k in (col, coppie.get(col)) if k is not None and r.figli.get(k)]
+    if gruppi:
+        # un risultato del conto economico non e' mai un conto, anche quando la sua somma non prova nulla
+        return any(not _controllo_sotto(r, [per_id[f] for f in g if f in per_id], ordine) for g in gruppi) \
+            or (r.sezione == "CE" and bool(_RISULTATO.search(_norm(r.etichetta))))
+    if not r.totale:
+        return False
+    if not r.figli:
+        return True     # un totale senza figli in nessuna colonna resta com'era: non una foglia
+    totale_di = {v: k for k, v in coppie.items()}     # colonna dei parziali -> la sua colonna dei totali
+    for k, g in r.figli.items():
+        proprio = r.celle.get(k) or r.celle.get(totale_di.get(k, -1))
+        if proprio is None or not proprio.valore:
+            continue
+        for f in g:
+            if f not in per_id:
+                continue
+            c = _colonna_della_riga(doc, col, per_id[f])
+            cella = _cella(doc, per_id[f], c) if c is not None else None
+            if cella is not None and cella.valore:
+                return True
+    return False
+
+
 def _foglie_grezze(doc: Documento, colonna: int) -> list[Foglia]:
     dal_saldo = 0
     righe = doc.righe_del_prospetto()
     per_id = {r.id: r for r in righe}
+    ordine = {r.id: k for k, r in enumerate(doc.righe)}
     pos = _scorri(righe, doc.contrapposto)
     perc = _Percorsi(righe, pos)
     out: list[Foglia] = []
     for r in righe:
         col = _colonna_della_riga(doc, colonna, r)
-        if r.totale or r.intestazione or col is None or _cella(doc, r, col) is None or r.figli.get(col) \
+        if r.intestazione or col is None or _cella(doc, r, col) is None or _chiude_su(doc, r, col, per_id, ordine) \
                 or _e_controllo(r):
             continue
         lato_sp = pos[r.id].lato_sp
@@ -837,6 +870,7 @@ def _macro_del_totale(t: Riga, righe: list[Riga], perc: _Percorsi) -> tuple[str 
 def ancore(doc: Documento, colonna: int) -> list[Ancora]:
     righe = doc.righe_del_prospetto()
     per_id = {r.id: r for r in righe}
+    ordine = {r.id: k for k, r in enumerate(doc.righe)}
     pos = _scorri(righe, doc.contrapposto)
     perc = _Percorsi(righe, pos)
     coppie = getattr(doc.profilo, "coppie", {})
@@ -865,7 +899,7 @@ def ancore(doc: Documento, colonna: int) -> list[Ancora]:
         c = col(t)
         if not t.totale or c is None or cella(t) is None or _e_controllo(t) and not _parole_nome(t):
             continue
-        if not (t.figli.get(c) or t.figli.get(coppie.get(c, -1))):
+        if not (t.figli.get(c) or t.figli.get(coppie.get(c, -1))) or not _chiude_su(doc, t, c, per_id, ordine):
             continue
         macro, ambigua = _macro_del_totale(t, righe, perc)
         if macro is None:

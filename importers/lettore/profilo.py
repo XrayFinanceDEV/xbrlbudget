@@ -115,6 +115,9 @@ class Profilo:
     sezioni_lati: dict[tuple[int, float, str], str] = field(default_factory=dict)
     # (pagina, x destra) dei trattini che fanno da colonna dei segni meno (1426), vedi `meno_staccato`
     segni_colonna: frozenset[tuple[int, float]] = frozenset()
+    # le colonne dove un intero nudo («623», «82») e' un importo (`_colonne_intere_di_fatto`); None = quelle che
+    # `decimali` dice tutte senza centesimi
+    intere: frozenset[int] | None = None
 
 
 @dataclass(frozen=True)
@@ -192,6 +195,26 @@ def _decimali(righe: list[RigaFisica], colonne: list[Colonna]) -> dict[int, bool
                 i = trovato[1].indice
                 out[i] = bool(out[i]) or "," in p.testo
     return out
+
+
+# Una colonna dei totali all'unita' puo' stampare i centesimi su una riga o due (il risultato d'esercizio, 1540: 2
+# importi su 81): non per questo i suoi interi nudi («623», «82») diventano testo. Bastano tanti importi da fare una
+# prova, e i centesimi devono essere l'eccezione, non una delle due forme della colonna (208, 682: un terzo e oltre).
+_MIN_IMPORTI_INTERI = 20
+_QUOTA_CENTESIMI_AMMESSA = 0.05
+
+
+def _colonne_intere_di_fatto(righe: list[RigaFisica], colonne: list[Colonna]) -> frozenset[int]:
+    """Le colonne i cui importi sono senza centesimi, salvo al piu' il 5% su almeno 20 importi letti."""
+    conti: dict[int, list[int]] = {c.indice: [0, 0] for c in colonne}
+    for r in righe:
+        for p in r.parole:
+            trovato = _in_colonna(p, colonne)
+            if trovato is not None and trovato[0].forma != "zero":
+                conti[trovato[1].indice]["," in p.testo] += 1
+    return frozenset(i for i, (senza, con) in conti.items()
+                     if senza and (not con or (senza + con >= _MIN_IMPORTI_INTERI
+                                               and con <= _QUOTA_CENTESIMI_AMMESSA * (senza + con))))
 
 
 def _colonne_intere(righe: list[RigaFisica], colonne: list[Colonna]) -> frozenset[int]:
@@ -1120,4 +1143,4 @@ def profilo_documento(righe: list[RigaFisica], *, altezze: dict[int, float] | No
                    _forme(_candidati(prospetto, colonne, confine)), _sezioni_pagina(pagine, per_riga),
                    frozenset(margini), avvisi, contrapposto, parti_pagina, bande, tabelle, scartate, sezioni_righe,
                    parti_righe, _colonne_a_marcatore(prospetto, colonne, intere), _coppie(prospetto, colonne, intere),
-                   sezioni_lati, segni_colonna)
+                   sezioni_lati, segni_colonna, _colonne_intere_di_fatto(prospetto, colonne))

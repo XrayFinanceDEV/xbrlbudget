@@ -1281,14 +1281,16 @@ il lettore gira sul solo PDF.
      l'etichetta nuda, cambiando idea da una corsa all'altra.
    - **La scadenza dei debiti la decide il testo** (`classifica.scadenza_dei_debiti`, prima del passo 2): un debito
      del modello va su `sp17` solo con una prova stampata nel conto o nel mastro («oltre 12 mesi/l'esercizio», «lungo
-     termine», «medio/lungo», «m/l»), altrimenti su `sp16` (CLAUDE.md, «Debito senza scadenza dichiarata → a breve»;
+     termine», «medio/lungo», «m/l», le sigle «(OE)»/«(EE)» dei gestionali), altrimenti su `sp16` (CLAUDE.md, «Debito senza scadenza dichiarata → a breve»;
      il mastro «medio/lungo» è una scadenza dichiarata, gli interessi sotto di lui restano entro). Il dettaglio passa
      alla stessa lettera. Le classi `legale` portano già la loro scadenza. `diagnostica["scadenze"]`.
    - **Imposte anticipate senza scadenza stampata oltre 12 mesi** (`imposte_anticipate_oltre`, dopo il passo 2,
      regola D14 del proprietario): `sp06f` → `sp07f` salvo un «entro» nel percorso, nel conto o nel mastro.
-   - **Un saldo negativo passa all'altro lato, per natura** (`componi.saldo_negativo`, regole D2/D12/D15): un
-     credito o una liquidità a saldo negativo fra le attività è un debito (`sp16a` se liquidità, `sp16e` se credito
-     tributario, altrimenti `sp16g`); un debito negativo è un credito (`sp06e` se tributario, altrimenti `sp06g`).
+   - **Un saldo negativo passa all'altro lato, per natura** (`componi.saldi_negativi`, regole D2/D12/D15): la
+     liquidità negativa (una banca, una carta di credito) è un debito verso banche (`sp16a`) conto per conto; un credito
+     o un debito negativo passa di lato **solo se il campo su cui somma esce negativo** (credito → `sp16e` se
+     tributario, altrimenti `sp16g`; debito → `sp06e` se tributario, altrimenti `sp06g`): una nota di credito da
+     ricevere fra i fornitori rettifica una voce che resta positiva e lì resta nettata.
      Attivo e passivo salgono della stessa massa: il pareggio resta, e le ancore (di partenza e di arrivo) e i totali
      passati al cancello contano la massa spostata (`Composizione.spostati`, `percorso._stampati`). Fondi e rettifiche
      col meno restano dove sono. *Se si ignora:* il secchio «altri» esce negativo.
@@ -1304,9 +1306,13 @@ il lettore gira sul solo PDF.
      e il suo fondo abbinato va lì, non sull'aggregato.
    - **Il prompt porta le regole di classificazione del proprietario** (natura sul mastro del gestionale: amministratori
      in B.7, somministrato in B.9, cauzioni fra le immobilizzazioni finanziarie, versamenti in conto capitale fra le
-     riserve; nel passo 2 carte di credito verso banche, soci e SIMEST verso altri finanziatori, fatture da ricevere
+     riserve, migliorie su beni di terzi fra gli immateriali, TFR solo il fondo; nel passo 2 carte di credito verso banche, soci e SIMEST verso altri finanziatori, fatture da ricevere
      verso fornitori, acconti dei clienti e debiti verso il gruppo fra gli altri debiti, ammortamenti senza categoria
      sui materiali, riserve di rivalutazione di legge, merci fra i prodotti finiti e merci).
+   - **Dopo l'adozione dettagli e scadenze non si rifanno** (`pdf_importer._dettagli_gia_letti` →
+     `dettagli_letti_dal_lettore`, come per il reso XBRL). *Se si ignora:* la ricerca dei dettagli rilegge il documento
+     e la sua regola gestionale «finanziamenti e mutui oltre 12 mesi» (`reclassify_ledger_maturities`) riscrive
+     `sp16`/`sp17` contro la scadenza decisa dal testo: la correzione del lettore non arriva al DB.
 6. **Voti sui blocchi che non tornano** (F3-11). Se una macro ancorata (`sp06`, `ce08`, …) non rifà il proprio
    totale stampato oltre 1 €, **solo le sue foglie** si rivotano, tre volte a temperatura 0 con **tre presentazioni
    diverse** (altrimenti la stessa domanda darebbe tre volte la stessa risposta): ogni riga coi soli antenati;

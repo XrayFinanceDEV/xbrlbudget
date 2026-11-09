@@ -931,7 +931,13 @@ def ancore(doc: Documento, colonna: int) -> list[Ancora]:
         c = col(t)
         if not t.totale or c is None or cella(t) is None or _e_controllo(t) and not _parole_nome(t):
             continue
-        if not (t.figli.get(c) or t.figli.get(coppie.get(c, -1))) or not _chiude_su(doc, t, c, per_id, ordine):
+        if not (t.figli.get(c) or t.figli.get(coppie.get(c, -1))):
+            continue
+        if not _chiude_su(doc, t, c, per_id, ordine):
+            avviso = (f"«{t.etichetta}» (pagina {t.pagina}): la sua somma sulla colonna {c + 1} contiene una riga di "
+                      f"controllo stampata sotto: non e' un'ancora, il suo importo conta come foglia")
+            if avviso not in doc.avvisi:
+                doc.avvisi.append(avviso)
             continue
         macro, ambigua = _macro_del_totale(t, righe, perc)
         if macro is None:

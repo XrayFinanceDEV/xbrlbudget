@@ -775,6 +775,7 @@ def test_voce_che_somma_solo_un_totale_stampato_sotto_resta_foglia(tmp_path):
     assert _per_etichetta(foglie)["B.I.3 Diritti di brevetto"].importo == Decimal("900.00")
     assert sum(f.importo for f in foglie) == Decimal("11950.00")
     assert not any(a.riga == voce.id for a in ancore(doc, 0))     # la sua somma non prova niente: non e' un'ancora
+    assert any("B.I.3 Diritti di brevetto" in a and "non e' un'ancora" in a for a in doc.avvisi)
 
 
 def test_voce_con_figli_solo_dove_vale_zero_resta_foglia(tmp_path):
@@ -857,3 +858,20 @@ def test_arabo_in_avanti_senza_la_sua_lettera_va_al_modello(tmp_path):
     assert foglie["1) Ricavi delle vendite e delle prestazioni"].percorso_legale == "CE.A.1"
     assert foglie["6) Per materie prime, sussidiarie e merci"].percorso_legale is None
     assert foglie["7) Per servizi"].percorso_legale is None
+
+
+def test_totale_con_figli_scartati_da_r18_sulla_corrente_non_diventa_foglia(tmp_path):
+    # R18: il gruppo della corrente e quello del precedente hanno figli diversi, il padre non e' verificato; ma sulla
+    # corrente il totale ha i suoi figli, che sono foglie: contarlo accanto a loro raddoppierebbe la massa
+    voci = [(50, 112, "Stato Patrimoniale - Attivo")] + _righe(140, [
+        ("Crediti verso clienti", "300,00", "250,00"), ("Cliente Rossi", "100,00", "100,00"),
+        ("Cliente Bianchi", "200,00", "150,00"), ("Banca", "500,00", "400,00"), ("TOTALE ATTIVO", "800,00", "650,00")])
+    doc = _doc(tmp_path, voci)
+    per = {r.etichetta: r for r in doc.righe}
+    mastro, rossi, bianchi = per["Crediti verso clienti"], per["Cliente Rossi"], per["Cliente Bianchi"]
+    mastro.totale, mastro.figli = True, {0: (rossi.id, bianchi.id), 1: (rossi.id,)}
+    for f in (rossi, bianchi):
+        f.padre, f.padre_verificato = mastro.id, False
+    foglie = foglie_contabili(doc, 0)
+    assert "Crediti verso clienti" not in [f.etichetta for f in foglie]
+    assert sum(f.importo for f in foglie) == Decimal("800.00")

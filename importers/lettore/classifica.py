@@ -347,6 +347,21 @@ def _voce(c: Classe) -> str:
     return c.macro
 
 
+# Le parole di una voce di legge che non dicono un dettaglio: la scadenza e i connettivi
+_PAROLE_SENZA_DETTAGLIO = {"verso", "esigibili", "entro", "oltre", "esercizio", "successivo", "mesi", "totale", "di",
+                           "e", "dei", "delle", "del", "della", "degli", "in", "su", "per", "da", "a", "con", "ed",
+                           "al", "il", "lo", "la", "le", "gli", "l"}
+
+
+def _nomina_solo_la_macro(f: Foglia, macro: str) -> bool:
+    """Tolti enumeratori, scadenza e connettivi, ogni parola dell'etichetta e' una parola del nome della macro-voce
+    (o ne comincia: «immobilizzazioni» per «immob»)."""
+    nome = tavola.ETICHETTE_MACRO.get(macro, "").split()
+    parole = [w for w in re.findall(r"[a-z]+", _norm(f.etichetta))
+              if len(w) > 1 and w not in _PAROLE_SENZA_DETTAGLIO and not re.fullmatch(r"[ivx]+", w)]
+    return all(any(w.startswith(n) or n.startswith(w) for n in nome if len(n) >= 4) for w in parole)
+
+
 def classifica_dettagli(foglie: list[Foglia], classi: dict[str, Classe], *, chiama_json=None,
                         cache: dict | None = None) -> None:
     chiama_json = chiama_json or _chiama_default()
@@ -356,9 +371,10 @@ def classifica_dettagli(foglie: list[Foglia], classi: dict[str, Classe], *, chia
         c = classi.get(f.id)
         if not c or c.macro not in tavola.DETTAGLI or c.dettaglio:
             continue
-        if c.fonte == "legale" and gettoni_di_legge(f.etichetta, f.codice):
-            # la foglia e' la voce di legge stampata («II - Crediti» di un abbreviato): il suo percorso dice gia'
-            # tutto quello che il documento sa, il dettaglio e' ignoto e la massa va in «altri», mai inventata
+        if c.fonte == "legale" and gettoni_di_legge(f.etichetta, f.codice) and _nomina_solo_la_macro(f, c.macro):
+            # la foglia e' la voce di legge stampata e ne porta solo il nome («II - Crediti» di un abbreviato): il
+            # dettaglio e' ignoto e la massa va in «altri», mai inventata. «II - Crediti verso clienti» nomina il
+            # dettaglio, e il passo 2 lo puo' dare
             continue
         k = ("dettaglio", c.macro, c.rettifica) + _chiave(f)
         if k in cache:

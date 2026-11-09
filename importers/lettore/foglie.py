@@ -18,8 +18,8 @@ from importers.lettore import tavola
 from importers.lettore._ereditati import _CONNETTIVI, _scadenza as _scadenza_inizio, _scadenza_in_coda
 from importers.lettore.righe import Documento, Riga
 from importers.lettore.totali import (DICE_ATTIVO, DICE_PASSIVO, DICE_TOTALE, _CONTROLLO, _RISULTATO_DI_LEGGE,
-                                      _RISULTATO, _RISULTATO_ESERCIZIO, _controllo_sotto, _costo_del_risultato, _norm, _risultato,
-                                      _su_schema, _valore_di_somma, valore_nel_totale)
+                                      _RISULTATO, _RISULTATO_ESERCIZIO, _controllo_sotto, _costo_del_risultato,
+                                      _norm, _risultato, _su_schema, _valore_di_somma, valore_nel_totale)
 from importers.schema_etichette_parser import percorso as _percorso_etichetta
 
 _ZERO = Decimal(0)

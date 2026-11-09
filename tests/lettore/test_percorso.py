@@ -458,3 +458,15 @@ def test_legge_percorso_stampato_vince_sul_modello(tmp_path):
     bs = r["bs"]
     assert bs["sp03_immob_materiali"] == D("800.00") and bs["sp03b_impianti_macchinari"] == D("800.00")
     assert not bs.get("sp02_immob_immateriali")
+
+
+def test_legge_voce_che_nomina_il_dettaglio_lo_prende_dal_modello(tmp_path):
+    # «II - Crediti verso clienti» senza sotto-voci: la macro dal percorso stampato, ma le parole oltre i gettoni
+    # nominano il dettaglio, e il passo 2 lo da' (sp06a); «D) DEBITI» resta in «altri»
+    voci = [(x, y, "II - Crediti verso clienti" if t == "II - Crediti" else t) for x, y, t in _abbreviato()]
+    finto = Finto({"clienti": "sp06a", "debiti": "sp16a"})
+    r = importa_col_lettore(_pdf(tmp_path, voci), chiama_json=finto)
+    bs = r["bs"]
+    assert finto.chiamate >= 1
+    assert bs["sp06a_crediti_clienti_breve"] == D("500.00") and not bs.get("sp06g_crediti_altri_breve")
+    assert bs["sp16g_altri_debiti_breve"] == D("650.00") and not bs.get("sp16a_debiti_banche_breve")

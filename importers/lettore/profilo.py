@@ -314,6 +314,18 @@ _PERDITE_E_PROFITTI = re.compile(r"perdite\s+e\s+profitti\b", re.I)
 _COSTI_E_RICAVI = re.compile(r"(?:costi\W+spese\s+e\s+perdite|ricavi\W+(?:rendite\s+e\s+)?profitti)\b", re.I)
 
 
+# Le parole di una testata di colonna che una stampa mette sulla riga del titolo del lato («ATTIVITA' CORRENTE
+# PRECEDENTE», 1533): tolte quelle, resta il titolo.
+_TESTATA_SUL_TITOLO = {"corrente", "precedente", "esercizio", "periodo", "anno", "importi", "importo", "euro",
+                       "valori", "saldo", "saldi"}
+
+
+def _titolo_di_lato(testo: str) -> bool:
+    """«ATTIVITA'», «PASSIVITA' E PATRIMONIO NETTO», anche con le parole della testata delle colonne accanto."""
+    parole = [w for w in testo.split() if _norm(w).strip("'’.:") not in _TESTATA_SUL_TITOLO]
+    return len(parole) < len(testo.split()) and intestazione(" ".join(parole)) in (["Attivo"], ["Passivo"])
+
+
 def _titolo_sezione(r: RigaFisica, colonne: list[Colonna]) -> str | None:
     """La sezione che una riga-titolo apre (`detail_enrichment.collect_source_rows`); solo una riga senza
     importi: «UTILE DA CONTO ECONOMICO 5.000,00» nel passivo non apre il CE."""
@@ -329,6 +341,8 @@ def _titolo_sezione(r: RigaFisica, colonne: list[Colonna]) -> str | None:
         return compatto[:2]     # «CE - Schema Ridotto» in testa a una delle due tabelle affiancate (1426)
     if "CONTINONASSEGNATI" in compatto or compatto.startswith("NOTAINTEGRATIVA"):
         return ""
+    if _titolo_di_lato(_testo(r)):
+        return "SP"
     return None
 
 

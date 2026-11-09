@@ -1443,7 +1443,7 @@ def import_pdf_balance_sheet(
         # un'economia, non una nuova rotta: se non produce nulla di utilizzabile
         # (o solleva), il codice sotto — is_trial_balance/IV-CEE come oggi — resta
         # il ripiego dichiarato, mai silenzioso (validation_report["import_snello"]
-        # lo dice sempre, quando l'interruttore e' acceso). Scansioni e testo da
+        # lo dice sempre: con il motore classico contiene il solo "ripiego_classico"). Scansioni e testo da
         # OCR (is_scanned/_ocr_source) non hanno mai una struttura testuale
         # affidabile da analizzare: il percorso snello non si tenta nemmeno, e lo
         # dichiara con esito "non_applicabile" invece di un ripiego silenzioso.
@@ -1552,8 +1552,8 @@ def import_pdf_balance_sheet(
                     f"e il percorso snello non ha adottato il documento ({_ripiego_classico['motivo']}).")
         if _snello_report is not None:
             _snello_report["ripiego_classico"] = _ripiego_classico
-        else:
-            _snello_report_classico = {"ripiego_classico": _ripiego_classico}
+        _snello_report_dichiarato = (
+            _snello_report if _snello_report is not None else {"ripiego_classico": _ripiego_classico})
 
         # Detect an explicitly contradictory legal statement before choosing an
         # extractor — but never reject it. Task 17 (decisione del proprietario,
@@ -2641,10 +2641,7 @@ def import_pdf_balance_sheet(
         _validation_payload = _validation_report_payload(_qd, reliability=_reliability)
         if _lettore is not None:
             _validation_payload["lettore"] = _lettore
-        if _snello_report is not None:
-            _validation_payload["import_snello"] = _snello_report
-        else:
-            _validation_payload["import_snello"] = _snello_report_classico
+        _validation_payload["import_snello"] = _snello_report_dichiarato
         if _mineru_tabelle:
             _validation_payload["mineru_contrapposte"] = True
         if _risultato_report:

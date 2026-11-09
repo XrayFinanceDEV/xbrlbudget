@@ -173,6 +173,14 @@ def test_precedente_di_nove_mesi(tmp_path):
     assert r["diagnostica"]["mesi_precedente"] == 9 and r["anno_precedente"] == 2025
 
 
+def test_precedente_esercizio_non_solare_senza_inizio_stampato(tmp_path):
+    # esercizio 1/7-30/6: la colonna stampa solo «30/06/2025», senza inizio; contare da gennaio darebbe 6 mesi.
+    # Senza inizio stampato la durata del precedente non e' nota: None, mai un parziale finto.
+    voci = _schema_di_legge(intestazioni=("30/06/2026", "30/06/2025"))
+    r = importa_col_lettore(_pdf(tmp_path, voci), chiama_json=_mai)
+    assert r["diagnostica"]["mesi_precedente"] is None and r["anno_precedente"] == 2025
+
+
 def test_precedente_che_non_torna_scartato(tmp_path):
     # il deposito del precedente vale 540 invece di 550: l'attivo stampato (1.700) non torna
     prec = ("700,00", "450,00", "540,00", "950,00", "100,00", "650,00", "2.470,00", "30,00", "2.400,00",

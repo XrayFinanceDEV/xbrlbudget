@@ -207,7 +207,9 @@ def _importa(file_path, contesto_mineru, chiama_json, diag: dict) -> dict:
            "prior_stato": "assente"}
     out["stampati"] = _stampati(comp, anc_c)
     prec = next((c for c in doc.colonne if c.indice == precedente), None)
-    diag["mesi_precedente"] = prec.mesi if prec else None
+    # Una durata diversa da 12 vale solo se la colonna stampa anche l'inizio: senza, `mesi` conta da gennaio, e un
+    # esercizio non solare (1/7-30/6) risulterebbe di 6 mesi. Senza inizio stampato la durata e' ignota (None).
+    diag["mesi_precedente"] = prec.mesi if prec and (prec.mesi == 12 or prec.inizio is not None) else None
     if prec is not None and prec.fine is not None:
         out["anno_precedente"] = prec.fine.year
     if foglie_p:

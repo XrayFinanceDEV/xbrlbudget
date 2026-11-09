@@ -1261,6 +1261,16 @@ il lettore gira sul solo PDF.
    attivo e passivo che il cancello confronta (`percorso._stampati`), come `net_contra_accounts` chiede al chiamante;
    una macro ancorata conta le rettifiche stampate sotto di lei, non quelle portate dall'altra colonna.
    `fondi_gia_nettati` non serve qui: una voce netta e i conti che la ricostruiscono non sono mai entrambi foglie.
+   **Un fondo segue il suo cespite** (F3-16): prima di comporre, ogni fondo `sp02.F`/`sp03.F` si accoppia a un
+   cespite e si netta sulla macro (e sul dettaglio) dove il modello ha messo quel cespite, anche se il modello aveva
+   nominato l'altra categoria. Prima per etichetta: il fondo che nomina un solo cespite (ogni sua parola, tolta la
+   testa «F.DO AMM.» di `_FONDO_AMM_HEAD_RE`, è l'inizio di una parola del cespite: «F/AMM. LAV. STR. SU BENI DI
+   TERZ» e «LAVORI STRAOR. SU BENI DI TERZI»); poi per famiglia, con le regole del percorso C per cespiti e fondi
+   (`_sp02_detail_field`/`_sp03_detail_field`, copiate in `_ereditati.py`). L'etichetta viene prima perché la sola
+   famiglia sbaglia sulle abbreviazioni («F/AMM.COSTI IMPIANTO» cadrebbe fra gli impianti). Entra solo se la famiglia ha ancora cespite lordo che lo contenga (fondo ≤ cespite, i
+   fondi dal più grande); altrimenti resta la classe del modello e si dichiara in `scelte`. *Se si ignora:* fondo e
+   cespite su macro diverse spostano massa fra `sp02` e `sp03` senza toccare il totale (budget_395, 1531): nessun
+   cancello la vede.
 6. **Voti sui blocchi che non tornano** (F3-11). Se una macro ancorata (`sp06`, `ce08`, …) non rifà il proprio
    totale stampato oltre 1 €, **solo le sue foglie** si rivotano, tre volte a temperatura 0 con **tre presentazioni
    diverse** (altrimenti la stessa domanda darebbe tre volte la stessa risposta): ogni riga coi soli antenati;

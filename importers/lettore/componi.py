@@ -9,13 +9,15 @@ si misura e si dichiara, mai un plug.
 """
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+import re
+from dataclasses import dataclass, field, replace
 from decimal import Decimal
 
 from calculations.ce_result import calculate_ce_result
 from importers.import_snello import percorsi
 from importers.lettore import tavola
-from importers.lettore._ereditati import clamp_immobilizzazioni_negative, netta_fondi_negativi
+from importers.lettore._ereditati import (FONDO_AMM_HEAD_RE, clamp_immobilizzazioni_negative, dettaglio_sp02,
+                                          dettaglio_sp03, netta_fondi_negativi)
 from importers.lettore.classifica import Classe
 from importers.import_snello.verifica import soglia as soglia_adozione
 from importers.lettore.diagnosi import TOLLERANZA_ARROTONDAMENTO
@@ -121,6 +123,105 @@ def _bersaglio_sp(f: Foglia, classe: Classe | None) -> tuple[str | None, Decimal
     return None, importo
 
 
+def _categoria_cespite(etichetta: str) -> str | None:
+    """La famiglia del cespite che un conto nomina, con le stesse regole del percorso C per cespiti e fondi
+    (`_sp02_detail_field`/`_sp03_detail_field`): un fondo e il suo bene cadono nella stessa famiglia. La testa
+    «F.DO AMM.» di un fondo si toglie prima (la stessa testa che `_canon_fondo_amm` riconosce)."""
+    testo = _senza_testa(etichetta)
+    return dettaglio_sp02(testo) or dettaglio_sp03(testo)
+
+
+_PAROLA = re.compile(r"[A-Z0-9]+")
+# le parole che dicono «fondo ammortamento (ordinario)» e non nominano il cespite
+_PAROLE_DEL_FONDO = {"FONDO", "FONDI", "FDO", "FDI", "AMM", "AMMTO", "AMMORT", "AMMORTAMENTO", "AMMORTAMENTI", "ORD",
+                     "ORDINARIO", "ORDINARI", "DEL", "DELLA", "DEI", "DELLE", "PER"}
+
+
+def _senza_testa(etichetta: str) -> str:
+    testo = re.sub(r"^[^A-Z0-9]+", "", etichetta.upper())       # «-F.Amm.» di un elenco a trattini
+    return FONDO_AMM_HEAD_RE.sub("", testo, count=1)
+
+
+def _parole(etichetta: str) -> list[str]:
+    """Le parole significative (3 lettere o piu') di un conto, senza la dicitura del fondo."""
+    return [w for w in _PAROLA.findall(_senza_testa(etichetta)) if len(w) >= 3 and w not in _PAROLE_DEL_FONDO]
+
+
+def _nomina(fondo: list[str], cespite: list[str]) -> int:
+    """Quante parole del cespite il fondo nomina, se ogni parola del fondo e' l'inizio di una parola del cespite o
+    viceversa (abbreviazioni: «LAV. STR. SU BENI DI TERZ» e «LAVORI STRAOR. SU BENI DI TERZI», «UFFICIO» e «UFF»);
+    0 se una parola del fondo non c'e'."""
+    if not fondo or not cespite:
+        return 0
+    usate: set[int] = set()
+    for w in fondo:
+        k = next((k for k, c in enumerate(cespite) if k not in usate and (c.startswith(w) or w.startswith(c))), None)
+        if k is None:
+            return 0
+        usate.add(k)
+    return len(usate)
+
+
+def _abbina_fondi(foglie: list[Foglia], classi: dict[str, Classe]) -> tuple[dict[str, Classe], list[str]]:
+    """F3-16: un fondo ammortamento si netta sulla macro (e sul dettaglio) del suo cespite, anche se il modello ha
+    nominato un'altra categoria. Prima l'etichetta: il fondo che nomina un solo cespite (ogni sua parola e' l'inizio
+    di una parola del cespite) va su quello; poi la famiglia, con le regole del percorso C per cespiti e fondi
+    (`_categoria_cespite`). Un fondo entra solo se il cespite (o la famiglia) ha ancora lordo che lo contenga
+    (fondo <= cespite, i fondi dal piu' grande). Senza un cespite che lo accolga resta la classe del modello,
+    dichiarata. Le classi del chiamante non si mutano: ritorna copie."""
+    immob = ("sp02", "sp03")
+    cespiti = [f for f in foglie
+               if f.sezione == "SP" and (c := classi.get(f.id)) is not None and not c.rettifica and c.macro in immob
+               and lato_sp(f) == "A" and importo_sp(f) > 0]
+    fondi = [f for f in foglie if f.sezione == "SP" and f.importo and classi.get(f.id) is not None
+             and classi[f.id].rettifica and percorsi.e_fondo(classi[f.id].rettifica) and classi[f.id].macro in immob]
+    if not fondi:
+        return classi, []
+    residuo = {f.id: importo_sp(f) for f in cespiti}
+    parole = {f.id: _parole(f.etichetta) for f in cespiti}
+    famiglia = {f.id: _categoria_cespite(f.etichetta) for f in cespiti}
+    nuove = dict(classi)
+    scelte: list[str] = []
+
+    def assegna(fondo: Foglia, macro: str, dettaglio: str | None, come: str) -> None:
+        nuove[fondo.id] = replace(classi[fondo.id], macro=macro, dettaglio=dettaglio)
+        scelte.append(f"fondo abbinato al cespite per {come} ({dettaglio or macro}): {fondo.id}")
+
+    for fondo in sorted(fondi, key=lambda x: (-x.importo, x.id)):
+        if fondo.importo < 0:       # un fondo col segno del cespite non si abbina: resta com'e', dichiarato
+            scelte.append(f"fondo senza cespite che lo contenga, resta la classe del modello ({classi[fondo.id].macro}): "
+                          f"{fondo.id}")
+            continue
+        # punteggio: parole nominate, poi quanta parte del cespite spiegano («Attrezzature L Sabatini» batte
+        # «Attrez. Cred Imp+Sabatini» per «F.Amm.ord.Attr L Sabatini»)
+        voti = [((n, n / len(parole[c.id])), c) for c in cespiti
+                if (n := _nomina(_parole(fondo.etichetta), parole[c.id])) and residuo[c.id] >= fondo.importo]
+        voti.sort(key=lambda x: (-x[0][0], -x[0][1]))
+        if voti and (len(voti) == 1 or voti[0][0] > voti[1][0]):
+            c = voti[0][1]
+            residuo[c.id] -= fondo.importo
+            assegna(fondo, classi[c.id].macro, classi[c.id].dettaglio, "etichetta")
+            continue
+        cat = _categoria_cespite(fondo.etichetta)
+        stessi = [c for c in cespiti if cat is not None and famiglia[c.id] == cat]
+        if not stessi or sum((residuo[c.id] for c in stessi), _ZERO) < fondo.importo:
+            scelte.append(f"fondo senza cespite che lo contenga, resta la classe del modello ({classi[fondo.id].macro}): "
+                          f"{fondo.id}")
+            continue
+        per_macro: dict[str, Decimal] = {}
+        for c in stessi:
+            per_macro[classi[c.id].macro] = per_macro.get(classi[c.id].macro, _ZERO) + importo_sp(c)
+        macro = max(sorted(per_macro), key=lambda m: per_macro[m])
+        dettagli = {classi[c.id].dettaglio for c in stessi if classi[c.id].macro == macro}
+        resta = fondo.importo
+        for c in sorted(stessi, key=lambda c: -residuo[c.id]):
+            preso = min(resta, residuo[c.id])
+            residuo[c.id] -= preso
+            resta -= preso
+        assegna(fondo, macro, dettagli.pop() if len(dettagli) == 1 else None, "famiglia")
+    return nuove, scelte
+
+
 def _somma(importi: dict[str, Decimal]) -> tuple[dict, dict, list]:
     """bs, ce e le immobilizzazioni tagliate: un fondo piu' fine del lordo si netta all'aggregato, un fondo oltre
     il cespite azzera l'aggregato e si dichiara - le regole del percorso snello (`conti.py`), mai una seconda."""
@@ -147,6 +248,8 @@ def componi(foglie: list[Foglia], classi: dict[str, Classe], ancore: list[Ancora
     senza_classe = _ZERO
     scelte: list[str] = []
     righe_risultato: list[Foglia] = []
+    classi, scelte_fondi = _abbina_fondi(foglie, classi)
+    scelte += scelte_fondi
     rettifiche = _ZERO
     rettificate: dict[str, Decimal] = {}      # id -> importo con cui la sua colonna (e il suo totale) la conta
     rettifiche_in: dict[str, Decimal] = {}    # macro -> massa portata dalle rettifiche (col loro segno)

@@ -194,3 +194,65 @@ def test_dettaglio_non_kpi_tenuto():
     k = componi(foglie, {"a": C("sp06", "sp06e"), "b": C("sp06", "sp06a"), "p": C("sp16")}, [])
     assert k.bs["sp06e_crediti_tributari_breve"] == D(300) and k.bs["sp06_crediti_breve"] == D(1000)
     assert k.sbilancio == 0
+
+
+def test_fondo_segue_il_cespite_anche_se_il_modello_dice_altro():
+    # F3-16, caso 1531: il modello nomina il fondo degli immateriali, il cespite e' fra i materiali
+    foglie = [F("i", 1000, etichetta="LAV. STR. SU BENI DI TERZI"), F("c", 500, etichetta="Cassa"),
+              F("f", 600, "R", etichetta="F/AMM. LAV. STR. SU BENI DI TERZ"), F("d", 900, "R", etichetta="Debiti")]
+    classi = {"i": C("sp03", "sp03d"), "c": C("sp09"), "f": R("sp02", "SPA.B.I.F"), "d": C("sp16")}
+    k = componi(foglie, classi, [])
+    assert k.bs["sp03_immob_materiali"] == D(400) and k.bs["sp03d_altri_beni"] == D(400)
+    assert "sp02_immob_immateriali" not in k.bs or k.bs["sp02_immob_immateriali"] == 0
+    assert k.sbilancio == 0 and k.rettifiche == D(600)
+    assert any("abbinato" in s and "f" in s for s in k.scelte)
+    assert classi["f"].macro == "sp02"          # la classe del modello non si muta
+
+
+def test_fondo_senza_cespite_tiene_la_classe_e_si_dichiara():
+    foglie = [F("b", 1000, etichetta="Brevetti"), F("f", 300, "R", etichetta="F.do amm. automezzi"),
+              F("d", 700, "R", etichetta="Debiti")]
+    k = componi(foglie, {"b": C("sp02"), "f": R("sp03", "SPA.B.II.F"), "d": C("sp16")}, [])
+    assert k.bs["sp03_immob_materiali"] == 0          # fondo oltre un cespite assente: tagliato, dichiarato
+    assert any("senza cespite" in s for s in k.scelte)
+
+
+def test_fondo_oltre_il_cespite_della_categoria_non_si_abbina():
+    foglie = [F("i", 100, etichetta="Impianti generici"), F("m", 2000, etichetta="Mobili e arredi"),
+              F("f", 500, "R", etichetta="F.do amm. impianti generici"), F("d", 1600, "R", etichetta="Debiti")]
+    k = componi(foglie, {"i": C("sp02"), "m": C("sp03"), "f": R("sp03", "SPA.B.II.F"), "d": C("sp16")}, [])
+    assert k.bs["sp03_immob_materiali"] == D(1500) and k.bs["sp02_immob_immateriali"] == D(100)
+    assert any("senza cespite" in s for s in k.scelte)
+
+
+def test_fondo_negativo_senza_cespite_non_solleva():
+    foglie = [F("c", 100, etichetta="Cassa"), F("f", -50, "R", etichetta="F.do amm. attrezzature"),
+              F("d", 50, "R", etichetta="Debiti")]
+    k = componi(foglie, {"c": C("sp09"), "f": R("sp03", "SPA.B.II.F"), "d": C("sp16")}, [])
+    assert any("senza cespite" in s for s in k.scelte)
+
+
+def test_fondo_abbinato_per_etichetta_prima_che_per_famiglia():
+    # «F/AMM.COSTI IMPIANTO» cadrebbe fra gli impianti per famiglia: l'etichetta abbreviata nomina il suo cespite
+    foglie = [F("a", 300, etichetta="COSTI DI IMPIANTO"), F("b", 900, etichetta="IMPIANTI GENERICI"),
+              F("s", 200, etichetta="LIC.ZA USO SOFTWARE TEMPO INDET."),
+              F("fa", 300, "R", etichetta="F/AMM.COSTI IMPIANTO"), F("fs", 150, "R", etichetta="F/AMM.LIC. D'USO SOF. A TEM. IND"),
+              F("d", 950, "R", etichetta="Debiti")]
+    classi = {"a": C("sp02", "sp02a"), "b": C("sp03", "sp03b"), "s": C("sp02", "sp02c"),
+              "fa": R("sp03", "SPA.B.II.F"), "fs": R("sp03", "SPA.B.II.F"), "d": C("sp16")}
+    k = componi(foglie, classi, [])
+    assert k.bs["sp02_immob_immateriali"] == D(50) and k.bs["sp03_immob_materiali"] == D(900)
+    assert "sp02a_costi_impianto" not in k.bs or k.bs["sp02a_costi_impianto"] == 0
+    assert k.bs["sp02c_brevetti"] == D(50) and k.sbilancio == 0
+
+
+def test_fondo_a_trattino_con_ordinario_e_parita_per_copertura():
+    foglie = [F("c", 400, etichetta="-Consulenza Matrix"), F("a", 300, etichetta="-Attrezzature L Sabatini"),
+              F("b", 500, etichetta="-Attrez. Cred Imp+Sabatini"),
+              F("fc", 400, "R", etichetta="-F.Amm.ord.Consul Matrix"), F("fa", 300, "R", etichetta="-F.Amm.ord.Attr L Sabatini"),
+              F("d", 500, "R", etichetta="Debiti")]
+    classi = {"c": C("sp02", "sp02b"), "a": C("sp03", "sp03c"), "b": C("sp02", "sp02g"),
+              "fc": R("sp03", "SPA.B.II.F"), "fa": R("sp02", "SPA.B.I.F"), "d": C("sp16")}
+    k = componi(foglie, classi, [])
+    assert k.bs["sp02b_costi_sviluppo"] == 0 and k.bs["sp03c_attrezzature"] == 0
+    assert k.bs["sp02g_altre_immob_imm"] == D(500) and k.sbilancio == 0

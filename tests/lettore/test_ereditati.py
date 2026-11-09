@@ -12,6 +12,7 @@ import pytest
 
 from importers import (detail_enrichment, mineru_adapter, schema_legge_generico, standard_ivcee_parser,
                        xbrl_reso_parser)
+from importers import situazione_contabile_parser as scp
 from importers.import_snello import conti as conti_snello
 from importers.import_snello import righe as righe_snello
 from importers.lettore import _ereditati as e
@@ -210,3 +211,22 @@ def test_deriva_clamp_immobilizzazioni_negative():
         assert e.clamp_immobilizzazioni_negative(a) == conti_snello._clamp_immobilizzazioni_negative(b) and a == b, (
             f"clamp_immobilizzazioni_negative ha preso una strada diversa da import_snello.conti su {bs!r}: decidi "
             "se portare la correzione in importers/lettore/_ereditati.py")
+
+
+DESCRIZIONI_CESPITI = [
+    "F/AMM. LAV. STR. SU BENI DI TERZ", "LAV. STR. SU BENI DI TERZI", "F.DO AMM.TO AUTOMEZZI", "IMPIANTI GENERICI",
+    "FONDO AMMORTAMENTO IMPIANTI DI PRODU", "F.DO AMM. MACCH. ORD. UFF", "COSTI DI IMPIANTO", "SOFTWARE", "AVVIAMENTO",
+    "TERRENI", "ATTREZZATURA VARIA", "IMMOBILIZZAZIONI IN CORSO", "F.DO AMM.COSTR.LEGGERE", "DIRITTI UTILIZZO", "",
+    "CASSA", "F/AMM.IMP.GENERICI/SPECIFICI", "MOBILI E ARREDI", "F.DI AMMOR.TO MARCHI",
+]
+
+
+def test_deriva_dettagli_dei_cespiti():
+    for d in DESCRIZIONI_CESPITI:
+        assert e.dettaglio_sp02(d) == scp._sp02_detail_field(d) and e.dettaglio_sp03(d) == scp._sp03_detail_field(d), (
+            f"dettaglio_sp02/03 ha preso una strada diversa da situazione_contabile_parser su {d!r}: decidi se "
+            "portare la correzione in importers/lettore/_ereditati.py")
+
+
+def test_deriva_testa_del_fondo():
+    _costante(e.FONDO_AMM_HEAD_RE, scp._FONDO_AMM_HEAD_RE, "FONDO_AMM_HEAD_RE", "situazione_contabile_parser")

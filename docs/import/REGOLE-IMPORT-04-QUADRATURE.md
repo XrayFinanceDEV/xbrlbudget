@@ -526,7 +526,8 @@ può decidere.
   fra le attività) si netta sul bene o sul netto: sparisce da un lato e scende dall'altro della stessa massa, quindi
   il pareggio resta. È l'unico conto che attraversa il lato, e solo se il modello lo nomina come rettifica
   (`tavola.RETTIFICHE`). Un fondo oltre il proprio cespite si azzera e l'eccedenza resta sbilancio dichiarato, come
-  in `conti.py`. I totali stampati sono lordi: il cancello li confronta al netto di `_netted_contra`.
+  in `conti.py`. I totali stampati sono lordi: il cancello li confronta al netto di `_netted_contra`. Un fondo si
+  netta sulla macro del cespite della sua famiglia (F3-16), così la massa non passa fra `sp02` e `sp03`.
 - **I dettagli stanno dentro la loro macro-voce**: il secondo passo sceglie solo fra le sotto-voci della macro
   assegnata; l'aggregato resta la somma delle sue foglie. Dal 2026-11-09 il dettaglio è il più fine possibile (ogni
   macro che ne ha, e quello del percorso di legge si tiene), «altri» solo se ignoto: più dettagli non muovono il

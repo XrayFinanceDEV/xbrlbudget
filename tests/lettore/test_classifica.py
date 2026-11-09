@@ -360,3 +360,13 @@ def test_imposte_anticipate_senza_scadenza_oltre():
     out, scelte = c.imposte_anticipate_oltre(foglie, classi)
     assert (out["a"].macro, out["a"].dettaglio) == ("sp07", "sp07f") and out["c"].dettaglio == "sp07f"
     assert out["b"].dettaglio == "sp06f" and out["d"].dettaglio == "sp06f" and len(scelte) == 2
+
+
+def test_prompt_porta_le_regole_di_classificazione_del_proprietario():
+    # regole del 2026-10-28 e 2026-11-04 che il modello non sa da solo: natura, non nome del mastro del gestionale
+    m, d = c.PROMPT_MACRO.lower(), c.PROMPT_DETTAGLIO.lower()
+    assert "amministratori" in m and "somministrato" in m and "depositi cauzionali" in m
+    assert "conto capitale" in m
+    assert "carte di credito" in d and "acconti" in d and "controllanti" in d and "fatture da ricevere" in d
+    assert "materiali" in d and "rivalutazione" in d and "merci" in d
+

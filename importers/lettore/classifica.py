@@ -40,10 +40,21 @@ PROMPT_MACRO = (
     "nuovo o azioni proprie stampate fra le attivita' stanno in diminuzione del netto (codice .N). Fondi rischi, "
     "TFR e fondi imposte restano passivita'. "
     "Rispondi «X» solo se la riga non e' un conto (intestazione, nota, totale, riferimento). "
+    "Conta la natura del conto, non il mastro del gestionale: compensi e contributi degli amministratori sono "
+    "servizi (B.7); il lavoro somministrato o interinale e' costo del personale (B.9); i depositi cauzionali versati "
+    "sono immobilizzazioni finanziarie; i versamenti dei soci in conto capitale o a copertura perdite sono riserve, "
+    "non capitale sociale. "
     "Non scrivere mai importi. Rispondi solo con un JSON {id: codice}.")
 PROMPT_DETTAGLIO = (
     "Sei un ragioniere italiano. Ogni riga e' gia' stata assegnata a una voce di bilancio: indica la sotto-voce "
     "che la descrive, scegliendo SOLO fra quelle ammesse per quella riga, oppure «altri» se nessuna calza. "
+    "Regole: carte di credito e anticipi bancari sono debiti verso banche; i finanziamenti dei soci, SIMEST e i "
+    "finanziamenti agevolati sono debiti verso altri finanziatori; fatture da ricevere sono debiti verso fornitori; "
+    "acconti ricevuti dai clienti, debiti verso controllanti, collegate o altre societa' del gruppo, verso dipendenti "
+    "e amministratori sono altri debiti; i crediti verso controllanti o collegate vanno nella loro sotto-voce. "
+    "Un ammortamento che non dice la categoria va sulle immobilizzazioni materiali. Le riserve che citano una legge "
+    "di rivalutazione o di riallineamento sono riserve di rivalutazione. Le rimanenze di merci sono prodotti finiti "
+    "e merci, non materie prime. "
     "Non scrivere mai importi. Rispondi solo con un JSON {id: codice}.")
 NOTA_VOTO = "Nota: questo blocco non torna contro il totale stampato nel documento; rileggi con attenzione ogni riga."
 

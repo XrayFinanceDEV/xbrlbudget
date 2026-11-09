@@ -269,3 +269,37 @@ def test_fondo_segue_il_cespite_anche_nel_secchio_altri():
     k = componi(foglie, classi, [])
     assert k.bs["sp02g_altre_immob_imm"] == 0 and k.bs["sp02b_costi_sviluppo"] == D(100)
     assert k.bs["sp02_immob_immateriali"] == D(100) and k.sbilancio == 0
+
+
+# --- saldi negativi (Task 11, regola D12 del proprietario): un saldo negativo fra le attivita' e' un debito ----------
+
+def test_credito_negativo_fra_i_debiti_e_il_foglio_quadra():
+    foglie = [F("a", 1000, etichetta="Clienti"), F("n", -100, etichetta="Crediti verso altri entro"),
+              F("p", 900, "R", etichetta="Fornitori")]
+    classi = {"a": C("sp06", "sp06a"), "n": C("sp06", "sp06g"), "p": C("sp16", "sp16d")}
+    ancore = [Ancora("attivo", D(900), "r1", ("a", "n")), Ancora("sp06", D(900), "r2", ("a", "n")),
+              Ancora("passivo", D(900), "r3", ("p",))]
+    k = componi(foglie, classi, ancore)
+    assert k.bs.get("sp06g_crediti_altri_breve", 0) == 0 and k.bs["sp06_crediti_breve"] == D(1000)
+    assert k.bs["sp16g_altri_debiti_breve"] == D(100) and k.bs["sp16_debiti_breve"] == D(1000)
+    assert k.sbilancio == 0 and k.blocchi == [] and k.spostati == D(100)
+    assert all(s == 0 for s in k.scarti.values())
+    assert any("saldo negativo" in s and s.endswith(": n") for s in k.scelte)
+
+
+def test_saldi_negativi_per_natura_banca_erario_e_debito_fra_i_crediti():
+    foglie = [F("c", 1000, etichetta="Cassa"), F("b", -200, etichetta="Banca X c/c"),
+              F("t", -50, etichetta="Erario c/IVA"), F("d", -30, "R", etichetta="Fornitori c/anticipi"),
+              F("p", 780, "R", etichetta="Debiti")]
+    classi = {"c": C("sp09"), "b": C("sp09"), "t": C("sp06", "sp06e"), "d": C("sp16", "sp16d"), "p": C("sp16")}
+    k = componi(foglie, classi, [])
+    assert k.bs["sp16a_debiti_banche_breve"] == D(200) and k.bs["sp16e_debiti_tributari_breve"] == D(50)
+    assert k.bs["sp09_disponibilita_liquide"] == D(1000) and k.bs["sp06g_crediti_altri_breve"] == D(30)
+    assert k.bs.get("sp16d_debiti_fornitori_breve", 0) == 0 and k.sbilancio == 0
+
+
+def test_fondo_negativo_fra_le_attivita_non_e_un_debito():
+    foglie = [F("a", 1000, etichetta="Clienti"), F("f", -100, etichetta="F.do svalutazione crediti"),
+              F("p", 900, "R", etichetta="Debiti")]
+    k = componi(foglie, {"a": C("sp06", "sp06a"), "f": C("sp06", "sp06a"), "p": C("sp16")}, [])
+    assert k.bs["sp06a_crediti_clienti_breve"] == D(900) and k.spostati == 0

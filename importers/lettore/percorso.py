@@ -107,8 +107,10 @@ def _dati(c: Composizione) -> tuple[dict, dict]:
 def _stampati(c: Composizione, anc) -> dict:
     """Totale attivo e passivo stampati, al netto delle rettifiche passate dalla colonna opposta: il documento li
     stampa lordi, il cancello li confronta con attivo e passivo composti (come `net_contra_accounts` chiede al
-    chiamante di ridurre l'ancora dichiarata)."""
-    return {f"totale_{a.chiave}": a.importo - c.rettifiche for a in anc if a.chiave in ("attivo", "passivo")}
+    chiamante di ridurre l'ancora dichiarata). Un saldo negativo passato all'altro lato fa salire entrambi i lati
+    composti della stessa massa: i totali stampati, che lo contano sul suo lato, salgono di tanto."""
+    return {f"totale_{a.chiave}": a.importo - c.rettifiche + c.spostati for a in anc
+            if a.chiave in ("attivo", "passivo")}
 
 
 def _somma_macro(c: Composizione, chiave: str) -> Decimal:

@@ -357,3 +357,16 @@ def test_scadenza_dei_debiti_dal_testo_non_dal_modello(monkeypatch):
     r = importa_col_lettore("x.pdf", chiama_json=finto)
     assert r["bs"]["sp16_debiti_breve"] == D("600") and r["bs"]["sp17_debiti_lungo"] == D("400")
     assert r["diagnostica"]["sbilancio"] == "0.00" and len(r["diagnostica"]["scadenze"]) == 2
+
+
+def test_saldo_negativo_spostato_e_i_totali_stampati_seguono(monkeypatch):
+    foglie = [_f("c", 1000, "L", "Cassa"), _f("n", -100, "L", "Crediti diversi"), _f("p", 900, "R", "Fornitori")]
+    _finta_lettura(monkeypatch, foglie, [Ancora("attivo", D(900), "r1", ("c", "n")),
+                                         Ancora("passivo", D(900), "r2", ("p",))])
+    finto = Finto({"cassa": "sp09", "crediti": "sp06", "fornitori": "sp16"})
+    r = importa_col_lettore("x.pdf", chiama_json=finto)
+    assert r["stampati"] == {"totale_attivo": D(1000), "totale_passivo": D(1000)}
+    assert r["bs"]["sp16_debiti_breve"] == D(1000)
+    # attivo composto = cassa 1.000 (il credito negativo e' ora un debito): uguale al totale stampato corretto
+    assert r["bs"]["sp09_disponibilita_liquide"] + r["bs"].get("sp06_crediti_breve", 0) == D(1000)
+    assert r["diagnostica"]["blocchi"] == [] and all(D(v) == 0 for v in r["diagnostica"]["scarti"].values())

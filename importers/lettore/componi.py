@@ -42,6 +42,8 @@ class Composizione:
     rettifiche: Decimal = _ZERO      # massa delle rettifiche passate dalla colonna opposta: i totali stampati la
                                      # contano, attivo e passivo composti no (entrambi scendono di tanto)
     tagliate: list = field(default_factory=list)      # [[campo, eccedenza]]: fondo oltre il cespite, azzerato
+    spostati: Decimal = _ZERO        # massa dei saldi negativi passati all'altro lato (D12): attivo e passivo composti
+                                     # ne salgono entrambi, i totali stampati no
 
 
 def lato_sp(f: Foglia) -> str | None:
@@ -105,9 +107,34 @@ def e_questo_risultato(f: Foglia, risultato: Decimal, soglia: Decimal) -> bool:
     return abs(abs(f.importo) - abs(risultato)) <= soglia
 
 
+# Saldi negativi (proprietario, regole D2/D12/D15 del 2026-10-28): un saldo negativo fra le attivita' e' un debito -
+# verso banche se e' liquidita', tributario se e' un credito tributario, altrimenti fra gli altri debiti; un debito
+# negativo e' un credito (tributario o altro). Non e' il ribaltamento per descrizione (vietato): e' aritmetica, e attivo
+# e passivo salgono della stessa massa, quindi il pareggio resta. Un fondo o una rettifica col meno restano dove sono.
+_SALDO_NEGATIVO_ATTIVO = {"sp06": "sp16g", "sp07": "sp16g", "sp09": "sp16a"}
+_SALDO_NEGATIVO_PASSIVO = {"sp16": "sp06g", "sp17": "sp06g"}
+_TRIBUTARI = {"sp06e": "sp16e", "sp07e": "sp16e", "sp16e": "sp06e", "sp17e": "sp06e"}
+_RETTIFICA_NEL_NOME = re.compile(r"\bF(?:ONDO|\.\s*DO|/DO|DO)\b|SVALUT|RETTIFIC|\bAMM(?:\.|TO|ORT)", re.I)
+
+
+def saldo_negativo(f: Foglia, classe: Classe | None) -> str | None:
+    """Il campo dell'altro lato su cui va una foglia di SP a saldo negativo, o None se resta dov'e'."""
+    if f.sezione != "SP" or classe is None or classe.macro is None or classe.rettifica or importo_sp(f) >= 0:
+        return None
+    if (f.percorso_legale and percorsi.e_fondo(f.percorso_legale)) or _RETTIFICA_NEL_NOME.search(f.etichetta):
+        return None
+    tabella = {"A": _SALDO_NEGATIVO_ATTIVO, "P": _SALDO_NEGATIVO_PASSIVO}.get(lato_sp(f) or "", {})
+    if classe.macro not in tabella:
+        return None
+    return _TRIBUTARI.get(classe.dettaglio or "") or tabella[classe.macro]
+
+
 def _bersaglio_sp(f: Foglia, classe: Classe | None) -> tuple[str | None, Decimal]:
     importo = importo_sp(f)
     macro = classe.macro if classe else None
+    altro_lato = saldo_negativo(f, classe)
+    if altro_lato:
+        return altro_lato, -importo
     if macro and classe.rettifica:
         # rettifica della colonna opposta: in diminuzione del bene o del netto, sul dettaglio se noto, altrimenti
         # sull'aggregato (senza dettaglio si netta all'aggregato, come `conti.py`). Il segno e' l'opposto di quello
@@ -259,6 +286,7 @@ def componi(foglie: list[Foglia], classi: dict[str, Classe], ancore: list[Ancora
     rettifiche = _ZERO
     rettificate: dict[str, Decimal] = {}      # id -> importo con cui la sua colonna (e il suo totale) la conta
     rettifiche_in: dict[str, Decimal] = {}    # macro -> massa portata dalle rettifiche (col loro segno)
+    spostate: dict[str, Decimal] = {}         # id -> importo (negativo) dei saldi passati all'altro lato
     for f in foglie:
         if not f.importo:
             continue
@@ -278,6 +306,9 @@ def componi(foglie: list[Foglia], classi: dict[str, Classe], ancore: list[Ancora
             campo, valore = _bersaglio_sp(f, classe)
         if classe is None or classe.macro is None:
             senza_classe += abs(f.importo)
+        elif f.sezione != "CE" and saldo_negativo(f, classe):
+            spostate[f.id] = importo_sp(f)
+            scelte.append(f"saldo negativo sull'altro lato ({campo}): {f.id}")
         elif f.sezione != "CE" and classe.rettifica:
             rettifiche += importo_sp(f)
             rettificate[f.id] = importo_sp(f)
@@ -333,12 +364,13 @@ def componi(foglie: list[Foglia], classi: dict[str, Classe], ancore: list[Ancora
         bs, ce, tagliate = _somma(importi)
         att, pas = _totali(bs)
 
+    spostati = -sum(spostate.values(), _ZERO)     # positivo: attivo e passivo composti ne salgono entrambi
     scarti: dict[str, Decimal] = {}
     for a in ancore:
         if a.chiave == "attivo":
-            composto = att + rettifiche     # il totale stampato e' lordo delle rettifiche
-        elif a.chiave == "passivo":
-            composto = pas + rettifiche
+            composto = att + rettifiche - spostati   # il totale stampato e' lordo delle rettifiche e conta i
+        elif a.chiave == "passivo":                  # saldi negativi sul loro lato
+            composto = pas + rettifiche - spostati
         elif a.chiave == "utile":
             # senza CE l'utile stampato e' la cifra di sp13 (letta, non da rifare dal CE): nessun falso blocco
             composto = _utile(ce) if sp13_da == "ce" else importi.get("sp13", _ZERO)
@@ -347,10 +379,11 @@ def componi(foglie: list[Foglia], classi: dict[str, Classe], ancore: list[Ancora
             composto = (bs if a.chiave.startswith("sp") else ce).get(pieno, _ZERO) if pieno else _ZERO
             # una macro stampata conta le rettifiche sotto di lei, non quelle portate dall'altra colonna
             composto += (sum((rettificate[i] for i in a.foglie if i in rettificate), _ZERO)
-                         - rettifiche_in.get(a.chiave, _ZERO))
+                         - rettifiche_in.get(a.chiave, _ZERO)
+                         + sum((spostate[i] for i in a.foglie if i in spostate), _ZERO))
         scarti[a.chiave] = a.importo - composto
     blocchi = [k for k, s in scarti.items() if abs(s) > soglia]
     if abs(att - pas) > soglia:
         blocchi.append("pareggio")
     return Composizione(bs, ce, scarti, blocchi, chiusure, senza_classe, att - pas, sp13_da, scelte,
-                        rettifiche, tagliate)
+                        rettifiche, tagliate, spostati)

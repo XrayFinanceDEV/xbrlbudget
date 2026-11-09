@@ -287,6 +287,7 @@ def componi(foglie: list[Foglia], classi: dict[str, Classe], ancore: list[Ancora
     rettificate: dict[str, Decimal] = {}      # id -> importo con cui la sua colonna (e il suo totale) la conta
     rettifiche_in: dict[str, Decimal] = {}    # macro -> massa portata dalle rettifiche (col loro segno)
     spostate: dict[str, Decimal] = {}         # id -> importo (negativo) dei saldi passati all'altro lato
+    spostate_in: dict[str, Decimal] = {}      # macro di arrivo -> massa (positiva) che vi e' arrivata
     for f in foglie:
         if not f.importo:
             continue
@@ -308,6 +309,7 @@ def componi(foglie: list[Foglia], classi: dict[str, Classe], ancore: list[Ancora
             senza_classe += abs(f.importo)
         elif f.sezione != "CE" and saldo_negativo(f, classe):
             spostate[f.id] = importo_sp(f)
+            spostate_in[tavola.macro_di(campo)] = spostate_in.get(tavola.macro_di(campo), _ZERO) - importo_sp(f)
             scelte.append(f"saldo negativo sull'altro lato ({campo}): {f.id}")
         elif f.sezione != "CE" and classe.rettifica:
             rettifiche += importo_sp(f)
@@ -380,7 +382,8 @@ def componi(foglie: list[Foglia], classi: dict[str, Classe], ancore: list[Ancora
             # una macro stampata conta le rettifiche sotto di lei, non quelle portate dall'altra colonna
             composto += (sum((rettificate[i] for i in a.foglie if i in rettificate), _ZERO)
                          - rettifiche_in.get(a.chiave, _ZERO)
-                         + sum((spostate[i] for i in a.foglie if i in spostate), _ZERO))
+                         + sum((spostate[i] for i in a.foglie if i in spostate), _ZERO)
+                         - spostate_in.get(a.chiave, _ZERO))
         scarti[a.chiave] = a.importo - composto
     blocchi = [k for k, s in scarti.items() if abs(s) > soglia]
     if abs(att - pas) > soglia:

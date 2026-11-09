@@ -278,7 +278,7 @@ def test_credito_negativo_fra_i_debiti_e_il_foglio_quadra():
               F("p", 900, "R", etichetta="Fornitori")]
     classi = {"a": C("sp06", "sp06a"), "n": C("sp06", "sp06g"), "p": C("sp16", "sp16d")}
     ancore = [Ancora("attivo", D(900), "r1", ("a", "n")), Ancora("sp06", D(900), "r2", ("a", "n")),
-              Ancora("passivo", D(900), "r3", ("p",))]
+              Ancora("passivo", D(900), "r3", ("p",)), Ancora("sp16", D(900), "r4", ("p",))]
     k = componi(foglie, classi, ancore)
     assert k.bs.get("sp06g_crediti_altri_breve", 0) == 0 and k.bs["sp06_crediti_breve"] == D(1000)
     assert k.bs["sp16g_altri_debiti_breve"] == D(100) and k.bs["sp16_debiti_breve"] == D(1000)

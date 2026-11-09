@@ -553,4 +553,4 @@ documento con troppa massa non classificata.
 o si salva con lo sbilancio dichiarato come per ogni lettore. *Se si ignora:* un plug attribuisce a un conto vero un
 importo che nessuno ha letto, e il foglio quadra lo stesso: è il guasto che questa regola esiste per evitare.
 
-Misura sul campione: da completare col giro fase3-502f078.
+Misura sul campione (78 documenti × 3 giri, `tests/corpus/punteggio.py`, giro `fase3-4de18b6`, 2026-11-09, contro `fase3-502f078` del primo innesto): dei 9 documenti il cui PDF quadra ma l'import no alla Fase 2, **7 escono quadrati in tutti i giri** (contro 2); i due fuori sono attesi (massa non classificabile; foglie davvero non in pari, attivo e passivo affiancati). Documenti salvati sbilanciati 12 → 7, nessuno nuovo. 11 documenti adottati dal lettore, nessuno instabile nell'adozione. Macro-voci esatte 78,7% → 80,6%, dettagli KPI 76,4% → 80,3%, altri dettagli 75,5% → 78,7%. Costo per import adottato: mediana 6 chiamate al modello (max 9, tetto 40 mai toccato), 66 s di lettore (max 153 s).

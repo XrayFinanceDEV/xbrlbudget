@@ -844,3 +844,16 @@ def test_proventi_da_consolidato_fiscale_si_sottraggono_dalle_imposte(tmp_path):
     imposte = {f.etichetta: f.importo for f in foglie_contabili(doc, 0) if f.percorso_legale == "CE.20"}
     assert imposte["f) Proventi (oneri) da consolidato fiscale"] == Decimal("-600.00")
     assert sum(imposte.values()) == Decimal("-250.00")
+
+
+def test_arabo_in_avanti_senza_la_sua_lettera_va_al_modello(tmp_path):
+    # «B)» non stampata: «6) per materie prime» sotto «A)» non e' A.6 ne' la voce A.1 di prima (un costo fra i
+    # ricavi, 2x il suo importo): il percorso resta senza risposta e la classe la da' il modello
+    voci = [(50, 112, "CONTO ECONOMICO")] + _righe(140, [
+        ("A) Valore della produzione",), ("1) Ricavi delle vendite e delle prestazioni", "1.000,00"),
+        ("6) Per materie prime, sussidiarie e merci", "400,00"), ("7) Per servizi", "300,00"),
+        ("8) Per godimento di beni di terzi", "120,00"), ("14) Oneri diversi di gestione", "30,00")])
+    foglie = _per_etichetta(foglie_contabili(_doc(tmp_path, voci), 0))
+    assert foglie["1) Ricavi delle vendite e delle prestazioni"].percorso_legale == "CE.A.1"
+    assert foglie["6) Per materie prime, sussidiarie e merci"].percorso_legale is None
+    assert foglie["7) Per servizi"].percorso_legale is None

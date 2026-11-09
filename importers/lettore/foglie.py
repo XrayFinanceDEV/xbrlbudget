@@ -179,6 +179,18 @@ def arabo_fuori_lettera(lettera: str | None, arabo: str) -> bool:
     return bool(limiti and m and int(m.group()) < 20 and not limiti[0] <= int(m.group()) <= limiti[1])
 
 
+def _arabo_all_indietro(sezione: str, lettera: str | None, gettoni: tuple[str, ...]) -> bool:
+    """Il solo arabo della riga sta prima dei numeri della sua lettera del CE («5) da altri» sotto C): e' un elenco
+    dentro la voce e non entra nell'outline. Un arabo in avanti («6)» sotto A, quando l'intestazione «B)» manca)
+    entra, e il percorso che ne viene, fuori dalla lettera, non si risolve (`percorso_valido`): decide il modello,
+    mai la voce sbagliata dell'outline di prima (che manderebbe un costo fra i ricavi)."""
+    if sezione != "CE" or len(gettoni) != 1 or _tipo(gettoni[0]) != 2:
+        return False
+    limiti = _ARABI_DEL_CE.get(lettera or "")
+    m = re.match(r"\d+", gettoni[0])
+    return bool(limiti and m and int(m.group()) < limiti[0])
+
+
 def _titoli_di_lato_sui_due_lati(righe: list[Riga]) -> bool:
     """Due tabelle affiancate dello stato patrimoniale con un titolo «attivo» a sinistra e uno «passivo» a destra:
     sono le sezioni contrapposte che il profilo ha tipato male, non due tabelle diverse. Il flusso sequenziale non puo'
@@ -251,8 +263,7 @@ def _scorri(righe: list[Riga], contrapposto: bool = True) -> dict[str, _Posizion
             elif gettoni and gettoni[0] == "A" and stato != "P" and livelli[0] in ("B", "C", "D"):
                 passa_al_passivo()          # la lettera A che riparte dopo la B: comincia il passivo
                 azzera()
-        if r.sezione == "CE" and len(gettoni) == 1 and _tipo(gettoni[0]) == 2 \
-                and arabo_fuori_lettera(livelli[0], gettoni[0]):
+        if _arabo_all_indietro(r.sezione, livelli[0], gettoni):
             gettoni = ()
         for g in gettoni:
             t = _tipo(g)
@@ -842,8 +853,8 @@ class _Percorsi:
         for g in base if ancorato else ():
             slots[_tipo(g)] = g
         presenti = [i for i, g in enumerate(slots) if g]
-        if r.sezione == "CE" and len(propri) == 1 and _tipo(propri[0]) == 2 and arabo_fuori_lettera(slots[0], propri[0]):
-            propri = ()         # un elenco dentro la voce, non un livello (`arabo_fuori_lettera`)
+        if _arabo_all_indietro(r.sezione, slots[0], propri):
+            propri = ()         # un elenco dentro la voce, non un livello
         accettati = bool(propri) and (len(propri) > 1 or not presenti or _tipo(propri[0]) > max(presenti))
         if accettati and ancorato:
             if len(propri) > 1:

@@ -588,8 +588,8 @@ def _doc_sezioni(tmp_path, pagine):
 
 
 def test_titolo_di_sezione_con_i_totali_sulla_stessa_riga(tmp_path):
-    # 1440, 302: «STATO PATRIMONIALE ATTIVO 217.368,86 ...» e «Conto economico 0,00» sono titoli anche con gli importi
-    pagina1 = [(50, 120, "STATO PATRIMONIALE ATTIVO"), (480, 120, "7.190.401,00"), (560, 120, "6.000,00")] + \
+    # «STATO PATRIMONIALE ATTIVO» con i totali accanto e «Conto economico 0,00» sono titoli anche con gli importi
+    pagina1 = [(50, 120, "STATO PATRIMONIALE ATTIVO"), (480, 120, "7.000,00"), (560, 120, "6.000,00")] + \
         _tabella(_SCHEMA, y0=140)
     pagina2 = [(50, 120, "3360 Conto economico"), (480, 120, "0,00"), (560, 120, "0,00")] + \
         _tabella(["A) Valore della produzione", "B) Costi della produzione", "7) Servizi"], y0=140)
@@ -605,18 +605,18 @@ def test_utile_da_conto_economico_nel_passivo_non_apre_il_ce(tmp_path):
 
 
 def test_attivo_e_passivo_con_i_totali_aprono_lo_sp_solo_prima_di_ogni_sezione(tmp_path):
-    # 1540: «1 ATTIVO 30.278.599» apre lo SP; in coda a un CE «ATTIVO 1.464.996,42» e' un riepilogo (229)
-    apre = [[(50, 120, "1 ATTIVO"), (480, 120, "30.278.599,00"), (560, 120, "21.547.525,00")] +
+    # «1 ATTIVO» con un totale apre lo SP; in coda a un CE «ATTIVO» con un totale e' un riepilogo
+    apre = [[(50, 120, "1 ATTIVO"), (480, 120, "30.000,00"), (560, 120, "21.000,00")] +
             _tabella(_SCHEMA, y0=140)]
     assert _doc_sezioni(tmp_path, apre).sezioni == {1: "SP"}
     riepilogo = [[(50, 120, "CONTO ECONOMICO")] + _tabella(["A) Valore della produzione", "7) Servizi"], y0=140) +
-                 [(50, 220, "ATTIVO"), (480, 220, "1.464.996,42"), (560, 220, "1.000,00")]]
+                 [(50, 220, "ATTIVO"), (480, 220, "1.400,00"), (560, 220, "1.000,00")]]
     assert _doc_sezioni(tmp_path, riepilogo).sezioni == {1: "CE"}
 
 
 def test_utile_dell_esercizio_dentro_il_patrimonio_netto_non_chiude_la_pagina(tmp_path):
     # 381: l'utile sta nel PN e la pagina prosegue con TFR e debiti; la pagina dopo senza titolo e' ancora SP
-    pagina1 = [(50, 120, "Stato patrimoniale passivo"), (480, 120, "79.802,13")] + _tabella(
+    pagina1 = [(50, 120, "Stato patrimoniale passivo"), (480, 120, "7.000,00")] + _tabella(
         ["A) Patrimonio netto", "A.IX) Utile (Perdita) dell'esercizio", "C) Trattamento di fine rapporto",
          "D) Debiti"], y0=140)
     pagina2 = _tabella(["Esigibili entro l'esercizio successivo", "D.4) Debiti verso banche"], y0=140)
@@ -636,9 +636,9 @@ def test_totale_costi_della_produzione_non_chiude_il_conto_economico(tmp_path):
 def test_totali_dei_conti_patrimoniali_ed_economici_decidono_le_sezioni(tmp_path):
     # 1561: nessun titolo; «TOTALE CONTI PATRIMONIALI» chiude lo SP a meta' pagina, «TOTALE CONTI ECONOMICI» il CE
     voci = _tabella([f"1300{k} Conto patrimoniale" for k in range(4)], y0=140)
-    voci += [(50, 200, "TOTALE CONTI PATRIMONIALI PERDITA D'ESERCIZIO"), (480, 200, "38.122,74")]
+    voci += [(50, 200, "TOTALE CONTI PATRIMONIALI PERDITA D'ESERCIZIO"), (480, 200, "3.000,00")]
     voci += _tabella([f"7100{k} Conto economico {k}" for k in range(4)], y0=220)
-    voci += [(50, 280, "TOTALE CONTI ECONOMICI PERDITA D'ESERCIZIO"), (480, 280, "38.122,74")]
+    voci += [(50, 280, "TOTALE CONTI ECONOMICI PERDITA D'ESERCIZIO"), (480, 280, "3.000,00")]
     prof = _doc_sezioni(tmp_path, [voci])
     assert prof.sezioni == {1: "SP+CE"}
     sezioni = prof.sezioni_righe

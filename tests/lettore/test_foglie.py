@@ -485,7 +485,7 @@ def _ce_con_costi(valori_costi, totale):
 
 
 def test_ancora_dei_costi_ha_il_segno_delle_sue_foglie(tmp_path):
-    # 1470: costi tra parentesi; la foglia arriva positiva e l'ancora della macro-voce con lei (non -1.065.113 contro +)
+    # costi tra parentesi; la foglia arriva positiva e l'ancora della macro-voce con lei (non negativa contro positiva)
     doc = _doc(tmp_path, _ce_con_costi([f"({v},00)" for v in (130, 270, 410, 570, 690, 850)], "(2.920,00)"))
     col = colonne_utili(doc)[0]
     foglie = [f for f in foglie_contabili(doc, col) if f.etichetta.startswith("7) Per servizi")]
@@ -576,7 +576,7 @@ def _due_titoli(passivo):
 
 
 def test_titolo_di_lato_con_importo_uguale_all_altro_e_un_totale(tmp_path):
-    # 1440: «STATO PATRIMONIALE ATTIVO 217.368,86» e «... PASSIVO 217.368,86» senza righe «Totale»: attivo = passivo
+    # «STATO PATRIMONIALE ATTIVO» e «... PASSIVO» con lo stesso importo, senza righe «Totale»: attivo = passivo
     doc = _doc(tmp_path, _due_titoli("1.500,00"))
     col = colonne_utili(doc)[0]
     an = {a.chiave: a.importo for a in ancore(doc, col)}

@@ -1356,7 +1356,7 @@ metà lascia il documento non adottato e l'import prosegue sul percorso di §10.
 - (Task 9) le parole scritte in verticale a schermo (un timbro sul margine) si tolgono prima di formare le righe:
   alte quanto tre righe contabili, le univano in una sola e ne perdevano gli importi;
 - catene di voci a uguale importo (eco, k=1): contate una volta;
-- titolo di lato che porta il proprio totale («STATO PATRIMONIALE ATTIVO 217.368,86») ancora, solo se attivo e
+- titolo di lato che porta il proprio totale («STATO PATRIMONIALE ATTIVO» seguito dal suo totale) ancora, solo se attivo e
   passivo coincidono: un titolo con un numero senza quella prova resta un titolo.
 
 *Misura sul campione (78 documenti × 3 giri, `tests/corpus/punteggio.py`, giro `fase3-4de18b6`, 2026-11-09, contro `fase3-502f078` del primo innesto): dei 9 documenti il cui PDF quadra ma l'import no alla Fase 2, **7 escono quadrati in tutti i giri** (contro 2); i due fuori sono attesi (massa non classificabile; foglie davvero non in pari, attivo e passivo affiancati). Documenti salvati sbilanciati 12 → 7, nessuno nuovo. 11 documenti adottati dal lettore, nessuno instabile nell'adozione. Macro-voci esatte 78,7% → 80,6%, dettagli KPI 76,4% → 80,3%, altri dettagli 75,5% → 78,7%. Costo per import adottato: mediana 6 chiamate al modello (max 9, tetto 40 mai toccato), 66 s di lettore (max 153 s).*

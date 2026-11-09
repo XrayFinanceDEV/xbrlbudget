@@ -884,7 +884,7 @@ def _voci_con_meno(stacco=2.2, totale="7.800,00", x_trattino=None):
 
 
 def test_trattino_a_un_soffio_dall_importo_e_il_suo_segno_se_il_totale_lo_conferma(tmp_path):
-    # 1553: «Utile (Perdita) dell'esercizio - 184.019» e' -184.019 perche' il totale stampato (7.800) chiude solo cosi'
+    # «Utile (Perdita) dell'esercizio - 2.000» e' -2.000 perche' il totale stampato (7.800) chiude solo cosi'
     doc = _leggi(tmp_path, [_voci_con_meno()])
     riga = _riga(doc, "Rettifica uno")
     assert riga.celle[0].valore == Decimal("-2000.00")
@@ -903,7 +903,7 @@ def test_trattino_senza_un_totale_che_lo_confermi_resta_un_separatore(tmp_path):
 
 
 def test_trattino_lontano_dall_importo_resta_un_separatore(tmp_path):
-    # «FONDO - 6.138» a 33 pt (1426) con meno di tre trattini allineati: separatore, importo positivo
+    # «FONDO - 1.000» a 33 pt (1426) con meno di tre trattini allineati: separatore, importo positivo
     doc = _leggi(tmp_path, [_voci_con_meno(stacco=33.0, totale="13.200,00")])
     assert _riga(doc, "Rettifica uno").celle[0].valore == Decimal("2000.00")
     assert not doc.profilo.negativi
@@ -928,14 +928,14 @@ def test_colonna_di_segni_allineati_vale_anche_lontano_dall_importo(tmp_path):
 
 
 def test_trattino_in_un_documento_con_i_negativi_di_sempre_non_e_un_segno(tmp_path):
-    # 394: i costi sono «-235.559» attaccati; il trattino a un soffio da un'altra cella non gira il segno (+30.517)
+    # i costi sono «-2.350» attaccati; il trattino a un soffio da un'altra cella non gira il segno (+300)
     voci = _riempi(140, colonne=(560,), n=4)
-    voci += [(50, 220, "Costo uno"), (560, 220, "-235.559,00"), (50, 234, "Costo due"), (560, 234, "-35.535,00")]
+    voci += [(50, 220, "Costo uno"), (560, 220, "-2.350,00"), (50, 234, "Costo due"), (560, 234, "-35.535,00")]
     for k in range(2):
-        voci += [(50, 250 + k * 14, f"Variazione {k}")] + _con_meno(560, 250 + k * 14, "30.517,00")
+        voci += [(50, 250 + k * 14, f"Variazione {k}")] + _con_meno(560, 250 + k * 14, "300,00")
     doc = _leggi(tmp_path, [voci])
     assert "meno-staccato" not in doc.profilo.negativi
-    assert _riga(doc, "Variazione 0").celle[0].valore == Decimal("30517.00")
+    assert _riga(doc, "Variazione 0").celle[0].valore == Decimal("300.00")
 
 
 def test_due_tabelle_affiancate_hanno_ognuna_la_sua_sezione(tmp_path):

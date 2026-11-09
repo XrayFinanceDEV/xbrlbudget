@@ -404,3 +404,20 @@ def scadenza_dei_debiti(foglie: list[Foglia], classi: dict[str, Classe]) -> tupl
         perche = "scadenza stampata" if s else "nessuna scadenza stampata"
         scelte.append(f"debito {'oltre' if voluta == 'sp17' else 'a breve'} ({perche}): {f.id}")
     return nuove, scelte
+
+
+def imposte_anticipate_oltre(foglie: list[Foglia], classi: dict[str, Classe]) -> tuple[dict[str, Classe], list[str]]:
+    """Imposte anticipate senza scadenza stampata -> oltre 12 mesi (sp07f), regola D14 del proprietario
+    (2026-10-28): per un credito la prudenza e' l'opposto dei debiti, e il percorso di legge «5-ter» non dice la
+    scadenza. Resta entro solo con un «entro» stampato (nel percorso, nel conto o nel mastro). Copie, scelte dichiarate."""
+    nuove = dict(classi)
+    scelte: list[str] = []
+    for f in foglie:
+        k = classi.get(f.id)
+        if k is None or k.rettifica or k.dettaglio != "sp06f":
+            continue
+        if (f.percorso_legale or "").endswith(".E") or _scadenza_del_debito(f) == "E":
+            continue
+        nuove[f.id] = replace(k, macro="sp07", dettaglio="sp07f")
+        scelte.append(f"imposte anticipate oltre 12 mesi (nessuna scadenza stampata): {f.id}")
+    return nuove, scelte

@@ -19,7 +19,8 @@ from decimal import Decimal
 from importers import llm_provider
 from importers.import_snello import percorsi
 from importers.lettore.celle import leggi_celle
-from importers.lettore.classifica import classifica_dettagli, classifica_macro, rivota, scadenza_dei_debiti
+from importers.lettore.classifica import (classifica_dettagli, classifica_macro, imposte_anticipate_oltre, rivota,
+                                          scadenza_dei_debiti)
 from importers.lettore.componi import (Composizione, componi, e_questo_risultato, e_risultato, importo_sp,
                                        lato_sp, risultato_con_segno)
 from importers.lettore.foglie import ancore, colonne_utili, foglie_contabili, senza_colonna
@@ -162,6 +163,8 @@ def _importa(file_path, contesto_mineru, chiama_json, diag: dict) -> dict:
     prima = conto["n"]
     classifica_dettagli(tutte, classi, chiama_json=chiama, cache=cache)
     diag["chiamate_dettagli"] = conto["n"] - prima
+    classi, anticipate = imposte_anticipate_oltre(tutte, classi)    # dopo il dettaglio: sp06f si sa solo ora
+    diag["scadenze"] += anticipate
     comp = componi(foglie_c, classi, anc_c)
     bs, ce = _dati(comp)
 

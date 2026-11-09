@@ -348,3 +348,15 @@ def test_scadenza_dal_mastro_non_verificato():
     out, _ = c.scadenza_dei_debiti([_FM("a", "Debiti v/INPS", ("DEBITI", "DEBITI PREVIDENZIALI OLTRE 12 MESI"))],
                                    {"a": _M("sp16")})
     assert out["a"].macro == "sp17"
+
+
+def test_imposte_anticipate_senza_scadenza_oltre():
+    # D14 del proprietario: imposte anticipate senza scadenza stampata -> oltre 12 mesi (sp07f), anche dal percorso
+    foglie = [F("a", "5-ter) Imposte anticipate", percorso="SPA.C.II.5-ter"),
+              F("b", "Imposte anticipate entro 12 mesi"), F("c", "Crediti per imposte anticipate"),
+              F("d", "Imposte anticipate", percorso="SPA.C.II.5-ter.E")]
+    classi = {"a": _M("sp06", "legale", "sp06f"), "b": _M("sp06", dettaglio="sp06f"),
+              "c": _M("sp06", dettaglio="sp06f"), "d": _M("sp06", "legale", "sp06f")}
+    out, scelte = c.imposte_anticipate_oltre(foglie, classi)
+    assert (out["a"].macro, out["a"].dettaglio) == ("sp07", "sp07f") and out["c"].dettaglio == "sp07f"
+    assert out["b"].dettaglio == "sp06f" and out["d"].dettaglio == "sp06f" and len(scelte) == 2

@@ -391,3 +391,17 @@ def test_scadenza_con_le_sigle_ee_oe_del_gestionale():
               _FM("b", "Finanziamento banca (EE) n. 2", ("DEBITI", "DEBITI VERSO BANCHE (OE)"))]
     out, _ = c.scadenza_dei_debiti(foglie, {"a": _M("sp16"), "b": _M("sp17")})
     assert out["a"].macro == "sp17" and out["b"].macro == "sp16"
+
+
+def test_fondi_che_sono_debiti_non_sono_contro_conti():
+    # «DEBITI V/FONDI PENSIONE», il fondo TFR, un fondo rischi stanno nel passivo: nessun «.F» nell'enum
+    finto = Finto("X")
+    c.classifica_macro([F("a", "DEBITI V/FONDI PENSIONE", lato="R"), F("b", "Fondo T.F.R.", lato="R"),
+                        F("c", "Fondo rischi e oneri", lato="R"), F("d", "Debiti v/amm.ri", lato="R"),
+                        F("e", "F.do amm.fabbricati", lato="R"), F("f", "FONDO SVALUTAZIONE CREDITI", lato="R"),
+                        F("g", "Ammortamenti accumulati impianti", lato="R"), F("h", "F/AMM.COSTI IMPIANTO", lato="R"),
+                        F("i", "F/DO RISCHI SU CREDITI TASSATO", lato="R"), F("j", "-F.Amm.ord.Consul Matrix", lato="R")],
+                       chiama_json=finto)
+    p = finto.chiamate[0][1]["properties"]
+    assert all("sp03.F" not in p[k]["enum"] for k in "abcd")
+    assert all("sp03.F" in p[k]["enum"] for k in "efghij")     # «rischi su crediti» e' la svalutazione crediti

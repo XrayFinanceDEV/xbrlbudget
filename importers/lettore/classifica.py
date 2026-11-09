@@ -89,8 +89,11 @@ def _ammesse(f: Foglia) -> tuple[str, ...]:
 # Senza, il modello usava il «.F» per un conto qualunque che non trovava posto sul lato (una banca in avere sotto le
 # disponibilita' liquide nettata sui crediti verso clienti): una massa spostata fra lati senza che nessun cancello
 # la veda.
-_FONDO = re.compile(r"\bF(?:ONDO|ONDI|DO|DI)\b|\bF\s*[./]\s*(?:DO|DI|AMM|SVAL)|AMMORT|\bAMM\.?\s*TO\b|SVALUT|RETTIFIC",
-                    re.I)
+# Un fondo e' un contro-conto solo se dice di che cosa: ammortamento, svalutazione, deprezzamento, rettifica, o un fondo
+# sui crediti (il «fondo rischi su crediti» tassato e' la svalutazione crediti). «Fondi pensione», il fondo TFR, un
+# fondo rischi e oneri sono debiti o fondi del passivo, mai una rettifica dell'attivo (revisione Task 11).
+_TESTA_FONDO = r"(?:\bF(?:ONDO|ONDI|DO|DI)\b|\bF\s*[./]\s*(?:D[OI]\b|(?=AMM|SVAL)))"
+_FONDO = re.compile(rf"AMMORT|SVALUT|DEPREZZ|RETTIFIC|{_TESTA_FONDO}.*(?:\bAMM|SVAL|CREDIT)", re.I)
 _NETTO_IN_DIMINUZIONE = re.compile(r"PERDIT|AZION\w*\s+PROPRI|RISERV\w*\s+NEGATIV", re.I)
 
 

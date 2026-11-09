@@ -48,10 +48,6 @@ _PERCENTUALE = re.compile(r"-?\d{1,3}(?:\.\d{3})*,\d{2,3}")
 _DATA = re.compile(r"^\d{1,2}[/.]\d{1,2}[/.]((?:19|20)\d{2})$")
 _LETTERE = re.compile(r"[A-Za-zÀ-ÿ]")
 
-# voci di A) Valore della produzione: la convenzione dell'albero di legge condiviso
-# (data/iv_cee_tree.json), quella che leggono Rettifiche e Confronto: A.4 in ce03, mai in ce03a
-_VALORE_PRODUZIONE = {"1": "ce01", "2": "ce02", "3": "ce02", "4": "ce03", "5": "ce04"}
-
 
 def _norm(testo: str) -> str:
     t = unicodedata.normalize("NFKD", testo).encode("ascii", "ignore").decode().lower()
@@ -139,8 +135,6 @@ def _profondita_voce(sez: str, t: tuple[str, ...]) -> Optional[int]:
 
 def _campo(sez: str, t: tuple[str, ...], scad: Optional[str] = None) -> Optional[str]:
     if sez == "CE":
-        if t[0] == "A" and len(t) == 2:
-            return _VALORE_PRODUZIONE.get(t[1])
         return campo_di_legge(".".join(("CE", *t)))
     p = ".".join((sez, *t, *((scad,) if scad else ())))
     return campo_di_legge(p)

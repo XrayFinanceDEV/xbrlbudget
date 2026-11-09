@@ -90,9 +90,12 @@ def test_interruttore_assente_non_chiama_la_finta_e_report_senza_chiave(tmp_path
         company_name="Interruttore assente", create_company=True, sector=1,
         user_id="snello-assente", period_months=12,
     )
-    assert "import_snello" not in result["validation_report"]
+    # Fase 4: il motivo del classico si dichiara sempre, e qui il classico e' il motore scelto
+    assert result["validation_report"]["import_snello"] == {
+        "ripiego_classico": {"usato": True, "motivo": "motore_classico"}}
     persistito = _validation_report_persistito(session_factory, result["company_id"], 2025)
-    assert "import_snello" not in persistito
+    assert persistito["import_snello"] == {
+        "ripiego_classico": {"usato": True, "motivo": "motore_classico"}}
 
 
 def test_switch_acceso_finta_quadrata_vince_su_tutto(tmp_path, monkeypatch):
@@ -146,10 +149,12 @@ def test_snello_non_riuscito_dichiarato_ripiega_sull_estrattore_di_oggi(tmp_path
     # come negli altri test di route C senza chiave Anthropic.
     assert result["success"] is True
     assert result["extraction_method"] != "import_snello"
-    assert result["validation_report"]["import_snello"] == {"esito": "ripiego", "fase": "verifica"}
+    _rc = {"ripiego_classico": {"usato": True, "motivo": "ripiego"}}
+    assert result["validation_report"]["import_snello"] == {
+        "esito": "ripiego", "fase": "verifica", **_rc}
 
     persistito = _validation_report_persistito(session_factory, result["company_id"], 2025)
-    assert persistito["import_snello"] == {"esito": "ripiego", "fase": "verifica"}
+    assert persistito["import_snello"] == {"esito": "ripiego", "fase": "verifica", **_rc}
 
 
 def test_eccezione_generica_diventa_ripiego_dichiarato(tmp_path, monkeypatch):
@@ -297,11 +302,13 @@ def test_ocr_source_non_tenta_il_percorso_snello(tmp_path, monkeypatch):
         company_name="OCR MinerU", create_company=True, sector=1,
         user_id="snello-ocr", extraction_context=extraction_context,
     )
+    _rc = {"usato": True, "motivo": "non_applicabile"}
     assert result["validation_report"]["import_snello"] == {
-        "esito": "non_applicabile", "motivo": "ocr",
+        "esito": "non_applicabile", "motivo": "ocr", "ripiego_classico": _rc,
     }
     persistito = _validation_report_persistito(session_factory, result["company_id"], 2026)
-    assert persistito["import_snello"] == {"esito": "non_applicabile", "motivo": "ocr"}
+    assert persistito["import_snello"] == {
+        "esito": "non_applicabile", "motivo": "ocr", "ripiego_classico": _rc}
 
 
 def test_scansione_non_tenta_il_percorso_snello(tmp_path, monkeypatch):
@@ -341,11 +348,13 @@ def test_scansione_non_tenta_il_percorso_snello(tmp_path, monkeypatch):
         company_name="Scansione senza snello", create_company=True, sector=1,
         user_id="snello-scansione", period_months=12,
     )
+    _rc = {"usato": True, "motivo": "non_applicabile"}
     assert result["validation_report"]["import_snello"] == {
-        "esito": "non_applicabile", "motivo": "scansione",
+        "esito": "non_applicabile", "motivo": "scansione", "ripiego_classico": _rc,
     }
     persistito = _validation_report_persistito(session_factory, result["company_id"], 2025)
-    assert persistito["import_snello"] == {"esito": "non_applicabile", "motivo": "scansione"}
+    assert persistito["import_snello"] == {
+        "esito": "non_applicabile", "motivo": "scansione", "ripiego_classico": _rc}
 
 
 @pytest.mark.parametrize("valore_motore", ["classico", "altro", ""])
@@ -387,7 +396,8 @@ def test_interruttore_non_snello_e_byte_identico_a_oggi(tmp_path, monkeypatch, v
     riferimento_confrontabile = _senza_tempi(riferimento)
     confronto_confrontabile = _senza_tempi(confronto)
     assert confronto_confrontabile == riferimento_confrontabile
-    assert "import_snello" not in confronto["validation_report"]
+    assert confronto["validation_report"]["import_snello"] == {
+        "ripiego_classico": {"usato": True, "motivo": "motore_classico"}}
 
 
 def test_successo_snello_non_rilegge_la_fonte_con_ledger_evidence(tmp_path, monkeypatch):

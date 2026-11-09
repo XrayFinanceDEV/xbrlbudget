@@ -12,6 +12,7 @@ presenti, anche a zero). Mai un'eccezione verso il chiamante: un errore da' bs/c
 from __future__ import annotations
 
 import threading
+from dataclasses import replace
 import time
 from collections import Counter
 from decimal import Decimal
@@ -46,16 +47,24 @@ def _contatore(chiama_json, diag: dict | None = None):
     """Avvolge il modello contando le chiamate (da piu' thread); oltre `MAX_CHIAMATE` non chiama piu' e
     solleva `LLMProviderError` (le foglie restano senza classe), dichiarando `diag["tetto_chiamate"]`."""
     blocco = threading.Lock()
-    conto = {"n": 0}
+    conto = {"n": 0, "rotto": False}
 
     def chiama(*a, **k):
         with blocco:
+            if conto["rotto"]:      # interruttore: dopo il primo errore del provider il modello non si chiama piu'
+                raise llm_provider.LLMProviderError("modello non disponibile: errore gia' visto in questo documento")
             if conto["n"] >= MAX_CHIAMATE:
                 if diag is not None:
                     diag["tetto_chiamate"] = MAX_CHIAMATE
                 raise llm_provider.LLMProviderError(f"tetto di {MAX_CHIAMATE} chiamate al modello raggiunto")
             conto["n"] += 1
-        return chiama_json(*a, **k)
+        try:
+            return chiama_json(*a, **k)
+        except (llm_provider.RispostaTroncata, llm_provider.ContestoEccessivo):
+            raise                   # non e' il provider che non risponde: il blocco si dimezza
+        except Exception:
+            conto["rotto"] = True
+            raise
     return chiama, conto
 
 
@@ -176,8 +185,17 @@ def _importa(file_path, contesto_mineru, chiama_json, diag: dict) -> dict:
         return {"bs": {}, "ce": {}, "prior_bs": None, "prior_ce": None, "anno_precedente": None,
                 "prior_stato": "assente", "stampati": {}, "diagnostica": diag}
 
+    def _modello_rotto():
+        """Il provider ha sbagliato: il risultato non e' adottabile e il percorso di oggi prosegue. Dichiarato."""
+        diag["motivo"] = "modello_non_disponibile"
+        diag.setdefault("mesi_precedente", None)
+        return {"bs": {}, "ce": {}, "prior_bs": None, "prior_ce": None, "anno_precedente": None,
+                "prior_stato": "assente", "stampati": {}, "diagnostica": diag}
+
     cache: dict = {}
     classi = classifica_macro(tutte, chiama_json=chiama, cache=cache, diagnostica=diag)
+    if conto["rotto"]:
+        return _modello_rotto()
     comp = componi(foglie_c, classi, anc_c)
     voti = rivotate = 0
     for a in anc_c:
@@ -191,13 +209,18 @@ def _importa(file_path, contesto_mineru, chiama_json, diag: dict) -> dict:
         rivotate += len(sotto)
         voti += len(sotto) * _VOTI
         comp = componi(foglie_c, classi, anc_c)
+        if conto["rotto"]:
+            return _modello_rotto()
     # la scadenza dei debiti la decide il testo stampato, prima del dettaglio (sp16a e sp17a sono sotto-voci diverse)
     classi_del_modello = classi
     classi, diag["scadenze"] = scadenza_dei_debiti(tutte, classi)
     classi, diag["scadenze"] = _scadenze_contro_ancore(foglie_c, classi_del_modello, classi, anc_c, diag["scadenze"])
     prima = conto["n"]
+    classi = {k: replace(c) for k, c in classi.items()}      # il dettaglio scrive in posto: mai sugli oggetti del modello
     classifica_dettagli(tutte, classi, chiama_json=chiama, cache=cache)
     diag["chiamate_dettagli"] = conto["n"] - prima
+    if conto["rotto"]:
+        return _modello_rotto()
     classi, anticipate = imposte_anticipate_oltre(tutte, classi)    # dopo il dettaglio: sp06f si sa solo ora
     diag["scadenze"] += anticipate
     comp = componi(foglie_c, classi, anc_c)
@@ -207,7 +230,9 @@ def _importa(file_path, contesto_mineru, chiama_json, diag: dict) -> dict:
            "prior_stato": "assente"}
     out["stampati"] = _stampati(comp, anc_c)
     prec = next((c for c in doc.colonne if c.indice == precedente), None)
-    diag["mesi_precedente"] = prec.mesi if prec else None
+    # Una durata diversa da 12 vale solo se la colonna stampa anche l'inizio: senza, `mesi` conta da gennaio, e un
+    # esercizio non solare (1/7-30/6) risulterebbe di 6 mesi. Senza inizio stampato la durata e' ignota (None).
+    diag["mesi_precedente"] = prec.mesi if prec and (prec.mesi == 12 or prec.inizio is not None) else None
     if prec is not None and prec.fine is not None:
         out["anno_precedente"] = prec.fine.year
     if foglie_p:

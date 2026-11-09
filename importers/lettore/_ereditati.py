@@ -497,7 +497,7 @@ def dettaglio_sp02(desc_upper: str) -> Optional[str]:
         return 'sp02e_avviamento'
     if _kw_any(desc_upper, ['IN CORSO', 'ACCONT']):
         return 'sp02f_immob_in_corso'
-    # migliorie su beni di terzi ("MAN. E RIPARAZ. SU BENI DI TERZI", Santini): B.I.7
+    # migliorie su beni di terzi ("MAN. E RIPARAZ. SU BENI DI TERZI"): B.I.7
     if _kw_any(desc_upper, ['PLURIENN', 'IMMATERIAL', 'BENI DI TERZ', 'BENI TERZI', 'MANUT',
                             'RIPARAZ', 'MAN.E RIP', 'MIGLIORIE']):
         return 'sp02g_altre_immob_imm'
@@ -524,7 +524,7 @@ def dettaglio_sp03(desc_upper: str) -> Optional[str]:
     ]):
         return 'sp03d_altri_beni'
     # "MACCHIN/IMP", "MACC./IMP.", "IMP.DEPURAZIONE" (budget_680)
-    # "F.DO AMMTO IMP AUDIO-VIDEO SORV" (Santini)
+    # "F.DO AMMTO IMP AUDIO-VIDEO SORV"
     if (_kw_any(desc_upper, ['IMPIANT', 'MACCHINAR', 'MACCHIN/', 'MACCHIN.', 'MACC.', 'IMP.', 'IMP/'])
             or re.search(r'\bIMP\b', desc_upper)):
         return 'sp03b_impianti_macchinari'

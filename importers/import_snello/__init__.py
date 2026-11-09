@@ -278,7 +278,7 @@ _CHIAVI_REPORT = ("foglie", "ancore", "blocchi", "voti", "foglie_rivotate", "chi
                   "mesi_precedente", "motivo", "tetto_chiamate", "chiamate_dettagli")
 
 
-def _tenta_lettore(file_path: str, _det: dict) -> tuple[dict | None, dict]:
+def _tenta_lettore(file_path: str) -> tuple[dict | None, dict]:
     """(candidato adottato o None, esito per il report). Mai un'eccezione: un errore e' un esito dichiarato e
     il percorso di oggi prosegue. Il cancello e' quello di ogni lettore deterministico (``deterministico.esito``);
     l'anno precedente, gia' passato dallo stesso cancello dal percorso, entra solo se letto.
@@ -340,7 +340,7 @@ def importa(file_path: str, *, ocr_text: str | None = None, analizza=None, leggi
     # stesso cancello di adozione. Spento da IMPORT_LETTORE=0 (allora nulla qui cambia).
     _lettore_rep = None
     if _lettore_acceso():
-        _lett, _lettore_rep = _tenta_lettore(file_path, _det)
+        _lett, _lettore_rep = _tenta_lettore(file_path)
         if _lett is not None:
             try:
                 from importers.struttura_documento.analisi import struttura_deterministica

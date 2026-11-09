@@ -1324,11 +1324,15 @@ il lettore gira sul solo PDF.
 7. **Anno precedente** (F3-14). Le foglie della colonna precedente si accoppiano per id a quelle della corrente e
    usano **le stesse classi**; quelle presenti solo nel precedente entrano nello stesso giro, senza chiamate in
    più. Il precedente passa per lo stesso cancello (esito `ok`, nessun tappo, massa non classificata sotto soglia),
-   altrimenti si scarta e `prior_rifiuto` dice perché. La durata viene dalla colonna del lettore
-   (`Colonna.mesi`, `diagnostica["mesi_precedente"]`) e vale **anche a periodo pieno**: un comparato di 9 mesi non si
+   altrimenti si scarta e `prior_rifiuto` dice perché; si scarta anche quando un'ancora della sua colonna non torna
+   (`controllo: blocchi`). La durata viene dalla colonna del lettore
+   (`Colonna.mesi`, `diagnostica["mesi_precedente"]`) e vale **anche a periodo pieno**, ma una durata diversa da 12 si
+   dichiara solo se la colonna stampa anche l'inizio del periodo (senza, `mesi` conta da gennaio e un esercizio non solare
+   1/7-30/6 risulterebbe di 6 mesi: `None`, anno intero come prima): un comparato di 9 mesi non si
    salva mai come anno intero (`period_months` = mesi), e un 12 dichiarato vale come durata nota. *Se si ignora:* un
    parziale salvato come anno pieno diventa un anno base falso.
-8. **Guardia di costo e tetto** (F3-15). Prima di ogni chiamata, se i lati delle foglie sono noti e attivo ≠ passivo
+8. **Guardia di costo, tetto e interruttore** (F3-15). Dopo il primo errore del provider (eccezione o timeout, non una risposta troncata)
+   il documento non chiama più il modello: esce non adottabile con `motivo: modello_non_disponibile` e prosegue il percorso di oggi. Prima di ogni chiamata, se i lati delle foglie sono noti e attivo ≠ passivo
    (più l'utile letto dal CE) oltre la soglia di adozione, il percorso esce non adottabile con
    `motivo: foglie_non_in_pari` (o `senza_foglie_sp`) **senza chiamare il modello**: nessuna classe può rimediare,
    perché la colonna decide il lato. La guardia usa **la stessa regola della composizione** (`componi.lato_sp`,
@@ -1356,7 +1360,7 @@ metà lascia il documento non adottato e l'import prosegue sul percorso di §10.
 - (Task 9) le parole scritte in verticale a schermo (un timbro sul margine) si tolgono prima di formare le righe:
   alte quanto tre righe contabili, le univano in una sola e ne perdevano gli importi;
 - catene di voci a uguale importo (eco, k=1): contate una volta;
-- titolo di lato che porta il proprio totale («STATO PATRIMONIALE ATTIVO 217.368,86») ancora, solo se attivo e
+- titolo di lato che porta il proprio totale («STATO PATRIMONIALE ATTIVO» seguito dal suo totale) ancora, solo se attivo e
   passivo coincidono: un titolo con un numero senza quella prova resta un titolo.
 
-*Misura sul campione: da completare col giro fase3-502f078.*
+*Misura sul campione (78 documenti × 3 giri, `tests/corpus/punteggio.py`, giro `fase3-4de18b6`, 2026-11-09, contro `fase3-502f078` del primo innesto): dei 9 documenti il cui PDF quadra ma l'import no alla Fase 2, **7 escono quadrati in tutti i giri** (contro 2); i due fuori sono attesi (massa non classificabile; foglie davvero non in pari, attivo e passivo affiancati). Documenti salvati sbilanciati 12 → 7, nessuno nuovo. 11 documenti adottati dal lettore, nessuno instabile nell'adozione. Macro-voci esatte 78,7% → 80,6%, dettagli KPI 76,4% → 80,3%, altri dettagli 75,5% → 78,7%. Costo per import adottato: mediana 6 chiamate al modello (max 9, tetto 40 mai toccato), 66 s di lettore (max 153 s).*

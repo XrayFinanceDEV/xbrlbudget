@@ -247,9 +247,9 @@ def test_fondo_abbinato_per_etichetta_prima_che_per_famiglia():
 
 
 def test_fondo_a_trattino_con_ordinario_e_parita_per_copertura():
-    foglie = [F("c", 400, etichetta="-Consulenza Matrix"), F("a", 300, etichetta="-Attrezzature L Sabatini"),
-              F("b", 500, etichetta="-Attrez. Cred Imp+Sabatini"),
-              F("fc", 400, "R", etichetta="-F.Amm.ord.Consul Matrix"), F("fa", 300, "R", etichetta="-F.Amm.ord.Attr L Sabatini"),
+    foglie = [F("c", 400, etichetta="-Consulenza Alfa"), F("a", 300, etichetta="-Attrezzature L Gamma"),
+              F("b", 500, etichetta="-Attrez. Cred Imp+Gamma"),
+              F("fc", 400, "R", etichetta="-F.Amm.ord.Consul Alfa"), F("fa", 300, "R", etichetta="-F.Amm.ord.Attr L Gamma"),
               F("d", 500, "R", etichetta="Debiti")]
     classi = {"c": C("sp02", "sp02b"), "a": C("sp03", "sp03c"), "b": C("sp02", "sp02g"),
               "fc": R("sp03", "SPA.B.II.F"), "fa": R("sp02", "SPA.B.I.F"), "d": C("sp16")}

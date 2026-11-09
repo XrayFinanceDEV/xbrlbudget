@@ -525,7 +525,7 @@ def _generali_stampati(doc: Documento, colonna: int, righe: list[Riga]) -> dict[
 
 def _titoli_come_totali(doc: Documento, colonna: int, righe: list[Riga], per_id: dict[str, Riga],
                         gen: dict[str, list[Riga]]) -> dict[str, list[Riga]]:
-    """Il titolo di un lato che porta il suo totale («STATO PATRIMONIALE ATTIVO 217.368,86», 1440) vale come totale
+    """Il titolo di un lato che porta il suo totale («STATO PATRIMONIALE ATTIVO» seguito dall'importo) vale come totale
     solo dove nessuna riga «Totale attivo» lo dice, il suo importo non e' zero e coincide con quello dell'altro lato,
     titolo o totale (attivo = passivo e' la prova stampata che e' un totale: senza, un titolo con un numero e' un
     titolo, 1426, 680; due zeri non provano nulla). Una riga che e' l'ancora non e' una foglia
@@ -690,7 +690,7 @@ _QUOTA_COSTI_NEGATIVI = 0.7
 
 
 def _costi_stampati_negativi(foglie: list[Foglia]) -> bool:
-    """Un conto economico che stampa i costi col meno («(1.558.295)» sul totale servizi, 1470) segue una convenzione
+    """Un conto economico che stampa i costi col meno (importi fra parentesi sul totale dei servizi) segue una convenzione
     del documento intero, non storna ogni conto. La prova e' la maggioranza: almeno cinque costi e almeno il 70% di
     loro negativo (i cinque documenti misurati sono tutti sopra il 95%; una percentuale piu' bassa e' un documento
     con storni, che resta com'e'). Un costo positivo dentro un documento sopra soglia e' lo storno."""

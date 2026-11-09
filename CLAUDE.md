@@ -207,7 +207,9 @@ ciò che non si può non sapere. Ogni voce dice la regola e **cosa si rompe** a 
   ha letto, e il foglio quadra lo stesso. → `docs/import/REGOLE-IMPORT-02-ESTRAZIONE.md` §4-bis
 - **Le rimanenze di un elenco di conti vanno per natura, mai nel ripiego**: prodotti (anche
   lavori in corso su ordinazione) in `ce02`, materie e merci in `ce10`, una regola sola per
-  tutti i lettori (`importers/rimanenze_ce.py`). Un mastro si legge dai suoi conti quando
+  tutti i lettori (`importers/rimanenze_ce.py`); il percorso del lettore applica in più la regola
+  W4 del proprietario (2026-11-04): i lavori in corso su ordinazione vanno in A.3, `ce03`
+  (`voce_rimanenze`). Un mastro si legge dai suoi conti quando
   sommano al totale stampato, anche contro il nome del mastro; un conto muto prende la natura
   del capo opposto. Iniziali in `ce12` e finali in `ce04` quadrano lo stesso e gonfiano valore
   e costi della produzione; un capo in `ce02` e l'altro in `ce10` fanno lo stesso con entrambi

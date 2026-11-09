@@ -156,6 +156,23 @@ def test_due_anni_stesse_classi(tmp_path):
     assert r["prior_stato"] == "scartato" and r["diagnostica"]["prior_rifiuto"]["controllo"] == "vuoto"
 
 
+def test_modello_che_solleva_ferma_le_chiamate_e_non_adotta(tmp_path):
+    # interruttore: dopo il primo errore del provider (timeout, connessione) il documento non chiama piu' il modello
+    chiamate = []
+
+    def rotto(*a, **k):
+        chiamate.append(1)
+        raise LLMProviderError("timeout")
+    voci = [_testata(373, 120, "31/12/2025"), _testata(453, 120, "31/12/2024")]
+    sx = [("Banca c/c", "110,00", "100,00"), ("Clienti Rossi", "210,00", "190,00"), ("Magazzino merci", "330,00", "300,00"),
+          ("Impianti", "450,00", "410,00")]
+    voci += _righe(140, sx + [("Fornitori Alfa", "400,00", "350,00"), ("Capitale sociale", "700,00", "650,00")])
+    r = importa_col_lettore(_pdf(tmp_path, voci), chiama_json=rotto)
+    assert r["diagnostica"]["motivo"] == "modello_non_disponibile"
+    assert r["bs"] == {} and r["ce"] == {} and r["prior_stato"] == "assente"
+    assert len(chiamate) == 1 and "errore" not in r["diagnostica"]
+
+
 def test_foglia_solo_nel_precedente_stesso_giro(monkeypatch):
     corr = _anno(100, 60)
     prec = _anno(90, 70, extra=[_f("b", 20, "L", "Banca")])
@@ -171,6 +188,14 @@ def test_precedente_di_nove_mesi(tmp_path):
     voci = _schema_di_legge(intestazioni=("dal 01/01/2026 al 30/09/2026", "dal 01/01/2025 al 30/09/2025"))
     r = importa_col_lettore(_pdf(tmp_path, voci), chiama_json=_mai)
     assert r["diagnostica"]["mesi_precedente"] == 9 and r["anno_precedente"] == 2025
+
+
+def test_precedente_esercizio_non_solare_senza_inizio_stampato(tmp_path):
+    # esercizio 1/7-30/6: la colonna stampa solo «30/06/2025», senza inizio; contare da gennaio darebbe 6 mesi.
+    # Senza inizio stampato la durata del precedente non e' nota: None, mai un parziale finto.
+    voci = _schema_di_legge(intestazioni=("30/06/2026", "30/06/2025"))
+    r = importa_col_lettore(_pdf(tmp_path, voci), chiama_json=_mai)
+    assert r["diagnostica"]["mesi_precedente"] is None and r["anno_precedente"] == 2025
 
 
 def test_precedente_che_non_torna_scartato(tmp_path):
@@ -230,7 +255,7 @@ def test_modello_che_fallisce_non_adottato(monkeypatch):
         raise LLMProviderError("gx10 giu'")
     _finta_lettura(monkeypatch, _anno(5000, 4960), [])
     r = importa_col_lettore("x.pdf", chiama_json=cade)
-    assert r["diagnostica"]["classi_per_fonte"] == {"errore": 4}
+    assert r["diagnostica"]["motivo"] == "modello_non_disponibile"      # interruttore: nessuna composizione
     assert _esito("lettore", r["bs"], r["ce"], r["stampati"])["esito"] != "ok"
 
 

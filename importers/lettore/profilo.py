@@ -255,7 +255,7 @@ _CODICE_IN_TESTA = re.compile(r"^[\d.]+$")
 
 
 def _titolo_con_importi(r: RigaFisica, colonne: list[Colonna]) -> str | None:
-    """Un titolo di sezione che stampa i totali sulla stessa riga («STATO PATRIMONIALE ATTIVO 217.368,86 ...»,
+    """Un titolo di sezione che stampa i totali sulla stessa riga («STATO PATRIMONIALE ATTIVO» con il totale accanto,
     «Conto economico 0,00»): le parole fuori colonna cominciano col titolo, dopo l'eventuale numero d'ordine, e
     sono poche. «UTILE DA CONTO ECONOMICO 5.000,00» nel passivo comincia altrimenti e non apre il CE."""
     parole = [p.testo for p in r.parole if _in_colonna(p, colonne) is None]
@@ -273,8 +273,8 @@ def _titolo_con_importi(r: RigaFisica, colonne: list[Colonna]) -> str | None:
 
 def _titolo_debole(r: RigaFisica, colonne: list[Colonna]) -> str | None:
     """«1 ATTIVO», «2 PASSIVO» con i totali accanto (1540): titolo dello stato patrimoniale solo finche' il
-    documento non ha aperto nessuna sezione. Piu' avanti «ATTIVO 1.464.996,42» e' un riepilogo in coda alle
-    contrapposte (229), non un titolo."""
+    documento non ha aperto nessuna sezione. Piu' avanti «ATTIVO» con un totale e' un riepilogo in coda alle
+    contrapposte, non un titolo."""
     parole = [p.testo for p in r.parole if _in_colonna(p, colonne) is None]
     while parole and _CODICE_IN_TESTA.fullmatch(parole[0]):
         parole = parole[1:]
@@ -876,10 +876,10 @@ def in_colonna_di_segni(pagina: int, x1: float, segni_colonna: frozenset[tuple[i
 def meno_staccato(parole: list[Parola], i: int, trovati: list, pagina: int = 0,
                   segni_colonna: frozenset[tuple[int, float]] = frozenset()) -> bool:
     """La parola `i` e' un trattino che fa da segno meno all'importo che la segue, e che sta in una colonna mentre il
-    trattino no. Due forme: a un soffio dall'importo («Utile (Perdita) dell'esercizio - 184.019», 1553; due trattini
-    di fila, «merci - - 30.517», 394, sono una convenzione che non si legge dal solo segno), oppure in una colonna di
+    trattino no. Due forme: a un soffio dall'importo («Utile (Perdita) dell'esercizio - 1.000»; due trattini
+    di fila, «merci - - 300», sono una convenzione che non si legge dal solo segno), oppure in una colonna di
     segni, trattini allineati sulla stessa x in tre o piu' righe della pagina («Passivo B) IMMOBILIZZAZIONI - FONDI
-    -   1.043.969», 1426: a 33 pt dall'importo, ma sempre alla stessa x)."""
+    -   1.000»: a 33 pt dall'importo, ma sempre alla stessa x)."""
     if i + 1 >= len(parole) or parole[i].testo not in _TRATTINI or trovati[i] is not None or trovati[i + 1] is None:
         return False
     imp = leggi_importo(parole[i + 1].testo)
@@ -945,8 +945,8 @@ def _negativi(righe: list[RigaFisica], colonne: list[Colonna], intere: frozenset
                 viste["meno-finale"] += 1
     forme = {f for f, n in viste.items() if n >= _MIN_NEGATIVI}
     if forme - {"meno-staccato", "meno-colonna", "marcatore"}:
-        # un documento che stampa gia' i negativi con una forma sua (394: «-235.559») non ne ha una seconda: il
-        # trattino a un soffio di un importo li' non e' un segno (dava +30.517 nella somma che chiude)
+        # un documento che stampa gia' i negativi con una forma sua («-2.000» attaccato) non ne ha una seconda: il
+        # trattino a un soffio di un importo li' non e' un segno (darebbe un positivo nella somma che chiude)
         forme.discard("meno-staccato")
     ruoli = {c.ruolo for c in colonne}
     if {"dare", "avere"} <= ruoli:
@@ -966,7 +966,7 @@ _QUOTA_MARCATORI = 0.6
 
 def _posto_marcatore(parole: list[Parola], i: int) -> int | None:
     """L'indice del marcatore D/A che segue la parola `i`, o None. Fra importo e lettera possono stare solo i
-    filetti di sottolineatura dell'importo (1562: «3.186,73 _________ D__», token fatti di soli «_» che
+    filetti di sottolineatura dell'importo («300,00 _________ D__», token fatti di soli «_» che
     cominciano sotto l'importo); la lettera puo' portare la sua sottolineatura attaccata («D__»)."""
     j = i + 1
     while j < len(parole) and set(parole[j].testo) == {"_"} and parole[j].x0 < parole[i].x1:

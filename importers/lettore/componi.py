@@ -248,8 +248,8 @@ def _abbina_fondi(foglie: list[Foglia], classi: dict[str, Classe]) -> tuple[dict
             scelte.append(f"fondo senza cespite che lo contenga, resta la classe del modello ({classi[fondo.id].macro}): "
                           f"{fondo.id}")
             continue
-        # punteggio: parole nominate, poi quanta parte del cespite spiegano («Attrezzature L Sabatini» batte
-        # «Attrez. Cred Imp+Sabatini» per «F.Amm.ord.Attr L Sabatini»)
+        # punteggio: parole nominate, poi quanta parte del cespite spiegano («Attrezzature L Gamma» batte
+        # «Attrez. Cred Imp+Gamma» per «F.Amm.ord.Attr L Gamma»)
         voti = [((n, n / len(parole[c.id])), c) for c in cespiti
                 if (n := _nomina(_parole(fondo.etichetta), parole[c.id])) and residuo[c.id] >= fondo.importo]
         voti.sort(key=lambda x: (-x[0][0], -x[0][1]))

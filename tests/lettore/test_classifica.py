@@ -378,7 +378,7 @@ def test_rettifica_dell_altro_lato_solo_per_un_conto_che_lo_dice():
     finto = Finto("X")
     c.classifica_macro([F("a", "Banca Alfa S.p.A.", lato="R"), F("b", "F/AMM.COSTI IMPIANTO", lato="R"),
                         F("c", "Crediti verso clienti", lato="R"), F("d", "Perdite esercizi precedenti", lato="L"),
-                        F("e", "Prelevamenti soci", lato="L"), F("f", "-F.Amm.ord.Consul Matrix", lato="R")],
+                        F("e", "Prelevamenti soci", lato="L"), F("f", "-F.Amm.ord.Consul Alfa", lato="R")],
                        chiama_json=finto)
     p = finto.chiamate[0][1]["properties"]
     assert "sp06.F" not in p["a"]["enum"] and "sp06.F" not in p["c"]["enum"] and "sp16" in p["a"]["enum"]
@@ -400,7 +400,7 @@ def test_fondi_che_sono_debiti_non_sono_contro_conti():
                         F("c", "Fondo rischi e oneri", lato="R"), F("d", "Debiti v/amm.ri", lato="R"),
                         F("e", "F.do amm.fabbricati", lato="R"), F("f", "FONDO SVALUTAZIONE CREDITI", lato="R"),
                         F("g", "Ammortamenti accumulati impianti", lato="R"), F("h", "F/AMM.COSTI IMPIANTO", lato="R"),
-                        F("i", "F/DO RISCHI SU CREDITI TASSATO", lato="R"), F("j", "-F.Amm.ord.Consul Matrix", lato="R")],
+                        F("i", "F/DO RISCHI SU CREDITI TASSATO", lato="R"), F("j", "-F.Amm.ord.Consul Alfa", lato="R")],
                        chiama_json=finto)
     p = finto.chiamate[0][1]["properties"]
     assert all("sp03.F" not in p[k]["enum"] for k in "abcd")

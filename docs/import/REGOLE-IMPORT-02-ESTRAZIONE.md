@@ -1324,11 +1324,15 @@ il lettore gira sul solo PDF.
 7. **Anno precedente** (F3-14). Le foglie della colonna precedente si accoppiano per id a quelle della corrente e
    usano **le stesse classi**; quelle presenti solo nel precedente entrano nello stesso giro, senza chiamate in
    più. Il precedente passa per lo stesso cancello (esito `ok`, nessun tappo, massa non classificata sotto soglia),
-   altrimenti si scarta e `prior_rifiuto` dice perché. La durata viene dalla colonna del lettore
-   (`Colonna.mesi`, `diagnostica["mesi_precedente"]`) e vale **anche a periodo pieno**: un comparato di 9 mesi non si
+   altrimenti si scarta e `prior_rifiuto` dice perché; si scarta anche quando un'ancora della sua colonna non torna
+   (`controllo: blocchi`). La durata viene dalla colonna del lettore
+   (`Colonna.mesi`, `diagnostica["mesi_precedente"]`) e vale **anche a periodo pieno**, ma una durata diversa da 12 si
+   dichiara solo se la colonna stampa anche l'inizio del periodo (senza, `mesi` conta da gennaio e un esercizio non solare
+   1/7-30/6 risulterebbe di 6 mesi: `None`, anno intero come prima): un comparato di 9 mesi non si
    salva mai come anno intero (`period_months` = mesi), e un 12 dichiarato vale come durata nota. *Se si ignora:* un
    parziale salvato come anno pieno diventa un anno base falso.
-8. **Guardia di costo e tetto** (F3-15). Prima di ogni chiamata, se i lati delle foglie sono noti e attivo ≠ passivo
+8. **Guardia di costo, tetto e interruttore** (F3-15). Dopo il primo errore del provider (eccezione o timeout, non una risposta troncata)
+   il documento non chiama più il modello: esce non adottabile con `motivo: modello_non_disponibile` e prosegue il percorso di oggi. Prima di ogni chiamata, se i lati delle foglie sono noti e attivo ≠ passivo
    (più l'utile letto dal CE) oltre la soglia di adozione, il percorso esce non adottabile con
    `motivo: foglie_non_in_pari` (o `senza_foglie_sp`) **senza chiamare il modello**: nessuna classe può rimediare,
    perché la colonna decide il lato. La guardia usa **la stessa regola della composizione** (`componi.lato_sp`,

@@ -526,7 +526,8 @@ può decidere.
   fra le attività) si netta sul bene o sul netto: sparisce da un lato e scende dall'altro della stessa massa, quindi
   il pareggio resta. È l'unico conto che attraversa il lato, e solo se il modello lo nomina come rettifica
   (`tavola.RETTIFICHE`). Un fondo oltre il proprio cespite si azzera e l'eccedenza resta sbilancio dichiarato, come
-  in `conti.py`. I totali stampati sono lordi: il cancello li confronta al netto di `_netted_contra`. Un fondo si
+  in `conti.py`. I totali stampati sono lordi: il cancello li confronta al netto di `_netted_contra` e al lordo di `spostati` (i saldi negativi passati all'altro lato,
+  `percorso._stampati`). Un fondo si
   netta sulla macro del cespite della sua famiglia (F3-16), così la massa non passa fra `sp02` e `sp03`.
 - **I dettagli stanno dentro la loro macro-voce**: il secondo passo sceglie solo fra le sotto-voci della macro
   assegnata; l'aggregato resta la somma delle sue foglie. Dal 2026-11-09 il dettaglio è il più fine possibile (ogni
@@ -538,7 +539,7 @@ può decidere.
 - Una foglia **senza classe** cade nel secchio «altri» del suo lato (`sp06g`/`sp16g`, `ce06` fra i costi, `ce04` fra
   i ricavi), mai su un aggregato né su `TIER0_FIELDS`; se anche il lato è ignoto non entra da nessuna parte.
 
-**Chiusura fino a 1 €, dichiarata.** Decisione del proprietario: fino a 1 € è arrotondamento, si chiude da sé, senza
+**Chiusura fino a 1 € per controllo, dichiarata** (le chiusure possibili sono due, utile/CE e attivo/passivo: al più 2 € in totale). Decisione del proprietario: fino a 1 € è arrotondamento, si chiude da sé, senza
 avviso all'utente. Utile stampato contro utile del CE: lo scarto va su `ce04` (utile stampato più alto) o `ce06`;
 attivo contro passivo: su `sp16g` (manca passivo) o `sp06g` (manca attivo). Ogni chiusura è registrata
 (`diagnostica["chiusure"]`) e la loro somma è `_plug_residual`. Il tappo snello fino a 10 € di §12 resta com'è e

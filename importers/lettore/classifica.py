@@ -106,20 +106,20 @@ _INDIZIO_SP = {"gross_sp02": "sp02", "gross_sp03": "sp03", "gross_sp04": "sp04",
 
 def indizio(f: Foglia) -> str | None:
     """La macro-voce che i classificatori a parole chiave di oggi darebbero all'etichetta: un indizio per il
-    modello, mai un vincolo. CE: `_resolve_ce_field` nella direzione della colonna (mai `iv_cee_hierarchy.resolve`
-    con `side`: su un nodo CE non filtra nulla); SP: le regole a parole chiave di route C per il lato della
+    modello, mai un vincolo. CE: la catena di route C (`_ereditati.catena_ce`: regole di mastro, `_resolve_ce_field`, conto foglia, sinonimo)
+    nella direzione della colonna (mai `iv_cee_hierarchy.resolve` con `side`: su un nodo CE non filtra nulla); SP: le regole a parole chiave di route C per il lato della
     colonna. `None` se non decidono, se la direzione o il lato sono ignoti, o se l'esito non e' fra le macro
     ammesse per il lato (un indizio contro la colonna non entra mai)."""
     nome = f.etichetta.upper()
     if (f.sezione or "SP") == "CE":
         direzione = {"costo": "costi", "ricavo": "ricavi"}.get(f.verso_ce or "")
-        campo = _ereditati._resolve_ce_field(nome, direzione) if direzione else None
+        campo = _ereditati.catena_ce(nome, direzione) if direzione else None
     else:
         lato = _lato_colonna(f)
         if lato == "U":
             return None
         campo = _INDIZIO_SP.get(_ereditati._regola_sp(nome, "attivo" if lato == "L" else "passivo") or "")
-    macro = tavola.macro_di(campo) if campo else None
+    macro = tavola.macro_di(campo.split("_")[0]) if campo else None  # ce10_close, ce02_open: il tag e' la macro
     return macro if macro in _ammesse(f) else None
 
 

@@ -258,6 +258,7 @@ const ATTESI_RETTIFICHE: string[] = [
   "ce01_ricavi_vendite",
   "ce02_variazioni_rimanenze",
   "ce03_lavori_interni",
+  "ce03a_incrementi_immobilizzazioni",
   "ce04_altri_ricavi",
   "ce05_materie_prime",
   "ce06_servizi",
@@ -370,6 +371,7 @@ const ATTESI_CONFRONTO_CE: string[] = [
   "ce01_ricavi_vendite",
   "ce02_variazioni_rimanenze",
   "ce03_lavori_interni",
+  "ce03a_incrementi_immobilizzazioni",
   "ce04_altri_ricavi",
   "_totale_vp",
   "_hdr_b",
@@ -487,7 +489,8 @@ const ATTESI_CONFRONTO_LABELS: ReadonlyArray<readonly [string, string]> = [
   ["sp18_ratei_risconti_passivi", "E) Ratei e risconti passivi"],
   ["ce01_ricavi_vendite", "1) Ricavi delle vendite e delle prestazioni"],
   ["ce02_variazioni_rimanenze", "2) Var. rimanenze di prodotti in c/lav., semilav. e finiti"],
-  ["ce03_lavori_interni", "4) Incrementi di immobilizzazioni per lavori interni"],
+  ["ce03_lavori_interni", "3) Variazioni dei lavori in corso su ordinazione"],
+  ["ce03a_incrementi_immobilizzazioni", "4) Incrementi di immobilizzazioni per lavori interni"],
   ["ce04_altri_ricavi", "5) Altri ricavi e proventi"],
   ["ce05_materie_prime", "6) Per materie prime, sussidiarie, di consumo e di merci"],
   ["ce06_servizi", "7) Per servizi"],
@@ -599,7 +602,7 @@ const ATTESI_LABELS_AUTONOME: ReadonlyArray<readonly [string, string]> = [
   ["sp18_ratei_risconti_passivi", "E) Ratei e risconti passivi"],
   ["ce01_ricavi_vendite", "1) Ricavi delle vendite e delle prestazioni"],
   ["ce02_variazioni_rimanenze", "2) Var. rimanenze di prodotti in c/lav., semilav. e finiti"],
-  ["ce03_lavori_interni", "4) Incrementi di immobilizzazioni per lavori interni"],
+  ["ce03_lavori_interni", "3) Variazioni dei lavori in corso su ordinazione"],
   ["ce03a_incrementi_immobilizzazioni", "4) Incrementi di immobilizzazioni per lavori interni"],
   ["ce04_altri_ricavi", "5) Altri ricavi e proventi"],
   ["ce05_materie_prime", "6) Per materie prime, sussidiarie, di consumo e di merci"],
@@ -791,7 +794,7 @@ describe("invariante: nessuna vista perde o riordina righe", () => {
 });
 
 describe("le etichette non si muovono", () => {
-  it("Confronto: la grafia contestuale delle 87 voci rese", () => {
+  it("Confronto: la grafia contestuale delle 88 voci rese", () => {
     const codici = [
       ...buildBalanceItemsWithTotals(BS_FIXTURE),
       ...buildIncomeItemsWithEbitda(CE_FIXTURE, 9),

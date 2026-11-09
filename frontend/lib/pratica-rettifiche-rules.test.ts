@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import {
   EDITABLE_RETTIFICHE,
+  PROPOSAL_RULES,
   NON_POSTABLE_FIELDS,
   QUADRATURA_INIZIALE,
   applicaMovimento,
@@ -97,5 +98,21 @@ describe("contaNelTetto", () => {
     expect(contaNelTetto({ entry_type: null })).toBe(true);
     expect(contaNelTetto({ entry_type: "confirm" })).toBe(false);
     expect(contaNelTetto({ entry_type: QUADRATURA_INIZIALE })).toBe(false);
+  });
+});
+
+describe("A.3 e A.4 del CE (Task 5-bis)", () => {
+  it("ce03 (A.3) e ce03a (A.4) sono entrambe editabili in Rettifiche", () => {
+    expect([...EDITABLE_RETTIFICHE]).toContain("ce03_lavori_interni");
+    expect([...EDITABLE_RETTIFICHE]).toContain("ce03a_incrementi_immobilizzazioni");
+  });
+
+  it("gli incrementi per lavori interni si accoppiano alle immobilizzazioni su ce03a, mai su ce03", () => {
+    const controparti = (editabile: string) =>
+      PROPOSAL_RULES.filter((r) => r.editable === editabile).map((r) => r.counterpart);
+    expect(controparti("sp02_immob_immateriali")).toEqual(["ce03a_incrementi_immobilizzazioni"]);
+    expect(controparti("sp03_immob_materiali")).toEqual(["ce03a_incrementi_immobilizzazioni"]);
+    expect(controparti("ce03a_incrementi_immobilizzazioni")).toEqual(["sp03_immob_materiali"]);
+    expect(controparti("ce03_lavori_interni")).toEqual(["sp05c_lavori_in_corso"]);
   });
 });

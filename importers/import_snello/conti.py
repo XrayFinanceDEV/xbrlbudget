@@ -8,12 +8,13 @@ from decimal import Decimal
 from itertools import product
 
 from calculations.ce_result import calculate_ce_result
-from importers.import_snello.percorsi import (CONTROPARTE, NOMI, campo_da_percorso, completa,
+from importers.import_snello.percorsi import (CONTROPARTE, NOMI, completa,
                                               e_fondo, e_netto, e_risultato, famiglia, lato_di)
 from importers.import_snello.risultato import (control_caption, has_account_code, prior_caption,
                                                sign_by_caption)
 from importers.import_snello.verifica import misura, soglia
 from importers.iv_cee_hierarchy import detail_fields
+from importers.lettore.tavola import campo_di_legge
 from importers.rimanenze_ce import e_conto_rimanenze, natura_rimanenze
 
 _C = Decimal("0.01")
@@ -293,7 +294,7 @@ def _voto_direzione_ce(foglie) -> tuple[dict, bool]:
     due_lati = len({f.lato for f in ce} & {"L", "R"}) == 2
     peso = Counter()
     for f in ce:
-        codice = campo_da_percorso(f.percorso)
+        codice = campo_di_legge(f.percorso)
         if codice is None:
             continue
         peso[(famiglia(codice), _corsia(f, due_lati))] += 1
@@ -338,7 +339,7 @@ def riclassifica_ignote(foglie, diag: dict) -> None:
     campo inventato: catture anche gli altri tag interni non tradotti, es. 'depr_sp02',
     'deduct_crediti', che classify_passivo puo' restituire come "specifico").
 
-    Muta ``f.percorso`` sul posto con un marcatore ``'#<campo>'`` che ``campo_da_percorso`` non
+    Muta ``f.percorso`` sul posto con un marcatore ``'#<campo>'`` che ``campo_di_legge`` non
     traduce: ``da_foglie`` lo riconosce all'inizio del proprio giro e la foglia entra nel voto di
     colonna (per il CE) o di lato (per lo SP) come qualunque altra foglia gia' classificata - e'
     cosi', non con un nuovo calcolo, che il netto Dare/Avere di uno stesso mastro si ottiene
@@ -552,7 +553,7 @@ def da_foglie(foglie):
                 ambigue.append(f)
             continue
 
-        codice = campo_da_percorso(f.percorso)
+        codice = campo_di_legge(f.percorso)
         if codice is None:
             diag["non_mappati"].append([f.id, f.percorso, str(f.valore.quantize(_C))])
             continue
@@ -877,7 +878,7 @@ def da_coppie(coppie):
         if any(q != p and q.startswith(p + ".") and not e_fondo(q) and q not in scadenze_scartate
                for q in tutti):
             continue
-        codice = campo_da_percorso(p)
+        codice = campo_di_legge(p)
         if codice is None:
             diag["non_mappati" if p not in ("X", "R") else "escluse"].append([p, p, str(v.quantize(_C))])
             continue

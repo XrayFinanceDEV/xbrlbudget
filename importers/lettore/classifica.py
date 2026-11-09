@@ -117,7 +117,7 @@ def _classe(codice: str | None, fonte: str, voti: tuple[str, ...] = ()) -> Class
         return Classe(None, None, fonte, voti)
     if codice in tavola.RETTIFICHE:
         p = tavola.RETTIFICHE[codice]
-        campo = tavola.campo_da_percorso_legale(p)
+        campo = tavola.campo_di_legge(p)
         macro = tavola.macro_di(campo)
         return Classe(macro, campo if campo != macro else None, fonte, voti, rettifica=p)
     return Classe(codice, None, fonte, voti)
@@ -131,7 +131,7 @@ def _chiave(f: Foglia) -> tuple:
 def _da_percorso(f: Foglia) -> Classe | None:
     if not f.percorso_legale:
         return None
-    campo = tavola.campo_da_percorso_legale(f.percorso_legale)
+    campo = tavola.campo_di_legge(f.percorso_legale)
     if not campo:
         return None
     macro = tavola.macro_di(campo)

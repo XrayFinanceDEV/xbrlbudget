@@ -302,7 +302,7 @@ def _scorri(righe: list[Riga], contrapposto: bool = True) -> dict[str, _Posizion
 
 
 def _campo(p: str) -> str | None:
-    return tavola.campo_da_percorso_legale(p)
+    return tavola.campo_di_legge(p)
 
 
 def _lettera_significativa(base: str, lettera: str) -> bool:
@@ -944,7 +944,7 @@ def ancore(doc: Documento, colonna: int) -> list[Ancora]:
             continue
         sotto = _sotto(t, per_id, ids, c, coppie)
         macro_foglie = {tavola.macro_di(m) for f in sotto if per_foglia[f].percorso_legale
-                        and (m := tavola.campo_da_percorso_legale(per_foglia[f].percorso_legale))}
+                        and (m := tavola.campo_di_legge(per_foglia[f].percorso_legale))}
         if ambigua:
             if len(macro_foglie) != 1:
                 continue

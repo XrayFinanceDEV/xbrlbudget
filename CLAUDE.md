@@ -236,6 +236,14 @@ ciò che non si può non sapere. Ogni voce dice la regola e **cosa si rompe** a 
 - **`data/iv_cee_tree.json` è solo di livello legale, per scelta.** Aggiungere alias di
   sotto-conto sembra un miglioramento ovvio e raddoppia gli importi nell'aggregazione piatta delle
   route A/B, dove padre e figlio verrebbero sommati entrambi. Nessun cancello vede quell'inflazione.
+- **I parser per singolo layout di gestionale di `situazione_contabile_parser.py` sono congelati (dal 2026-11): solo
+  correzioni di errori; un layout nuovo va nel lettore (`importers/lettore`), mai in un tredicesimo parser.** Sono i
+  dodici di `PARSER_DI_LAYOUT` (AGO, DEPI, 8 cifre, verifica I/E, mastri, sub-mastro, SEZBIL, TeamSystem, colonna
+  singola, verifica per segno, best-effort, generico). Ogni parser in più è un altro insieme di regole di classificazione e
+  di quadratura da tenere allineato a mano con le altre: diverge in silenzio, e il file che lo ha motivato quadra mentre
+  quelli di un altro gestionale cambiano senza che nessun cancello se ne accorga.
+  `tests/test_parser_layout_congelati.py` fallisce se ne compare uno nuovo; non si aggiunge il nome alla tupla per
+  farlo tornare verde. → `docs/import/REGOLE-IMPORT-02-ESTRAZIONE.md` §11
 - **L'LLM IV-CEE è l'estrattore sbagliato per una situazione contabile.** `extract_pdf_with_llm`
   legge lo schema di legge, non un elenco di conti: su una contrapposte restituisce un'estrazione
   sbilanciata che diventa il generico «Balance sheet does not balance». È l'ultima risorsa **solo**

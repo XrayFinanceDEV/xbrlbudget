@@ -15,6 +15,10 @@ Account hierarchy (DEPI format):
   ***        = section total (TOTALE ATTIVITA`, TOTALE PASSIVITA`, etc.)
   ****       = UTILE DI ESERCIZIO
   *****      = TOTALE A PAREGGIO
+
+CONGELATO dal 2026-11: i parser per singolo layout di gestionale elencati in
+PARSER_DI_LAYOUT accettano solo correzioni di errori; un layout nuovo va nel lettore
+(importers/lettore), non qui. tests/test_parser_layout_congelati.py lo fa rispettare.
 """
 
 import logging
@@ -31,6 +35,23 @@ import fitz  # PyMuPDF
 from importers.rimanenze_ce import e_conto_rimanenze, natura_rimanenze
 
 logger = logging.getLogger(__name__)
+
+# Parser di layout congelati (vedi l'intestazione del modulo). Il test ne ricava l'elenco
+# dalle funzioni `parse_*`/`extract_*` pubbliche di livello modulo, dispatcher escluso.
+PARSER_DI_LAYOUT: Tuple[str, ...] = (
+    "parse_entries",
+    "parse_entries_ago",
+    "parse_entries_single_column",
+    "parse_entries_contrapposte_depi",
+    "parse_entries_contrapposte_8digit",
+    "parse_entries_verifica_ie",
+    "parse_entries_verifica_mastri",
+    "parse_entries_verifica_sub_mastro",
+    "parse_entries_verifica_sezbil",
+    "parse_entries_teamsystem",
+    "parse_bilancio_verifica_segno",
+    "extract_contrapposte_best_effort",
+)
 
 
 @dataclass

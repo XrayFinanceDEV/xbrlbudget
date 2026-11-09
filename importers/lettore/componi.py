@@ -296,6 +296,11 @@ def componi(foglie: list[Foglia], classi: dict[str, Classe], ancore: list[Ancora
                 righe_risultato.append(f)   # si decide dopo, contro il risultato del periodo
             continue            # nel CE la riga del risultato non e' mai una foglia
         classe = classi.get(f.id)
+        if classe is not None and classe.macro == "sp13" and f.sezione == "SP":
+            # il modello lo dice risultato: lo e' solo se ne vale l'importo, altrimenti e' un conto del netto (sp12g),
+            # come la riga del risultato di un altro esercizio - mai una massa persa che sbilancia il foglio
+            righe_risultato.append(f)
+            continue
         if classe is not None and classe.macro in ("sp13", "ce21"):
             continue            # il risultato e' la cifra di chiusura, mai una foglia
         if (f.sezione == "CE" and classe is not None and classe.macro == "ce17"

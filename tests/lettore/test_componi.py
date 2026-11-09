@@ -311,3 +311,13 @@ def test_rimanenze_di_commesse_in_a3():
               F("r", 1000, "R", "CE", "ricavo", "Ricavi")]
     c = componi(foglie, {"i": C("ce06"), "f": C("ce04"), "r": C("ce01")}, [])
     assert c.ce["ce03_lavori_interni"] == -300 and c.ce.get("ce02_variazioni_rimanenze", 0) == 0
+
+
+def test_conto_del_netto_che_il_modello_chiama_risultato_resta_nel_netto():
+    # il modello manda «Utili portati a nuovo» su sp13: non e' la riga del risultato, e se non ne vale l'importo e'
+    # un conto del patrimonio netto (sp12g), mai una massa persa che sbilancia il foglio
+    foglie = [F("a", 11500), F("p", 9000, "R"), F("n", 1500, "R", etichetta="Utili portati a nuovo"),
+              F("x", 1000, "R", etichetta="Risultato in corso"), F("r", 1000, "L", "CE", "ricavo")]
+    c = componi(foglie, {"a": C("sp06"), "p": C("sp16"), "n": C("sp13"), "x": C("sp13"), "r": C("ce01")}, [])
+    assert c.bs["sp12g_utili_perdite_portati"] == 1500 and c.bs["sp13_utile_perdita"] == 1000
+    assert c.sbilancio == 0

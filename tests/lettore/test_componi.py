@@ -187,3 +187,10 @@ def test_fondo_oltre_il_cespite_azzerato_e_dichiarato_come_conti():
     assert k.tagliate == [["sp03_immob_materiali", "200.00"]]
     assert k.sbilancio == D(200)       # l'eccedenza tagliata resta sbilancio dichiarato, mai spostata
     assert "pareggio" in k.blocchi
+
+
+def test_dettaglio_non_kpi_tenuto():
+    foglie = [F("a", 300, etichetta="Erario c/IVA"), F("b", 700, etichetta="Clienti"), F("p", 1000, "R")]
+    k = componi(foglie, {"a": C("sp06", "sp06e"), "b": C("sp06", "sp06a"), "p": C("sp16")}, [])
+    assert k.bs["sp06e_crediti_tributari_breve"] == D(300) and k.bs["sp06_crediti_breve"] == D(1000)
+    assert k.sbilancio == 0

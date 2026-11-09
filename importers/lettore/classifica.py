@@ -5,7 +5,9 @@ modello; le altre vanno a Qwen a blocchi, con JSON guidato: ogni id ha il propri
 lato e verso, le sole rettifiche che possono attraversare il lato (`tavola.rettifiche_ammesse`: un fondo dal passivo,
 il netto in diminuzione dall'attivo) piu' «X» (non e' un conto). Qwen indica una classe per un id, mai un importo. Una risposta fuori
 dall'enum e' scartata e la foglia resta senza classe (F3-6): la massa senza classe la dichiara chi compone.
-Passo 2: dentro le macro con un KPI sopra (`DETTAGLI_KPI`) la sotto-voce, o «altri»; la macro non cambia mai.
+Passo 2: dentro ogni macro con dettagli (`tavola.DETTAGLI`) la sotto-voce, o «altri» se non si sa; la macro non
+cambia mai. Un dettaglio che il percorso di legge dice esattamente si tiene senza chiedere (decisione del
+proprietario, 2026-11-09: «max details if possible, if not generic accounts»).
 """
 from __future__ import annotations
 
@@ -48,7 +50,7 @@ NOTA_VOTO = "Nota: questo blocco non torna contro il totale stampato nel documen
 @dataclass
 class Classe:
     macro: str | None          # "sp06"; None = senza classe
-    dettaglio: str | None      # "sp06a" solo per le macro di DETTAGLI_KPI, altrimenti None
+    dettaglio: str | None      # "sp06a"; None = non noto (la foglia va nel secchio «altri» della macro)
     fonte: str                 # "legale" | "modello" | "voto" | "nessuna" | "errore" (il modello ha fallito)
     voti: tuple[str, ...] = ()
     rettifica: str | None = None   # percorso di legge di una rettifica stampata nella colonna opposta (`tavola.RETTIFICHE`)
@@ -100,7 +102,7 @@ def _da_percorso(f: Foglia) -> Classe | None:
     macro = tavola.macro_di(campo)
     if macro not in _ammesse(f):
         return None
-    dettaglio = campo if campo != macro and campo in tavola.DETTAGLI_KPI.get(macro, ()) else None
+    dettaglio = campo if campo != macro else None
     return Classe(macro, dettaglio, "legale")
 
 
@@ -304,6 +306,12 @@ def rivota(foglie: list[Foglia], classi: dict[str, Classe], *, voti: int = 3, ch
     return nuove
 
 
+def _voce(c: Classe) -> str:
+    if c.rettifica:
+        return f"{c.macro} ({tavola.ETICHETTE_MACRO.get(c.macro + '.F', 'rettifica')}: indica il bene rettificato)"
+    return c.macro
+
+
 def classifica_dettagli(foglie: list[Foglia], classi: dict[str, Classe], *, chiama_json=None,
                         cache: dict | None = None) -> None:
     chiama_json = chiama_json or _chiama_default()
@@ -311,21 +319,21 @@ def classifica_dettagli(foglie: list[Foglia], classi: dict[str, Classe], *, chia
     da_chiedere: dict[tuple, list[Foglia]] = {}
     for f in foglie:
         c = classi.get(f.id)
-        if not c or c.macro not in tavola.DETTAGLI_KPI or c.dettaglio:
+        if not c or c.macro not in tavola.DETTAGLI or c.dettaglio:
             continue
-        k = ("dettaglio", c.macro) + _chiave(f)
+        k = ("dettaglio", c.macro, c.rettifica) + _chiave(f)
         if k in cache:
             c.dettaglio = cache[k]
             continue
         da_chiedere.setdefault(k, []).append(f)
     rappresentanti = [g[0] for g in da_chiedere.values()]
-    enum = lambda f: list(tavola.DETTAGLI_KPI[classi[f.id].macro]) + [ALTRI]
+    enum = lambda f: list(tavola.DETTAGLI[classi[f.id].macro]) + [ALTRI]
     etichette = {d: tavola.nome_pieno(d).split("_", 1)[1].replace("_", " ")
-                 for ds in tavola.DETTAGLI_KPI.values() for d in ds}
+                 for ds in tavola.DETTAGLI.values() for d in ds}
     etichette[ALTRI] = "nessuna delle altre sotto-voci"
     risposte = _in_parallelo([
         (lambda b=b: _chiama(chiama_json, PROMPT_DETTAGLIO, b, {f.id: enum(f) for f in b}, etichette,
-                             macro_assegnata={f.id: classi[f.id].macro for f in b}))
+                             macro_assegnata={f.id: _voce(classi[f.id]) for f in b}))
         for b in _blocchi(rappresentanti)])
     per_id: dict[str, str] = {}
     for r, _p in risposte:
@@ -333,7 +341,7 @@ def classifica_dettagli(foglie: list[Foglia], classi: dict[str, Classe], *, chia
     for k, gruppo in da_chiedere.items():
         rep = gruppo[0]
         r = per_id.get(rep.id)
-        det = r if r in tavola.DETTAGLI_KPI[classi[rep.id].macro] else None   # «altri» e fuori enum: nessun dettaglio
+        det = r if r in tavola.DETTAGLI[classi[rep.id].macro] else None   # «altri» e fuori enum: nessun dettaglio
         if r is not None:
             cache[k] = det
         for f in gruppo:

@@ -1215,11 +1215,18 @@ il lettore gira sul solo PDF.
    foglia **senza classe** (fonte `nessuna`);
    un blocco che il provider non ha saputo evadere dà fonte `errore` (diverso da «X»). Il blocco troncato o
    troppo lungo si dimezza e si riprova fino a una foglia. Le foglie con la stessa etichetta, antenato, lato,
-   sezione e verso si chiedono una volta (cache). Passo 2: solo dentro le macro con un KPI sopra
-   (`tavola.DETTAGLI_KPI`: `sp06a`, `sp16a`-`sp16d`, `sp17a`-`sp17c`, `ce08a`-`ce08d`, `ce09a`/`ce09b`) la sotto-voce
-   o «altri»; **la macro non cambia mai** e un dettaglio non attraversa la propria macro-voce. Il resto della massa
-   di una macro va nel suo secchio «altri» (`tavola.altri_di`: `iv_cee_hierarchy.residual_bucket` per l'SP,
-   `residual_finalization.CE_BUCKETS` per il CE, quindi mai `ce09c` per ripiego).
+   sezione e verso si chiedono una volta (cache). Passo 2: **dentro ogni macro che ha dettagli** (`tavola.DETTAGLI`,
+   i gruppi di `iv_cee_hierarchy.detail_fields`: `sp01`-`sp07`, `sp12`, `sp14`, `sp16`, `sp17`, `ce08`, `ce09`; non
+   `ce17`, che decide il verso) la sotto-voce, con l'enum ristretto ai dettagli di quella macro più «altri»; un fondo
+   (rettifica `.F`) sceglie il dettaglio del bene che rettifica, o resta sull'aggregato. **La macro non cambia mai** e
+   un dettaglio non attraversa la propria macro-voce. Un dettaglio che il percorso di legge dice esattamente
+   («5-bis) crediti tributari» → `sp06e`) **si tiene** senza chiedere; «altri» solo quando il dettaglio non si sa, e
+   allora la massa va nel secchio «altri» della macro (`tavola.altri_di`: `iv_cee_hierarchy.residual_bucket` per
+   l'SP, `residual_finalization.CE_BUCKETS` per il CE, quindi mai `ce09c` per ripiego). Decisione del proprietario
+   (2026-11-09: «macro accounts first, then check for details, max details if possible, if not generic accounts»),
+   che sostituisce la profondità «macro + KPI» del 2026-11-06: i dettagli legali gratuiti finivano in «altri» anche
+   quando il percorso li diceva. Il passo 2 resta sotto lo stesso tetto di chiamate; le sue chiamate si dichiarano
+   in `diagnostica["chiamate_dettagli"]` (anche nel report).
 4. **Percorso legale solo se ben formato** (F3-9/F3-10). Una foglia il cui percorso di legge (dal proprio codice, dalle
    etichette o dall'antenato verificato) è ben formato (`foglie.percorso_valido`: livelli in ordine senza
    ripetizioni, voce che la tavola sa tradurre, lettera solo dove divide davvero la voce, scadenza solo dove la voce

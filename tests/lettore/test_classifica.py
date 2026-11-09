@@ -83,10 +83,56 @@ def test_dettaglio_dentro_la_macro():
     assert classi["a"].dettaglio is None
 
 
-def test_macro_senza_dettagli_kpi_non_chiede():
+def test_macro_senza_dettagli_non_chiede():
     finto = Finto("altri")
-    c.classifica_dettagli([F("a")], {"a": c.Classe("sp04", None, "modello")}, chiama_json=finto)
+    c.classifica_dettagli([F("a")], {"a": c.Classe("sp09", None, "modello")}, chiama_json=finto)
     assert finto.chiamate == []
+
+
+def test_passo_2_per_ogni_macro_con_dettagli():
+    # decisione del proprietario 2026-11-09: dettagli massimi, non solo i KPI
+    finto = Finto("sp05d")
+    classi = {"a": c.Classe("sp05", None, "modello")}
+    c.classifica_dettagli([F("a", "Merci c/rimanenze")], classi, chiama_json=finto)
+    enum = finto.chiamate[0][1]["properties"]["a"]["enum"]
+    assert set(enum) == {"sp05a", "sp05b", "sp05c", "sp05d", "sp05e", "altri"}
+    assert classi["a"].dettaglio == "sp05d" and classi["a"].macro == "sp05"
+
+
+def test_dettaglio_altri_solo_se_ignoto():
+    classi = {"a": c.Classe("sp12", None, "modello")}
+    c.classifica_dettagli([F("a", "Riserva varia", lato="R")], classi, chiama_json=Finto("altri"))
+    assert classi["a"].dettaglio is None
+
+
+def test_dettaglio_del_percorso_legale_tenuto():
+    finto = Finto("altri")
+    out = c.classifica_macro([F("a", percorso="SPA.C.II.5-bis"), F("b", "Erario", lato="R", percorso="SPP.D.12")],
+                             chiama_json=finto)
+    assert out["a"].fonte == "legale" and out["a"].macro == "sp06" and out["a"].dettaglio == "sp06e"
+    assert out["b"].dettaglio == "sp16e"
+    c.classifica_dettagli([F("a", percorso="SPA.C.II.5-bis")], out, chiama_json=finto)
+    assert finto.chiamate == [] and out["a"].dettaglio == "sp06e"
+
+
+def test_percorso_legale_senza_dettaglio_chiede_il_passo_2():
+    finto = Finto("sp06a")
+    out = c.classifica_macro([F("a", "Clienti Rossi", percorso="SPA.C.II")], chiama_json=_mai_c)
+    assert out["a"].fonte == "legale" and out["a"].dettaglio is None
+    c.classifica_dettagli([F("a", "Clienti Rossi", percorso="SPA.C.II")], out, chiama_json=finto)
+    assert out["a"].dettaglio == "sp06a" and out["a"].fonte == "legale"
+
+
+def test_fondo_chiede_il_dettaglio_del_bene():
+    finto = Finto("sp03b")
+    classi = {"a": c.Classe("sp03", None, "modello", rettifica="SPA.B.II.F")}
+    c.classifica_dettagli([F("a", "Fondo amm. impianti", lato="R")], classi, chiama_json=finto)
+    assert "sp03b" in finto.chiamate[0][1]["properties"]["a"]["enum"]
+    assert classi["a"].dettaglio == "sp03b" and classi["a"].rettifica == "SPA.B.II.F"
+
+
+def _mai_c(*a, **k):
+    raise AssertionError("il modello non va chiamato")
 
 
 def test_errore_del_modello():

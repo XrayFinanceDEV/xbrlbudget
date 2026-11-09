@@ -60,11 +60,21 @@ def test_parita_con_percorsi_e_orm():
     assert not set(t.macro_ammesse("R", "SP", None)) & set(t.macro_ammesse("L", "SP", None))
 
 
-def test_dettagli_kpi_dentro_la_macro():
-    for macro, dettagli in t.DETTAGLI_KPI.items():
+def test_dettagli_dentro_la_macro():
+    for macro, dettagli in t.DETTAGLI.items():
         for d in dettagli:
             assert t.macro_di(d) == macro
             assert t.nome_pieno(d) in h.detail_fields(t.nome_pieno(macro))
+
+
+def test_dettagli_massimi():
+    # decisione del proprietario 2026-11-09: ogni macro con dettagli, non solo i KPI; ce17 lo decide il verso
+    assert set(t.DETTAGLI["sp05"]) == {"sp05a", "sp05b", "sp05c", "sp05d", "sp05e"}
+    assert "sp12" in t.DETTAGLI and "sp14" in t.DETTAGLI and "ce09" in t.DETTAGLI and "sp02" in t.DETTAGLI
+    assert "ce17" not in t.DETTAGLI and "sp09" not in t.DETTAGLI
+    for macro in ("sp01", "sp02", "sp03", "sp04", "sp05", "sp06", "sp07", "sp12", "sp14", "sp16", "sp17", "ce08",
+                  "ce09"):
+        assert {t.nome_pieno(d) for d in t.DETTAGLI[macro]} == set(h.detail_fields(t.nome_pieno(macro)))
 
 
 def test_macro_note_e_ordinate():

@@ -275,7 +275,7 @@ def _lettore_acceso() -> bool:
 
 
 _CHIAVI_REPORT = ("foglie", "ancore", "blocchi", "voti", "foglie_rivotate", "chiamate", "classi_per_fonte", "secondi",
-                  "mesi_precedente", "motivo", "tetto_chiamate")
+                  "mesi_precedente", "motivo", "tetto_chiamate", "chiamate_dettagli")
 
 
 def _tenta_lettore(file_path: str, _det: dict) -> tuple[dict | None, dict]:

@@ -1,8 +1,9 @@
-"""La tavola unica del lettore: percorso di legge -> campo -> macro-voce -> dettaglio KPI -> secchio «altri».
+"""La tavola unica del lettore: percorso di legge -> campo -> macro-voce -> dettaglio -> secchio «altri».
 
 Non copia tabelle: delega a `percorsi` (percorso -> campo, nomi delle colonne) e a `iv_cee_hierarchy`
 (gruppi di dettaglio, secchi residui). Qui stanno solo i confini che il lettore decide: quali macro-voci
-sono ammesse da un lato e quali dettagli hanno un KPI sopra (decisione del proprietario, 2026-11-06).
+sono ammesse da un lato, quali rettifiche possono attraversarlo e fin dove si scende nei dettagli (decisioni del
+proprietario, 2026-11-06 e 2026-11-09).
 
 Il conflitto A.3/A.4 segue le colonne del DB come `percorsi`: `ce03` = A.3 lavori in corso su ordinazione,
 `ce03a` = A.4 incrementi per lavori interni (`database/models.py`). `iv_cee_tree.json` resta com'e' (Fase 4).
@@ -18,14 +19,6 @@ from importers.residual_finalization import CE_BUCKETS
 MACRO_ATTIVO: tuple[str, ...] = tuple(f"sp{n:02d}" for n in range(1, 11))
 MACRO_PASSIVO: tuple[str, ...] = tuple(f"sp{n:02d}" for n in range(11, 19))
 
-# Profondita' decisa dal proprietario: macro-voci + questi dettagli, il resto va nel secchio «altri».
-DETTAGLI_KPI: dict[str, tuple[str, ...]] = {
-    "sp06": ("sp06a",),
-    "sp16": ("sp16a", "sp16b", "sp16c", "sp16d"),
-    "sp17": ("sp17a", "sp17b", "sp17c"),
-    "ce08": ("ce08a", "ce08b", "ce08c", "ce08d"),
-    "ce09": ("ce09a", "ce09b"),
-}
 
 
 def nome_pieno(codice: str) -> str:
@@ -48,6 +41,15 @@ def _macro_dei_dettagli() -> dict[str, str]:
 
 
 _MACRO_DI = _macro_dei_dettagli()
+
+# Profondita' decisa dal proprietario (2026-11-09, sostituisce «macro + KPI»): prima la macro-voce, poi il dettaglio
+# piu' fine possibile, «altri» solo quando il dettaglio non si sa. Ogni macro con dettagli, tranne ce17: la
+# rettifica di valore la decide il verso (rivalutazione o svalutazione), non il modello.
+DETTAGLI: dict[str, tuple[str, ...]] = {}
+for _d, _m in _MACRO_DI.items():
+    if _m != "ce17":
+        DETTAGLI.setdefault(_m, ())
+        DETTAGLI[_m] += (_d,)
 
 # Macro-voci di CE dalle colonne dell'ORM (senza i dettagli di ce08/ce09/ce17); ricavi = `percorsi.RICAVI`
 # portati alla macro (ce17a -> ce17). `ce17` (rettifiche, segno ambiguo) sta in entrambi i versi.

@@ -2,7 +2,7 @@
 
 Foglie e ancore della colonna corrente -> passo 1 (macro-voce) -> `componi`; i blocchi che non tornano contro un
 totale stampato si rivotano (solo le macro-voci ancorate: un totale attivo/passivo/utile che non torna non dipende
-dalla classe, il lato lo decide la colonna) -> passo 2 (dettagli KPI) -> composizione finale. Le foglie della
+dalla classe, il lato lo decide la colonna) -> passo 2 (il dettaglio di ogni macro che ne ha) -> composizione finale. Le foglie della
 colonna precedente si accoppiano per id di riga a quelle della corrente e usano le STESSE classi; una foglia
 presente solo nel precedente entra nello stesso giro di classificazione, senza chiamate in piu'.
 
@@ -155,7 +155,9 @@ def _importa(file_path, contesto_mineru, chiama_json, diag: dict) -> dict:
         rivotate += len(sotto)
         voti += len(sotto) * _VOTI
         comp = componi(foglie_c, classi, anc_c)
+    prima = conto["n"]
     classifica_dettagli(tutte, classi, chiama_json=chiama, cache=cache)
+    diag["chiamate_dettagli"] = conto["n"] - prima
     comp = componi(foglie_c, classi, anc_c)
     bs, ce = _dati(comp)
 

@@ -338,3 +338,11 @@ def test_fondo_nella_colonna_del_passivo_adottabile(tmp_path):
     assert r["stampati"] == {"totale_attivo": D("1830.00"), "totale_passivo": D("1830.00")}
     assert r["diagnostica"]["sbilancio"] == "0.00" and r["diagnostica"]["rettifiche"] == "380.00"
     assert r["diagnostica"]["immobilizzazioni_negative_tagliate"] == []
+
+
+def test_chiamate_del_passo_2_dichiarate(tmp_path):
+    finto = Finto({"magazzino": "sp05", "impianti": "sp03", **_REGOLE})
+    r = importa_col_lettore(_pdf(tmp_path, _contrapposte_sp()), chiama_json=finto)
+    d = r["diagnostica"]
+    # magazzino e impianti hanno dettagli: il passo 2 li chiede (prima solo le macro KPI)
+    assert d["chiamate_dettagli"] >= 1 and d["chiamate_dettagli"] <= d["chiamate"] == finto.chiamate

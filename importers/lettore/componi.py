@@ -1,6 +1,6 @@
 """La composizione quadrata (Fase 3, Task 4): dalle foglie classificate a SP e CE che quadrano per costruzione.
 
-Ogni foglia somma una volta sul suo dettaglio KPI o sul secchio «altri» della sua macro-voce; una foglia senza
+Ogni foglia somma una volta sul suo dettaglio o sul secchio «altri» della sua macro-voce; una foglia senza
 classe va nel secchio «altri» del suo lato e si dichiara in `senza_classe`; se anche il lato (o il verso, nel CE)
 e' ignoto, non entra in nessun lato ma resta in `senza_classe` (mai finita in un secchio). Gli aggregati sono la somma dei
 dettagli (`percorsi.completa`), `sp13` e' l'utile del CE. Lo scarto attivo-passivo o utile-`sp13` fino a 1 euro

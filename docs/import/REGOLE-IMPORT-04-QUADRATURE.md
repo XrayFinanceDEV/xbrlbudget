@@ -528,7 +528,9 @@ può decidere.
   (`tavola.RETTIFICHE`). Un fondo oltre il proprio cespite si azzera e l'eccedenza resta sbilancio dichiarato, come
   in `conti.py`. I totali stampati sono lordi: il cancello li confronta al netto di `_netted_contra`.
 - **I dettagli stanno dentro la loro macro-voce**: il secondo passo sceglie solo fra le sotto-voci della macro
-  assegnata; l'aggregato resta la somma delle sue foglie.
+  assegnata; l'aggregato resta la somma delle sue foglie. Dal 2026-11-09 il dettaglio è il più fine possibile (ogni
+  macro che ne ha, e quello del percorso di legge si tiene), «altri» solo se ignoto: più dettagli non muovono il
+  pareggio, perché nessuno esce dalla sua macro.
 - **`sp13` è la cifra di chiusura**: l'utile del CE se il documento ha un CE; il risultato stampato se c'è solo lo
   SP (una cifra letta, non inventata, `sp13_da: "stampato"`); altrimenti assente. Mai una foglia (la riga del
   risultato e le classi `sp13`/`ce21` non si sommano).

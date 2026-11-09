@@ -19,6 +19,7 @@ from decimal import Decimal
 from importers import llm_provider
 from importers.import_snello import percorsi
 from importers.lettore.celle import leggi_celle
+from importers.lettore.diagnosi import TOLLERANZA_ARROTONDAMENTO
 from importers.lettore.classifica import (classifica_dettagli, classifica_macro, imposte_anticipate_oltre, rivota,
                                           scadenza_dei_debiti)
 from importers.lettore.componi import (Composizione, componi, e_questo_risultato, e_risultato, importo_sp,
@@ -97,6 +98,38 @@ def _foglie_non_in_pari(foglie, ancore=()) -> str | None:
     return "foglie_non_in_pari"
 
 
+_ANCORE_DEI_DEBITI = ("sp16", "sp17")
+
+
+def _scadenze_contro_ancore(foglie, prima: dict, dopo: dict, ancore, scelte: list[str]) -> tuple[dict, list[str]]:
+    """Il totale stampato dei debiti entro/oltre decide piu' di una regola di testo: uno spostamento di scadenza che
+    rompe un'ancora sp16/sp17 che con la classe del modello tornava (entro 1 euro) non si applica. Tornano alla classe
+    del modello le foglie spostate sotto l'ancora rotta o verso la sua macro; la scelta si dichiara al posto di quella
+    della regola. Senza ancore dei debiti, nulla da controllare."""
+    chiavi = [a for a in ancore if a.chiave in _ANCORE_DEI_DEBITI]
+    mosse = {f.id for f in foglie if f.id in dopo and f.id in prima and dopo[f.id].macro != prima[f.id].macro}
+    if not chiavi or not mosse:
+        return dopo, scelte
+    tornavano = {a.chiave for a in chiavi
+                 if abs(componi(foglie, prima, ancore).scarti.get(a.chiave, _ZERO)) <= TOLLERANZA_ARROTONDAMENTO}
+    out = dict(dopo)
+    tenute: list[str] = []
+    while True:
+        scarti = componi(foglie, out, ancore).scarti
+        rotte = [a for a in chiavi if a.chiave in tornavano and abs(scarti.get(a.chiave, _ZERO)) > TOLLERANZA_ARROTONDAMENTO]
+        tornano = {i for i in mosse if out[i] is not prima[i]
+                   and any(i in a.foglie or out[i].macro == a.chiave for a in rotte)}
+        if not tornano:
+            break
+        for i in sorted(tornano):
+            out[i] = prima[i]
+            tenute.append(f"scadenza del modello tenuta, l'ancora stampata {prima[i].macro} torna solo cosi': {i}")
+    if not tenute:
+        return out, scelte
+    ritornate = {t.rsplit(": ", 1)[1] for t in tenute}
+    return out, [s for s in scelte if s.rsplit(": ", 1)[1] not in ritornate] + tenute
+
+
 def _dati(c: Composizione) -> tuple[dict, dict]:
     """bs/ce con le chiavi diagnostiche sempre dichiarate: a valle una chiave assente vale zero."""
     plug = sum((x["importo"] for x in c.chiusure), _ZERO)
@@ -159,7 +192,9 @@ def _importa(file_path, contesto_mineru, chiama_json, diag: dict) -> dict:
         voti += len(sotto) * _VOTI
         comp = componi(foglie_c, classi, anc_c)
     # la scadenza dei debiti la decide il testo stampato, prima del dettaglio (sp16a e sp17a sono sotto-voci diverse)
+    classi_del_modello = classi
     classi, diag["scadenze"] = scadenza_dei_debiti(tutte, classi)
+    classi, diag["scadenze"] = _scadenze_contro_ancore(foglie_c, classi_del_modello, classi, anc_c, diag["scadenze"])
     prima = conto["n"]
     classifica_dettagli(tutte, classi, chiama_json=chiama, cache=cache)
     diag["chiamate_dettagli"] = conto["n"] - prima

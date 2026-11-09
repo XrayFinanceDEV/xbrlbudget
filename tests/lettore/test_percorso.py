@@ -370,3 +370,17 @@ def test_saldo_negativo_spostato_e_i_totali_stampati_seguono(monkeypatch):
     # attivo composto = cassa 1.000 (il credito negativo e' ora un debito): uguale al totale stampato corretto
     assert r["bs"]["sp09_disponibilita_liquide"] + r["bs"].get("sp06_crediti_breve", 0) == D(1000)
     assert r["diagnostica"]["blocchi"] == [] and all(D(v) == 0 for v in r["diagnostica"]["scarti"].values())
+
+
+def test_scadenza_non_rompe_un_ancora_stampata_che_tornava(monkeypatch):
+    # il documento stampa il totale dei debiti oltre (sp17) che contiene il mutuo: la classe del modello lo chiude, la
+    # regola «senza prova a breve» lo romperebbe. Il totale stampato decide, e la scelta si dichiara.
+    foglie = [_f("c", 1000, "L", "Cassa"), _f("m", 600, "R", "Mutuo banca"), _f("d", 400, "R", "Fornitori")]
+    _finta_lettura(monkeypatch, foglie, [Ancora("sp17", D(600), "Debiti oltre", ("m",)),
+                                         Ancora("sp16", D(400), "Debiti entro", ("d",))])
+    finto = Finto({"cassa": "sp09", "mutuo": "sp17", "fornitori": "sp16"})
+    r = importa_col_lettore("x.pdf", chiama_json=finto)
+    assert r["bs"]["sp17_debiti_lungo"] == D("600") and r["bs"]["sp16_debiti_breve"] == D("400")
+    assert r["diagnostica"]["blocchi"] == []
+    assert any("ancora" in s and s.endswith(": m") for s in r["diagnostica"]["scadenze"])
+    assert not any(s.startswith("debito a breve") and s.endswith(": m") for s in r["diagnostica"]["scadenze"])

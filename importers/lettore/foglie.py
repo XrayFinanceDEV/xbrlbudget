@@ -25,6 +25,17 @@ from importers.schema_etichette_parser import percorso as _percorso_etichetta
 _ZERO = Decimal(0)
 _RUOLI_VALORE = ("esercizio", "saldo")
 
+# Un'etichetta fatta delle sole parole del risultato («Utile», «Perdita», «Utile (perdita)», «Risultato netto») e' il
+# risultato anche senza «esercizio»: fra i costi a pareggio di un conto economico contrapposto non e' un costo
+_RISULTATO_NUDO = re.compile(r"^\W*(?:utile|perdita|risultato)(?:\W+(?:utile|perdita|netto|netta|del|di|periodo))*\W*$")
+
+
+def e_riga_del_risultato(etichetta: str) -> bool:
+    """La riga del risultato d'esercizio: «Utile (perdita) dell'esercizio», o un'etichetta di sole parole del
+    risultato («Utile»)."""
+    n = _norm(etichetta)
+    return bool(_RISULTATO_ESERCIZIO.search(n) or _RISULTATO_NUDO.match(n))
+
 # L'enumeratore di una voce di legge stampato come titolo: «C)», «II -», «1)», «5-bis)», «c)». Il maiuscolo A-E
 # vuole la parentesi e il romano la parentesi o il trattino, cosi' «A. Rossi s.r.l.» e «I.V.A.» non sono voci.
 _ENUMERATORE = re.compile(
@@ -155,6 +166,20 @@ def _titoli_di_lato_sui_due_lati(righe: list[Riga]) -> bool:
     return ("L", "A") in titoli and ("R", "P") in titoli
 
 
+def _romano_in_sequenza(r: Riga, livelli: list[str | None], prefisso: str | None) -> tuple[str, ...]:
+    """«II. Crediti»: il romano col punto e' un livello dell'outline solo se e' un totale sotto una voce con lettera,
+    fa salire il romano aperto (I, II, poi IV se III manca) e divide davvero quella voce nello schema di legge del
+    lato («SPA.C.IV» si', «SPA.C.V» no); «V. ROSSI» fra i conti no."""
+    m = _ROMANO_COL_PUNTO.match(r.etichetta)
+    if not m or not r.totale or not livelli[0] or not prefisso or m["n"] not in _VALORE_ROMANO:
+        return ()
+    if _VALORE_ROMANO[m["n"]] <= _VALORE_ROMANO.get(livelli[1] or "", 0):
+        return ()
+    voce = f"{prefisso}.{livelli[0]}"
+    figlio = _campo(f"{voce}.{m['n']}")
+    return (m["n"],) if figlio is not None and figlio != _campo(voce) else ()
+
+
 def _scorri(righe: list[Riga], contrapposto: bool = True) -> dict[str, _Posizione]:
     """Per ogni riga: il lato dello stato patrimoniale (L/R dal lato fisico; su una colonna unica dal titolo
     «attivo»/«passivo», dal totale dell'attivo, o dalla lettera maiuscola che riparte da A dopo la B), l'outline di
@@ -186,8 +211,11 @@ def _scorri(righe: list[Riga], contrapposto: bool = True) -> dict[str, _Posizion
         n = _nome(r)
         chiave = (r.sezione, r.lato)
         livelli = outline.setdefault(chiave, [None] * 4)
-        gettoni = gettoni_di_legge(r.etichetta, r.codice)
         unico = r.lato == "U" or not contrapposto
+        lato_qui = ({"L": "A", "R": "P"}.get(r.lato) if contrapposto and not unico else stato) \
+            if r.sezione == "SP" else None
+        gettoni = gettoni_di_legge(r.etichetta, r.codice) or _romano_in_sequenza(
+            r, livelli, {"A": "SPA", "P": "SPP"}.get(lato_qui or ""))
         if r.sezione == "SP" and unico:
             titolo = _lato_del_titolo(r, gettoni)
             if titolo == "A" and stato != "A":
@@ -213,7 +241,8 @@ def _scorri(righe: list[Riga], contrapposto: bool = True) -> dict[str, _Posizion
         if r.sezione == "SP":
             lato_sp = {"L": "A", "R": "P"}.get(r.lato, stato) if contrapposto else stato
         out[r.id] = _Posizione(lato_sp, tuple(g for g in livelli if g), scadenze.get(chiave))
-        if r.totale and not gettoni and not _totale_generale(r):
+        if r.totale and not gettoni and not _totale_generale(r) and not s_riga:
+            # (una ripartizione «- entro esercizio successivo» divide la voce per scadenza, non la chiude)
             # un totale chiuso senza numerazione («Totale crediti») chiude la voce che porta il suo nome: sotto di lui
             # i livelli tornano a quelli del titolo, meno quello chiuso
             titolo = _titolo_del_totale(r, righe[:k_riga])
@@ -400,11 +429,18 @@ def gettoni_di_legge(r_etichetta: str, codice: str = "") -> tuple[str, ...]:
     return (m["minuscola"],)
 
 
+# «- entro esercizio successivo», «- oltre l'esercizio successivo»: la ripartizione senza «esigibili» (Passepartout)
+_SCADENZA_A_TRATTINO = re.compile(r"^\W*(entro|oltre)\s+(?:l\W?\s*)?esercizio\s+successivo\b", re.I)
+
+
 def _scadenza(etichette: list[str]) -> str | None:
     for e in etichette:
         s = _scadenza_in_coda(e) or _scadenza_inizio(e)
         if s:
             return "E" if "entro" in s else "O"
+        m = _SCADENZA_A_TRATTINO.match(e)
+        if m:
+            return "E" if m.group(1).lower() == "entro" else "O"
     return None
 
 
@@ -729,10 +765,19 @@ class _Percorsi:
         if r.id in self._memo:
             return self._memo[r.id]
         self._memo[r.id] = ((), None, False)         # contro un ciclo
+        if _totale_generale(r):
+            # «A) TOTALE STATO PATRIMONIALE - ATTIVO»: la lettera numera il lato, non la voce A di legge; un totale
+            # di sezione verificato sotto di lui («C) TOTALE ATTIVO CIRCOLANTE») non deve ereditarla
+            return (), None, False
         posizionale = (self.pos[r.id].livelli, self.pos[r.id].scad)
         propri = gettoni_di_legge(r.etichetta, r.codice)
         padre = self.per_id.get(r.padre) if r.padre and r.padre_verificato else None
         base, scad, ancorato = self._livelli(padre) if padre is not None else ((), None, False)
+        romano = _ROMANO_COL_PUNTO.match(r.etichetta) if not propri else None
+        if romano and r.totale and ancorato and base and _tipo(base[-1]) == 0 and romano["n"] in _VALORE_ROMANO:
+            # «II. Crediti» sotto «C) Attivo circolante», verificato dai suoi conti: il romano col punto e' un livello
+            # quando e' un totale subito sotto una voce con lettera («V. ROSSI» fra i conti resta un conto)
+            propri = (romano["n"],)
         slots: list[str | None] = [None] * 4
         for g in base if ancorato else ():
             slots[_tipo(g)] = g
@@ -848,7 +893,7 @@ def ancore(doc: Documento, colonna: int) -> list[Ancora]:
     # risultato d'esercizio: il totale chiuso del conto economico, poi una sua riga, poi quello dello stato
     # patrimoniale (che e' una foglia del passivo); legato alle foglie che lo compongono se e' un totale
     cand = [r for r in righe if cella(r) is not None and r.sezione in ("CE", "SP")
-            and _RISULTATO_ESERCIZIO.search(_norm(r.etichetta)) and not _totale_generale(r)]
+            and e_riga_del_risultato(r.etichetta) and not _totale_generale(r)]
     cand.sort(key=lambda r: (r.sezione != "CE", not r.totale))
     if cand:
         r = cand[0]

@@ -266,3 +266,83 @@ def test_tetto_di_chiamate_dichiarato(tmp_path, monkeypatch):
     finto = Finto(_REGOLE)
     r = importa_col_lettore(_pdf(tmp_path, _contrapposte_sp()), chiama_json=finto)
     assert finto.chiamate <= 1 and r["diagnostica"]["tetto_chiamate"] == 1
+
+
+# --- guardia di costo con la stessa regola di lato della composizione (Task 9, fix 1) ---------------------------
+
+def _sp(id, importo, lato, lato_sp, etichetta="Conto"):
+    return Foglia(id, etichetta, "", lato, "SP", D(importo), None, (), None, lato_sp)
+
+
+def test_guardia_foglia_senza_sezione_non_blocca():
+    # una foglia di sezione ignota con un importo puo' essere CE: non si sa, quindi non si blocca
+    foglie = [_sp("a", 100, "L", "A"), _sp("p", 100, "R", "P"),
+              Foglia("x", "Acquisti merci", "", "L", "", D(5000), None, (), None, None)]
+    assert percorso._foglie_non_in_pari(foglie) is None
+
+
+def test_guardia_lato_come_la_composizione():
+    # colonna destra con lato_sp «A»: la composizione la mette nel passivo (decide la colonna), la guardia pure
+    foglie = [_sp("a", 100, "L", "A"), _sp("p", 100, "R", "A")]
+    assert percorso._foglie_non_in_pari(foglie) is None
+
+
+def test_guardia_utile_stampato_col_suo_segno():
+    # la riga del risultato non e' mai una foglia (componi): la perdita stampata fra le attivita' torna con l'ancora
+    foglie = [_sp("a", 100000, "L", "A"), _sp("r", 5000, "L", "A", "Perdita d'esercizio"), _sp("p", 105000, "R", "P")]
+    assert percorso._foglie_non_in_pari(foglie, [Ancora("utile", D(-5000), "Perdita", ())]) is None
+    assert percorso._foglie_non_in_pari(foglie) == "foglie_non_in_pari"
+
+
+def test_guardia_lato_ignoto_non_blocca():
+    foglie = [_sp("a", 100, "L", "A"), _sp("u", 900, "U", None)]
+    assert percorso._foglie_non_in_pari(foglie) is None
+
+
+def test_guardia_solo_ce_senza_foglie_sp():
+    assert percorso._foglie_non_in_pari([_ce("r", 100, "ricavo", "Ricavi")]) == "senza_foglie_sp"
+
+
+def test_guardia_verso_ce_ignoto_non_blocca_neanche_con_utile_stampato():
+    # l'utile composto viene dal CE, non dallo stampato: con un verso ignoto e' libero, quindi non si sa
+    foglie = [_sp("a", 100000, "L", "A"), _sp("p", 50000, "R", "P"), _ce("c", 10, None, "Varie")]
+    assert percorso._foglie_non_in_pari(foglie, [Ancora("utile", D(0), "Utile", ())]) is None
+
+
+def test_guardia_utile_di_un_altro_esercizio_resta_nel_passivo():
+    # l'utile stampato nel passivo non e' quello del CE: resta un conto del passivo (come in `componi`), quadra
+    foglie = [_sp("a", 11500, "L", "A"), _sp("p", 9000, "R", "P"), _sp("u", 1500, "R", "P", "Utile d'esercizio"),
+              _ce("r", 1000, "ricavo", "Ricavi")]
+    assert percorso._foglie_non_in_pari(foglie) is None
+
+
+def _contrapposte_con_fondo():
+    """Contrapposte con il fondo ammortamento nella colonna del passivo: i totali stampati sono lordi."""
+    sx = [("Impianti", "1.130,00"), ("Cassa", "470,00"), ("Clienti Rossi", "610,00"), ("Totale attivita", "2.210,00")]
+    dx = [("Fondo amm. impianti", "380,00"), ("Capitale sociale", "250,00"), ("Fornitori Alfa", "1.440,00"),
+          ("Utile d'esercizio", "140,00"), ("Totale passivita", "2.210,00")]
+    voci = [(40, 100, "STATO PATRIMONIALE"), (40, 120, "Attivo"), (310, 120, "Passivo")]
+    for k, (a, b) in enumerate(zip(sx + [("", "")], dx)):
+        y = 140 + 14 * k
+        voci += [(310, y, b[0]), (560, y, b[1])] + ([(40, y, a[0]), (280, y, a[1])] if a[0] else [])
+    return voci
+
+
+def test_fondo_nella_colonna_del_passivo_adottabile(tmp_path):
+    regole = {"fondo": "sp03.F", **_REGOLE}
+    r = importa_col_lettore(_pdf(tmp_path, _contrapposte_con_fondo()), chiama_json=Finto(regole))
+    bs = r["bs"]
+    assert bs["sp03_immob_materiali"] == D("750.00")
+    assert bs["_netted_contra"] == D("380.00") and bs["_unclassified_mass"] == 0
+    # i totali stampati sono lordi: il cancello li confronta al netto della rettifica
+    assert r["stampati"] == {"totale_attivo": D("1830.00"), "totale_passivo": D("1830.00")}
+    assert r["diagnostica"]["sbilancio"] == "0.00" and r["diagnostica"]["rettifiche"] == "380.00"
+    assert r["diagnostica"]["immobilizzazioni_negative_tagliate"] == []
+
+
+def test_chiamate_del_passo_2_dichiarate(tmp_path):
+    finto = Finto({"magazzino": "sp05", "impianti": "sp03", **_REGOLE})
+    r = importa_col_lettore(_pdf(tmp_path, _contrapposte_sp()), chiama_json=finto)
+    d = r["diagnostica"]
+    # magazzino e impianti hanno dettagli: il passo 2 li chiede (prima solo le macro KPI)
+    assert d["chiamate_dettagli"] >= 1 and d["chiamate_dettagli"] <= d["chiamate"] == finto.chiamate

@@ -60,11 +60,21 @@ def test_parita_con_percorsi_e_orm():
     assert not set(t.macro_ammesse("R", "SP", None)) & set(t.macro_ammesse("L", "SP", None))
 
 
-def test_dettagli_kpi_dentro_la_macro():
-    for macro, dettagli in t.DETTAGLI_KPI.items():
+def test_dettagli_dentro_la_macro():
+    for macro, dettagli in t.DETTAGLI.items():
         for d in dettagli:
             assert t.macro_di(d) == macro
             assert t.nome_pieno(d) in h.detail_fields(t.nome_pieno(macro))
+
+
+def test_dettagli_massimi():
+    # decisione del proprietario 2026-11-09: ogni macro con dettagli, non solo i KPI; ce17 lo decide il verso
+    assert set(t.DETTAGLI["sp05"]) == {"sp05a", "sp05b", "sp05c", "sp05d", "sp05e"}
+    assert "sp12" in t.DETTAGLI and "sp14" in t.DETTAGLI and "ce09" in t.DETTAGLI and "sp02" in t.DETTAGLI
+    assert "ce17" not in t.DETTAGLI and "sp09" not in t.DETTAGLI
+    for macro in ("sp01", "sp02", "sp03", "sp04", "sp05", "sp06", "sp07", "sp12", "sp14", "sp16", "sp17", "ce08",
+                  "ce09"):
+        assert {t.nome_pieno(d) for d in t.DETTAGLI[macro]} == set(h.detail_fields(t.nome_pieno(macro)))
 
 
 def test_macro_note_e_ordinate():
@@ -79,3 +89,19 @@ def test_lato_sconosciuto():
         t.macro_ammesse("X", "SP", None)
     with pytest.raises(ValueError):
         t.macro_ammesse("L", "ZZ", None)
+
+
+def test_rettifiche_del_lato_opposto_dai_percorsi_di_legge():
+    # un fondo (.F del bene) attraversa dal passivo, un conto del netto in diminuzione dall'attivo: niente altro
+    assert set(t.rettifiche_ammesse("R")) == {"sp02.F", "sp03.F", "sp04.F", "sp06.F"}
+    assert set(t.rettifiche_ammesse("L")) == {"sp12g.N", "sp12h.N"}
+    assert t.rettifiche_ammesse("U") == ()
+    for codice in t.rettifiche_ammesse("R"):
+        p = t.RETTIFICHE[codice]
+        assert percorsi.e_fondo(p) and percorsi.lato_di(p) == "att"
+        assert t.macro_di(percorsi.campo_da_percorso(p)) == codice[:4]
+    for codice in t.rettifiche_ammesse("L"):
+        p = t.RETTIFICHE[codice]
+        assert percorsi.e_netto(p) and percorsi.campo_da_percorso(p) == codice.split(".")[0]
+    for codice in t.RETTIFICHE:
+        assert t.ETICHETTE_MACRO[codice]

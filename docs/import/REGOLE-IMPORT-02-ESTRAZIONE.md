@@ -1163,3 +1163,157 @@ parte, salendo per i totali fino al primo antenato che non è un totale: la lett
 clienti», il lettore il totale stampato che la chiude, «Totale crediti verso clienti»). Le annotazioni
 sbagliate note stanno in `CORREZIONI_ANNOTAZIONE`, non pesano e si elencano; oggi l'elenco è vuoto, perché le
 prime (353, 1524-1526) il proprietario le ha corrette alla fonte.
+
+### Il percorso del lettore (Fase 3)
+
+> Codice: `importers/lettore/{foglie,tavola,classifica,componi,percorso}.py`, il gancio in
+> `importers/import_snello/__init__.py` (`_tenta_lettore`), i mesi dell'anno precedente in
+> `importers/pdf_importer.py` (`mesi_precedente`). La regola sul risultato è in
+> [REGOLE-IMPORT-04 §14](REGOLE-IMPORT-04-QUADRATURE.md).
+
+Dalla Fase 3 il lettore di questa sezione non solo diagnostica: **decide gli importi** di un PDF che i lettori
+deterministici noti non hanno adottato. Il modello (Qwen su gx10) non scrive mai un importo: indica una **classe**
+per un id di riga, e gli importi vengono dal testo (o dalle celle MinerU) attraverso il lettore.
+
+**Dove sta.** In `importa()` dopo i lettori deterministici noti (`xbrl_reso`, schema con o senza codici, situazione
+contabile) e **prima** del percorso del modello di §10; un documento che un lettore noto adotta ha gli stessi numeri
+di prima. Il candidato passa per **lo stesso cancello** di ogni lettore deterministico
+(`deterministico.esito`, nome pubblico di `_esito`): adottato o no lo decide quello, non il percorso. Se non è
+adottato, o solleva, il percorso di §10 prosegue come prima; l'esito resta in
+`report["lettore_percorso"]` (solo conteggi, chiamate, secondi, esito del cancello: mai etichette o importi, il
+report finisce nel DB) e la fonte di un import adottato è `deterministico:lettore`. Interruttore
+`IMPORT_LETTORE=0|false|no|off`: spento, nulla cambia rispetto a prima. Il contesto MinerU non arriva al percorso:
+il lettore gira sul solo PDF.
+
+**I passi, nell'ordine.**
+
+1. **Foglie contate una volta e ancore** (`foglie.py`). Una foglia è una riga di prospetto che non è un totale e ha
+   un importo sulla colonna; un mastro coi figli verificati non è mai foglia, e una voce che ripete i propri conti
+   (importo uguale alla somma dei conti stampati sotto, **al centesimo**) è un'eco e si toglie. *Se si ignora:* si
+   somma il mastro e i suoi figli e la massa raddoppia, e nessun cancello vede l'inflazione. Le ancore sono gli
+   importi che il documento stampa e che le foglie devono rifare: un totale chiuso risolto a una macro-voce, più
+   totale attivo, totale passivo e risultato d'esercizio. Il segno di una foglia è quello normale per il suo lato
+   (F3-1): positivo = saldo naturale; un fondo rettificativo stampato col meno resta negativo.
+2. **Il lato lo decide la colonna.** Una foglia dell'attivo cade solo su `sp01`-`sp10`, una del passivo su
+   `sp11`-`sp18`; nel CE il verso (costo/ricavo) viene dal lato sulle contrapposte, dalla sezione di legge
+   dell'antenato o dal segno D/A (F3-2), `None` se ignoto. Su uno schema a colonna unica il lato SP viene dalla
+   sezione di legge dell'antenato o dalla pagina (F3-7). *Se si ignora:* una foglia dell'attivo finita su un campo del
+   passivo sposta il pareggio senza che nessuno la veda.
+   **L'unica eccezione sono le rettifiche stampate nella colonna opposta** (decisione del proprietario, 2026-11-09:
+   «riusare il sistema del vecchio importatore»): un fondo ammortamento o svalutazione nella colonna del passivo, perdite
+   portate a nuovo o azioni proprie in quella dell'attivo. L'enum di una foglia SP offre le macro del suo lato **più le
+   sole rettifiche di quel lato** (`tavola.rettifiche_ammesse`): dal passivo `sp02.F`, `sp03.F`, `sp04.F`, `sp06.F`
+   (fondo del bene, il percorso del bene + `.F` della legenda snello, `percorsi.e_fondo`), dall'attivo `sp12g.N`,
+   `sp12h.N` (percorsi `SPP.A.VIII`/`SPP.A.X`, `percorsi.e_netto`). Il campo viene da `percorsi.campo_da_percorso`
+   come nel percorso snello (`sp06.F` → `sp06a`). Nessun altro conto attraversa il lato; un fondo rischi, il TFR, un
+   fondo imposte restano passività.
+3. **Classificazione in due passi** (`classifica.py`). Passo 1: foglia → macro-voce. Il modello risponde con JSON
+   guidato in cui **ogni id ha il proprio enum**, ristretto alle macro ammesse da *quel* lato e verso, più «X»
+   («non è un conto»), riservata a ciò che non è un conto: il prompt dice che un saldo a lato invertito (un
+   fornitore in dare fra le attività) è comunque un conto e va sulla voce ammessa più vicina, e il contesto di ogni
+   riga di SP dice «attivo»/«passivo», non solo la colonna fisica. Una risposta fuori enum, «X» o assente lascia la
+   foglia **senza classe** (fonte `nessuna`);
+   un blocco che il provider non ha saputo evadere dà fonte `errore` (diverso da «X»). Il blocco troncato o
+   troppo lungo si dimezza e si riprova fino a una foglia. Le foglie con la stessa etichetta, antenato, lato,
+   sezione e verso si chiedono una volta (cache). Passo 2: **dentro ogni macro che ha dettagli** (`tavola.DETTAGLI`,
+   i gruppi di `iv_cee_hierarchy.detail_fields`: `sp01`-`sp07`, `sp12`, `sp14`, `sp16`, `sp17`, `ce08`, `ce09`; non
+   `ce17`, che decide il verso) la sotto-voce, con l'enum ristretto ai dettagli di quella macro più «altri»; un fondo
+   (rettifica `.F`) sceglie il dettaglio del bene che rettifica, o resta sull'aggregato. **La macro non cambia mai** e
+   un dettaglio non attraversa la propria macro-voce. Un dettaglio che il percorso di legge dice esattamente
+   («5-bis) crediti tributari» → `sp06e`) **si tiene** senza chiedere; «altri» solo quando il dettaglio non si sa, e
+   allora la massa va nel secchio «altri» della macro (`tavola.altri_di`: `iv_cee_hierarchy.residual_bucket` per
+   l'SP, `residual_finalization.CE_BUCKETS` per il CE, quindi mai `ce09c` per ripiego). Decisione del proprietario
+   (2026-11-09: «macro accounts first, then check for details, max details if possible, if not generic accounts»),
+   che sostituisce la profondità «macro + KPI» del 2026-11-06: i dettagli legali gratuiti finivano in «altri» anche
+   quando il percorso li diceva. Il passo 2 resta sotto lo stesso tetto di chiamate; le sue chiamate si dichiarano
+   in `diagnostica["chiamate_dettagli"]` (anche nel report).
+4. **Percorso legale solo se ben formato** (F3-9/F3-10). Una foglia il cui percorso di legge (dal proprio codice, dalle
+   etichette o dall'antenato verificato) è ben formato (`foglie.percorso_valido`: livelli in ordine senza
+   ripetizioni, voce che la tavola sa tradurre, lettera solo dove divide davvero la voce, scadenza solo dove la voce
+   ha entro/oltre) prende la macro dalla tavola **senza chiamare il modello** (fonte `legale`); altrimenti `None` e
+   decide il modello. Una lettera che non divide la voce («a) Rossi» sotto «1) verso clienti», la ripartizione
+   «a) … entro») si toglie e resta la base, che deve valere da sola (F3-10). *Se si ignora:* un percorso sbagliato
+   costa una macro sbagliata senza nessun modello a contestarla; uno mancante costa solo una chiamata. Una macro che
+   il percorso dà ma il lato non ammette si scarta. (Task 9) Il totale generale di un lato («A) TOTALE STATO
+   PATRIMONIALE - ATTIVO») non è un livello di legge: la sua lettera numera il lato, e un totale di sezione
+   verificato sotto di lui teneva la «A» al posto della propria «C» (161: rimanenze e liquidità finite in `sp01`).
+   Il romano col punto («II. Crediti») è un livello quando è un totale sotto una voce con lettera, nella catena
+   verificata o nell'outline quando fa salire il romano aperto e divide davvero la voce del lato («SPA.C.IV» sì anche
+   se manca III, «SPA.C.V» no: mai «V. ROSSI» fra i conti); «- entro/oltre esercizio successivo» è una scadenza come
+   «esigibili entro», e come totale senza numero stampato sopra i suoi conti divide la voce, non la chiude. *Se si ignora:* il percorso manca, decide il modello sull'etichetta nuda, e
+   «CREDITI V/SOCI» sotto «5-quater) verso altri» diventa crediti verso soci (`sp01`).
+5. **Composizione** (`componi.py`): ogni foglia somma una volta sul suo dettaglio o sul secchio «altri»; gli
+   aggregati sono la somma dei dettagli (`percorsi.completa`); `sp13` viene dal CE. La riga del risultato
+   (`foglie.e_riga_del_risultato`: «Utile (perdita) dell'esercizio», o un'etichetta di sole parole del risultato
+   come «Utile» fra i costi a pareggio) nel CE non è mai una foglia; nello SP lo è solo se **non** vale il risultato
+   del periodo (a meno del segno, entro la soglia di adozione): allora è l'utile di un esercizio prima non ancora
+   destinato e va in `sp12g` (utili/perdite portati a nuovo), dichiarato in `scelte`. *Se si ignora:* togliendo
+   quella riga il passivo perde un conto vero del patrimonio netto e il foglio non quadra. Dettagli in
+   [REGOLE-IMPORT-04 §14](REGOLE-IMPORT-04-QUADRATURE.md).
+   **Una rettifica della colonna opposta si netta** sul bene o sul netto col segno opposto a quello con cui la sua
+   colonna la conta (sul dettaglio se noto, altrimenti sull'aggregato: «senza dettaglio si netta all'aggregato»):
+   attivo e passivo scendono della stessa massa e il pareggio resta. Poi le regole del percorso snello, riusate
+   tali e quali da `conti.py` (copie in `_ereditati.py` con test di deriva): un dettaglio di `sp02`/`sp03`/`sp04`
+   rimasto negativo passa all'aggregato (`netta_fondi_negativi`), un aggregato ancora negativo si azzera e
+   l'eccedenza si dichiara (`clamp_immobilizzazioni_negative` → `diagnostica["immobilizzazioni_negative_tagliate"]`,
+   nelle anomalie del report come per lo snello) e resta sbilancio dichiarato, mai spostata. I totali stampati sono
+   **lordi**: la massa rettificata si dichiara in `_netted_contra` (la chiave del percorso C) e si toglie dai totali
+   attivo e passivo che il cancello confronta (`percorso._stampati`), come `net_contra_accounts` chiede al chiamante;
+   una macro ancorata conta le rettifiche stampate sotto di lei, non quelle portate dall'altra colonna.
+   `fondi_gia_nettati` non serve qui: una voce netta e i conti che la ricostruiscono non sono mai entrambi foglie.
+   **Un fondo segue il suo cespite** (F3-16): prima di comporre, ogni fondo `sp02.F`/`sp03.F` si accoppia a un
+   cespite e si netta sulla macro (e sul dettaglio) dove il modello ha messo quel cespite, anche se il modello aveva
+   nominato l'altra categoria. Prima per etichetta: il fondo che nomina un solo cespite (ogni sua parola, tolta la
+   testa «F.DO AMM.» di `_FONDO_AMM_HEAD_RE`, è l'inizio di una parola del cespite: «F/AMM. LAV. STR. SU BENI DI
+   TERZ» e «LAVORI STRAOR. SU BENI DI TERZI»); poi per famiglia, con le regole del percorso C per cespiti e fondi
+   (`_sp02_detail_field`/`_sp03_detail_field`, copiate in `_ereditati.py`). L'etichetta viene prima perché la sola
+   famiglia sbaglia sulle abbreviazioni («F/AMM.COSTI IMPIANTO» cadrebbe fra gli impianti). Entra solo se la famiglia ha ancora cespite lordo che lo contenga (fondo ≤ cespite, i
+   fondi dal più grande); altrimenti resta la classe del modello e si dichiara in `scelte`. *Se si ignora:* fondo e
+   cespite su macro diverse spostano massa fra `sp02` e `sp03` senza toccare il totale (budget_395, 1531): nessun
+   cancello la vede.
+6. **Voti sui blocchi che non tornano** (F3-11). Se una macro ancorata (`sp06`, `ce08`, …) non rifà il proprio
+   totale stampato oltre 1 €, **solo le sue foglie** si rivotano, tre volte a temperatura 0 con **tre presentazioni
+   diverse** (altrimenti la stessa domanda darebbe tre volte la stessa risposta): ogni riga coi soli antenati;
+   il blocco con l'ancora, il totale stampato e la somma di oggi (mai un importo di foglia); il blocco in ordine
+   inverso coi fratelli. Vince la maggioranza stretta di risposte valide; senza maggioranza resta la classe di prima.
+   Mai rivotate le foglie `legale`, né per un totale generale (attivo, passivo, utile): non dipendono dalla classe,
+   il lato lo decide la colonna. Un documento che quadra al primo passo non costa un voto.
+7. **Anno precedente** (F3-14). Le foglie della colonna precedente si accoppiano per id a quelle della corrente e
+   usano **le stesse classi**; quelle presenti solo nel precedente entrano nello stesso giro, senza chiamate in
+   più. Il precedente passa per lo stesso cancello (esito `ok`, nessun tappo, massa non classificata sotto soglia),
+   altrimenti si scarta e `prior_rifiuto` dice perché. La durata viene dalla colonna del lettore
+   (`Colonna.mesi`, `diagnostica["mesi_precedente"]`) e vale **anche a periodo pieno**: un comparato di 9 mesi non si
+   salva mai come anno intero (`period_months` = mesi), e un 12 dichiarato vale come durata nota. *Se si ignora:* un
+   parziale salvato come anno pieno diventa un anno base falso.
+8. **Guardia di costo e tetto** (F3-15). Prima di ogni chiamata, se i lati delle foglie sono noti e attivo ≠ passivo
+   (più l'utile letto dal CE) oltre la soglia di adozione, il percorso esce non adottabile con
+   `motivo: foglie_non_in_pari` (o `senza_foglie_sp`) **senza chiamare il modello**: nessuna classe può rimediare,
+   perché la colonna decide il lato. La guardia usa **la stessa regola della composizione** (`componi.lato_sp`,
+   `importo_sp`, `e_risultato`): somma solo le foglie di sezione `SP`, la riga del risultato non conta, e il
+   risultato candidato è zero, l'utile delle foglie di CE o l'utile stampato col suo segno. Un lato ignoto, una
+   foglia di sezione ignota con un importo o un verso di CE ignoto non attivano la guardia (non lo so, non blocca). Tetto di
+   `MAX_CHIAMATE = 40` per documento: oltre, il modello non è più chiamato, le foglie restano senza classe e il
+   report dichiara `tetto_chiamate`.
+
+**Non solleva mai.** Qualsiasi errore dà bs/ce vuoti e `diagnostica["errore"]`; il modello che non risponde o cade a
+metà lascia il documento non adottato e l'import prosegue sul percorso di §10.
+
+**Le correzioni al lettore delle Task 2b/2c** (cambiano quali righe sono foglie, non le regole sopra):
+
+- sezione SP/CE assegnata anche su schema con dettaglio e bilanci di verifica, e ripresa a metà documento;
+- un «-» finale nell'etichetta («Utile (Perdita) dell'esercizio -») è un segno, ma solo quando un totale stampato lo
+  conferma; il «meno staccato» non si decide da una soglia;
+- due tabelle affiancate (attivo e passivo sulla stessa pagina) hanno i lati dai titoli delle due metà, che vincono
+  sul flusso di lettura;
+- lato su tipo ignoto dedotto dalle sezioni;
+- lettera D/A staccata prima dell'importo riconosciuta (marcatore per colonna, §11);
+- (Task 9) un riepilogo di righe di chiusura subito sotto il titolo di sezione («Totale Costi: / Perdita
+  d'Esercizio:» sotto «Conto Economico») non chiude la pagina, e «COSTI, SPESE E PERDITE / RICAVI E PROFITTI» è il
+  titolo del conto economico: le pagine dopo non restano più senza sezione;
+- (Task 9) le parole scritte in verticale a schermo (un timbro sul margine) si tolgono prima di formare le righe:
+  alte quanto tre righe contabili, le univano in una sola e ne perdevano gli importi;
+- catene di voci a uguale importo (eco, k=1): contate una volta;
+- titolo di lato che porta il proprio totale («STATO PATRIMONIALE ATTIVO 217.368,86») ancora, solo se attivo e
+  passivo coincidono: un titolo con un numero senza quella prova resta un titolo.
+
+*Misura sul campione: da completare col giro fase3-502f078.*

@@ -419,3 +419,113 @@ class TableHTMLParser(HTMLParser):
     def handle_data(self, data):
         if self._in_cell:
             self._buf.append(data)
+
+
+# da importers/import_snello/conti.py:_IMMOBILIZZAZIONI, main c57e232
+IMMOBILIZZAZIONI = ("sp02", "sp03", "sp04")
+
+
+# da importers/import_snello/conti.py:_netta_fondi_negativi, main c57e232
+def netta_fondi_negativi(importi: dict) -> dict:
+    """Un fondo puo' essere piu' fine del lordo stampato: se un dettaglio di immobilizzazioni
+    (sp02/sp03/sp04) resta negativo dopo la sottrazione del fondo, l'importo si sposta sul
+    valore diretto dell'aggregato e il dettaglio sparisce - senza dettaglio si netta
+    all'aggregato."""
+    from importers.import_snello.percorsi import NOMI
+    from importers.iv_cee_hierarchy import detail_fields
+
+    importi = dict(importi)
+    for aggregato in IMMOBILIZZAZIONI:
+        pieno = NOMI.get(aggregato)
+        if not pieno:
+            continue
+        for dettaglio_pieno in detail_fields(pieno):
+            codice = dettaglio_pieno.split("_")[0]
+            v = importi.get(codice)
+            if v is not None and v < 0:
+                importi[aggregato] = importi.get(aggregato, Decimal(0)) + importi.pop(codice)
+    return importi
+
+
+# da importers/import_snello/conti.py:_clamp_immobilizzazioni_negative, main c57e232
+def clamp_immobilizzazioni_negative(bs: dict) -> list:
+    """Un fondo non puo' mai superare il proprio cespite lordo: un'immobilizzazione netta ancora negativa a
+    livello di AGGREGATO (dopo ``netta_fondi_negativi``) si azzera - mai spostata su un altro campo, ne' lasciata
+    negativa - e l'eccedenza tagliata si dichiara (resta sbilancio dichiarato)."""
+    from importers.import_snello.percorsi import NOMI
+
+    tagliate = []
+    for breve in IMMOBILIZZAZIONI:
+        pieno = NOMI.get(breve)
+        if pieno and bs.get(pieno, Decimal(0)) < 0:
+            tagliate.append([pieno, str((-bs[pieno]).quantize(Decimal("0.01")))])
+            bs[pieno] = Decimal(0)
+    return tagliate
+
+
+# da importers/situazione_contabile_parser.py:_FONDO_AMM_HEAD_RE, main c57e232
+FONDO_AMM_HEAD_RE = re.compile(
+    r"^\s*(?:F\s*[./]\s*D[OI]|FD[OI]|FOND[OI]|F)\s*[./]?\s*"
+    r"AMM(?:ORT\w*|\.?\s*TO|\.?\s*NTO)?\s*[./]?\s*"
+)
+
+
+# da importers/situazione_contabile_parser.py:_kw_match, main c57e232
+def _kw_match(desc_upper: str, keywords) -> bool:
+    return all(kw in desc_upper for kw in keywords)
+
+
+# da importers/situazione_contabile_parser.py:_kw_any, main c57e232
+def _kw_any(desc_upper: str, keywords) -> bool:
+    return any(kw in desc_upper for kw in keywords)
+
+
+# da importers/situazione_contabile_parser.py:_sp02_detail_field, main c57e232
+def dettaglio_sp02(desc_upper: str) -> Optional[str]:
+    """Return the B.I detail supported by the source description, if explicit."""
+    if _kw_any(desc_upper, ['COSTI DI IMPIANTO', "COSTI D'IMPIANTO"]):
+        return 'sp02a_costi_impianto'
+    if _kw_any(desc_upper, ['SVILUPP', 'RICERCA']):
+        return 'sp02b_costi_sviluppo'
+    if _kw_any(desc_upper, ['BREVETT', 'SOFTWARE', 'OPERE INGEGNO', 'PROCEDURE ELABOR']):
+        return 'sp02c_brevetti'
+    if _kw_match(desc_upper, ['DIRITTI', 'UTILIZZ']):   # "F.DO AMM.TO DIRITTI UTILIZZO" (1343)
+        return 'sp02c_brevetti'
+    if _kw_any(desc_upper, ['CONCESS', 'LICENZ', 'MARCHI']):
+        return 'sp02d_concessioni'
+    if 'AVVIAMENTO' in desc_upper:
+        return 'sp02e_avviamento'
+    if _kw_any(desc_upper, ['IN CORSO', 'ACCONT']):
+        return 'sp02f_immob_in_corso'
+    # migliorie su beni di terzi ("MAN. E RIPARAZ. SU BENI DI TERZI", Santini): B.I.7
+    if _kw_any(desc_upper, ['PLURIENN', 'IMMATERIAL', 'BENI DI TERZ', 'BENI TERZI', 'MANUT',
+                            'RIPARAZ', 'MAN.E RIP', 'MIGLIORIE']):
+        return 'sp02g_altre_immob_imm'
+    return None
+
+
+# da importers/situazione_contabile_parser.py:_sp03_detail_field, main c57e232
+def dettaglio_sp03(desc_upper: str) -> Optional[str]:
+    """Return the B.II detail from semantics, independently of account codes."""
+    if _kw_any(desc_upper, ['IN CORSO', 'ACCONT']):
+        return 'sp03e_immob_in_corso'
+    if (_kw_any(desc_upper, ['TERREN', 'FABBRICAT', 'COSTRUZIONI LEGGER'])
+            or _kw_match(desc_upper, ['COSTR', 'LEGGER'])):     # "F.DO AMM.COSTR.LEGGERE"
+        return 'sp03a_terreni_fabbricati'
+    if 'ATTREZ' in desc_upper:                 # anche "ATTREZ./REPARTO OFFIC" (budget_680)
+        return 'sp03c_attrezzature'
+    # "MOBIL" ma non dentro IMMOBIL...: "IMMOBILIZZI TECNICI" non e' un mobile
+    # "MACCH. ORD. UFFICI", "MACCH. UFF. ELETTRON", "AUTOV. DA TRASPORT" (budget_1343)
+    if re.search(r'(?<!IM)MOBIL|MACC\w*\.?\s*(?:ORD|UFF)|\bAUTOV', desc_upper) or _kw_any(desc_upper, [
+        "MACCHINE D'UFFICIO", 'MACCHINE UFFICIO', 'MACCHINE UFF', 'ARRED',
+        'AUTOMEZZ', 'AUTOVEICOL', 'AUTOVETTUR', 'AUTO.', 'AUTO,', 'AUTOCARR',
+        'BENI VALORE', 'BENI DI VALORE', 'HARDWARE', 'CELLULAR', 'CENTRALINO',
+        'TELEFON', 'MEZZI TRASP', 'ALTRI BENI MATERIAL',
+    ]):
+        return 'sp03d_altri_beni'
+    # "MACCHIN/IMP", "MACC./IMP.", "IMP.DEPURAZIONE" (budget_680)
+    # "F.DO AMMTO IMP AUDIO-VIDEO SORV" (Santini)
+    if (_kw_any(desc_upper, ['IMPIANT', 'MACCHINAR', 'MACCHIN/', 'MACCHIN.', 'MACC.', 'IMP.', 'IMP/'])
+            or re.search(r'\bIMP\b', desc_upper)):
+        return 'sp03b_impianti_macchinari'
+    return None

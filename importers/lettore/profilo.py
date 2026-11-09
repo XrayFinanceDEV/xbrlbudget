@@ -19,7 +19,8 @@ from decimal import Decimal
 
 from importers.bilancio_classifier import classify_bilancio
 from importers.lettore._ereditati import (
-    AMOUNT_LIKE, DATE_RE, FASCIA_MARGINE, PIEDE, chiave_ripetuta, chiude_sezione, intestazione, sezione_della_chiusura,
+    _TOTALE_DI_CHIUSURA, AMOUNT_LIKE, DATE_RE, FASCIA_MARGINE, PIEDE, chiave_ripetuta, chiude_sezione, intestazione,
+    sezione_della_chiusura,
 )
 from importers.lettore.colonne import Colonna, _e_riga_testata, colonna_di, colonne_documento, completa_periodi
 from importers.lettore.geometria import Parola, RigaFisica
@@ -285,6 +286,9 @@ def _titolo_debole(r: RigaFisica, colonne: list[Colonna]) -> str | None:
 # Il titolo del conto economico di certi gestionali, ripetuto in testa a ogni pagina come un'intestazione di sezione:
 # non e' un margine da scartare (1566)
 _PERDITE_E_PROFITTI = re.compile(r"perdite\s+e\s+profitti\b", re.I)
+# Le due meta' del conto economico a sezioni contrapposte, nel titolo classico: «COSTI, SPESE E PERDITE»,
+# «RICAVI E PROFITTI» (1531: la pagina dopo uno stato patrimoniale chiuso a pareggio)
+_COSTI_E_RICAVI = re.compile(r"(?:costi\W+spese\s+e\s+perdite|ricavi\W+(?:rendite\s+e\s+)?profitti)\b", re.I)
 
 
 def _titolo_sezione(r: RigaFisica, colonne: list[Colonna]) -> str | None:
@@ -295,7 +299,8 @@ def _titolo_sezione(r: RigaFisica, colonne: list[Colonna]) -> str | None:
     compatto = re.sub(r"\s+", "", _testo(r).upper())
     if "STATOPATRIMONIALE" in compatto or "SITUAZIONEPATRIMONIALE" in compatto:
         return "SP"
-    if "CONTOECONOMICO" in compatto or "SITUAZIONEECONOMICA" in compatto or _PERDITE_E_PROFITTI.match(_testo(r)):
+    if "CONTOECONOMICO" in compatto or "SITUAZIONEECONOMICA" in compatto or _PERDITE_E_PROFITTI.match(_testo(r)) \
+            or _COSTI_E_RICAVI.match(_testo(r)):
         return "CE"     # «PERDITE E PROFITTI al 30/09/2026»: il conto economico di certi gestionali (1566)
     if compatto.startswith(("CE-", "SP-")) and len(compatto) < 40:
         return compatto[:2]     # «CE - Schema Ridotto» in testa a una delle due tabelle affiancate (1426)
@@ -374,6 +379,18 @@ def _sezioni_dei_lati(pagine: list[list[RigaFisica]], colonne: list[Colonna],
     return out
 
 
+def _senza_riepilogo(grezze: list[list[tuple]], titolo: int | None) -> list[list[tuple]]:
+    """La pagina senza le righe di chiusura stampate subito sotto il suo ultimo titolo di sezione: «Totale Costi: /
+    Perdita d'Esercizio:» sotto «Conto Economico» e' il riepilogo che apre la sezione, non la chiusura (1432: il CE
+    comincia in fondo a pagina 2 e prosegue nelle pagine dopo, che senza titolo restavano senza sezione)."""
+    if titolo is None:
+        return grezze
+    fine = titolo + 1
+    while fine < len(grezze) and _TOTALE_DI_CHIUSURA.search(" ".join(str(w[4]) for w in grezze[fine]).upper()):
+        fine += 1
+    return grezze[:titolo + 1] + grezze[fine:]
+
+
 def _sezioni(pagine: list[list[RigaFisica]], colonne: list[Colonna], avvisi: list[str]) -> list[list[str]]:
     """Per pagina e riga, la sezione: l'ultimo titolo sopra la riga; sopra il primo titolo, la sezione della
     pagina prima finche' quella non si e' chiusa col suo totale; una pagina senza titoli che chiude con un
@@ -382,12 +399,14 @@ def _sezioni(pagine: list[list[RigaFisica]], colonne: list[Colonna], avvisi: lis
     out = []
     for righe in pagine:
         titoli = []
-        for r in righe:
+        ultimo_titolo = None
+        for k, r in enumerate(righe):
             s = _titolo_sezione(r, colonne)
             if s is None and not ultima:
                 s = _titolo_debole(r, colonne)
             if s is not None:
                 titoli.append((r.y, s))
+                ultimo_titolo = k
         grezze = _tuple(righe)
         chiusura = _SEZIONI.get(sezione_della_chiusura(grezze) or "")
         if ultima and not chiusa and (titoli or chiusura in (None, ultima)):
@@ -409,7 +428,7 @@ def _sezioni(pagine: list[list[RigaFisica]], colonne: list[Colonna], avvisi: lis
                           f"sua sezione e qui non c'e' un titolo)")
         out.append(sezioni)
         ultima = titoli[-1][1] if titoli else pagina
-        chiusa = _chiude(grezze)
+        chiusa = _chiude(_senza_riepilogo(grezze, ultimo_titolo))
     _sezioni_dai_totali_di_conti(pagine, out)
     return out
 

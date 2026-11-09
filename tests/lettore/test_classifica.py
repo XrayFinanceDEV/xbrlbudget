@@ -83,10 +83,56 @@ def test_dettaglio_dentro_la_macro():
     assert classi["a"].dettaglio is None
 
 
-def test_macro_senza_dettagli_kpi_non_chiede():
+def test_macro_senza_dettagli_non_chiede():
     finto = Finto("altri")
-    c.classifica_dettagli([F("a")], {"a": c.Classe("sp04", None, "modello")}, chiama_json=finto)
+    c.classifica_dettagli([F("a")], {"a": c.Classe("sp09", None, "modello")}, chiama_json=finto)
     assert finto.chiamate == []
+
+
+def test_passo_2_per_ogni_macro_con_dettagli():
+    # decisione del proprietario 2026-11-09: dettagli massimi, non solo i KPI
+    finto = Finto("sp05d")
+    classi = {"a": c.Classe("sp05", None, "modello")}
+    c.classifica_dettagli([F("a", "Merci c/rimanenze")], classi, chiama_json=finto)
+    enum = finto.chiamate[0][1]["properties"]["a"]["enum"]
+    assert set(enum) == {"sp05a", "sp05b", "sp05c", "sp05d", "sp05e", "altri"}
+    assert classi["a"].dettaglio == "sp05d" and classi["a"].macro == "sp05"
+
+
+def test_dettaglio_altri_solo_se_ignoto():
+    classi = {"a": c.Classe("sp12", None, "modello")}
+    c.classifica_dettagli([F("a", "Riserva varia", lato="R")], classi, chiama_json=Finto("altri"))
+    assert classi["a"].dettaglio is None
+
+
+def test_dettaglio_del_percorso_legale_tenuto():
+    finto = Finto("altri")
+    out = c.classifica_macro([F("a", percorso="SPA.C.II.5-bis"), F("b", "Erario", lato="R", percorso="SPP.D.12")],
+                             chiama_json=finto)
+    assert out["a"].fonte == "legale" and out["a"].macro == "sp06" and out["a"].dettaglio == "sp06e"
+    assert out["b"].dettaglio == "sp16e"
+    c.classifica_dettagli([F("a", percorso="SPA.C.II.5-bis")], out, chiama_json=finto)
+    assert finto.chiamate == [] and out["a"].dettaglio == "sp06e"
+
+
+def test_percorso_legale_senza_dettaglio_chiede_il_passo_2():
+    finto = Finto("sp06a")
+    out = c.classifica_macro([F("a", "Clienti Rossi", percorso="SPA.C.II")], chiama_json=_mai_c)
+    assert out["a"].fonte == "legale" and out["a"].dettaglio is None
+    c.classifica_dettagli([F("a", "Clienti Rossi", percorso="SPA.C.II")], out, chiama_json=finto)
+    assert out["a"].dettaglio == "sp06a" and out["a"].fonte == "legale"
+
+
+def test_fondo_chiede_il_dettaglio_del_bene():
+    finto = Finto("sp03b")
+    classi = {"a": c.Classe("sp03", None, "modello", rettifica="SPA.B.II.F")}
+    c.classifica_dettagli([F("a", "Fondo amm. impianti", lato="R")], classi, chiama_json=finto)
+    assert "sp03b" in finto.chiamate[0][1]["properties"]["a"]["enum"]
+    assert classi["a"].dettaglio == "sp03b" and classi["a"].rettifica == "SPA.B.II.F"
+
+
+def _mai_c(*a, **k):
+    raise AssertionError("il modello non va chiamato")
 
 
 def test_errore_del_modello():
@@ -201,3 +247,48 @@ def test_prompt_dettaglio_nomina_la_macro():
         return {i: "altri" for i in schema["properties"]}
     c.classifica_dettagli([F("a", "Banca", lato="R")], {"a": c.Classe("sp16", None, "modello")}, chiama_json=fa)
     assert "voce: sp16" in visti[0]
+
+
+# --- Task 9: «X» solo per cio' che non e' un conto ----------------------------------------------------------------
+
+def test_contesto_dice_il_lato_dello_stato_patrimoniale():
+    # il modello vede «attivo»/«passivo», non solo la colonna fisica: un debito in dare fra le attivita' e' un conto
+    finto = Finto("sp06")
+    c.classifica_macro([F("a", "Fornitori esteri", lato="L"), F("b", "Clienti", lato="R"),
+                        F("u", "Banca", lato="U", lato_sp="A")], chiama_json=finto)
+    testo = finto.chiamate[0][0][0]["content"]
+    riga = {r.split(" | ")[0]: r for r in testo.splitlines() if " | " in r}
+    assert "attivo" in riga["a"] and "passivo" in riga["b"] and "attivo" in riga["u"]
+
+
+def test_prompt_riserva_x_alle_righe_che_non_sono_conti():
+    p = c.PROMPT_MACRO.lower()
+    assert "lato invertito" in p and "voce ammessa piu' vicina" in p
+
+
+def test_lato_opposto_solo_rettifiche_nell_enum():
+    finto = Finto("X")
+    c.classifica_macro([F("a", "Fondo amm. impianti", lato="R"), F("b", "Perdite a nuovo", lato="L")], chiama_json=finto)
+    p = finto.chiamate[0][1]["properties"]
+    assert "sp03.F" in p["a"]["enum"] and "sp03" not in p["a"]["enum"] and "sp12g.N" not in p["a"]["enum"]
+    assert "sp12g.N" in p["b"]["enum"] and "sp12" not in p["b"]["enum"] and "sp03.F" not in p["b"]["enum"]
+
+
+def test_fondo_dal_modello_si_netta_sul_bene():
+    out = c.classifica_macro([F("a", "Fondo amm. impianti", lato="R")], chiama_json=Finto("sp03.F"))
+    assert out["a"].macro == "sp03" and out["a"].rettifica == "SPA.B.II.F" and out["a"].dettaglio is None
+    out = c.classifica_macro([F("a", "Fondo sval. crediti", lato="R")], chiama_json=Finto("sp06.F"))
+    assert out["a"].macro == "sp06" and out["a"].dettaglio == "sp06a" and out["a"].rettifica == "SPA.C.II.1.F"
+    out = c.classifica_macro([F("a", "Perdite a nuovo", lato="L")], chiama_json=Finto("sp12g.N"))
+    assert out["a"].macro == "sp12" and out["a"].dettaglio == "sp12g" and out["a"].rettifica == "SPP.A.VIII"
+
+
+def test_rettifica_dal_lato_sbagliato_scartata():
+    out = c.classifica_macro([F("a", "Impianti", lato="L")], chiama_json=Finto("sp03.F"))
+    assert out["a"].macro is None and out["a"].fonte == "nessuna"
+
+
+def test_voto_tiene_la_rettifica():
+    f = F("a", "Fondo amm. impianti", lato="R")
+    out = c.rivota([f], {"a": c.Classe(None, None, "nessuna")}, chiama_json=Finto("sp03.F"))
+    assert out["a"].macro == "sp03" and out["a"].rettifica == "SPA.B.II.F" and out["a"].fonte == "voto"

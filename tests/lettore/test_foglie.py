@@ -647,3 +647,92 @@ def test_con_un_totale_attivo_il_titolo_non_fa_da_ancora(tmp_path):
     assert len(ancora_attivo) == 1
     r = next(r for r in doc.righe if r.id == ancora_attivo[0].riga)
     assert r.etichetta == "Totale attivo"
+
+
+def test_totale_generale_con_la_lettera_non_e_un_livello_di_legge():
+    # «A) TOTALE STATO PATRIMONIALE - ATTIVO» e' il totale di un lato, non la voce A (crediti verso soci): i totali
+    # di sezione verificati sotto di lui («C) TOTALE ATTIVO CIRCOLANTE») tengono la propria lettera
+    from importers.lettore.foglie import _Percorsi, _scorri
+    righe = [_riga_finta("r01", "C) ATTIVO CIRCOLANTE", intestazione=True),
+             _riga_finta("r02", "I) RIMANENZE", padre="r04", padre_verificato=True),
+             _riga_finta("r03", "IV) DISPONIBILITA' LIQUIDE", padre="r04", padre_verificato=True),
+             _riga_finta("r04", "C) TOTALE ATTIVO CIRCOLANTE", totale=True, padre="r05", padre_verificato=True),
+             _riga_finta("r05", "A) TOTALE STATO PATRIMONIALE - ATTIVO", totale=True)]
+    perc = _Percorsi(righe, _scorri(righe))
+    assert perc.posizione(righe[1]).livelli == ("C", "I")
+    assert perc.posizione(righe[2]).livelli == ("C", "IV")
+
+
+def test_romano_col_punto_e_un_livello_solo_da_totale_sotto_una_lettera():
+    # «II. Crediti» totale sotto «C)» e' il livello II; «V. ROSSI» fra i conti di «1) verso clienti» resta un conto
+    from importers.lettore.foglie import _Percorsi, _scorri
+    righe = [_riga_finta("r1", "C) Attivo circolante", totale=True),
+             _riga_finta("r2", "II. Crediti", totale=True, padre="r1", padre_verificato=True),
+             _riga_finta("r3", "1) verso clienti", totale=True, padre="r2", padre_verificato=True),
+             _riga_finta("r4", "V. ROSSI", padre="r3", padre_verificato=True)]
+    perc = _Percorsi(righe, _scorri(righe))
+    assert perc.posizione(righe[2]).livelli == ("C", "II", "1")
+    assert perc.posizione(righe[3]).livelli == ("C", "II", "1")
+
+
+def test_entro_oltre_esercizio_successivo_e_una_scadenza():
+    from importers.lettore.foglie import _scadenza
+    assert _scadenza(["- entro esercizio successivo"]) == "E"
+    assert _scadenza(["- oltre l'esercizio successivo"]) == "O"
+
+
+def test_conto_sotto_romano_col_punto_e_scadenza_a_trattino_prende_il_percorso():
+    # «CREDITI V/SOCI» sotto «5-quater) verso altri / - entro esercizio successivo»: crediti verso altri, non la voce A
+    from importers.lettore.foglie import _Percorsi, _percorso, _scorri
+    righe = [_riga_finta("r1", "STATO PATRIMONIALE ATTIVO", intestazione=True),
+             _riga_finta("r2", "C) Attivo circolante", totale=True),
+             _riga_finta("r3", "II. Crediti", totale=True, padre="r2", padre_verificato=True),
+             _riga_finta("r4", "5-quater) verso altri", totale=True, padre="r3", padre_verificato=True),
+             _riga_finta("r5", "- entro esercizio successivo", totale=True, padre="r4", padre_verificato=True),
+             _riga_finta("r6", "Crediti v/soci", padre="r5", padre_verificato=True)]
+    perc = _Percorsi(righe, _scorri(righe))
+    assert _percorso(righe[5], perc.posizione(righe[5]))[0] == "SPA.C.II.5-quater.E"
+
+
+def test_outline_posizionale_col_romano_col_punto_in_sequenza():
+    # senza padre verificato la riga ripiega sull'outline posizionale: «II. Crediti» dopo «I. Rimanenze» sotto «C)»
+    # e' il livello II; «V. ROSSI» fuori sequenza no
+    righe = [_riga_finta("r0", "STATO PATRIMONIALE ATTIVO", intestazione=True),
+             _riga_finta("r1", "C) Attivo circolante", intestazione=True),
+             _riga_finta("r2", "I. Rimanenze", totale=True),
+             _riga_finta("r3", "II. Crediti", totale=True),
+             _riga_finta("r4", "1) verso clienti", totale=True),
+             _riga_finta("r5", "V. ROSSI", totale=True),
+             _riga_finta("r6", "Cliente alfa")]
+    pos = _scorri(righe)
+    assert pos["r3"].livelli == ("C", "II") and pos["r4"].livelli == ("C", "II", "1")
+    assert pos["r5"].livelli == ("C", "II", "1")          # «V.» fuori sequenza non e' il livello V
+
+
+def test_la_ripartizione_entro_oltre_non_chiude_la_voce_sopra():
+    # «- entro esercizio successivo» e' un totale senza numero stampato sopra i suoi conti: divide la voce per
+    # scadenza, non la chiude; i conti sotto restano in «1) verso clienti»
+    righe = [_riga_finta("r0", "STATO PATRIMONIALE ATTIVO", intestazione=True),
+             _riga_finta("r1", "C) Attivo circolante", intestazione=True),
+             _riga_finta("r2", "I. Rimanenze", totale=True),
+             _riga_finta("r3", "II. Crediti", totale=True),
+             _riga_finta("r4", "1) verso clienti", totale=True),
+             _riga_finta("r5", "- entro esercizio successivo", totale=True),
+             _riga_finta("r6", "Cliente alfa")]
+    pos = _scorri(righe)
+    assert pos["r6"].livelli == ("C", "II", "1") and pos["r6"].scad == "E"
+
+
+def test_romano_col_punto_che_salta_un_numero_vale_se_e_una_voce_di_legge():
+    # «III.» assente (attivita' finanziarie a zero): «IV. Disponibilita' liquide» dopo «II.» e' il livello IV,
+    # «V. ROSSI» no (sotto C) dell'attivo non esiste una voce V)
+    righe = [_riga_finta("r0", "STATO PATRIMONIALE ATTIVO", intestazione=True),
+             _riga_finta("r1", "C) Attivo circolante", intestazione=True),
+             _riga_finta("r3", "II. Crediti", totale=True),
+             _riga_finta("r4", "1) verso clienti", totale=True),
+             _riga_finta("r5", "IV. Disponibilita' liquide", totale=True),
+             _riga_finta("r6", "Cassa"),
+             _riga_finta("r7", "V. ROSSI", totale=True)]
+    pos = _scorri(righe)
+    assert pos["r6"].livelli == ("C", "IV")
+    assert pos["r7"].livelli == ("C", "IV")

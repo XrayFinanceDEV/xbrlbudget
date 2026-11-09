@@ -16,7 +16,8 @@ class IncomeStatementBase(BaseModel):
     ce02_variazioni_rimanenze: Decimal = Field(default=Decimal("0"))
     # A.3) Variazioni dei lavori in corso su ordinazione
     ce03_lavori_interni: Decimal = Field(default=Decimal("0"))
-    # A.4) Incrementi di immobilizzazioni per lavori interni (included in ce04)
+    # A.4) Incrementi di immobilizzazioni per lavori interni
+    ce03a_incrementi_immobilizzazioni: Decimal = Field(default=Decimal("0"))
     # A.5) Altri ricavi e proventi
     ce04_altri_ricavi: Decimal = Field(default=Decimal("0"))
 
@@ -78,6 +79,7 @@ class IncomeStatementUpdate(BaseModel):
     ce01_ricavi_vendite: Optional[Decimal] = None
     ce02_variazioni_rimanenze: Optional[Decimal] = None
     ce03_lavori_interni: Optional[Decimal] = None
+    ce03a_incrementi_immobilizzazioni: Optional[Decimal] = None
     ce04_altri_ricavi: Optional[Decimal] = None
     ce05_materie_prime: Optional[Decimal] = None
     ce06_servizi: Optional[Decimal] = None

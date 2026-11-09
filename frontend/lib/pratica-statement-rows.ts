@@ -299,6 +299,7 @@ export function buildIncomeItemsWithEbitda(
     labeled("ce01_ricavi_vendite"),
     labeled("ce02_variazioni_rimanenze"),
     labeled("ce03_lavori_interni"),
+    labeled("ce03a_incrementi_immobilizzazioni"),
     labeled("ce04_altri_ricavi"),
     makeRow("_totale_vp", "Totale Valore della Produzione", partialVP, refVP, annVP, priorVP),
     // B) COSTI DELLA PRODUZIONE

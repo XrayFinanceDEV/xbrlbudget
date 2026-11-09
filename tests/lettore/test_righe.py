@@ -996,3 +996,30 @@ def test_marcatore_con_sottolineatura_e_lettera_sottolineata(tmp_path):
     assert "_" not in cassa.etichetta and not cassa.etichetta.endswith(" A")
     assert _riga(doc, "CASSA CONTANTI").celle[0].valore == Decimal("839.66")
     assert "_" not in _riga(doc, "CASSA CONTANTI").etichetta
+
+
+def _totali_all_unita(con_centesimi: int):
+    voci = _riempi_interi(140, n=24)
+    # gli interi nudi non sono importi per `scrivi_pdf`, che li posa dal bordo sinistro: qui si allineano a destra
+    voci += [(50, 480, "Assegni"), (480 - fitz.get_text_length("82", fontsize=9), 480, "82"),
+             (560 - fitz.get_text_length("405", fontsize=9), 480, "405")]
+    for k in range(con_centesimi):
+        voci += [(50, 494 + k * 14, f"Risultato {k + 1}"), (480, 494 + k * 14, "(263.964,44)"),
+                 (560, 494 + k * 14, "1.000")]
+    return voci
+
+
+def test_intero_nudo_in_una_colonna_all_unita_con_un_risultato_al_centesimo(tmp_path):
+    # 1540: la colonna dei totali stampa tutto all'unita' tranne il risultato d'esercizio; un importo con i
+    # centesimi su piu' di venti non fa dei suoi interi nudi («82», «623») del testo dell'etichetta
+    doc = _leggi(tmp_path, [_totali_all_unita(1)])
+    riga = next(r for r in doc.righe if r.etichetta.startswith("Assegni"))
+    assert riga.etichetta == "Assegni"
+    assert riga.celle[0].valore == Decimal("82") and riga.celle[1].valore == Decimal("405")
+
+
+def test_intero_nudo_resta_testo_dove_i_centesimi_non_sono_l_eccezione(tmp_path):
+    # una colonna con i centesimi su piu' del 5% degli importi stampa i centesimi: un intero nudo li' e' un codice
+    doc = _leggi(tmp_path, [_totali_all_unita(3)])
+    riga = next(r for r in doc.righe if r.etichetta.startswith("Assegni"))
+    assert 0 not in riga.celle

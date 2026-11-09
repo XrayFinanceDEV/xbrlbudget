@@ -9,8 +9,9 @@
 //      * quattro aggregati di primo livello (sp12_riserve, sp16_debiti_breve,
 //        sp17_debiti_lungo, sp18_ratei_risconti_passivi), che Rettifiche non
 //        rende come righe editabili ma ATTIVO_CODES/PASSIVO_CODES richiedono;
-//      * cinque voci che altre viste pinnate rendono davvero (sp14a..sp14d e
-//        ce03a_incrementi_immobilizzazioni) — vedi VOCI_NON_IN_RETTIFICHE.
+//      * quattro voci che altre viste pinnate rendono davvero (sp14a..sp14d).
+//        ce03a_incrementi_immobilizzazioni era la quinta: dal Task 5-bis
+//        (2026-11-09) e' in CE_A, editabile in Rettifiche.
 //  - il padre: DETAIL_PARENTS (lib/pratica-codes.ts), più EXTRA_PARENTS per le
 //    voci che quella mappa non copre. Assente = voce di primo livello.
 //  - la sezione: ATTIVO_CODES per l'attivo (e le sue sotto-voci); sp11/sp12*/
@@ -148,7 +149,8 @@ const GRAFIA_RETTIFICHE: Record<string, string> = {
   // CE
   ce01_ricavi_vendite: "1) Ricavi delle vendite e delle prestazioni",
   ce02_variazioni_rimanenze: "2) Var. rimanenze di prodotti in c/lav., semilav. e finiti",
-  ce03_lavori_interni: "4) Incrementi di immobilizzazioni per lavori interni",
+  ce03_lavori_interni: "3) Variazioni dei lavori in corso su ordinazione",
+  ce03a_incrementi_immobilizzazioni: "4) Incrementi di immobilizzazioni per lavori interni",
   ce04_altri_ricavi: "5) Altri ricavi e proventi",
   ce05_materie_prime: "6) Per materie prime, sussidiarie, di consumo e di merci",
   ce06_servizi: "7) Per servizi",
@@ -299,7 +301,8 @@ const CONFRONTO_RELABEL: Record<string, string> = {
   // CE
   ce01_ricavi_vendite: "1) Ricavi delle vendite e delle prestazioni",
   ce02_variazioni_rimanenze: "2) Var. rimanenze di prodotti in c/lav., semilav. e finiti",
-  ce03_lavori_interni: "4) Incrementi di immobilizzazioni per lavori interni",
+  ce03_lavori_interni: "3) Variazioni dei lavori in corso su ordinazione",
+  ce03a_incrementi_immobilizzazioni: "4) Incrementi di immobilizzazioni per lavori interni",
   ce04_altri_ricavi: "5) Altri ricavi e proventi",
   ce05_materie_prime: "6) Per materie prime, sussidiarie, di consumo e di merci",
   ce06_servizi: "7) Per servizi",
@@ -354,17 +357,10 @@ const SP14_DETAIL: ReadonlyArray<readonly [string, string]> = [
   ["sp14d_altri_fondi", "Altri fondi"],
 ];
 
-// Riga resa da /forecast/income (app/forecast/income/page.tsx:562) e sommata
-// nel Valore della Produzione (VP_CODES, lib/pratica-codes.ts:72). `lib/` non
-// può importare da `app/`: il testo è copiato, non derivabile con un test.
-// Nessuna fonte le assegna un padre, quindi è voce di primo livello
-// (regola del brief: fuori da DETAIL_PARENTS ⇒ parent null).
-const CE03A_CODE = "ce03a_incrementi_immobilizzazioni";
-const CE03A_LABEL = "4) Incrementi di immobilizzazioni per lavori interni";
-
+// ce03a (A.4) NON e' piu' una voce extra: dal Task 5-bis (2026-11-09) sta in CE_A,
+// quindi nelle Rettifiche, con la sua etichetta in GRAFIA_RETTIFICHE.
 const EXTRA_LABELS: Record<string, string> = {
   ...Object.fromEntries(SP14_DETAIL),
-  [CE03A_CODE]: CE03A_LABEL,
 };
 
 const EXTRA_PARENTS: Record<string, string> = Object.fromEntries(
@@ -400,11 +396,10 @@ function labelFor(code: string): { label: string; shortLabel?: string; dettaglio
 }
 
 // ===== Quali codici, in che ordine =====
-// L'elenco di Rettifiche più i 4 aggregati di primo livello e le 5 voci che
+// L'elenco di Rettifiche più i 4 aggregati di primo livello e le 4 voci che
 // quella vista non rende (vedi commenti in testa al file). Le voci aggiunte
 // sono inserite nel punto in cui la vista che le rende le colloca: sp14a..d
-// subito dopo sp14_fondi_rischi (BALANCE_HIERARCHY_GROUPS), ce03a fra
-// ce03_lavori_interni e ce04_altri_ricavi (app/forecast/income/page.tsx).
+// subito dopo sp14_fondi_rischi (BALANCE_HIERARCHY_GROUPS). ce03a sta in CE_A.
 const ALL_CODES: string[] = [
   ...RETTIFICHE_BS_ATTIVO,
   ...RETTIFICHE_BS_PN,
@@ -416,7 +411,7 @@ const ALL_CODES: string[] = [
   ...DEBT_GROUPS.flatMap((g) => [...g.entro, ...g.oltre]),
   "sp17_debiti_lungo",
   "sp18_ratei_risconti_passivi",
-  ...CE_A.flatMap((c) => (c === "ce03_lavori_interni" ? [c, CE03A_CODE] : [c])),
+  ...CE_A,
   ...CE_B,
   ...CE_C,
   ...CE_D,
@@ -568,10 +563,10 @@ export function sectionRows(section: IvceeSection, maxDepth?: number): Voce[] {
 // fatale al caricamento — vedi Task 8). La POLITICA resta di là
 // (NON_POSTABLE_FIELDS, fieldCategory, COUNTERPART_GROUPS): qui c'è solo la
 // proiezione. L'elenco dei codici è quello di GRAFIA_RETTIFICHE, non VOCI:
-// VOCI ne ha 7 in più — sp14a..d e ce03a, che nel selettore non sono mai
-// comparse, più sp16_debiti_breve e sp17_debiti_lungo, che sarebbero comunque
-// esclusi da NON_POSTABLE_FIELDS (quindi solo 5 cambierebbero il menu, ma i
-// codici in più sono 7).
+// VOCI ne ha 6 in più — sp14a..d, che nel selettore non sono mai comparse,
+// più sp16_debiti_breve e sp17_debiti_lungo, che sarebbero comunque
+// esclusi da NON_POSTABLE_FIELDS (quindi solo 4 cambierebbero il menu, ma i
+// codici in più sono 6).
 //
 // L'opzione NON porta un'etichetta. Fino al 2026-08-11 ne portava una, calcolata
 // con la regola di prima del catalogo (GRAFIA_SELETTORE ?? GRAFIA_RETTIFICHE),

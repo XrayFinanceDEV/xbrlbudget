@@ -683,3 +683,33 @@ def test_costi_spese_e_perdite_e_il_titolo_del_conto_economico(tmp_path):
         [(50, 300, "TOTALE A PAREGGIO"), (480, 300, "9.000,00")]
     pagina2 = [(50, 120, "COSTI, SPESE E PERDITE")] + _tabella([f"Spesa {k}" for k in range(6)], y0=140)
     assert _doc_sezioni(tmp_path, [pagina1, pagina2]).sezioni == {1: "SP", 2: "CE"}
+
+
+def test_titolo_del_lato_con_la_testata_delle_colonne_apre_lo_sp(tmp_path):
+    # 1533: «ATTIVITA' CORRENTE PRECEDENTE», «PASSIVITA' E PATRIMONIO NETTO CORRENTE PRECEDENTE» sono i titoli dei
+    # lati con le parole della testata accanto: senza, la pagina dopo un lato chiuso resta senza sezione
+    pagina1 = [(50, 120, "ATTIVITA' CORRENTE PRECEDENTE")] + _tabella(
+        ["I Immobilizzazioni immateriali", "II Immobilizzazioni materiali"], y0=140)
+    pagina2 = _tabella(["IV Disponibilita' liquide", "Totale attivo"], y0=140)
+    pagina3 = [(50, 120, "PASSIVITA' E PATRIMONIO NETTO CORRENTE PRECEDENTE")] + _tabella(
+        ["I Capitale", "D Debiti"], y0=140)
+    pagina4 = _tabella(["E Ratei e risconti", "Totale passivo e patrimonio netto"], y0=140)
+    pagine = [pagina1, pagina2, pagina3, pagina4]
+    assert _doc_sezioni(tmp_path, pagine).sezioni == {1: "SP", 2: "SP", 3: "SP", 4: "SP"}
+
+
+def test_saldo_passivo_a_meta_del_ce_non_apre_lo_sp(tmp_path):
+    # la regola del titolo di lato vale solo con le parole dei periodi in coda e nessuna sezione aperta
+    pagina = [(50, 120, "CONTO ECONOMICO")] + _tabella(["A) Valore della produzione", "7) Servizi"], y0=140)
+    pagina += [(50, 200, "SALDO PASSIVO"), (50, 214, "PASSIVO CORRENTE")]
+    pagina += _tabella(["8) Godimento beni di terzi", "14) Oneri diversi di gestione"], y0=228)
+    assert _doc_sezioni(tmp_path, [pagina]).sezioni == {1: "CE"}
+
+
+def test_colonna_a_interi_di_fatto_al_limite():
+    from importers.lettore.profilo import intera_di_fatto
+    assert intera_di_fatto(19, 1)          # 1 importo coi centesimi su 20: il 5%
+    assert not intera_di_fatto(18, 1)      # 1 su 19: sotto i 20 importi non e' una prova
+    assert intera_di_fatto(38, 2)          # 2 su 40: ancora il 5%
+    assert not intera_di_fatto(37, 3)      # 3 su 40: oltre il 5%
+    assert intera_di_fatto(5, 0) and not intera_di_fatto(0, 0) and not intera_di_fatto(0, 3)

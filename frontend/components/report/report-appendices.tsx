@@ -29,6 +29,7 @@ const IS_REVENUE_KEYS = [
   "ce01_ricavi_vendite",
   "ce02_variazioni_rimanenze",
   "ce03_lavori_interni",
+  "ce03a_incrementi_immobilizzazioni",
   "ce04_altri_ricavi",
 ];
 

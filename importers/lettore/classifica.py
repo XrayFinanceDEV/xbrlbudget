@@ -20,7 +20,7 @@ from decimal import Decimal
 from importers import llm_provider
 from importers.llm_provider import ContestoEccessivo, LLMProviderError, RispostaTroncata
 from importers.lettore import tavola
-from importers.lettore.foglie import Ancora, Foglia
+from importers.lettore.foglie import Ancora, Foglia, gettoni_di_legge
 from importers.lettore.totali import _norm
 
 BLOCCO = 60
@@ -117,7 +117,7 @@ def _classe(codice: str | None, fonte: str, voti: tuple[str, ...] = ()) -> Class
         return Classe(None, None, fonte, voti)
     if codice in tavola.RETTIFICHE:
         p = tavola.RETTIFICHE[codice]
-        campo = tavola.campo_da_percorso_legale(p)
+        campo = tavola.campo_di_legge(p)
         macro = tavola.macro_di(campo)
         return Classe(macro, campo if campo != macro else None, fonte, voti, rettifica=p)
     return Classe(codice, None, fonte, voti)
@@ -131,7 +131,7 @@ def _chiave(f: Foglia) -> tuple:
 def _da_percorso(f: Foglia) -> Classe | None:
     if not f.percorso_legale:
         return None
-    campo = tavola.campo_da_percorso_legale(f.percorso_legale)
+    campo = tavola.campo_di_legge(f.percorso_legale)
     if not campo:
         return None
     macro = tavola.macro_di(campo)
@@ -347,6 +347,21 @@ def _voce(c: Classe) -> str:
     return c.macro
 
 
+# Le parole di una voce di legge che non dicono un dettaglio: la scadenza e i connettivi
+_PAROLE_SENZA_DETTAGLIO = {"verso", "esigibili", "entro", "oltre", "esercizio", "successivo", "mesi", "totale", "di",
+                           "e", "dei", "delle", "del", "della", "degli", "in", "su", "per", "da", "a", "con", "ed",
+                           "al", "il", "lo", "la", "le", "gli", "l"}
+
+
+def _nomina_solo_la_macro(f: Foglia, macro: str) -> bool:
+    """Tolti enumeratori, scadenza e connettivi, ogni parola dell'etichetta e' una parola del nome della macro-voce
+    (o ne comincia: «immobilizzazioni» per «immob»)."""
+    nome = tavola.ETICHETTE_MACRO.get(macro, "").split()
+    parole = [w for w in re.findall(r"[a-z]+", _norm(f.etichetta))
+              if len(w) > 1 and w not in _PAROLE_SENZA_DETTAGLIO and not re.fullmatch(r"[ivx]+", w)]
+    return all(any(w.startswith(n) or n.startswith(w) for n in nome if len(n) >= 4) for w in parole)
+
+
 def classifica_dettagli(foglie: list[Foglia], classi: dict[str, Classe], *, chiama_json=None,
                         cache: dict | None = None) -> None:
     chiama_json = chiama_json or _chiama_default()
@@ -355,6 +370,11 @@ def classifica_dettagli(foglie: list[Foglia], classi: dict[str, Classe], *, chia
     for f in foglie:
         c = classi.get(f.id)
         if not c or c.macro not in tavola.DETTAGLI or c.dettaglio:
+            continue
+        if c.fonte == "legale" and gettoni_di_legge(f.etichetta, f.codice) and _nomina_solo_la_macro(f, c.macro):
+            # la foglia e' la voce di legge stampata e ne porta solo il nome («II - Crediti» di un abbreviato): il
+            # dettaglio e' ignoto e la massa va in «altri», mai inventata. «II - Crediti verso clienti» nomina il
+            # dettaglio, e il passo 2 lo puo' dare
             continue
         k = ("dettaglio", c.macro, c.rettifica) + _chiave(f)
         if k in cache:

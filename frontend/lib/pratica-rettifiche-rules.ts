@@ -18,8 +18,8 @@ export interface ProposalRule {
 export const PROPOSAL_RULES: ProposalRule[] = [
   // ===== BS ATTIVO → CE =====
   { editable: "sp01_crediti_soci", counterpart: "ce04_altri_ricavi", direction: "same", explanation: "Più crediti vs soci → più altri ricavi", counterpartNeg: "ce09d_svalutazione_crediti", directionNeg: "inverse", explanationNeg: "Meno crediti vs soci → svalutazione crediti / oneri diversi", splitAltNeg: { field: "ce12_oneri_diversi", label: "14) Oneri diversi di gestione" } },
-  { editable: "sp02_immob_immateriali", counterpart: "ce03_lavori_interni", direction: "same", explanation: "Più immob. immateriali → più incrementi per lavori interni" },
-  { editable: "sp03_immob_materiali", counterpart: "ce03_lavori_interni", direction: "same", explanation: "Più immob. materiali → più incrementi per lavori interni" },
+  { editable: "sp02_immob_immateriali", counterpart: "ce03a_incrementi_immobilizzazioni", direction: "same", explanation: "Più immob. immateriali → più incrementi per lavori interni" },
+  { editable: "sp03_immob_materiali", counterpart: "ce03a_incrementi_immobilizzazioni", direction: "same", explanation: "Più immob. materiali → più incrementi per lavori interni" },
   { editable: "sp04a_partecipazioni", counterpart: "ce13_proventi_partecipazioni", direction: "same", explanation: "Più partecipazioni → più proventi da partecipazioni" },
   { editable: "sp04b_crediti_immob_breve", counterpart: "ce14_altri_proventi_finanziari", direction: "same", explanation: "Più crediti immob. breve → più proventi finanziari" },
   { editable: "sp04c_crediti_immob_lungo", counterpart: "ce14_altri_proventi_finanziari", direction: "same", explanation: "Più crediti immob. lungo → più proventi finanziari" },
@@ -28,7 +28,7 @@ export const PROPOSAL_RULES: ProposalRule[] = [
   { editable: "sp05_rimanenze", counterpart: "ce02_variazioni_rimanenze", direction: "same", explanation: "Più rimanenze → variazione positiva rimanenze" },
   { editable: "sp05a_materie_prime", counterpart: "ce10_var_rimanenze_mat_prime", direction: "inverse", explanation: "Più rimanenze materie → meno variazione mat. prime (costo)" },
   { editable: "sp05b_prodotti_in_corso", counterpart: "ce02_variazioni_rimanenze", direction: "same", explanation: "Più prodotti in c/lav → variazione positiva rimanenze" },
-  { editable: "sp05c_lavori_in_corso", counterpart: "ce02_variazioni_rimanenze", direction: "same", explanation: "Più lavori in corso → variazione positiva rimanenze" },
+  { editable: "sp05c_lavori_in_corso", counterpart: "ce03_lavori_interni", direction: "same", explanation: "Più lavori in corso su ordinazione → variazione positiva dei lavori in corso" },
   { editable: "sp05d_prodotti_finiti", counterpart: "ce02_variazioni_rimanenze", direction: "same", explanation: "Più prodotti finiti → variazione positiva rimanenze" },
   { editable: "sp05e_acconti", counterpart: "ce05_materie_prime", direction: "same", explanation: "Più acconti a fornitori → più costi materie prime" },
   { editable: "sp06_crediti_breve", counterpart: "ce01_ricavi_vendite", direction: "same", explanation: "Più crediti commerciali → più ricavi", counterpartNeg: "ce09d_svalutazione_crediti", directionNeg: "inverse", explanationNeg: "Meno crediti → svalutazione crediti / oneri diversi", splitAltNeg: { field: "ce12_oneri_diversi", label: "14) Oneri diversi di gestione" } },
@@ -80,7 +80,8 @@ export const PROPOSAL_RULES: ProposalRule[] = [
   // ===== CE → BS =====
   { editable: "ce01_ricavi_vendite", counterpart: "sp06a_crediti_clienti_breve", direction: "same", explanation: "Più ricavi → più crediti vs clienti" },
   { editable: "ce02_variazioni_rimanenze", counterpart: "sp05b_prodotti_in_corso", direction: "same", explanation: "Più variazione rimanenze → più rimanenze prodotti in c/lav" },
-  { editable: "ce03_lavori_interni", counterpart: "sp03_immob_materiali", direction: "same", explanation: "Più incrementi per lavori interni → più immob. materiali" },
+  { editable: "ce03_lavori_interni", counterpart: "sp05c_lavori_in_corso", direction: "same", explanation: "Più variazione dei lavori in corso su ordinazione → più lavori in corso" },
+  { editable: "ce03a_incrementi_immobilizzazioni", counterpart: "sp03_immob_materiali", direction: "same", explanation: "Più incrementi per lavori interni → più immob. materiali" },
   { editable: "ce04_altri_ricavi", counterpart: "sp06g_crediti_altri_breve", direction: "same", explanation: "Più altri ricavi → più crediti diversi" },
   { editable: "ce05_materie_prime", counterpart: "sp16d_debiti_fornitori_breve", direction: "same", explanation: "Più costi materie prime → più debiti vs fornitori" },
   { editable: "ce06_servizi", counterpart: "sp16d_debiti_fornitori_breve", direction: "same", explanation: "Più costi servizi → più debiti vs fornitori" },
@@ -213,7 +214,7 @@ export function applicaMovimento(
 // Field categorization for double-entry counterpart filtering.
 export type AcctCategory = "ATTIVO" | "PASSIVO" | "CE_POS" | "CE_NEG";
 export const CE_POSITIVE_FIELDS = new Set([
-  "ce01_ricavi_vendite", "ce02_variazioni_rimanenze", "ce03_lavori_interni", "ce04_altri_ricavi",
+  "ce01_ricavi_vendite", "ce02_variazioni_rimanenze", "ce03_lavori_interni", "ce03a_incrementi_immobilizzazioni", "ce04_altri_ricavi",
   "ce13_proventi_partecipazioni", "ce14_altri_proventi_finanziari", "ce16_utili_perdite_cambi",
   "ce17a_rivalutazioni", "ce18_proventi_straordinari",
 ]);
@@ -332,7 +333,7 @@ export const PASSIVO_TOTAL_FIELDS = [
 // CE split by IV CEE section for proper subtotal placement
 export const CE_A = [
   "ce01_ricavi_vendite", "ce02_variazioni_rimanenze", "ce03_lavori_interni",
-  "ce04_altri_ricavi",
+  "ce03a_incrementi_immobilizzazioni", "ce04_altri_ricavi",
 ];
 export const CE_B = [
   "ce05_materie_prime", "ce06_servizi", "ce07_godimento_beni",

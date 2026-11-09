@@ -18,8 +18,8 @@ from importers.lettore import tavola
 from importers.lettore._ereditati import _CONNETTIVI, _scadenza as _scadenza_inizio, _scadenza_in_coda
 from importers.lettore.righe import Documento, Riga
 from importers.lettore.totali import (DICE_ATTIVO, DICE_PASSIVO, DICE_TOTALE, _CONTROLLO, _RISULTATO_DI_LEGGE,
-                                      _RISULTATO_ESERCIZIO, _costo_del_risultato, _norm, _risultato,
-                                      _su_schema, _valore_di_somma, valore_nel_totale)
+                                      _RISULTATO, _RISULTATO_ESERCIZIO, _controllo_sotto, _costo_del_risultato,
+                                      _norm, _risultato, _su_schema, _valore_di_somma, valore_nel_totale)
 from importers.schema_etichette_parser import percorso as _percorso_etichetta
 
 _ZERO = Decimal(0)
@@ -165,6 +165,32 @@ def _tipo(gettone: str) -> int:
     return 0 if gettone.isupper() else 3
 
 
+# Art. 2425 c.c.: i numeri arabi di ogni lettera del conto economico. Un arabo fuori dalla sua lettera («5) da altri»
+# sotto «C) 16) a)», la numerazione dei debitori nel prospetto reso da XBRL) non e' una voce di legge: e' un elenco
+# dentro la voce, e prenderlo come livello manderebbe un provento finanziario fra gli altri ricavi (C.5 -> A.5).
+_ARABI_DEL_CE = {"A": (1, 5), "B": (6, 14), "C": (15, 17), "D": (18, 19)}
+
+
+def arabo_fuori_lettera(lettera: str | None, arabo: str) -> bool:
+    """L'arabo non appartiene alla lettera del conto economico sopra di lui (A 1-5, B 6-14, C 15-17-bis, D 18-19).
+    Imposte (20) e risultato (21) seguono le lettere senza una propria: valgono sotto qualunque lettera."""
+    limiti = _ARABI_DEL_CE.get(lettera or "")
+    m = re.match(r"\d+", arabo)
+    return bool(limiti and m and int(m.group()) < 20 and not limiti[0] <= int(m.group()) <= limiti[1])
+
+
+def _arabo_all_indietro(sezione: str, lettera: str | None, gettoni: tuple[str, ...]) -> bool:
+    """Il solo arabo della riga sta prima dei numeri della sua lettera del CE («5) da altri» sotto C): e' un elenco
+    dentro la voce e non entra nell'outline. Un arabo in avanti («6)» sotto A, quando l'intestazione «B)» manca)
+    entra, e il percorso che ne viene, fuori dalla lettera, non si risolve (`percorso_valido`): decide il modello,
+    mai la voce sbagliata dell'outline di prima (che manderebbe un costo fra i ricavi)."""
+    if sezione != "CE" or len(gettoni) != 1 or _tipo(gettoni[0]) != 2:
+        return False
+    limiti = _ARABI_DEL_CE.get(lettera or "")
+    m = re.match(r"\d+", gettoni[0])
+    return bool(limiti and m and int(m.group()) < limiti[0])
+
+
 def _titoli_di_lato_sui_due_lati(righe: list[Riga]) -> bool:
     """Due tabelle affiancate dello stato patrimoniale con un titolo «attivo» a sinistra e uno «passivo» a destra:
     sono le sezioni contrapposte che il profilo ha tipato male, non due tabelle diverse. Il flusso sequenziale non puo'
@@ -237,6 +263,8 @@ def _scorri(righe: list[Riga], contrapposto: bool = True) -> dict[str, _Posizion
             elif gettoni and gettoni[0] == "A" and stato != "P" and livelli[0] in ("B", "C", "D"):
                 passa_al_passivo()          # la lettera A che riparte dopo la B: comincia il passivo
                 azzera()
+        if _arabo_all_indietro(r.sezione, livelli[0], gettoni):
+            gettoni = ()
         for g in gettoni:
             t = _tipo(g)
             livelli[t] = g
@@ -274,7 +302,7 @@ def _scorri(righe: list[Riga], contrapposto: bool = True) -> dict[str, _Posizion
 
 
 def _campo(p: str) -> str | None:
-    return tavola.campo_da_percorso_legale(p)
+    return tavola.campo_di_legge(p)
 
 
 def _lettera_significativa(base: str, lettera: str) -> bool:
@@ -306,6 +334,8 @@ def percorso_valido(p: str) -> bool:
         return False
     tipi = [_tipo(g) for g in livelli]
     if any(b <= a for a, b in zip(tipi, tipi[1:])):
+        return False
+    if parti[0] == "CE" and tipi[0] == 0 and any(arabo_fuori_lettera(livelli[0], g) for g, t in zip(livelli, tipi) if t == 2):
         return False
     base = ".".join((parti[0], *livelli))
     if tipi[-1] == 3 and not _lettera_significativa(".".join((parti[0], *livelli[:-1])), livelli[-1]):
@@ -646,16 +676,49 @@ def _senza_echi(doc: Documento, foglie: list[Foglia]) -> list[Foglia]:
     return [f for f in foglie if f.id not in eco]
 
 
+def _chiude_su(doc: Documento, r: Riga, col: int, per_id: dict[str, Riga], ordine: dict[str, int]) -> bool:
+    """La riga chiude dei conti sulla colonna `col`, quindi non e' una foglia: ha un gruppo su `col` (o sulla sua
+    colonna dei parziali) che non contiene una riga di controllo stampata sotto di lei (`totali._controllo_sotto`:
+    «B.I.3» che «somma» il «Totale B.I» stampato sotto, «C.16.d» = C.17 + «TOTALE C)» per caso). Un totale senza
+    gruppo su `col` chiude se un suo gruppo di un'altra colonna ha figli con un importo su `col`; un gruppo il cui
+    totale vale zero su quella colonna non prova niente (+x e -x sommano a zero dovunque: il conto «Imm. in corso» a
+    zero nel precedente, «sopra» due conti di un'altra voce). Altrimenti la massa della riga non la conterebbe nessuno."""
+    coppie = getattr(doc.profilo, "coppie", {})
+    gruppi = [r.figli[k] for k in (col, coppie.get(col)) if k is not None and r.figli.get(k)]
+    if gruppi:
+        # un risultato del conto economico non e' mai un conto, anche quando la sua somma non prova nulla
+        return any(not _controllo_sotto(r, [per_id[f] for f in g if f in per_id], ordine) for g in gruppi) \
+            or (r.sezione == "CE" and bool(_RISULTATO.search(_norm(r.etichetta))))
+    if not r.totale:
+        return False
+    if not r.figli:
+        return True     # un totale senza figli in nessuna colonna resta com'era: non una foglia
+    totale_di = {v: k for k, v in coppie.items()}     # colonna dei parziali -> la sua colonna dei totali
+    for k, g in r.figli.items():
+        proprio = r.celle.get(k) or r.celle.get(totale_di.get(k, -1))
+        if proprio is None or not proprio.valore:
+            continue
+        for f in g:
+            if f not in per_id:
+                continue
+            c = _colonna_della_riga(doc, col, per_id[f])
+            cella = _cella(doc, per_id[f], c) if c is not None else None
+            if cella is not None and cella.valore:
+                return True
+    return False
+
+
 def _foglie_grezze(doc: Documento, colonna: int) -> list[Foglia]:
     dal_saldo = 0
     righe = doc.righe_del_prospetto()
     per_id = {r.id: r for r in righe}
+    ordine = {r.id: k for k, r in enumerate(doc.righe)}
     pos = _scorri(righe, doc.contrapposto)
     perc = _Percorsi(righe, pos)
     out: list[Foglia] = []
     for r in righe:
         col = _colonna_della_riga(doc, colonna, r)
-        if r.totale or r.intestazione or col is None or _cella(doc, r, col) is None or r.figli.get(col) \
+        if r.intestazione or col is None or _cella(doc, r, col) is None or _chiude_su(doc, r, col, per_id, ordine) \
                 or _e_controllo(r):
             continue
         lato_sp = pos[r.id].lato_sp
@@ -790,6 +853,8 @@ class _Percorsi:
         for g in base if ancorato else ():
             slots[_tipo(g)] = g
         presenti = [i for i, g in enumerate(slots) if g]
+        if _arabo_all_indietro(r.sezione, slots[0], propri):
+            propri = ()         # un elenco dentro la voce, non un livello
         accettati = bool(propri) and (len(propri) > 1 or not presenti or _tipo(propri[0]) > max(presenti))
         if accettati and ancorato:
             if len(propri) > 1:
@@ -837,6 +902,7 @@ def _macro_del_totale(t: Riga, righe: list[Riga], perc: _Percorsi) -> tuple[str 
 def ancore(doc: Documento, colonna: int) -> list[Ancora]:
     righe = doc.righe_del_prospetto()
     per_id = {r.id: r for r in righe}
+    ordine = {r.id: k for k, r in enumerate(doc.righe)}
     pos = _scorri(righe, doc.contrapposto)
     perc = _Percorsi(righe, pos)
     coppie = getattr(doc.profilo, "coppie", {})
@@ -867,12 +933,18 @@ def ancore(doc: Documento, colonna: int) -> list[Ancora]:
             continue
         if not (t.figli.get(c) or t.figli.get(coppie.get(c, -1))):
             continue
+        if not _chiude_su(doc, t, c, per_id, ordine):
+            avviso = (f"«{t.etichetta}» (pagina {t.pagina}): la sua somma sulla colonna {c + 1} contiene una riga di "
+                      f"controllo stampata sotto: non e' un'ancora, il suo importo conta come foglia")
+            if avviso not in doc.avvisi:
+                doc.avvisi.append(avviso)
+            continue
         macro, ambigua = _macro_del_totale(t, righe, perc)
         if macro is None:
             continue
         sotto = _sotto(t, per_id, ids, c, coppie)
         macro_foglie = {tavola.macro_di(m) for f in sotto if per_foglia[f].percorso_legale
-                        and (m := tavola.campo_da_percorso_legale(per_foglia[f].percorso_legale))}
+                        and (m := tavola.campo_di_legge(per_foglia[f].percorso_legale))}
         if ambigua:
             if len(macro_foglie) != 1:
                 continue

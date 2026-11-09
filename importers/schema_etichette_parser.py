@@ -8,8 +8,8 @@ Sotto ogni voce il gestionale stampa i propri dettagli: sotto-righe col percorso
 ("B.I.2.b) (Fondi di ammortamento)", "B.6.2) Materie prime") e i conti ("3020200 COSTI DI
 RICERCA"). Ogni livello stampa il proprio totale.
 
-La voce non si indovina dalla descrizione: il percorso si traduce nel campo (``percorsi.
-campo_da_percorso``, la tabella dei lettori deterministici). Si legge SOLO la voce di legge,
+La voce non si indovina dalla descrizione: il percorso si traduce nel campo (``tavola.
+campo_di_legge``, la tabella unica dei lettori). Si legge SOLO la voce di legge,
 mai una sotto-riga del gestionale ne' un conto: il valore della voce e' gia' netto dei fondi e
 comprende i propri dettagli. Unica eccezione, le righe "Esigibili entro/oltre" sotto crediti e
 debiti, che sono la scadenza voluta dall'art. 2424 e decidono fra breve e lungo.
@@ -31,7 +31,8 @@ import unicodedata
 from decimal import Decimal
 from typing import Iterable, Optional
 
-from importers.import_snello.percorsi import campo_da_percorso, completa
+from importers.import_snello.percorsi import completa
+from importers.lettore.tavola import campo_di_legge
 
 _C = Decimal("0.01")
 _TOLLERANZA = Decimal("0.05")
@@ -46,10 +47,6 @@ _IMPORTO_PIENO = re.compile(r"^-?\d{1,3}(?:\.\d{3})*,\d{2}-?$")
 _PERCENTUALE = re.compile(r"-?\d{1,3}(?:\.\d{3})*,\d{2,3}")
 _DATA = re.compile(r"^\d{1,2}[/.]\d{1,2}[/.]((?:19|20)\d{2})$")
 _LETTERE = re.compile(r"[A-Za-zÀ-ÿ]")
-
-# voci di A) Valore della produzione: la convenzione dell'albero di legge condiviso
-# (data/iv_cee_tree.json), quella che leggono Rettifiche e Confronto: A.4 in ce03, mai in ce03a
-_VALORE_PRODUZIONE = {"1": "ce01", "2": "ce02", "3": "ce02", "4": "ce03", "5": "ce04"}
 
 
 def _norm(testo: str) -> str:
@@ -138,11 +135,9 @@ def _profondita_voce(sez: str, t: tuple[str, ...]) -> Optional[int]:
 
 def _campo(sez: str, t: tuple[str, ...], scad: Optional[str] = None) -> Optional[str]:
     if sez == "CE":
-        if t[0] == "A" and len(t) == 2:
-            return _VALORE_PRODUZIONE.get(t[1])
-        return campo_da_percorso(".".join(("CE", *t)))
+        return campo_di_legge(".".join(("CE", *t)))
     p = ".".join((sez, *t, *((scad,) if scad else ())))
-    return campo_da_percorso(p)
+    return campo_di_legge(p)
 
 
 def _segno(sez: str, t: tuple[str, ...]) -> int:

@@ -751,3 +751,127 @@ def test_mastro_di_una_catena_nel_contesto_anche_se_non_verificato(tmp_path):
     f = _per_etichetta(foglie_contabili(doc, 0))
     assert f["Fatture da ricevere"].antenati == ()
     assert f["Fatture da ricevere"].mastri[-1] == "ALTRI DEBITI VERSO FORNITORI"
+
+
+def _attivo_con_voce_e_totale_sotto(tmp_path):
+    voci = [(50, 112, "Stato Patrimoniale - Attivo")] + _righe(140, [
+        ("B.I.3 Diritti di brevetto", "900,00"), ("Totale B.I Immobilizzazioni immateriali", "900,00"),
+        ("B.II.3 Attrezzature industriali", "7.400,00"), ("B.II.4 Altri beni", "2.600,00"),
+        ("Totale B.II Immobilizzazioni materiali", "10.000,00"),
+        ("C.IV.1 Depositi bancari", "1.000,00"), ("C.IV.3 Denaro in cassa", "50,00"),
+        ("Totale C.IV Disponibilita' liquide", "1.050,00"), ("TOTALE ATTIVO", "11.950,00")])
+    return _doc(tmp_path, voci)
+
+
+def test_voce_che_somma_solo_un_totale_stampato_sotto_resta_foglia(tmp_path):
+    # 1407: la catena di un solo importo letta a rovescio, la voce «somma» il suo «Totale B.I» stampato sotto. Il
+    # totale e' una riga di controllo e la voce un totale: nessuno dei due e' foglia, e la massa sparisce
+    doc = _attivo_con_voce_e_totale_sotto(tmp_path)
+    per = {r.etichetta: r for r in doc.righe}
+    voce, totale = per["B.I.3 Diritti di brevetto"], per["Totale B.I Immobilizzazioni immateriali"]
+    voce.totale, voce.figli, totale.totale, totale.figli = True, {0: (totale.id,)}, False, {}
+    totale.padre, totale.padre_verificato = voce.id, False
+    foglie = foglie_contabili(doc, 0)
+    assert _per_etichetta(foglie)["B.I.3 Diritti di brevetto"].importo == Decimal("900.00")
+    assert sum(f.importo for f in foglie) == Decimal("11950.00")
+    assert not any(a.riga == voce.id for a in ancore(doc, 0))     # la sua somma non prova niente: non e' un'ancora
+    assert any("B.I.3 Diritti di brevetto" in a and "non e' un'ancora" in a for a in doc.avvisi)
+
+
+def test_voce_con_figli_solo_dove_vale_zero_resta_foglia(tmp_path):
+    # 1445: un conto a zero nel precedente «somma» due conti di pari importo e segno opposto su quella colonna
+    # (+x - x = 0 dovunque): nel corrente non ha figli, e toglierlo perde la sua massa
+    voci = [(50, 112, "Stato Patrimoniale - Attivo")] + _righe(140, [
+        ("Imm. immateriali in corso", "800,00", "0,00"), ("Altre immobilizzazioni", "1.500,00", "1.500,00"),
+        ("F.do amm. altre immobilizzazioni", "-1.500,00", "-1.500,00"), ("Banca", "200,00", "300,00"),
+        ("Cassa", "100,00", "200,00"), ("TOTALE ATTIVO", "1.100,00", "500,00")])
+    doc = _doc(tmp_path, voci)
+    per = {r.etichetta: r for r in doc.righe}
+    conto = per["Imm. immateriali in corso"]
+    conto.totale, conto.figli = True, {1: (per["Altre immobilizzazioni"].id, per["F.do amm. altre immobilizzazioni"].id)}
+    foglie = foglie_contabili(doc, 0)
+    assert _per_etichetta(foglie)["Imm. immateriali in corso"].importo == Decimal("800.00")
+    assert sum(f.importo for f in foglie) == Decimal("1100.00")
+
+
+def test_totale_coi_figli_che_portano_la_colonna_resta_fuori(tmp_path):
+    # il caso di sempre: un totale con figli solo nel precedente che nel corrente hanno un importo resta un totale
+    voci = [(50, 112, "Stato Patrimoniale - Attivo")] + _righe(140, [
+        ("Crediti verso clienti", "300,00", "250,00"), ("Cliente Rossi", "100,00", "100,00"),
+        ("Cliente Bianchi", "200,00", "150,00"), ("Banca", "500,00", "400,00"), ("TOTALE ATTIVO", "800,00", "650,00")])
+    doc = _doc(tmp_path, voci)
+    per = {r.etichetta: r for r in doc.righe}
+    mastro = per["Crediti verso clienti"]
+    mastro.totale, mastro.figli = True, {1: (per["Cliente Rossi"].id, per["Cliente Bianchi"].id)}
+    nomi = [f.etichetta for f in foglie_contabili(doc, 0)]
+    assert "Crediti verso clienti" not in nomi and "Cliente Rossi" in nomi
+
+
+def test_arabo_fuori_dalla_sua_lettera_del_ce_non_e_un_livello(tmp_path):
+    # 1553 (prospetto reso da XBRL): «5) da altri» sotto «C) 16) a)» e' l'elenco dei debitori, non la voce A.5: preso
+    # come livello manda il provento finanziario fra gli altri ricavi (CE.C.5 -> ce04)
+    voci = [(50, 112, "CONTO ECONOMICO")] + _righe(140, [
+        ("A) Valore della produzione",), ("1) Ricavi delle vendite e delle prestazioni", "1.000,00"),
+        ("Totale valore della produzione", "1.000,00"), ("C) Proventi e oneri finanziari",),
+        ("16) Altri proventi finanziari",), ("a) da crediti iscritti nelle immobilizzazioni",),
+        ("5) da altri", "80,00"), ("d) proventi diversi dai precedenti",), ("5) da altri", "18,00"),
+        ("17) Interessi e altri oneri finanziari",), ("e) verso altri", "40,00")])
+    doc = _doc(tmp_path, voci)
+    foglie = foglie_contabili(doc, 0)
+    da_altri = [f for f in foglie if f.etichetta == "5) da altri"]
+    assert [f.percorso_legale for f in da_altri] == ["CE.C.16", "CE.C.16"]
+    assert _per_etichetta(foglie)["1) Ricavi delle vendite e delle prestazioni"].percorso_legale == "CE.A.1"
+    assert _per_etichetta(foglie)["e) verso altri"].percorso_legale == "CE.C.17"
+
+
+def test_validatore_rifiuta_un_arabo_del_ce_fuori_dalla_sua_lettera():
+    from importers.lettore.foglie import percorso_valido
+    assert not percorso_valido("CE.C.5") and not percorso_valido("CE.A.9") and not percorso_valido("CE.B.16")
+    assert percorso_valido("CE.C.16") and percorso_valido("CE.B.9.a") and percorso_valido("CE.C.17-bis")
+
+
+def test_proventi_da_consolidato_fiscale_si_sottraggono_dalle_imposte(tmp_path):
+    # 1553: «Totale delle imposte» = correnti + anticipate - proventi da consolidato. Senza la regola il totale non si
+    # verifica, i tre conti restano costi positivi e l'utile composto si sposta di due volte il provento
+    voci = [(50, 112, "CONTO ECONOMICO")] + _righe(140, [
+        ("A) Valore della produzione",), ("1) Ricavi delle vendite", "1.000,00"), ("5) Altri ricavi", "200,00"),
+        ("Totale valore della produzione", "1.200,00"), ("B) Costi della produzione",), ("7) Per servizi", "700,00"),
+        ("8) Godimento beni di terzi", "400,00"), ("Totale costi della produzione", "1.100,00"),
+        ("Risultato prima delle imposte", "100,00"), ("20) Imposte sul reddito",),
+        ("a) Imposte correnti", "300,00"), ("d) Imposte anticipate", "50,00"),
+        ("f) Proventi (oneri) da consolidato fiscale", "600,00"), ("Totale delle imposte sul reddito", "-250,00"),
+        ("21) Utile (perdita) dell'esercizio", "350,00")])
+    doc = _doc(tmp_path, voci)
+    imposte = {f.etichetta: f.importo for f in foglie_contabili(doc, 0) if f.percorso_legale == "CE.20"}
+    assert imposte["f) Proventi (oneri) da consolidato fiscale"] == Decimal("-600.00")
+    assert sum(imposte.values()) == Decimal("-250.00")
+
+
+def test_arabo_in_avanti_senza_la_sua_lettera_va_al_modello(tmp_path):
+    # «B)» non stampata: «6) per materie prime» sotto «A)» non e' A.6 ne' la voce A.1 di prima (un costo fra i
+    # ricavi, 2x il suo importo): il percorso resta senza risposta e la classe la da' il modello
+    voci = [(50, 112, "CONTO ECONOMICO")] + _righe(140, [
+        ("A) Valore della produzione",), ("1) Ricavi delle vendite e delle prestazioni", "1.000,00"),
+        ("6) Per materie prime, sussidiarie e merci", "400,00"), ("7) Per servizi", "300,00"),
+        ("8) Per godimento di beni di terzi", "120,00"), ("14) Oneri diversi di gestione", "30,00")])
+    foglie = _per_etichetta(foglie_contabili(_doc(tmp_path, voci), 0))
+    assert foglie["1) Ricavi delle vendite e delle prestazioni"].percorso_legale == "CE.A.1"
+    assert foglie["6) Per materie prime, sussidiarie e merci"].percorso_legale is None
+    assert foglie["7) Per servizi"].percorso_legale is None
+
+
+def test_totale_con_figli_scartati_da_r18_sulla_corrente_non_diventa_foglia(tmp_path):
+    # R18: il gruppo della corrente e quello del precedente hanno figli diversi, il padre non e' verificato; ma sulla
+    # corrente il totale ha i suoi figli, che sono foglie: contarlo accanto a loro raddoppierebbe la massa
+    voci = [(50, 112, "Stato Patrimoniale - Attivo")] + _righe(140, [
+        ("Crediti verso clienti", "300,00", "250,00"), ("Cliente Rossi", "100,00", "100,00"),
+        ("Cliente Bianchi", "200,00", "150,00"), ("Banca", "500,00", "400,00"), ("TOTALE ATTIVO", "800,00", "650,00")])
+    doc = _doc(tmp_path, voci)
+    per = {r.etichetta: r for r in doc.righe}
+    mastro, rossi, bianchi = per["Crediti verso clienti"], per["Cliente Rossi"], per["Cliente Bianchi"]
+    mastro.totale, mastro.figli = True, {0: (rossi.id, bianchi.id), 1: (rossi.id,)}
+    for f in (rossi, bianchi):
+        f.padre, f.padre_verificato = mastro.id, False
+    foglie = foglie_contabili(doc, 0)
+    assert "Crediti verso clienti" not in [f.etichetta for f in foglie]
+    assert sum(f.importo for f in foglie) == Decimal("800.00")

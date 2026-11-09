@@ -728,8 +728,8 @@ debiti decidono la scadenza, le lettere di B.9/B.10 il dettaglio del personale e
 ammortamenti; le sotto-righe del gestionale ("B.6.2) Materie prime", "(Fondi di ammortamento)",
 il percorso ripetuto sulla riga sotto) e i conti non entrano mai. **Ogni totale stampato deve
 essere la somma delle voci lette sotto di lui**, altrimenti l'anno non si adotta e `rifiuto`
-nomina il totale più interno che non torna. A.3/A.4 seguono `data/iv_cee_tree.json` (A.4 →
-`ce03`), non la tabella dello snello. Gira in tre punti: qui in F0, e nel percorso di sempre
+nomina il totale più interno che non torna. A.3/A.4 seguono le colonne del DB, in ogni importatore dal Task 5-bis (2026-11-09): A.3 → `ce03`, A.4 →
+`ce03a` (`data/iv_cee_tree.json`, `lettore.tavola`, estrattore LLM, parole chiave di route C). Gira in tre punti: qui in F0, e nel percorso di sempre
 (`_schema_etichette_extract` in testa a `_llm_extract`) sul testo del PDF **e sulle tabelle
 MinerU di una scansione** (`estrai_da_mineru`: la colonna Differenza ricompone le cifre che l'OCR
 sposta da una cella alla successiva). Prima questa famiglia andava al modello, che prendeva
@@ -1364,3 +1364,14 @@ metà lascia il documento non adottato e l'import prosegue sul percorso di §10.
   passivo coincidono: un titolo con un numero senza quella prova resta un titolo.
 
 *Misura sul campione (78 documenti × 3 giri, `tests/corpus/punteggio.py`, giro `fase3-4de18b6`, 2026-11-09, contro `fase3-502f078` del primo innesto): dei 9 documenti il cui PDF quadra ma l'import no alla Fase 2, **7 escono quadrati in tutti i giri** (contro 2); i due fuori sono attesi (massa non classificabile; foglie davvero non in pari, attivo e passivo affiancati). Documenti salvati sbilanciati 12 → 7, nessuno nuovo. 11 documenti adottati dal lettore, nessuno instabile nell'adozione. Macro-voci esatte 78,7% → 80,6%, dettagli KPI 76,4% → 80,3%, altri dettagli 75,5% → 78,7%. Costo per import adottato: mediana 6 chiamate al modello (max 9, tetto 40 mai toccato), 66 s di lettore (max 153 s).*
+
+### I parser di layout sono congelati (Fase 4, 2026-11)
+
+Con il percorso generico del lettore, i parser per singolo layout di gestionale dentro
+`importers/situazione_contabile_parser.py` non crescono più: da qui **solo correzioni di errori**, e un layout
+nuovo si insegna al lettore (`importers/lettore`). L'elenco è `PARSER_DI_LAYOUT` (dodici nomi: i `parse_entries*`
+per AGO, DEPI, 8 cifre, verifica I/E, mastri, sub-mastro, SEZBIL, TeamSystem, colonna singola e il generico,
+più `parse_bilancio_verifica_segno` e `extract_contrapposte_best_effort`).
+`tests/test_parser_layout_congelati.py` ricava i parser dal modulo (funzioni pubbliche di livello modulo
+`parse_*`/`extract_*`, dispatcher `extract_situazione_contabile` escluso) e fallisce se ne trova uno fuori
+dall'elenco. La regola e il danno a violarla stanno in CLAUDE.md, «Invarianti e trappole › Estrazione e classificazione».

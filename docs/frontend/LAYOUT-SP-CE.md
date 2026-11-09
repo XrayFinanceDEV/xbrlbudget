@@ -14,8 +14,8 @@ Non c'è **un** elenco condiviso: ce ne sono quattro, e ciascuno serve una famig
 
 | Elenco | Dove vive | Chi lo rende | Righe |
 |---|---|---|---|
-| `RETTIFICHE_RENDER_ORDER` | `lib/pratica-rettifiche-rules.ts` | Rettifiche (le due sotto-tab) | 92 codici |
-| `buildBalanceItemsWithTotals` + `buildIncomeItemsWithEbitda` | `lib/pratica-statement-rows.ts` | Confronto · Proiezione · Stampa | 76 + 44 righe, di cui 87 codici di voce |
+| `RETTIFICHE_RENDER_ORDER` | `lib/pratica-rettifiche-rules.ts` | Rettifiche (le due sotto-tab) | 93 codici |
+| `buildBalanceItemsWithTotals` + `buildIncomeItemsWithEbitda` | `lib/pratica-statement-rows.ts` | Confronto · Proiezione · Stampa | 76 + 45 righe, di cui 88 codici di voce |
 | `BALANCE_STATEMENT_ROWS` | `lib/ivcee-catalog.ts` | `/forecast/balance` · `report-appendices` | 86 righe |
 | `INCOME_STATEMENT_ROWS` | `lib/ivcee-catalog.ts` | `/forecast/income` | 47 righe |
 
@@ -23,10 +23,12 @@ I due prospetti insieme portano **108** righe con un campo, di cui 97 citano una
 catalogo; le altre 11 sono aggregati calcolati dal backend (`fixed_assets`, `ebitda`, `net_profit`,
 …), che non sono voci di legge.
 
-Gli elenchi **non coincidono**, ed è voluto. Il catalogo ha 100 voci; Rettifiche ne rende 92 — le
-otto che mancano sono i tre aggregati che la scheda ricalcola da sé (`sp12_riserve`,
-`sp16_debiti_breve`, `sp17_debiti_lungo`), le quattro sotto-voci dei fondi rischi (`sp14a..d`) e
-`ce03a_incrementi_immobilizzazioni`, che invece i prospetti rendono. Il Confronto rende 87 voci più
+Gli elenchi **non coincidono**, ed è voluto. Il catalogo ha 100 voci; Rettifiche ne rende 93 — le
+sette che mancano sono i tre aggregati che la scheda ricalcola da sé (`sp12_riserve`,
+`sp16_debiti_breve`, `sp17_debiti_lungo`) e le quattro sotto-voci dei fondi rischi (`sp14a..d`), che invece
+i prospetti rendono. `ce03a_incrementi_immobilizzazioni` (A.4) mancava come ottava: dal 2026-11-09 (Task 5-bis)
+sta in `CE_A` ed è editabile, perché ogni importatore ormai scrive lì gli incrementi per lavori interni e `ce03` resta
+A.3, la variazione dei lavori in corso su ordinazione. Il Confronto rende 88 voci più
 33 righe sintetiche di intestazione e totale (20 nello SP, 13 nel CE). Quello che è condiviso è la
 **tassonomia** — il nome, il padre, la sezione, l'ordine — non l'elenco.
 
@@ -89,7 +91,7 @@ Per aggiungere, poniamo, `sp05f_nuova`:
 
 | File | Che cosa, e cosa succede se lo salti |
 |---|---|
-| `lib/pratica-rettifiche-rules.ts` | il codice in `RETTIFICHE_BS_*` / `DEBT_GROUPS` / `CE_*`. Sono gli elenchi da cui `ALL_CODES` costruisce il catalogo **e** l'ordine di resa di Rettifiche: fuori di lì la voce non è editabile e non entra in `VOCI` — a meno di inserirla **a mano** in `ALL_CODES` (`ivcee-catalog.ts`), che è la via seguita per `sp14a..d` e `ce03a`. |
+| `lib/pratica-rettifiche-rules.ts` | il codice in `RETTIFICHE_BS_*` / `DEBT_GROUPS` / `CE_*`. Sono gli elenchi da cui `ALL_CODES` costruisce il catalogo **e** l'ordine di resa di Rettifiche: fuori di lì la voce non è editabile e non entra in `VOCI` — a meno di inserirla **a mano** in `ALL_CODES` (`ivcee-catalog.ts`), che è la via seguita per `sp14a..d` (e fino al 2026-11-09 per `ce03a`, oggi in `CE_A`). |
 | `lib/pratica-codes.ts` | il padre in `DETAIL_PARENTS` (per una sotto-voce) oppure il codice in `ATTIVO_CODES` / `PASSIVO_CODES` (per una voce SP di primo livello). Se manca, `order` vale `-1` e il test «nessuna voce resta senza ordine» diventa rosso. Per una voce di primo livello del CE non serve nulla: l'ordine si deriva da `ALL_CODES`. |
 | `lib/ivcee-catalog.ts` | l'etichetta (in una delle tre grafie, o in `EXTRA_LABELS`), più la riga in `BALANCE_STATEMENT_ROWS` o `INCOME_STATEMENT_ROWS` se deve comparire nei prospetti. Senza etichetta la voce si chiama come il proprio codice e il test strutturale diventa rosso. |
 | `lib/pratica-statement-rows.ts` | la riga del Confronto: è ancora una sequenza scritta a mano di chiamate `labeled("…")`, nessuno la deriva dal catalogo. |

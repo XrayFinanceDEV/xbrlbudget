@@ -26,7 +26,7 @@ from calculations.ce_result import calculate_ce_result
 
 # Si incrementa a ogni cambiamento dei numeri che il motore produce a parità di ipotesi: un
 # ForecastYear con una versione più vecchia è un previsionale da rigenerare (lotto 2, A01-bis).
-ENGINE_VERSION = "4"
+ENGINE_VERSION = "5"
 
 
 def _erogazioni_anno(details: Dict[str, Any]) -> str:
@@ -3367,12 +3367,13 @@ class ForecastEngine:
 
         # CE line items: use override if set, otherwise fall back to base year
         # ce02 (variazione di rimanenze di prodotti) non e' piu' quella dell'anno base: si deriva dallo SP nel
-        # blocco delle rimanenze qui sotto (#62 nota S04, 2026-10-05). ce03 resta della base (vedi sotto).
-        # A.4 "Incrementi di immobilizzazioni per lavori interni" — carried as its own line.
-        # Without this the engine silently dropped it from the production value (the client's
-        # "380.423 che sparisce / non si azzera" issue) and it had no override.
-        _base_ce03a = getattr(base_inc, 'ce03a_incrementi_immobilizzazioni', None) or Decimal('0')
-        ce03a = assumption.ce03a_override if getattr(assumption, 'ce03a_override', None) is not None else _base_ce03a
+        # blocco delle rimanenze qui sotto (#62 nota S04, 2026-10-05). ce03 e ce03a valgono zero in piano salvo override (vedi sotto).
+        # A.4 "Incrementi di immobilizzazioni per lavori interni" (`ce03a`, ENGINE_VERSION 5, Task 5-bis,
+        # decisione del proprietario 2026-11-09): come ce03 (A.3, R04 sotto), ce18 e ce19 non e' ricorrente e
+        # ripeterlo dalla base crea ricavo senza contropartita nello SP (cassa fittizia): vale ZERO in ogni
+        # anno di piano salvo `ce03a_override`. Resta una riga propria del valore della produzione e ha il
+        # suo override (il «380.423 che sparisce / non si azzera» del cliente).
+        ce03a = assumption.ce03a_override if getattr(assumption, 'ce03a_override', None) is not None else Decimal('0')
         # ── RIMANENZE IN TRE GRUPPI, DAL MAGAZZINO AL CE (spec B01 2026-09-26; #62 nota S04 2026-10-05) ──
         # Il calcolo sta QUI, nel CE, non nello SP: i valori di ce10/ce02/ce03 devono essere noti prima delle
         # imposte, e lo SP legge `details['rimanenze']` (e `['rimanenze_materie']` per sp05a) — mai il
@@ -3601,9 +3602,10 @@ class ForecastEngine:
                 chiusura_semilav = _qc(nuova_sl)
         else:
             ce02 = ce02_calc
-        # ce03 NON deriva da Δsp05c (il campo e' ambiguo negli import: la voce A.4 finisce spesso qui). R04 (#63,
+        # ce03 (A.3, lavori in corso su ordinazione) NON deriva da Δsp05c. R04 (#63,
         # decisione del proprietario 2026-10-09): ripeterlo dalla base creava ricavo senza contropartita nello SP
-        # (cassa fittizia), quindi vale ZERO in ogni anno di piano salvo `ce03_override`, come ce18/ce19 (E05).
+        # (cassa fittizia), quindi vale ZERO in ogni anno di piano salvo `ce03_override`, come ce18/ce19 (E05); lo stesso vale per
+        # `ce03a` (A.4) dalla ENGINE_VERSION 5.
         # Il movimento di sp05c non si specchia nel CE (solo cassa), e si dichiara: contropartita 'nessuna'.
         ce03 = assumption.ce03_override if assumption.ce03_override is not None else Decimal('0')
 

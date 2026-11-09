@@ -115,6 +115,12 @@ class Profilo:
     sezioni_lati: dict[tuple[int, float, str], str] = field(default_factory=dict)
     # (pagina, x destra) dei trattini che fanno da colonna dei segni meno (1426), vedi `meno_staccato`
     segni_colonna: frozenset[tuple[int, float]] = frozenset()
+    # le colonne dove un intero nudo («623», «82») e' un importo nella lettura delle celle
+    # (`_colonne_intere_di_fatto`); None = quelle che `decimali` dice tutte senza centesimi. Negativi, coppie
+    # parziali/totali e marcatori D/A restano sulle intere strette: contano forme e posizioni su tutte le righe, e un
+    # intero nudo letto come importo in una colonna che stampa anche i centesimi sposterebbe quei conteggi su ogni
+    # documento; a 1540 bastano le celle (le coppie le trova gia').
+    intere: frozenset[int] | None = None
 
 
 @dataclass(frozen=True)
@@ -192,6 +198,31 @@ def _decimali(righe: list[RigaFisica], colonne: list[Colonna]) -> dict[int, bool
                 i = trovato[1].indice
                 out[i] = bool(out[i]) or "," in p.testo
     return out
+
+
+# Una colonna dei totali all'unita' puo' stampare i centesimi su una riga o due (il risultato d'esercizio, 1540: 2
+# importi su 81): non per questo i suoi interi nudi («623», «82») diventano testo. Bastano tanti importi da fare una
+# prova, e i centesimi devono essere l'eccezione, non una delle due forme della colonna (208, 682: un terzo e oltre).
+_MIN_IMPORTI_INTERI = 20
+_QUOTA_CENTESIMI_AMMESSA = 0.05
+
+
+def _colonne_intere_di_fatto(righe: list[RigaFisica], colonne: list[Colonna]) -> frozenset[int]:
+    """Le colonne i cui importi sono senza centesimi, salvo al piu' il 5% su almeno 20 importi letti."""
+    conti: dict[int, list[int]] = {c.indice: [0, 0] for c in colonne}
+    for r in righe:
+        for p in r.parole:
+            trovato = _in_colonna(p, colonne)
+            if trovato is not None and trovato[0].forma != "zero":
+                conti[trovato[1].indice]["," in p.testo] += 1
+    return frozenset(i for i, (senza, con) in conti.items() if intera_di_fatto(senza, con))
+
+
+def intera_di_fatto(senza: int, con: int) -> bool:
+    """`senza` importi senza centesimi e `con` coi centesimi: la colonna e' a interi se non ne ha coi centesimi, o
+    se ne ha al piu' il 5% su almeno 20 importi (1 su 20 si', 1 su 19 no)."""
+    totale = senza + con
+    return senza > 0 and (con == 0 or (totale >= _MIN_IMPORTI_INTERI and con <= _QUOTA_CENTESIMI_AMMESSA * totale))
 
 
 def _colonne_intere(righe: list[RigaFisica], colonne: list[Colonna]) -> frozenset[int]:
@@ -289,6 +320,23 @@ _PERDITE_E_PROFITTI = re.compile(r"perdite\s+e\s+profitti\b", re.I)
 # Le due meta' del conto economico a sezioni contrapposte, nel titolo classico: «COSTI, SPESE E PERDITE»,
 # «RICAVI E PROFITTI» (1531: la pagina dopo uno stato patrimoniale chiuso a pareggio)
 _COSTI_E_RICAVI = re.compile(r"(?:costi\W+spese\s+e\s+perdite|ricavi\W+(?:rendite\s+e\s+)?profitti)\b", re.I)
+
+
+# Le parole di una testata di colonna che una stampa mette in coda al titolo del lato («ATTIVITA' CORRENTE
+# PRECEDENTE», 1533): tolte quelle, resta il titolo. Solo le parole dei periodi: «SALDO PASSIVO» non e' un titolo.
+_TESTATA_SUL_TITOLO = {"corrente", "precedente", "esercizio", "periodo", "anno"}
+
+
+def _titolo_di_lato(r: RigaFisica, colonne: list[Colonna]) -> bool:
+    """«ATTIVITA'», «PASSIVITA' E PATRIMONIO NETTO» seguiti dalle parole della testata delle colonne, su una riga
+    senza importi."""
+    if _ha_celle(r, colonne):
+        return False
+    parole = _testo(r).split()
+    n = len(parole)
+    while parole and _norm(parole[-1]).strip("'’.:") in _TESTATA_SUL_TITOLO:
+        parole.pop()
+    return 0 < len(parole) < n and intestazione(" ".join(parole)) in (["Attivo"], ["Passivo"])
 
 
 def _titolo_sezione(r: RigaFisica, colonne: list[Colonna]) -> str | None:
@@ -404,6 +452,8 @@ def _sezioni(pagine: list[list[RigaFisica]], colonne: list[Colonna], avvisi: lis
             s = _titolo_sezione(r, colonne)
             if s is None and not ultima:
                 s = _titolo_debole(r, colonne)
+            if s is None and not titoli and (not ultima or chiusa) and _titolo_di_lato(r, colonne):
+                s = "SP"        # solo dove nessuna sezione e' aperta: a meta' di un CE «PASSIVO ...» resta un conto
             if s is not None:
                 titoli.append((r.y, s))
                 ultimo_titolo = k
@@ -1120,4 +1170,4 @@ def profilo_documento(righe: list[RigaFisica], *, altezze: dict[int, float] | No
                    _forme(_candidati(prospetto, colonne, confine)), _sezioni_pagina(pagine, per_riga),
                    frozenset(margini), avvisi, contrapposto, parti_pagina, bande, tabelle, scartate, sezioni_righe,
                    parti_righe, _colonne_a_marcatore(prospetto, colonne, intere), _coppie(prospetto, colonne, intere),
-                   sezioni_lati, segni_colonna)
+                   sezioni_lati, segni_colonna, _colonne_intere_di_fatto(prospetto, colonne))

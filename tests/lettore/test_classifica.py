@@ -292,3 +292,43 @@ def test_voto_tiene_la_rettifica():
     f = F("a", "Fondo amm. impianti", lato="R")
     out = c.rivota([f], {"a": c.Classe(None, None, "nessuna")}, chiama_json=Finto("sp03.F"))
     assert out["a"].macro == "sp03" and out["a"].rettifica == "SPA.B.II.F" and out["a"].fonte == "voto"
+
+
+# --- scadenza dei debiti (Task 11): senza prova stampata a breve, con «oltre»/«medio-lungo» oltre -----------------
+
+def _M(macro, fonte="modello", dettaglio=None):
+    return c.Classe(macro, dettaglio, fonte)
+
+
+def test_debito_senza_scadenza_stampata_torna_a_breve():
+    foglie = [F("a", "FINANZIAMENTI PASSIVI BANCA 2", lato="R"), F("b", "MUTUO PASSIVO", lato="R")]
+    out, scelte = c.scadenza_dei_debiti(foglie, {"a": _M("sp17"), "b": _M("sp16")})
+    assert out["a"].macro == "sp16" and out["b"].macro == "sp16"
+    assert any("a" in s for s in scelte) and not any(s.endswith(": b") for s in scelte)
+
+
+def test_debito_con_oltre_nell_etichetta_o_nel_mastro_va_oltre():
+    foglie = [F("a", "Erario c/iva oltre 12 mesi", lato="R"),
+              F("b", "Debiti v/INPS", lato="R", antenati=("DEBITI", "DEBITI PREVID./ASSIC. OLTRE 12 M")),
+              F("c", "CRA C/FINANZIAMENTO (LUNGO TERMINE)", lato="R"),
+              F("d", "Banca X", lato="R", antenati=("MUTUI A MEDIO/LUNGO TERMINE",))]
+    out, _ = c.scadenza_dei_debiti(foglie, {k: _M("sp16") for k in "abcd"})
+    assert all(out[k].macro == "sp17" for k in "abcd")
+
+
+def test_etichetta_del_conto_vince_sul_mastro_e_interessi_a_breve():
+    foglie = [F("a", "Deb.v/INPS entro 12 mesi", lato="R", antenati=("DEBITI OLTRE 12 MESI",)),
+              F("b", "Interessi maturati", lato="R", antenati=("MUTUI A MEDIO/LUNGO TERMINE",)),
+              F("c", "UNICREDIT C/FINANZIAMENTO A BREVE", lato="R")]
+    out, _ = c.scadenza_dei_debiti(foglie, {k: _M("sp17") for k in "abc"})
+    assert all(out[k].macro == "sp16" for k in "abc")
+
+
+def test_scadenza_non_tocca_legale_altre_macro_ne_dettaglio_gia_detto():
+    foglie = [F("a", "Debiti verso banche", lato="R", percorso="SPP.D.4.O"), F("b", "Fornitori", lato="R"),
+              F("c", "Banca oltre 12 mesi", lato="R")]
+    classi = {"a": _M("sp17", "legale", "sp17a"), "b": _M("sp18"), "c": _M("sp16", dettaglio="sp16a")}
+    out, _ = c.scadenza_dei_debiti(foglie, classi)
+    assert out["a"].macro == "sp17" and out["b"].macro == "sp18"
+    assert out["c"].macro == "sp17" and out["c"].dettaglio == "sp17a"     # stessa lettera dall'altra parte
+    assert classi["c"].macro == "sp16"                                    # le classi del chiamante non si mutano

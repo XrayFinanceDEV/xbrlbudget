@@ -346,3 +346,14 @@ def test_chiamate_del_passo_2_dichiarate(tmp_path):
     d = r["diagnostica"]
     # magazzino e impianti hanno dettagli: il passo 2 li chiede (prima solo le macro KPI)
     assert d["chiamate_dettagli"] >= 1 and d["chiamate_dettagli"] <= d["chiamate"] == finto.chiamate
+
+
+def test_scadenza_dei_debiti_dal_testo_non_dal_modello(monkeypatch):
+    # il modello manda il finanziamento senza scadenza oltre e il debito «oltre 12 mesi» a breve: decide il testo
+    foglie = [_f("c", 1000, "L", "Cassa"), _f("m", 600, "R", "Mutuo banca"),
+              _f("o", 400, "R", "Erario c/iva oltre 12 mesi")]
+    _finta_lettura(monkeypatch, foglie, [])
+    finto = Finto({"cassa": "sp09", "mutuo": "sp17", "erario": "sp16"})
+    r = importa_col_lettore("x.pdf", chiama_json=finto)
+    assert r["bs"]["sp16_debiti_breve"] == D("600") and r["bs"]["sp17_debiti_lungo"] == D("400")
+    assert r["diagnostica"]["sbilancio"] == "0.00" and len(r["diagnostica"]["scadenze"]) == 2

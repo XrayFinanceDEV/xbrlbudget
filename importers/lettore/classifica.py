@@ -11,6 +11,7 @@ proprietario, 2026-11-09: «max details if possible, if not generic accounts»).
 """
 from __future__ import annotations
 
+import re
 from collections import Counter
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, replace
@@ -346,3 +347,60 @@ def classifica_dettagli(foglie: list[Foglia], classi: dict[str, Classe], *, chia
             cache[k] = det
         for f in gruppo:
             classi[f.id].dettaglio = det
+
+
+# --- scadenza dei debiti ------------------------------------------------------------------------------------------
+# Regola del proprietario (CLAUDE.md, «Debito senza scadenza dichiarata → a breve»): un debito va oltre 12 mesi solo con
+# una prova stampata - «oltre 12 mesi / l'esercizio», «lungo termine», «medio/lungo», «m/l» - nel conto o nel suo mastro
+# (eccezione del 2026-10-28: il mastro «medio/lungo termine» e' una scadenza dichiarata). Senza prova si va a breve:
+# anticipare una scadenza peggiora gli indici di liquidita', non li abbellisce. Il modello sceglie fra sp16 e sp17
+# dall'etichetta e da una corsa all'altra cambia idea (un «FINANZIAMENTI PASSIVI» va oltre in una corsa e no
+# nell'altra): la scadenza la decide il testo, non lui.
+_PERIODO = r"(?:I\s*)?(?:12\s*M|L\W?\s*(?:ANNO|ESERCIZIO)|ES\.?\s*SUCC|ESERCIZIO\s+SUCC)"
+_OLTRE = re.compile(rf"\bOLTRE\s*{_PERIODO}|\bLUNGO\s+TERMINE|\bM(?:EDIO)?\s*/\s*L(?:UNGO)?\b|\bA\s+LUNGO\b")
+_ENTRO = re.compile(rf"\bENTRO\s*{_PERIODO}|\bBREVE\s+TERMINE|\bA\s+BREVE\b")
+# interessi maturati in un mastro «medio/lungo» sono dovuti entro l'anno (proprietario, P3 del 2026-11-04)
+_INTERESSI = re.compile(r"\bINTERESS|\bRATEI\b")
+
+
+def scadenza_stampata(testo: str) -> str | None:
+    """«E» | «O» se il testo dichiara una scadenza (una sola), altrimenti None."""
+    t = (testo or "").upper()
+    entro, oltre = bool(_ENTRO.search(t)), bool(_OLTRE.search(t))
+    return None if entro == oltre else ("E" if entro else "O")
+
+
+def _scadenza_del_debito(f: Foglia) -> str | None:
+    """La scadenza che il documento stampa per la foglia: prima il suo conto, poi i mastri dal piu' vicino."""
+    propria = scadenza_stampata(f.etichetta)
+    if propria:
+        return propria
+    for a in reversed(f.antenati):
+        s = scadenza_stampata(a)
+        if s:
+            return "E" if s == "O" and _INTERESSI.search(f.etichetta.upper()) else s
+    return None
+
+
+_DEBITI = {"E": "sp16", "O": "sp17"}
+
+
+def scadenza_dei_debiti(foglie: list[Foglia], classi: dict[str, Classe]) -> tuple[dict[str, Classe], list[str]]:
+    """Debiti verso sp16/sp17 dalla scadenza stampata, senza prova a breve. Solo le classi del modello (il percorso
+    di legge porta gia' la sua scadenza) e solo fra sp16 e sp17: la natura resta, il dettaglio passa alla stessa
+    lettera dell'altra parte (sp17a -> sp16a). Ritorna copie e le scelte dichiarate."""
+    nuove = dict(classi)
+    scelte: list[str] = []
+    for f in foglie:
+        k = classi.get(f.id)
+        if k is None or k.fonte == "legale" or k.rettifica or k.macro not in ("sp16", "sp17"):
+            continue
+        s = _scadenza_del_debito(f)
+        voluta = _DEBITI.get(s or "E")
+        if voluta == k.macro:
+            continue
+        dettaglio = voluta + k.dettaglio[4:] if k.dettaglio else None
+        nuove[f.id] = replace(k, macro=voluta, dettaglio=dettaglio)
+        perche = "scadenza stampata" if s else "nessuna scadenza stampata"
+        scelte.append(f"debito {'oltre' if voluta == 'sp17' else 'a breve'} ({perche}): {f.id}")
+    return nuove, scelte

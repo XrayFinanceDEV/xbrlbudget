@@ -19,7 +19,7 @@ from decimal import Decimal
 from importers import llm_provider
 from importers.import_snello import percorsi
 from importers.lettore.celle import leggi_celle
-from importers.lettore.classifica import classifica_dettagli, classifica_macro, rivota
+from importers.lettore.classifica import classifica_dettagli, classifica_macro, rivota, scadenza_dei_debiti
 from importers.lettore.componi import (Composizione, componi, e_questo_risultato, e_risultato, importo_sp,
                                        lato_sp, risultato_con_segno)
 from importers.lettore.foglie import ancore, colonne_utili, foglie_contabili, senza_colonna
@@ -155,6 +155,8 @@ def _importa(file_path, contesto_mineru, chiama_json, diag: dict) -> dict:
         rivotate += len(sotto)
         voti += len(sotto) * _VOTI
         comp = componi(foglie_c, classi, anc_c)
+    # la scadenza dei debiti la decide il testo stampato, prima del dettaglio (sp16a e sp17a sono sotto-voci diverse)
+    classi, diag["scadenze"] = scadenza_dei_debiti(tutte, classi)
     prima = conto["n"]
     classifica_dettagli(tutte, classi, chiama_json=chiama, cache=cache)
     diag["chiamate_dettagli"] = conto["n"] - prima
@@ -204,6 +206,7 @@ def importa_col_lettore(file_path: str, contesto_mineru=None, *, chiama_json=Non
     """SP e CE del PDF, corrente e precedente. Mai un'eccezione: un errore da' bs/ce vuoti e `diagnostica["errore"]`."""
     inizio = time.monotonic()
     diag: dict = {"foglie": 0, "ancore": 0, "blocchi": [], "voti": 0, "foglie_rivotate": 0, "chiamate": 0, "classi_per_fonte": {},
+                  "scadenze": [],
                   "secondi": 0.0}
     try:
         out = _importa(file_path, contesto_mineru, chiama_json, diag)

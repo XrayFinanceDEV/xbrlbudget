@@ -114,5 +114,6 @@ describe("A.3 e A.4 del CE (Task 5-bis)", () => {
     expect(controparti("sp03_immob_materiali")).toEqual(["ce03a_incrementi_immobilizzazioni"]);
     expect(controparti("ce03a_incrementi_immobilizzazioni")).toEqual(["sp03_immob_materiali"]);
     expect(controparti("ce03_lavori_interni")).toEqual(["sp05c_lavori_in_corso"]);
+    expect(controparti("sp05c_lavori_in_corso")).toEqual(["ce03_lavori_interni"]);
   });
 });

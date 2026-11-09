@@ -74,3 +74,13 @@ def test_route_c_parole_chiave_incrementi_in_ce03a():
     assert (['INCREM', 'IMMOB'], 'ce03') not in scp._CE_RICAVI_RULES
     assert (['INCREMENTI'], 'ce03a') in scp._VSEG_CE_RICAVI
     assert (['INCREMENTI'], 'ce03') not in scp._VSEG_CE_RICAVI
+
+
+def test_source_reconciliation_a3_stampata_va_in_ce03_non_in_ce02():
+    facts = {"ce_a": D("1080"), "ce_b": D("800"), "ce_pretax": D("280"), "ce_result": D("230"),
+             "ceitem_1": D("1000"), "ceitem_3": D("30"), "ceitem_4": D("50"), "ceitem_7": D("400"),
+             "ceitem_9": D("300"), "ceitem_10": D("100"), "ceitem_20": D("50")}
+    out = sr._income(facts, D("230"))
+    assert out is not None
+    assert out[A3] == D("30") and out[A4] == D("50")
+    assert out["ce02_variazioni_rimanenze"] == D("0")

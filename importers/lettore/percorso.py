@@ -12,6 +12,7 @@ presenti, anche a zero). Mai un'eccezione verso il chiamante: un errore da' bs/c
 from __future__ import annotations
 
 import threading
+from dataclasses import replace
 import time
 from collections import Counter
 from decimal import Decimal
@@ -215,6 +216,7 @@ def _importa(file_path, contesto_mineru, chiama_json, diag: dict) -> dict:
     classi, diag["scadenze"] = scadenza_dei_debiti(tutte, classi)
     classi, diag["scadenze"] = _scadenze_contro_ancore(foglie_c, classi_del_modello, classi, anc_c, diag["scadenze"])
     prima = conto["n"]
+    classi = {k: replace(c) for k, c in classi.items()}      # il dettaglio scrive in posto: mai sugli oggetti del modello
     classifica_dettagli(tutte, classi, chiama_json=chiama, cache=cache)
     diag["chiamate_dettagli"] = conto["n"] - prima
     if conto["rotto"]:

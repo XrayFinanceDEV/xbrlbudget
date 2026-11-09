@@ -20,7 +20,7 @@ from decimal import Decimal
 from importers import llm_provider
 from importers.llm_provider import ContestoEccessivo, LLMProviderError, RispostaTroncata
 from importers.lettore import tavola
-from importers.lettore.foglie import Ancora, Foglia
+from importers.lettore.foglie import Ancora, Foglia, gettoni_di_legge
 from importers.lettore.totali import _norm
 
 BLOCCO = 60
@@ -355,6 +355,10 @@ def classifica_dettagli(foglie: list[Foglia], classi: dict[str, Classe], *, chia
     for f in foglie:
         c = classi.get(f.id)
         if not c or c.macro not in tavola.DETTAGLI or c.dettaglio:
+            continue
+        if c.fonte == "legale" and gettoni_di_legge(f.etichetta, f.codice):
+            # la foglia e' la voce di legge stampata («II - Crediti» di un abbreviato): il suo percorso dice gia'
+            # tutto quello che il documento sa, il dettaglio e' ignoto e la massa va in «altri», mai inventata
             continue
         k = ("dettaglio", c.macro, c.rettifica) + _chiave(f)
         if k in cache:

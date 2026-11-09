@@ -409,3 +409,52 @@ def test_scadenza_non_rompe_un_ancora_stampata_che_tornava(monkeypatch):
     assert r["diagnostica"]["blocchi"] == []
     assert any("ancora" in s and s.endswith(": m") for s in r["diagnostica"]["scadenze"])
     assert not any(s.startswith("debito a breve") and s.endswith(": m") for s in r["diagnostica"]["scadenze"])
+
+
+# --- Review Focus della Fase 4 (Task 3) ---------------------------------------------------------------------------
+
+def _abbreviato(etichetta_immobilizzazioni="II - Immobilizzazioni materiali"):
+    righe = [("B) IMMOBILIZZAZIONI",), (etichetta_immobilizzazioni, "800,00"),
+             ("C) ATTIVO CIRCOLANTE",), ("II - Crediti", "500,00"), ("IV - Disponibilita' liquide", "700,00"),
+             ("TOTALE ATTIVO", "2.000,00"), ("STATO PATRIMONIALE PASSIVO",), ("A) PATRIMONIO NETTO",),
+             ("I - Capitale", "950,00"), ("IX - Utile (perdita) dell'esercizio", "400,00"), ("D) DEBITI", "650,00"),
+             ("TOTALE PASSIVO", "2.000,00"), ("CONTO ECONOMICO",), ("A) VALORE DELLA PRODUZIONE",),
+             ("1) ricavi delle vendite e delle prestazioni", "2.950,00"), ("5) altri ricavi e proventi", "100,00"),
+             ("B) COSTI DELLA PRODUZIONE",), ("7) per servizi", "2.650,00"),
+             ("21) Utile (perdita) dell'esercizio", "400,00")]
+    return [(50, 100, "STATO PATRIMONIALE ATTIVO"), _testata(373, 120, "31/12/2025")] + _righe(140, righe)
+
+
+def test_legge_precedente_senza_importi_non_dal_modello(tmp_path):
+    # RF1: la testata nomina due esercizi ma il precedente non ha importi letti (stampato in un'altra pagina, o non
+    # letto): la corrente quadra e si adotta, il precedente resta assente, e il modello non e' mai chiamato
+    voci = _schema_di_legge(prec=("",) * 12)
+    r = importa_col_lettore(_pdf(tmp_path, voci), chiama_json=_mai)
+    assert r["diagnostica"]["chiamate"] == 0 and r["diagnostica"]["blocchi"] == []
+    assert r["prior_bs"] is None and r["prior_ce"] is None and r["prior_stato"] in ("assente", "scartato")
+    esito = _esito("lettore", r["bs"], r["ce"], r["stampati"])
+    assert esito["adottato"] and esito["esito"] == "ok"
+
+
+def test_legge_abbreviato_dettaglio_in_altri(tmp_path):
+    # RF3: l'abbreviato stampa «II - Crediti» senza sotto-voci; la classe e' la macro dal percorso stampato e il
+    # dettaglio, che il documento non dice, va in «altri»: nemmeno un modello che lo inventerebbe viene chiesto
+    finto = Finto({"crediti": "sp06a", "debiti": "sp16a", "immobilizzazioni": "sp03a"})
+    r = importa_col_lettore(_pdf(tmp_path, _abbreviato()), chiama_json=finto)
+    assert finto.chiamate == 0 and r["diagnostica"]["classi_per_fonte"] == {"legale": 9}
+    bs = r["bs"]
+    assert bs["sp06_crediti_breve"] == D("500.00") and bs["sp06g_crediti_altri_breve"] == D("500.00")
+    assert not bs.get("sp06a_crediti_clienti_breve") and not bs.get("sp16a_debiti_banche_breve")
+    assert bs["sp16g_altri_debiti_breve"] == D("650.00")
+    assert _esito("lettore", bs, r["ce"], r["stampati"])["esito"] == "ok"
+
+
+def test_legge_percorso_stampato_vince_sul_modello(tmp_path):
+    # RF4: «B.II.2 Impianti e macchinario» stampa il percorso di legge; un modello che la manderebbe fra le
+    # immateriali (sp02) non viene chiesto, e la voce va in sp03b come dice il percorso (`classifica._da_percorso`)
+    finto = Finto({"impianti": "sp02"})
+    r = importa_col_lettore(_pdf(tmp_path, _abbreviato("B.II.2 Impianti e macchinario")), chiama_json=finto)
+    assert finto.chiamate == 0
+    bs = r["bs"]
+    assert bs["sp03_immob_materiali"] == D("800.00") and bs["sp03b_impianti_macchinari"] == D("800.00")
+    assert not bs.get("sp02_immob_immateriali")

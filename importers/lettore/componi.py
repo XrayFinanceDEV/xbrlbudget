@@ -22,7 +22,7 @@ from importers.lettore.classifica import Classe
 from importers.import_snello.verifica import soglia as soglia_adozione
 from importers.lettore.diagnosi import TOLLERANZA_ARROTONDAMENTO
 from importers.lettore.foglie import Ancora, Foglia, e_riga_del_risultato
-from importers.rimanenze_ce import e_conto_rimanenze, natura_rimanenze
+from importers.rimanenze_ce import e_conto_rimanenze, voce_rimanenze
 
 _ZERO = Decimal(0)
 _CENT = Decimal("0.01")
@@ -60,10 +60,10 @@ def _bersaglio_ce(f: Foglia, classe: Classe | None) -> tuple[str | None, Decimal
     importo = f.importo
     natura = None
     if e_conto_rimanenze(f.etichetta):
-        natura = natura_rimanenze(f.etichetta, *reversed(f.contesto))
+        natura = voce_rimanenze(f.etichetta, *reversed(f.contesto))
     if natura:
-        # ce02 e' un ricavo, ce10 un costo: la rimanenza dal verso opposto toglie
-        proprio = "ricavo" if natura == "ce02" else "costo"
+        # ce02/ce03 sono ricavi, ce10 un costo: la rimanenza dal verso opposto toglie
+        proprio = "costo" if natura == "ce10" else "ricavo"
         if f.verso_ce and f.verso_ce != proprio:
             importo = -importo
         return natura, importo

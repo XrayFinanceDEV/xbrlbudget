@@ -249,3 +249,14 @@ def test_schema_di_legge_legge_le_lettere_di_b10():
         "ce09d_svalutazione_crediti": D("14949")}
     # lettere che non chiudono sul totale stampato: nessuna
     assert _ce09_dettaglio(righe, 0, 5, 0, D("30000")) == {}
+
+
+def test_voce_rimanenze_lavori_in_corso_su_ordinazione_in_a3():
+    # W4 del proprietario (2026-11-04): la variazione dei lavori in corso su ordinazione va in A.3 (ce03)
+    from importers.rimanenze_ce import natura_rimanenze, voce_rimanenze
+    assert voce_rimanenze("RIMANENZE FINALI COMMESSE IN LAVORAZIONE") == "ce03"
+    assert voce_rimanenze("Rimanenze iniziali lavori in corso su ordinazione") == "ce03"
+    assert voce_rimanenze("Rimanenze finali", "LAVORI IN CORSO SU ORDINAZIONE") == "ce03"
+    assert voce_rimanenze("Rimanenze finali prodotti finiti", "COMMESSE") == "ce02"   # decide il conto, non il padre
+    assert voce_rimanenze("Rimanenze merci") == "ce10" and voce_rimanenze("Rimanenze") is None
+    assert natura_rimanenze("RIMANENZE FINALI COMMESSE IN LAVORAZIONE") == "ce02"     # i lettori di oggi invariati

@@ -303,3 +303,11 @@ def test_fondo_negativo_fra_le_attivita_non_e_un_debito():
               F("p", 900, "R", etichetta="Debiti")]
     k = componi(foglie, {"a": C("sp06", "sp06a"), "f": C("sp06", "sp06a"), "p": C("sp16")}, [])
     assert k.bs["sp06a_crediti_clienti_breve"] == D(900) and k.spostati == 0
+
+
+def test_rimanenze_di_commesse_in_a3():
+    foglie = [F("i", 500, "L", "CE", "costo", "RIMANENZE INIZIALI COMMESSE IN LAVORAZIONE"),
+              F("f", 200, "R", "CE", "ricavo", "RIMANENZE FINALI COMMESSE IN LAVORAZIONE"),
+              F("r", 1000, "R", "CE", "ricavo", "Ricavi")]
+    c = componi(foglie, {"i": C("ce06"), "f": C("ce04"), "r": C("ce01")}, [])
+    assert c.ce["ce03_lavori_interni"] == -300 and c.ce.get("ce02_variazioni_rimanenze", 0) == 0

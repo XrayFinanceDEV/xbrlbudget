@@ -59,3 +59,22 @@ def natura_rimanenze(*testi: str) -> Optional[str]:
         if materie:
             return "ce10"
     return None
+
+
+# W4 del proprietario (2026-11-04): la variazione dei lavori in corso su ordinazione (commesse) va in A.3, la sua voce
+# di legge (``ce03``), non in A.2. ``natura_rimanenze`` resta com'e' per i lettori di oggi; chi vuole la voce di legge
+# usa ``voce_rimanenze``.
+_ORDINAZIONE_RE = re.compile(r"ORDINAZ|COMMESS")
+
+
+def voce_rimanenze(*testi: str) -> Optional[str]:
+    """La voce di legge di un conto di rimanenze: ``'ce03'`` (A.3) per i lavori in corso su ordinazione, altrimenti
+    quella di ``natura_rimanenze``. Decide la prima descrizione che dice la natura, come per ``natura_rimanenze``."""
+    natura = natura_rimanenze(*testi)
+    if natura != "ce02":
+        return natura
+    for testo in testi:
+        t = _MERCI_RE.sub("MERCI", (testo or "").upper())
+        if _PRODOTTI_RE.search(t):
+            return "ce03" if _ORDINAZIONE_RE.search(t) else "ce02"
+    return natura

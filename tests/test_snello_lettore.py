@@ -215,3 +215,11 @@ def test_fondo_oltre_il_cespite_nelle_anomalie(tmp_path, monkeypatch):
     assert r.report["fonte"] == "deterministico:lettore"
     assert ["sp02_immob_immateriali", "4.00"] in r.report["anomalie"]
     assert r.report["diag"]["immobilizzazioni_negative_tagliate"] == [["sp02_immob_immateriali", "4.00"]]
+
+
+def test_dettagli_del_lettore_non_si_rifanno_dopo_l_adozione():
+    # Task 11: il lettore ha gia' deciso dettagli e scadenze (senza prova stampata a breve); la ricerca dei dettagli
+    # dopo l'adozione rileggeva il documento con la regola gestionale «finanziamenti oltre 12 mesi» e la riscriveva
+    assert pdf_importer._dettagli_gia_letti({"fonte": "deterministico:lettore"}, False, False, {}) \
+        == "dettagli_letti_dal_lettore"
+    assert pdf_importer._dettagli_gia_letti({"fonte": "qwen"}, False, False, {}) is None

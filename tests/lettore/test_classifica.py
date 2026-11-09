@@ -410,7 +410,7 @@ def test_fondi_che_sono_debiti_non_sono_contro_conti():
 # --- Task 4 (Fase 4): le parole chiave di oggi come indizio, decide il modello ---
 
 def test_indizio_entra_nella_domanda():
-    f = F("a", "Materie prime, sussidiarie, di consumo e di merci", lato="L", sezione="CE", verso="costo")
+    f = F("a", "carburanti", lato="L", sezione="CE", verso="costo")
     assert c.indizio(f) == "ce05"
     finto = Finto("ce06")
     c.classifica_macro([f], chiama_json=finto)
@@ -440,14 +440,14 @@ def test_indizio_senza_direzione_o_senza_parole_chiave():
 
 
 def test_decide_il_modello():
-    f = F("a", "Materie prime, sussidiarie, di consumo e di merci", lato="L", sezione="CE", verso="costo")
+    f = F("a", "carburanti", lato="L", sezione="CE", verso="costo")
     assert c.indizio(f) == "ce05"
     out = c.classifica_macro([f], chiama_json=Finto("ce06"))
     assert out["a"].macro == "ce06" and out["a"].fonte == "modello"
 
 
 def test_indizio_non_restringe_l_enum():
-    f = F("a", "Materie prime, sussidiarie, di consumo e di merci", lato="L", sezione="CE", verso="costo")
+    f = F("a", "carburanti", lato="L", sezione="CE", verso="costo")
     finto = Finto("ce05")
     c.classifica_macro([f], chiama_json=finto)
     assert set(finto.chiamate[0][1]["properties"]["a"]["enum"]) >= {"ce05", "ce06", "ce07"}
@@ -459,3 +459,10 @@ def test_passo_2_senza_indizio():
     c.classifica_dettagli([f], {"a": c.Classe("sp03", None, "modello")}, chiama_json=finto)
     for messaggi, _ in finto.chiamate:
         assert "indizio" not in messaggi[0]["content"]
+
+
+def test_indizio_ce_tag_di_rimanenza_e_ricavi():
+    # i tag della catena (ce10_close, ce02) diventano la macro; i ricavi usano la catena dei ricavi
+    assert c.indizio(F("a", "Rimanenze finali prodotti", lato="R", sezione="CE", verso="ricavo")) == "ce02"
+    assert c.indizio(F("b", "Ricavi vendite merci", lato="R", sezione="CE", verso="ricavo")) == "ce01"
+    assert c.indizio(F("c", "Carburanti", lato="R", sezione="CE", verso="ricavo")) is None

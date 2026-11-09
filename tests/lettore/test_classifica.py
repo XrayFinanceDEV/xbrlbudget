@@ -264,6 +264,7 @@ def test_contesto_dice_il_lato_dello_stato_patrimoniale():
 def test_prompt_riserva_x_alle_righe_che_non_sono_conti():
     p = c.PROMPT_MACRO.lower()
     assert "lato invertito" in p and "voce ammessa piu' vicina" in p
+    assert "non un'intestazione" in p      # una riga col nome della voce e un importo e' il conto di quella voce
 
 
 def test_lato_opposto_solo_rettifiche_nell_enum():

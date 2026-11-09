@@ -139,13 +139,14 @@ def extract_path_source(file_path):
         if bs['totale_attivo']!=bs['totale_passivo']:
             err.append('unbalanced printed statement')
         ce={}
-        mapping={'A.1':'ce01_ricavi_vendite','A.2':'ce02_variazioni_rimanenze','A.4':'ce03_lavori_interni',
+        mapping={'A.1':'ce01_ricavi_vendite','A.2':'ce02_variazioni_rimanenze','A.4':'ce03a_incrementi_immobilizzazioni',
             'A.5':'ce04_altri_ricavi','B.6':'ce05_materie_prime','B.7':'ce06_servizi','B.8':'ce07_godimento_beni',
             'B.9':'ce08_costi_personale','B.10':'ce09_ammortamenti','B.11':'ce10_var_rimanenze_mat_prime',
             'B.12':'ce11_accantonamenti','B.13':'ce11b_altri_accantonamenti','B.14':'ce12_oneri_diversi',
             'C.15':'ce13_proventi_partecipazioni','C.16':'ce14_altri_proventi_finanziari','C.17':'ce15_oneri_finanziari',
             'tax':'ce20_imposte'}
         ce={f:val('ce',p) for p,f in mapping.items()}
+        ce['ce03_lavori_interni']=ZERO  # A.3 non letta da questo percorso; A.4 sta in ce03a
         for path,fields in (('B.9',('ce08b_salari_stipendi','ce08c_oneri_sociali','ce08a_tfr_accrual',
                                    'ce08d_altri_costi_personale','ce08d_altri_costi_personale')),
                             ('B.10',detail_fields('ce09_ammortamenti'))):

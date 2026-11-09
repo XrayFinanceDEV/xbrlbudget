@@ -235,7 +235,7 @@ def _read_column(rows, column, cutoff):
 def _income(facts, sp_profit, tol=TOL):
     if not {'ce_a', 'ce_b', 'ce_pretax', 'ce_result'}.issubset(facts):
         return None
-    mapping = {1: 'ce01_ricavi_vendite', 2: 'ce02_variazioni_rimanenze', 4: 'ce03_lavori_interni',
+    mapping = {1: 'ce01_ricavi_vendite', 2: 'ce02_variazioni_rimanenze', 4: 'ce03a_incrementi_immobilizzazioni',
                5: 'ce04_altri_ricavi', 6: 'ce05_materie_prime', 7: 'ce06_servizi', 8: 'ce07_godimento_beni',
                9: 'ce08_costi_personale', 10: 'ce09_ammortamenti', 11: 'ce10_var_rimanenze_mat_prime',
                12: 'ce11_accantonamenti', 13: 'ce11b_altri_accantonamenti', 14: 'ce12_oneri_diversi',
@@ -243,6 +243,7 @@ def _income(facts, sp_profit, tol=TOL):
                20: 'ce20_imposte'}
     sign = -1 if facts['ce_b'] < 0 else 1
     ce = {field: facts.get(f'ceitem_{i}', ZERO) * (sign if 6 <= i <= 14 else 1) for i, field in mapping.items()}
+    ce['ce03_lavori_interni'] = ZERO  # A.3 confluisce in ce02 (sopra); ce03 e' A.3, A.4 sta in ce03a
     ce['ce02_variazioni_rimanenze'] += facts.get('ceitem_3', ZERO)
     ce['ce15_oneri_finanziari'] = abs(ce['ce15_oneri_finanziari'])
     ce['ce20_imposte'] *= sign

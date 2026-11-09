@@ -1758,7 +1758,8 @@ def _parse_income_column(
         return {
             "ce01_ricavi_vendite": ce01,
             "ce02_variazioni_rimanenze": ce02,
-            "ce03_lavori_interni": ce03,
+            "ce03_lavori_interni": Decimal("0"),  # A.3: il lettore declina se non e' zero
+            "ce03a_incrementi_immobilizzazioni": ce03,
             "ce04_altri_ricavi": ce04,
             "ce05_materie_prime": ce05,
             "ce06_servizi": ce06,
@@ -1959,7 +1960,8 @@ def _parse_compact_income(rows: Sequence[_Row]) -> Optional[Dict[str, Decimal]]:
         return {
             "ce01_ricavi_vendite": ce01,
             "ce02_variazioni_rimanenze": ce02,
-            "ce03_lavori_interni": ce03,
+            "ce03_lavori_interni": Decimal("0"),  # A.3: il lettore declina se non e' zero
+            "ce03a_incrementi_immobilizzazioni": ce03,
             "ce04_altri_ricavi": ce04,
             "ce05_materie_prime": ce05,
             "ce06_servizi": ce06,

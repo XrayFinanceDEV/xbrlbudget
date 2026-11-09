@@ -624,7 +624,7 @@ _CE_RICAVI_RULES = [
     (['DIFF', 'CAMBI'], 'ce16'),
     (['SU CAMBI'], 'ce16'),
     (['CONSOLIDATO', 'FISCALE'], 'ce20_provento'),   # riduce le imposte
-    (['INCREM', 'IMMOB'], 'ce03'),
+    (['INCREM', 'IMMOB'], 'ce03a'),
     (['RICAVI', 'DIVERSI'], 'ce04'),
     # Generic ricavi last (catches "RICAVI DELLE VENDITE" etc.)
     (['RICAVI'], 'ce01'),
@@ -7593,7 +7593,7 @@ def _vseg_classify_sp(bs: Dict[str, Decimal], rows: list, side: int) -> None:
 # PROVENTI, which also occurs in "ALTRI RICAVI E PROVENTI" → ce04).
 _VSEG_CE_RICAVI = [
     (['VENDIT'], 'ce01'), (['RICAVI DELLE'], 'ce01'), (['RICAVI DA PREST'], 'ce01'),
-    (['INCREMENTI'], 'ce03'),
+    (['INCREMENTI'], 'ce03a'),
     (['FINANZIAR'], 'ce14'),
 ]
 # "ACQUISTI DI SERVIZI" contains both ACQUIST and SERVIZ → ce05 must require BENI/PRODUZ

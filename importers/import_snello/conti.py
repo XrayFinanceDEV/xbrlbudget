@@ -111,7 +111,7 @@ def _e_rettifica_esplicita(testo: str) -> bool:
     return any(k in t for k in _RETTIFICA_KEYWORDS)
 
 
-# ce02 (variazione rimanenze prodotti) e ce03 (incrementi per lavori interni) stanno nella sezione A
+# ce02 (variazione rimanenze prodotti) e ce03 (A.3, lavori in corso su ordinazione) stanno nella sezione A
 # (valore della produzione): seguono la convenzione di stampa dei RICAVI, mai quella dei costi.
 # ce10 (OIC B.11) sta fra i costi e segue la convenzione dei costi (fix round 1 Task 24, F2:
 # budget_297, ricavi positivi e costi negativi, ce02 +30.077 stampato letto -30.077, scarto 2x).

@@ -321,3 +321,15 @@ def test_conto_del_netto_che_il_modello_chiama_risultato_resta_nel_netto():
     c = componi(foglie, {"a": C("sp06"), "p": C("sp16"), "n": C("sp13"), "x": C("sp13"), "r": C("ce01")}, [])
     assert c.bs["sp12g_utili_perdite_portati"] == 1500 and c.bs["sp13_utile_perdita"] == 1000
     assert c.sbilancio == 0
+
+
+def test_saldo_negativo_dentro_una_voce_positiva_resta_nettato():
+    # una nota di credito da ricevere fra i fornitori rettifica la voce, che resta positiva: nessuno spostamento.
+    # La banca negativa invece e' un debito verso banche anche se la cassa tiene positiva la liquidita' (D2)
+    foglie = [F("c", 1000, etichetta="Cassa"), F("b", -300, etichetta="Banca c/c"),
+              F("f", 800, "R", etichetta="Fornitori"), F("n", -100, "R", etichetta="Fornitori c/note credito da ricevere")]
+    classi = {"c": C("sp09"), "b": C("sp09"), "f": C("sp16", "sp16d"), "n": C("sp16", "sp16d")}
+    k = componi(foglie, classi, [])
+    assert k.bs["sp16d_debiti_fornitori_breve"] == D(700) and k.bs.get("sp06g_crediti_altri_breve", 0) == 0
+    assert k.bs["sp09_disponibilita_liquide"] == D(1000) and k.bs["sp16a_debiti_banche_breve"] == D(300)
+    assert k.sbilancio == 0 and k.spostati == D(300)

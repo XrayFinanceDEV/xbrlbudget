@@ -111,14 +111,19 @@ def e_questo_risultato(f: Foglia, risultato: Decimal, soglia: Decimal) -> bool:
 # verso banche se e' liquidita', tributario se e' un credito tributario, altrimenti fra gli altri debiti; un debito
 # negativo e' un credito (tributario o altro). Non e' il ribaltamento per descrizione (vietato): e' aritmetica, e attivo
 # e passivo salgono della stessa massa, quindi il pareggio resta. Un fondo o una rettifica col meno restano dove sono.
+# La liquidita' negativa (una banca, una carta di credito) e' un debito verso banche conto per conto (D2, D15); un
+# credito o un debito negativo passa solo quando il campo su cui somma esce negativo: una nota di credito da ricevere
+# fra i fornitori rettifica una voce che resta positiva, e li' resta nettata; un secchio «altri» negativo invece non
+# esiste (Task 11).
 _SALDO_NEGATIVO_ATTIVO = {"sp06": "sp16g", "sp07": "sp16g", "sp09": "sp16a"}
 _SALDO_NEGATIVO_PASSIVO = {"sp16": "sp06g", "sp17": "sp06g"}
 _TRIBUTARI = {"sp06e": "sp16e", "sp07e": "sp16e", "sp16e": "sp06e", "sp17e": "sp06e"}
+_CONTO_PER_CONTO = {"sp09"}
 _RETTIFICA_NEL_NOME = re.compile(r"\bF(?:ONDO|\.\s*DO|/DO|DO)\b|SVALUT|RETTIFIC|\bAMM(?:\.|TO|ORT)", re.I)
 
 
-def saldo_negativo(f: Foglia, classe: Classe | None) -> str | None:
-    """Il campo dell'altro lato su cui va una foglia di SP a saldo negativo, o None se resta dov'e'."""
+def _candidato_saldo_negativo(f: Foglia, classe: Classe | None) -> str | None:
+    """Il campo dell'altro lato su cui andrebbe una foglia di SP a saldo negativo, o None se non e' un candidato."""
     if f.sezione != "SP" or classe is None or classe.macro is None or classe.rettifica or importo_sp(f) >= 0:
         return None
     if (f.percorso_legale and percorsi.e_fondo(f.percorso_legale)) or _RETTIFICA_NEL_NOME.search(f.etichetta):
@@ -129,10 +134,27 @@ def saldo_negativo(f: Foglia, classe: Classe | None) -> str | None:
     return _TRIBUTARI.get(classe.dettaglio or "") or tabella[classe.macro]
 
 
-def _bersaglio_sp(f: Foglia, classe: Classe | None) -> tuple[str | None, Decimal]:
+def saldi_negativi(foglie: list[Foglia], classi: dict[str, Classe]) -> dict[str, str]:
+    """{id: campo dell'altro lato} delle foglie a saldo negativo che passano di lato: la liquidita' conto per conto,
+    crediti e debiti solo se il campo su cui sommano esce negativo."""
+    somme: dict[str, Decimal] = {}
+    for f in foglie:
+        c = classi.get(f.id)
+        if f.sezione == "SP" and f.importo and c is not None and c.macro and not c.rettifica:
+            campo = c.dettaglio or tavola.altri_di(c.macro)
+            somme[campo] = somme.get(campo, _ZERO) + importo_sp(f)
+    out: dict[str, str] = {}
+    for f in foglie:
+        c = classi.get(f.id)
+        altro = _candidato_saldo_negativo(f, c)
+        if altro and (c.macro in _CONTO_PER_CONTO or somme.get(c.dettaglio or tavola.altri_di(c.macro), _ZERO) < 0):
+            out[f.id] = altro
+    return out
+
+
+def _bersaglio_sp(f: Foglia, classe: Classe | None, altro_lato: str | None = None) -> tuple[str | None, Decimal]:
     importo = importo_sp(f)
     macro = classe.macro if classe else None
-    altro_lato = saldo_negativo(f, classe)
     if altro_lato:
         return altro_lato, -importo
     if macro and classe.rettifica:
@@ -283,6 +305,7 @@ def componi(foglie: list[Foglia], classi: dict[str, Classe], ancore: list[Ancora
     righe_risultato: list[Foglia] = []
     classi, scelte_fondi = _abbina_fondi(foglie, classi)
     scelte += scelte_fondi
+    spostabili = saldi_negativi(foglie, classi)
     rettifiche = _ZERO
     rettificate: dict[str, Decimal] = {}      # id -> importo con cui la sua colonna (e il suo totale) la conta
     rettifiche_in: dict[str, Decimal] = {}    # macro -> massa portata dalle rettifiche (col loro segno)
@@ -309,10 +332,10 @@ def componi(foglie: list[Foglia], classi: dict[str, Classe], ancore: list[Ancora
         if f.sezione == "CE":
             campo, valore = _bersaglio_ce(f, classe)
         else:
-            campo, valore = _bersaglio_sp(f, classe)
+            campo, valore = _bersaglio_sp(f, classe, spostabili.get(f.id))
         if classe is None or classe.macro is None:
             senza_classe += abs(f.importo)
-        elif f.sezione != "CE" and saldo_negativo(f, classe):
+        elif f.sezione != "CE" and f.id in spostabili:
             spostate[f.id] = importo_sp(f)
             spostate_in[tavola.macro_di(campo)] = spostate_in.get(tavola.macro_di(campo), _ZERO) - importo_sp(f)
             scelte.append(f"saldo negativo sull'altro lato ({campo}): {f.id}")

@@ -103,20 +103,20 @@ def test_una_cella_corrente_vuota_estrae_zero_non_il_comparato(tmp_path):
         str(pdf_path),
         {
             "ce01_ricavi_vendite": D("2104755.45"),
-            "ce03_lavori_interni": D("90603.75"),
+            "ce03a_incrementi_immobilizzazioni": D("90603.75"),
             "ce09d_svalutazione_crediti": D("2452.23"),
             "ce20_imposte": D("28773.00"),
         },
-        {"ce03_lavori_interni": D("0"), "ce20_imposte": D("0")},
+        {"ce03a_incrementi_immobilizzazioni": D("0"), "ce20_imposte": D("0")},
     )
 
-    assert current["ce03_lavori_interni"] == D("0")
+    assert current["ce03a_incrementi_immobilizzazioni"] == D("0")
     assert current["ce09d_svalutazione_crediti"] == D("0")
     assert current["ce20_imposte"] == D("0")
     # la riga con QUATTRO numeri ha una cella corrente piena: non si tocca
     assert current["ce01_ricavi_vendite"] == D("2104755.45")
     # il valore letto non sparisce: e' dell'anno precedente e li' finisce
-    assert prior["ce03_lavori_interni"] == D("90603.75")
+    assert prior["ce03a_incrementi_immobilizzazioni"] == D("90603.75")
 
 
 def test_le_colonne_di_analisi_non_passano_per_anno_precedente(tmp_path):
@@ -432,14 +432,14 @@ def test_amb_le_tre_righe_a_corrente_vuoto_valgono_zero():
         AMB,
         {
             "ce01_ricavi_vendite": D("2104755.45"),
-            "ce03_lavori_interni": D("90603.75"),
+            "ce03a_incrementi_immobilizzazioni": D("90603.75"),
             "ce09d_svalutazione_crediti": D("2452.23"),
             "ce20_imposte": D("28773.00"),
         },
         {},
     )
 
-    assert current["ce03_lavori_interni"] == D("0")
+    assert current["ce03a_incrementi_immobilizzazioni"] == D("0")
     assert current["ce09d_svalutazione_crediti"] == D("0")
     assert current["ce20_imposte"] == D("0")
     assert current["ce01_ricavi_vendite"] == D("2104755.45")
@@ -476,11 +476,11 @@ def test_un_importo_troncato_ai_centesimi_e_ancora_lo_stesso_importo(tmp_path):
 
     current, _ = _reconcile_blank_current_ce_cells(
         str(pdf_path),
-        {"ce03_lavori_interni": D("90603"), "ce09d_svalutazione_crediti": D("2452")},
+        {"ce03a_incrementi_immobilizzazioni": D("90603"), "ce09d_svalutazione_crediti": D("2452")},
         {},
     )
 
-    assert current["ce03_lavori_interni"] == D("0")
+    assert current["ce03a_incrementi_immobilizzazioni"] == D("0")
     assert current["ce09d_svalutazione_crediti"] == D("0")
 
 
@@ -490,10 +490,10 @@ def test_un_importo_diverso_non_viene_azzerato(tmp_path):
     _comparative_ce_pdf(str(pdf_path))
 
     current, _ = _reconcile_blank_current_ce_cells(
-        str(pdf_path), {"ce03_lavori_interni": D("12345.67")}, {},
+        str(pdf_path), {"ce03a_incrementi_immobilizzazioni": D("12345.67")}, {},
     )
 
-    assert current["ce03_lavori_interni"] == D("12345.67")
+    assert current["ce03a_incrementi_immobilizzazioni"] == D("12345.67")
 
 
 # ---------------------------------------------------------------------------
@@ -604,11 +604,11 @@ def test_un_campo_a_convenzione_positiva_non_cambia(tmp_path):
 
     _, prior = _reconcile_blank_current_ce_cells(
         str(pdf_path),
-        {"ce03_lavori_interni": D("90603.75"), "ce20_imposte": D("28773.00")},
-        {"ce03_lavori_interni": D("0"), "ce20_imposte": D("0")},
+        {"ce03a_incrementi_immobilizzazioni": D("90603.75"), "ce20_imposte": D("28773.00")},
+        {"ce03a_incrementi_immobilizzazioni": D("0"), "ce20_imposte": D("0")},
     )
 
-    assert prior["ce03_lavori_interni"] == D("90603.75")
+    assert prior["ce03a_incrementi_immobilizzazioni"] == D("90603.75")
     assert prior["ce20_imposte"] == D("28773.00")
 
 

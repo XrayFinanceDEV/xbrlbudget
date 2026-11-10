@@ -13,6 +13,7 @@ export const DERIVED_CE_CODES = [
 export const EDITABLE_CE_CODES = [
   "ce01_ricavi_vendite",
   "ce03_lavori_interni",
+  "ce03a_incrementi_immobilizzazioni",
   "ce04_altri_ricavi",
   "ce05_materie_prime",
   "ce06_servizi",

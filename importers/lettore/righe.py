@@ -643,8 +643,9 @@ def _letture(righe: list[RigaFisica], profilo: Profilo, colonne_tabelle: list[li
         parte, tabella = chiave
         if parte == "prospetto":
             colonne = profilo.colonne
-            lettura = _Lettura(parte, None, colonne, profilo.confine,
-                               frozenset(i for i, d in profilo.decimali.items() if d is False), profilo.negativi,
+            intere = profilo.intere if profilo.intere is not None else \
+                frozenset(i for i, d in profilo.decimali.items() if d is False)
+            lettura = _Lettura(parte, None, colonne, profilo.confine, intere, profilo.negativi,
                                profilo.marcatori, profilo.sezioni_lati, profilo.segni_colonna)
         else:
             colonne = colonne_tabelle[tabella] if tabella is not None else []

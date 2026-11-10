@@ -142,12 +142,22 @@ def _rettificativa(r: Riga) -> bool:
     return True
 
 
+# Art. 2425, voce 20: «proventi (oneri) da adesione al regime di consolidato fiscale / trasparenza fiscale» stampati
+# positivi sono un provento, e nel totale delle imposte si sottraggono (correnti + esercizi precedenti + differite e
+# anticipate - proventi da consolidato). La voce comincia cosi': una riga che incolla piu' voci non e' lei.
+_PROVENTO_FISCALE = re.compile(r"^(?:[a-z]\s?\)\s*)?proventi\s*\(?\s*oneri\s*\)?\s+da\s+(?:adesione|consolidat|trasparenz)")
+
+
+def _provento_fiscale(r: Riga) -> bool:
+    return r.sezione != "SP" and bool(_PROVENTO_FISCALE.match(_norm(r.etichetta)))
+
+
 def _valore_di_somma(r: Riga, colonna: int) -> Decimal:
     """L'importo come entra nelle somme di un totale sopra: lo stampato, col segno meno per una posta rettificativa
-    stampata positiva. Come totale dei suoi conti la posta vale lo stampato (i fondi stampati positivi sommano al
-    fondo). La cella resta lo stampato."""
+    stampata positiva (e per i proventi da consolidato fiscale fra le imposte). Come totale dei suoi conti la posta
+    vale lo stampato (i fondi stampati positivi sommano al fondo). La cella resta lo stampato."""
     v = r.celle[colonna].valore
-    return -v if v > 0 and _rettificativa(r) else v
+    return -v if v > 0 and (_rettificativa(r) or _provento_fiscale(r)) else v
 
 
 # I risultati del conto economico di legge sono differenze stampate: «Differenza tra valore e costi della produzione

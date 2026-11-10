@@ -146,7 +146,8 @@ class IncomeStatementExtraction(_ItalianNumberModel):
     """IV CEE Conto Economico fields."""
     ce01_ricavi_vendite: float = pydantic.Field(0, description="A.1) Ricavi delle vendite e delle prestazioni")
     ce02_variazioni_rimanenze: float = pydantic.Field(0, description="A.2) Variazioni delle rimanenze di prodotti in corso di lavorazione, semilavorati e finiti")
-    ce03_lavori_interni: float = pydantic.Field(0, description="A.4) Incrementi di immobilizzazioni per lavori interni")
+    ce03_lavori_interni: float = pydantic.Field(0, description="A.3) Variazioni dei lavori in corso su ordinazione")
+    ce03a_incrementi_immobilizzazioni: float = pydantic.Field(0, description="A.4) Incrementi di immobilizzazioni per lavori interni")
     ce04_altri_ricavi: float = pydantic.Field(0, description="A.5) Altri ricavi e proventi")
     ce05_materie_prime: float = pydantic.Field(0, description="B.6) Per materie prime, sussidiarie, di consumo e di merci")
     ce06_servizi: float = pydantic.Field(0, description="B.7) Per servizi")
@@ -681,12 +682,12 @@ def reading_order_text(page: fitz.Page, forza_ordinamento: bool = False) -> str:
 # Ogni voce porta i propri importi sulla stessa baseline dell'etichetta, quindi si
 # legge per riga fisica; il codice di voce stampato e le parole obbligatorie
 # rendono il riconoscimento inequivocabile.
-#   - ce03: A.4 "Incrementi di immobilizzazioni per lavori interni"
+#   - ce03a: A.4 "Incrementi di immobilizzazioni per lavori interni"
 #   - ce09d: B.10.d "Svalutazioni dei crediti compresi nell'attivo circolante"
 #   - ce20: 20) "Imposte sul reddito dell'esercizio" (anche quando la voce non ha
 #     il dettaglio 20.a/20.b su cui lavora il passo per segmenti piu' sotto)
 _BLANK_CURRENT_CE_ROWS = {
-    'ce03_lavori_interni': (
+    'ce03a_incrementi_immobilizzazioni': (
         re.compile(r"^(?:A\.?)?4\)[,]?$", re.I),
         ('incrementi', 'immobilizzazioni', 'lavori', 'interni'),
     ),
@@ -3765,7 +3766,8 @@ MAPPING (description -> field):
 RICAVI (A — valore della produzione):
 - ce01_ricavi_vendite: ricavi delle vendite e delle prestazioni (vendite merci/prodotti/servizi)
 - ce02_variazioni_rimanenze: variazioni rimanenze di prodotti/semilavorati/lavori in corso
-- ce03_lavori_interni: incrementi di immobilizzazioni per lavori interni
+- ce03_lavori_interni: A.3 variazione dei lavori in corso su ordinazione
+- ce03a_incrementi_immobilizzazioni: A.4 incrementi di immobilizzazioni per lavori interni
 - ce04_altri_ricavi: altri ricavi e proventi, contributi in conto esercizio, sopravvenienze attive, rimborsi
 COSTI (B — costi della produzione), all positive:
 - ce05_materie_prime: acquisti di materie prime, sussidiarie, di consumo e merci

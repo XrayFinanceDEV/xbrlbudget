@@ -30,7 +30,7 @@ from calculations.ce_result import calculate_ce_result
 CE_FIELDS = [
     ('ce01_ricavi_vendite', 'Ricavi delle vendite'),
     ('ce02_variazioni_rimanenze', 'Variazioni rimanenze prodotti'),
-    ('ce03_lavori_interni', 'Lavori interni capitalizzati'),
+    ('ce03_lavori_interni', 'Variazioni dei lavori in corso su ordinazione'),
     ('ce03a_incrementi_immobilizzazioni', 'Incrementi di immobilizzazioni per lavori interni'),
     ('ce04_altri_ricavi', 'Altri ricavi e proventi'),
     ('ce05_materie_prime', 'Materie prime e consumo'),

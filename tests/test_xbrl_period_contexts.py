@@ -164,3 +164,17 @@ def test_xbrl_adds_an_explicit_detail_omitted_from_published_maturity_subtotal()
     assert bs["sp06f_imposte_anticipate_breve"] == Decimal("10")
     assert info["source_derivations"]["sp06_crediti_breve"]["published_total"] == 300.0
     assert info["reconciliation_adjustments"] == {}
+
+
+def test_xbrl_a4_incrementi_immobilizzazioni_va_in_ce03a_non_in_ce03():
+    """Decisione 5-bis: A.4 sta in ce03a in ogni importatore; ce03 e' A.3."""
+    parser = EnhancedXBRLParser(db_session=_session())
+    for tag in (
+        "ValoreProduzioneIncrementiImmobilizzazioniLavoriInterni",
+        "ValoreProduzioneIncrementoImmobilizzazioniLavoriInterni",
+        "IncrImmobPerLavoriInterni",
+    ):
+        facts = {"{urn:test}" + tag: Decimal("12345")}
+        _, ce, _ = parser.map_facts_to_fields_with_reconciliation(facts)
+        assert ce.get("ce03a_incrementi_immobilizzazioni") == Decimal("12345"), tag
+        assert not ce.get("ce03_lavori_interni"), tag

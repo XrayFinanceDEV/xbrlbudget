@@ -98,7 +98,8 @@ export const BS_LABELS: Record<string, string> = {
 export const IS_LABELS: Record<string, string> = {
   ce01_ricavi_vendite: "Ricavi delle Vendite",
   ce02_variazioni_rimanenze: "Variazione Rimanenze Prodotti",
-  ce03_lavori_interni: "Lavori in Economia",
+  ce03_lavori_interni: "Variazione Lavori in Corso su Ordinazione",
+  ce03a_incrementi_immobilizzazioni: "Incrementi per Lavori Interni",
   ce04_altri_ricavi: "Altri Ricavi e Proventi",
   ce05_materie_prime: "Materie Prime e Consumo",
   ce06_servizi: "Servizi",

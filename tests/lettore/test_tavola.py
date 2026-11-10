@@ -15,8 +15,8 @@ from importers.situazione_contabile_parser import TIER0_FIELDS
     ("CE.B.10.b", "ce09b"), ("CE.A.3", "ce03"), ("CE.A.4", "ce03a"),
 ])
 def test_percorsi_noti(percorso, atteso):
-    assert t.campo_da_percorso_legale(percorso) == atteso
-    assert t.campo_da_percorso_legale(percorso) == percorsi.campo_da_percorso(percorso)
+    assert t.campo_di_legge(percorso) == atteso
+    assert t.campo_di_legge(percorso) == percorsi.campo_da_percorso(percorso)
 
 
 def test_macro_e_altri():

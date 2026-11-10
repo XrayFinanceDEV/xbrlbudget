@@ -389,3 +389,20 @@ def test_crediti_verso_sottoposte_hanno_un_campo():
     from importers.import_snello.percorsi import campo_da_percorso
     assert campo_da_percorso("SPA.C.II.5.E") == "sp06g"
     assert campo_da_percorso("SPA.C.II.5.O") == "sp07g"
+
+
+def test_a3_lavori_in_corso_e_a4_lavori_interni_seguono_le_colonne_del_db():
+    """A.3 (variazioni dei lavori in corso su ordinazione) in ce03, A.4 (incrementi per lavori interni) in ce03a:
+    la stessa tavola di tutti i lettori (`tavola.campo_di_legge`), non una convenzione propria di questo lettore."""
+    righe = []
+    for cod, et, cor, prec in RIGHE:
+        if et.startswith("A) Valore della produzione"):
+            cor, prec = "1.050,00", "900,00"
+        righe.append((cod, et, cor, prec))
+        if et.startswith("A.1.n)"):
+            righe.append(("", "A.3) Variazione dei lavori in corso su ordinazione", "30,00", "0,00"))
+            righe.append(("", "A.4) Incrementi di immobilizzazioni per lavori interni", "20,00", "0,00"))
+    ce = sep.estrai_da_righe(_righe(righe))["ce"]
+    assert ce["ce03_lavori_interni"] == D("30.00")
+    assert ce["ce03a_incrementi_immobilizzazioni"] == D("20.00")
+    assert ce.get("ce02_variazioni_rimanenze", D("0")) == D("0")

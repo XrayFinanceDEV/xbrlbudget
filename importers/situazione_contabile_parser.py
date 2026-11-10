@@ -15,6 +15,10 @@ Account hierarchy (DEPI format):
   ***        = section total (TOTALE ATTIVITA`, TOTALE PASSIVITA`, etc.)
   ****       = UTILE DI ESERCIZIO
   *****      = TOTALE A PAREGGIO
+
+CONGELATO dal 2026-11: i parser per singolo layout di gestionale elencati in
+PARSER_DI_LAYOUT accettano solo correzioni di errori; un layout nuovo va nel lettore
+(importers/lettore), non qui. tests/test_parser_layout_congelati.py lo fa rispettare.
 """
 
 import logging
@@ -31,6 +35,23 @@ import fitz  # PyMuPDF
 from importers.rimanenze_ce import e_conto_rimanenze, natura_rimanenze
 
 logger = logging.getLogger(__name__)
+
+# Parser di layout congelati (vedi l'intestazione del modulo). Il test ne ricava l'elenco
+# dalle funzioni `parse_*`/`extract_*` pubbliche di livello modulo, dispatcher escluso.
+PARSER_DI_LAYOUT: Tuple[str, ...] = (
+    "parse_entries",
+    "parse_entries_ago",
+    "parse_entries_single_column",
+    "parse_entries_contrapposte_depi",
+    "parse_entries_contrapposte_8digit",
+    "parse_entries_verifica_ie",
+    "parse_entries_verifica_mastri",
+    "parse_entries_verifica_sub_mastro",
+    "parse_entries_verifica_sezbil",
+    "parse_entries_teamsystem",
+    "parse_bilancio_verifica_segno",
+    "extract_contrapposte_best_effort",
+)
 
 
 @dataclass
@@ -624,7 +645,7 @@ _CE_RICAVI_RULES = [
     (['DIFF', 'CAMBI'], 'ce16'),
     (['SU CAMBI'], 'ce16'),
     (['CONSOLIDATO', 'FISCALE'], 'ce20_provento'),   # riduce le imposte
-    (['INCREM', 'IMMOB'], 'ce03'),
+    (['INCREM', 'IMMOB'], 'ce03a'),
     (['RICAVI', 'DIVERSI'], 'ce04'),
     # Generic ricavi last (catches "RICAVI DELLE VENDITE" etc.)
     (['RICAVI'], 'ce01'),
@@ -1119,7 +1140,7 @@ _CE_COST_FIELDS = frozenset({
     'ce20',                      # imposte sul reddito
 })
 _CE_REVENUE_FIELDS = frozenset({
-    'ce01', 'ce02', 'ce03', 'ce04',   # A) valore della produzione
+    'ce01', 'ce02', 'ce03', 'ce03a', 'ce04',   # A) valore della produzione (ce03a = A.4, ce03 = A.3)
     'ce13', 'ce14', 'ce16',           # C) proventi finanziari (ce16 netto)
     'ce17',                           # D) rettifiche di valore (netto)
     'ce18',                           # E.20 proventi straordinari
@@ -7593,7 +7614,7 @@ def _vseg_classify_sp(bs: Dict[str, Decimal], rows: list, side: int) -> None:
 # PROVENTI, which also occurs in "ALTRI RICAVI E PROVENTI" → ce04).
 _VSEG_CE_RICAVI = [
     (['VENDIT'], 'ce01'), (['RICAVI DELLE'], 'ce01'), (['RICAVI DA PREST'], 'ce01'),
-    (['INCREMENTI'], 'ce03'),
+    (['INCREMENTI'], 'ce03a'),
     (['FINANZIAR'], 'ce14'),
 ]
 # "ACQUISTI DI SERVIZI" contains both ACQUIST and SERVIZ → ce05 must require BENI/PRODUZ
@@ -7654,7 +7675,7 @@ def _vseg_classify_ce(ce: Dict[str, Decimal], rows: list, side: int,
         ce[field] = ce.get(field, Decimal('0')) + amt
 
 
-_VSEG_RICAVI_KEYS = ('ce01', 'ce02', 'ce03', 'ce04', 'ce13', 'ce14', 'ce18')
+_VSEG_RICAVI_KEYS = ('ce01', 'ce02', 'ce03', 'ce03a', 'ce04', 'ce13', 'ce14', 'ce18')
 _VSEG_COSTI_KEYS = ('ce05', 'ce06', 'ce07', 'ce08', 'ce09', 'ce10', 'ce11', 'ce12', 'ce15', 'ce19', 'ce20')
 
 

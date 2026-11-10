@@ -94,7 +94,7 @@ If not marked, use the section context:
 |-------------------------------|--------|----------|
 | ricavi vendite, ricavi prestazioni, fatturato | A.1 | ce01 |
 | variazioni rimanenze prodotti | A.2 | ce02 |
-| incrementi immobilizzazioni, lavori interni | A.4 | ce03 |
+| incrementi immobilizzazioni, lavori interni | A.4 | ce03a |
 | altri ricavi, contributi esercizio | A.5 | ce04 |
 | materie prime, acquisti merci | B.6 | ce05 |
 | servizi, consulenze, utenze, manutenzioni | B.7 | ce06 |

@@ -89,15 +89,13 @@ import {
 } from "@/lib/pratica-rettifiche-rules";
 import type { AdjustableFinancialYear, RettificaEntry } from "@/types/api";
 
-// A) Valore della produzione come lo somma il backend (calculations/ce_result.py): la A.4
-// sta in ce03_lavori_interni per la maggior parte dei lettori e in
-// ce03a_incrementi_immobilizzazioni per il percorso snello e il reso XBRL. CE_A non ha
-// ce03a (le Rettifiche non la rendono, VOCI_NON_IN_RETTIFICHE): sommare solo CE_A dava un
-// falso squadrato CE <-> SP di tutta la A.4 (budget_1322: 380.713 nel 2025, 314.360 nel
-// 2024). La riga si vede in sola lettura quando ha un importo; sp13 lo ricostruisce gia'
-// recalcAggregates contando anche ce03a.
-const CE_A_RESE = CE_A.flatMap((c) =>
-  c === "ce03_lavori_interni" ? [c, "ce03a_incrementi_immobilizzazioni"] : [c]);
+// A) Valore della produzione come lo somma il backend (calculations/ce_result.py): ce03 e'
+// A.3 (variazione dei lavori in corso su ordinazione), ce03a e' A.4 (incrementi di
+// immobilizzazioni per lavori interni), in ogni importatore dal Task 5-bis (2026-11-09).
+// Dal 2026-11-09 anche ce03a sta in CE_A ed e' editabile; prima solo in sola lettura, e
+// sommare solo CE_A dava un falso squadrato CE <-> SP di tutta la A.4 (budget_1322: 380.713
+// nel 2025, 314.360 nel 2024). sp13 lo ricostruisce recalcAggregates contando ce03a.
+const CE_A_RESE = CE_A;
 
 // Intestazioni di raggruppamento dello schema art. 2424, righe di RESA come la
 // fascia di sezione: NON entrano nel catalogo (VOCI) ne' negli elenchi
@@ -244,7 +242,7 @@ export function RettificheTab({
   const CE17_DETAILS = ["ce17a_rivalutazioni", "ce17b_svalutazioni"];
   // All CE fields that affect the P&L result
   const CE_FIELDS = [
-    "ce01_ricavi_vendite", "ce02_variazioni_rimanenze", "ce03_lavori_interni", "ce04_altri_ricavi",
+    "ce01_ricavi_vendite", "ce02_variazioni_rimanenze", "ce03_lavori_interni", "ce03a_incrementi_immobilizzazioni", "ce04_altri_ricavi",
     "ce05_materie_prime", "ce06_servizi", "ce07_godimento_beni", "ce08_costi_personale",
     "ce09_ammortamenti", "ce09a_ammort_immateriali", "ce09b_ammort_materiali", "ce09c_svalutazioni", "ce09d_svalutazione_crediti",
     "ce10_var_rimanenze_mat_prime", "ce11_accantonamenti", "ce11b_altri_accantonamenti", "ce12_oneri_diversi",
@@ -1472,7 +1470,7 @@ export function RettificheTab({
               "sp18_ratei_risconti_passivi",
             ];
             const CE_SUMMARY_FIELDS = [
-              "ce01_ricavi_vendite", "ce02_variazioni_rimanenze", "ce03_lavori_interni", "ce04_altri_ricavi",
+              "ce01_ricavi_vendite", "ce02_variazioni_rimanenze", "ce03_lavori_interni", "ce03a_incrementi_immobilizzazioni", "ce04_altri_ricavi",
               "ce05_materie_prime", "ce06_servizi", "ce07_godimento_beni",
               "ce08_costi_personale", "ce08b_salari_stipendi", "ce08c_oneri_sociali",
               "ce08a_tfr_accrual", "ce08d_altri_costi_personale",

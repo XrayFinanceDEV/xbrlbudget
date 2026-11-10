@@ -15,7 +15,10 @@ lxml==5.3.0
 python-xbrl==1.1.1
 
 # PDF extraction (PyMuPDF + Claude Haiku)
-PyMuPDF>=1.25.0
+# Versione fissata (2026-11-10): con PyMuPDF 2.x `find_tables()` cambia e xbrl_reso_parser perde le tabelle
+# della nota (dettagli KPI nei contenitori sp06g/sp16g/sp17g). Il passaggio a 2.x va fatto misurandolo col
+# punteggio del corpus (tests/corpus/punteggio.py --corpus), non con un aggiornamento al buio.
+PyMuPDF==1.28.2
 anthropic>=0.40.0
 rapidocr-onnxruntime>=1.4.4
 

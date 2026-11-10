@@ -355,3 +355,78 @@ def test_ripiego_classico_usato_e_rifiutati_a_classico_spento():
     assert "| Rifiutati a classico spento (documento ×giri) | E ×1 |" in md
     rec = {"import_snello": {"fonte": "llm", "ripiego_classico": {"usato": True, "motivo": "ripiego"}}}
     assert P._snello_compatto(rec)["ripiego_classico"] == {"usato": True, "motivo": "ripiego"}
+
+
+# --- modalità corpus (tutti i PDF, senza verità) -----------------------------------------------------
+
+def test_corpus_un_documento_per_contenuto_pdf_soli_fuori_dalle_cartelle_escluse():
+    manifesto = {"files": [
+        {"sha256": "a" * 64, "format": "pdf", "route_expected": "ivcee",
+         "paths": ["2026-07/july_budget/budget_7_X.pdf", "2026-07/budget_7_X.pdf"]},
+        {"sha256": "b" * 64, "format": "pdf", "route_expected": "unknown", "paths": ["lotto/budget_9_Y.pdf"]},
+        {"sha256": "c" * 64, "format": "pdf", "route_expected": "unknown", "paths": ["lotto/budget_9_Z.pdf"]},
+        {"sha256": "d" * 64, "format": "pdf", "route_expected": "unknown", "paths": ["lotto/senza numero.pdf"]},
+        {"sha256": "e" * 64, "format": "xbrl", "route_expected": "xbrl", "paths": ["lotto/budget_5.xbrl"]},
+        {"sha256": "f" * 64, "format": "pdf", "route_expected": "unknown", "paths": ["2026-07/july_budget/budget_8.pdf"]},
+        {"sha256": "1" * 64, "format": "pdf", "route_expected": "ivcee", "paths": ["lotto/qualunque.pdf"]},
+    ]}
+    campione = {"315": {"id": "315", "sha256": "1" * 64}}
+    docs = {d["id"]: d for d in P.documenti_del_corpus(manifesto, campione)}
+    assert docs["7"]["path"] == "2026-07/budget_7_X.pdf" and docs["7"]["lotto"] == "2026-07"   # la copia è esclusa
+    assert {"9-bbbbbb", "9-cccccc"} <= set(docs)            # stesso numero, contenuti diversi
+    assert "sha-dddddddd" in docs
+    assert docs["315"]["in_campione"] and not docs["7"]["in_campione"]
+    assert len(docs) == 5                                    # niente XBRL, niente file solo nelle cartelle escluse
+
+
+def test_anno_dal_nome_prima_del_testo_e_date_di_stampa_scartate():
+    assert P.anno_dal_documento("al 31/12/2026", "budget_1_ROSSI_2025.pdf") == (2025, "nome del file")
+    assert P.anno_dal_documento("", "Bilancino 31-5-26.pdf") == (2026, "nome del file")
+    assert P.anno_dal_documento("dal 01/01/2025 al 31/12/2025\nData/Ora 30/09/2026 18:24:22", "x.pdf") == \
+        (2025, "data di fine periodo")
+    assert P.anno_dal_documento("Data di stampa: 30/06/2026\nPeriodo al 31.03.25", "x.pdf") == (2025, "data di fine periodo")
+    assert P.anno_dal_documento("totale 12.31.92 e 15/03/2025", "x.pdf") == (None, "nessuna")   # 2092: oltre il prossimo
+    assert P.anno_dal_documento("Esercizio 2024", "x.pdf") == (2024, "parola nel testo")
+    assert P.anno_dal_documento("", "scan.pdf") == (None, "nessuna")
+
+
+def test_rifiuti_attesi_errori_veri_e_servizio():
+    assert P.tipo_rifiuto("PDFImportError: Documento non importabile come bilancio completo: solo CE.")["atteso"]
+    assert P.tipo_rifiuto("Il documento è un riepilogo di sintesi (poche macro-voci)")["atteso"]
+    s = P.tipo_rifiuto("MINERU_UNAVAILABLE: ConnectError: timeout")
+    assert s["servizio"] and not s["atteso"]
+    assert P.tipo_rifiuto("Importazione non salvata: nessun dato contabile estratto")["tipo"] == "estrazione vuota"
+    assert P.tipo_rifiuto("KeyError: 'sp01'") == {"tipo": "altro errore", "atteso": False, "servizio": False}
+
+
+def _giro_corpus(giro, importato=True, quadra=True, fonte="qwen", campi=None, **extra):
+    return {"giro": giro, "importato": importato, "quadra": quadra, "secondi": 10.0 * giro,
+            "snello": {"fonte": fonte, "letture_chiamate": 4, "lettore_percorso": {"chiamate": 2}},
+            "esercizi": [{"anno": 2025, "mesi": None, "campi": campi or {"sp01": 1.0}}] if importato else [], **extra}
+
+
+def test_documento_corpus_misura_quadratura_fonte_chiamate_e_instabilita():
+    doc = {"id": "9", "lotto": "L", "route_expected": "ivcee", "path": "L/x.pdf", "in_campione": False,
+           "anno": 2025, "anno_fonte": "nome del file", "mesi": None}
+    stabile = P.documento_corpus(doc, [_giro_corpus(1), _giro_corpus(2)])
+    assert stabile["esito"] == "importato" and stabile["quadra"] == "quadrato" and not stabile["instabile"]
+    assert stabile["chiamate_mediana"] == 6 and stabile["secondi_max"] == 20.0
+    sbil = _giro_corpus(2, quadra=False, fonte="deterministico:lettore", sbilancio=-12.5, utile_ce=100.0, sp13=90.0,
+                 campi={"sp01": 2.0})
+    d = P.documento_corpus(doc, [_giro_corpus(1), sbil])
+    assert d["quadra"] == "misto" and d["sbilancio_sp_max"] == 12.5 and d["utile_ce_sp_max"] == 10.0
+    assert d["instabile"] and d["campi_instabili"] == ["sp01"] and d["fonti"] == {"deterministico:lettore": 1, "qwen": 1}
+    rif = P.documento_corpus(doc, [_giro_corpus(1, importato=False, errore="riepilogo di sintesi")])
+    assert rif["esito"] == "rifiutato" and rif["rifiuto"]["atteso"] and rif["quadra"] is None
+    s = P.sintesi_corpus([stabile, d, rif])
+    assert s["totale"]["tutti"]["documenti"] == 3 and s["totale"]["tutti"]["rifiutati_attesi"] == 1
+    assert s["lotto"]["L"]["sbilanciati"] == 1 and s["route_expected"]["ivcee"]["instabili"] == 1
+
+
+def test_documento_corpus_col_campione_mette_accanto_macro_e_kpi():
+    doc = {"id": "X", "lotto": "L", "route_expected": "ivcee", "path": "p", "in_campione": True,
+           "anno": 2025, "anno_fonte": "verità", "mesi": None}
+    vero = {"id": "X", "giudizio_atteso": "importabile",
+            "periodi": [{"fine": "2025-12", "periodo": None, "campi": _vero(sp01=1.0, sp06a=5.0)}]}
+    d = P.documento_corpus(doc, [_giro_corpus(1, campi={"sp01": 1.0, "sp06a": 3.0})], vero)
+    assert d["macro"] == 1.0 and d["kpi"] == 0.0 and d["esito_giusto"]

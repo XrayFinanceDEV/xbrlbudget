@@ -878,7 +878,9 @@ _RIFIUTI = [   # (tipo, atteso?, frammento del messaggio) - il primo che combaci
     ("servizio non raggiungibile", False, "Anthropic API error"),
     ("servizio non raggiungibile", False, "ANTHROPIC_API_KEY"),
     ("scansione illeggibile", False, "l'OCR non ha riconosciuto testo"),
+    ("scansione illeggibile", False, "l'OCR non ha ricostruito"),
     ("estrazione vuota", False, "nessun dato contabile"),
+    ("estrazione vuota", False, "Nessun dato estratto dal documento"),
     ("passivo mancante", False, "Lettura del passivo mancante"),
     ("classico spento", False, RIFIUTO_CLASSICO_SPENTO),
 ]

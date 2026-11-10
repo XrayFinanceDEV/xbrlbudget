@@ -396,6 +396,8 @@ def test_rifiuti_attesi_errori_veri_e_servizio():
     s = P.tipo_rifiuto("MINERU_UNAVAILABLE: ConnectError: timeout")
     assert s["servizio"] and not s["atteso"]
     assert P.tipo_rifiuto("Importazione non salvata: nessun dato contabile estratto")["tipo"] == "estrazione vuota"
+    assert P.tipo_rifiuto("Nessun dato estratto dal documento: lo Stato Patrimoniale risulta vuoto")["tipo"] == "estrazione vuota"
+    assert P.tipo_rifiuto("scansione contabile, ma l'OCR non ha ricostruito in modo affidabile")["tipo"] == "scansione illeggibile"
     assert P.tipo_rifiuto("KeyError: 'sp01'") == {"tipo": "altro errore", "atteso": False, "servizio": False}
 
 

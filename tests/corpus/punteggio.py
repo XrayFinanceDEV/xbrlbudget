@@ -27,8 +27,15 @@ Uso (le variabili dell'ambiente di produzione, gx10 e MinerU, nel processo: mai 
     backend/venv/bin/python tests/corpus/punteggio.py --da-esiti <cartella>   # ricalcola senza importare
     backend/venv/bin/python tests/corpus/punteggio.py --etichetta fase2-<sha> --confronta base-fase2-e3455d6
 
-Scrive in `Test/_analisi-campione/punteggio/<etichetta>/`: `esiti.jsonl` (ciò che l'importatore ha
-salvato, giro per giro), `punteggio.json` e `punteggio.md`.
+Scrive in `Test/_analisi-campione/punteggio/<etichetta>/` (o in `$IMPORT_PUNTEGGIO_DIR/<etichetta>/`):
+`esiti.jsonl` (ciò che l'importatore ha salvato, giro per giro), `punteggio.json` e `punteggio.md`.
+
+Modalità corpus (`--corpus`): tutti i PDF del manifesto, uno per sha256, fuori da `july_budget` e `_analysis`; il
+rapporto non presuppone una verità (importato/rifiutato e perché, quadrato/sbilanciato, fonte che ha salvato, ripiego
+classico, chiamate e secondi, instabilità fra i giri) e mette macro/KPI accanto ai documenti del campione. Per i
+documenti senza verità l'anno è ricavato dal documento (`anno_dal_documento`) e i mesi non si passano:
+    backend/venv/bin/python tests/corpus/punteggio.py --corpus --etichetta corpus-<sha> --ripetizioni 3 --paralleli 2
+    backend/venv/bin/python tests/corpus/punteggio.py --corpus --lotti budget-wk-45 --etichetta wk45-<sha>
 """
 from __future__ import annotations
 
@@ -43,8 +50,9 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 CAMPIONE = ROOT / "tests" / "corpus" / "campione.json"
+MANIFESTO = ROOT / "tests" / "corpus" / "manifest.json"
 VERITA = Path(os.environ.get("IMPORT_VERITA_DIR", ROOT / "Test" / "_analisi-campione" / "verita"))
-USCITA = ROOT / "Test" / "_analisi-campione" / "punteggio"
+USCITA = Path(os.environ.get("IMPORT_PUNTEGGIO_DIR", ROOT / "Test" / "_analisi-campione" / "punteggio"))
 CORPUS = Path(os.environ.get("IMPORT_CORPUS_ROOT", ROOT / "Test"))
 
 TOLLERANZA = 1.0          # euro: molti documenti stampano all'unità
@@ -140,9 +148,11 @@ def _snello_compatto(rec: dict) -> dict | None:
     if not isinstance(sn, dict):
         return None
     tappo = (sn.get("tappo") or {}).get("corrente")
+    letture = sn.get("letture") if isinstance(sn.get("letture"), dict) else {}
     return {"fonte": sn.get("fonte"), "esito": sn.get("esito"), "lettore_percorso": sn.get("lettore_percorso"),
             "tappo_importo": tappo.get("importo") if isinstance(tappo, dict) else None,
-            "plug_residual": rec.get("plug_residual"), "ripiego_classico": sn.get("ripiego_classico")}
+            "plug_residual": rec.get("plug_residual"), "ripiego_classico": sn.get("ripiego_classico"),
+            "letture_chiamate": letture.get("chiamate"), "secondi_snello": sn.get("secondi")}
 
 
 def importa(percorso: Path, period_months: int | None, fiscal_year: int | None = None) -> dict:
@@ -779,6 +789,293 @@ def scrivi_rapporto(cartella: Path, documenti: list[dict], sin: dict, meta: dict
     (cartella / "punteggio.md").write_text("\n".join(r) + "\n", encoding="utf-8")
 
 
+# --- modalità corpus: tutti i PDF, senza verità -------------------------------------------------------
+
+ESCLUSI = ("july_budget", "_analysis")        # copie e materiale di analisi, come api_pdf_import_audit.py
+_ID_BUDGET = re.compile(r"budget_(\d+)")
+_DATA = re.compile(r"(?<!\d)(\d{1,2})[/.\-](\d{1,2})[/.\-](20\d{2}|\d{2})(?!\d)")
+_STAMPA = re.compile(r"(?i)(stampa|stampato|data/ora|elaborat|generat)[^\n]{0,12}$")   # data di stampa, non di periodo
+_FINE_MESE = {1: 31, 2: 28, 3: 31, 4: 30, 5: 31, 6: 30, 7: 31, 8: 31, 9: 30, 10: 31, 11: 30, 12: 31}
+_ANNO_NEL_NOME = re.compile(r"(?<![\d.])(20\d{2})(?![\d.])")     # non un pezzo di data 2026.11.01
+_ANNO_DOPO_PAROLA = re.compile(r"(?i)\b(?:esercizio|bilancio(?:\s+al)?|anno|al)\s+(?:\d{1,2}[/.\-]\d{1,2}[/.\-])?(20\d{2})\b")
+
+
+def documenti_del_corpus(manifesto: dict, campione: dict) -> list[dict]:
+    """Un documento per contenuto (sha256), PDF soli, fuori dalle cartelle escluse. L'id è quello del campione quando
+    il contenuto è lì, altrimenti il numero di `budget_<ID>` nel nome, altrimenti l'inizio dello sha; due contenuti
+    diversi con lo stesso numero si distinguono con un pezzo di sha."""
+    per_sha = {c["sha256"]: i for i, c in campione.items() if c.get("sha256")}
+    out, visti = [], defaultdict(int)
+    for f in manifesto.get("files", []):
+        if f.get("format") != "pdf":
+            continue
+        percorsi = sorted(p for p in f.get("paths", []) if not any(x in Path(p).parts for x in ESCLUSI))
+        if not percorsi:
+            continue
+        p = percorsi[0]
+        m = next((_ID_BUDGET.search(Path(x).name) for x in percorsi if _ID_BUDGET.search(Path(x).name)), None)
+        id_ = per_sha.get(f["sha256"]) or (m.group(1) if m else "sha-" + f["sha256"][:8])
+        out.append({"id": id_, "sha256": f["sha256"], "path": p, "lotto": Path(p).parts[0],
+                    "route_expected": f.get("route_expected") or "?", "in_campione": f["sha256"] in per_sha})
+    for d in out:
+        visti[d["id"]] += 1
+    for d in out:
+        if visti[d["id"]] > 1 and not d["in_campione"]:
+            d["id"] = f"{d['id']}-{d['sha256'][:6]}"
+    return out
+
+
+def _anni_di_fine_periodo(testo: str) -> list[int]:
+    """Gli anni delle date di fine mese (31/12/2025, 30.09.25), escluse le date di stampa (precedute da «stampa»,
+    «Data/Ora»... o seguite da un orario) e gli anni oltre il prossimo."""
+    out = []
+    for x in _DATA.finditer(testo or ""):
+        g, m, a = (int(v) for v in x.groups())
+        a += 2000 if a < 100 else 0
+        if a > time.localtime().tm_year + 1:
+            continue
+        if _STAMPA.search(testo[max(0, x.start() - 40):x.start()]) or re.match(r"\s+\d{1,2}:\d{2}", testo[x.end():x.end() + 8]):
+            continue
+        if 1 <= m <= 12 and (g == _FINE_MESE[m] or (m == 2 and g == 29)):
+            out.append(a)
+    return out
+
+
+def anno_dal_documento(testo: str, nome: str) -> tuple[int | None, str]:
+    """L'anno che l'utente scriverebbe nel form: quello nel nome del file (anno a quattro cifre, o data di fine mese),
+    altrimenti la più recente data di fine mese stampata nelle prime pagine, altrimenti l'anno dopo «esercizio»/
+    «bilancio al»/«anno». (anno, fonte); (None, "nessuna") se non si trova: l'importatore userà l'anno di oggi.
+    Sul campione con verità il nome prima del testo sbaglia meno (il testo porta date di registrazione e stampa)."""
+    stem = Path(nome or "").stem
+    nel_nome = [int(a) for a in _ANNO_NEL_NOME.findall(stem)] or _anni_di_fine_periodo(stem)
+    if nel_nome:
+        return max(nel_nome), "nome del file"
+    fine_mese = _anni_di_fine_periodo(testo or "")
+    if fine_mese:
+        return max(fine_mese), "data di fine periodo"
+    parole = [int(a) for a in _ANNO_DOPO_PAROLA.findall(testo or "")]
+    if parole:
+        return max(parole), "parola nel testo"
+    return None, "nessuna"
+
+
+def _testo_di_testa(percorso: Path, pagine: int = 3) -> str:
+    try:
+        import fitz
+        with fitz.open(str(percorso)) as doc:
+            return "\n".join(doc[i].get_text() for i in range(min(pagine, doc.page_count)))
+    except Exception:  # noqa: BLE001 - un file illeggibile non ferma il giro
+        return ""
+
+
+_RIFIUTI = [   # (tipo, atteso?, frammento del messaggio) - il primo che combacia decide
+    ("non bilancio (classificatore)", True, "Documento non importabile come bilancio completo"),
+    ("riepilogo di sintesi", True, "riepilogo di sintesi"),
+    ("XBRL nativo", True, "istanza XBRL nativa"),
+    ("servizio non raggiungibile", False, "MINERU_UNAVAILABLE"),
+    ("servizio non raggiungibile", False, "Errore gx10"),
+    ("servizio non raggiungibile", False, "Lettura col modello non disponibile"),
+    ("servizio non raggiungibile", False, "Anthropic API error"),
+    ("servizio non raggiungibile", False, "ANTHROPIC_API_KEY"),
+    ("scansione illeggibile", False, "l'OCR non ha riconosciuto testo"),
+    ("scansione illeggibile", False, "l'OCR non ha ricostruito"),
+    ("estrazione vuota", False, "nessun dato contabile"),
+    ("estrazione vuota", False, "Nessun dato estratto dal documento"),
+    ("passivo mancante", False, "Lettura del passivo mancante"),
+    ("classico spento", False, RIFIUTO_CLASSICO_SPENTO),
+]
+
+
+def tipo_rifiuto(errore) -> dict:
+    """Un rifiuto atteso (non è un bilancio, è un riepilogo, è XBRL) si distingue da un errore vero; un servizio
+    che non risponde è a parte: non dice niente dell'importatore."""
+    msg = str(errore or "")
+    for tipo, atteso, frammento in _RIFIUTI:
+        if frammento in msg:
+            return {"tipo": tipo, "atteso": atteso, "servizio": tipo == "servizio non raggiungibile"}
+    return {"tipo": "altro errore", "atteso": False, "servizio": False}
+
+
+def chiamate_del_giro(g: dict) -> int | None:
+    """Chiamate al modello dichiarate dal percorso snello: letture di Qwen più quelle del percorso del lettore.
+    None quando il giro non le dichiara (ripiego classico, rifiuto prima del percorso)."""
+    s = _sn(g) or {}
+    v = [_num(s.get("letture_chiamate")), _num(_lp(g).get("chiamate")), _num(_lp(g).get("chiamate_dettagli"))]
+    v = [x for x in v if x is not None]
+    return int(sum(v)) if v else None
+
+
+def _maggioranza(valori: list) -> object:
+    c = defaultdict(int)
+    for v in valori:
+        c[v] += 1
+    return max(c.items(), key=lambda kv: kv[1])[0] if c else None
+
+
+def documento_corpus(doc: dict, giri: list[dict], vero: dict | None = None) -> dict:
+    """Le misure senza verità di un documento su tutti i suoi giri; macro/KPI accanto se c'è la verità."""
+    imp = [g for g in giri if g.get("importato")]
+    rif = [g for g in giri if not g.get("importato")]
+    esito = "importato" if len(imp) == len(giri) else "rifiutato" if not imp else "misto"
+    sbil = [s for s in (sbilancio_dichiarato(g) for g in imp) if s]
+    quadra = None if not imp else "quadrato" if not sbil else "sbilanciato" if len(sbil) == len(imp) else "misto"
+    sp = [abs(s["sp"]) for s in sbil if s["sp"] is not None]
+    ut = [abs(s["utile"]) for s in sbil if s["utile"] is not None]
+    fonti = defaultdict(int)
+    motivi_ripiego = set()
+    for g in giri:
+        fonti[fonte_del_giro(g)] += 1
+        rc = (_sn(g) or {}).get("ripiego_classico")
+        if g.get("importato") and isinstance(rc, dict) and rc.get("usato"):
+            motivi_ripiego.add(str(rc.get("motivo") or "?"))
+    chiamate = [c for c in (chiamate_del_giro(g) for g in giri) if c is not None]
+    secondi = [_num(g.get("secondi")) for g in giri if _num(g.get("secondi")) is not None]
+    stab = _stabilita(giri)
+    instabile = bool(stab and (stab["campi_instabili"] or stab["esiti_diversi"])) or len(fonti) > 1 or quadra == "misto"
+    durate = sorted({(e["anno"], e["mesi"]) for g in imp for e in g.get("esercizi", []) if e.get("mesi") is not None})
+    r = {**{k: doc.get(k) for k in ("id", "lotto", "route_expected", "path", "in_campione", "anno", "anno_fonte", "mesi")},
+         "giri": len(giri), "importati": len(imp), "esito": esito,
+         "rifiuto": ({"messaggio": str(rif[0].get("errore") or "")[:300], **tipo_rifiuto(rif[0].get("errore"))}
+                     if rif else None),
+         "quadra": quadra, "sbilancio_sp_max": max(sp) if sp else None, "utile_ce_sp_max": max(ut) if ut else None,
+         "fonte": _maggioranza([fonte_del_giro(g) for g in giri]), "fonti": dict(sorted(fonti.items())),
+         "ripiego_classico": sorted(motivi_ripiego),
+         "chiamate_mediana": _mediana_max(chiamate)[0], "chiamate_max": _mediana_max(chiamate)[1],
+         "secondi_mediana": _mediana_max(secondi)[0], "secondi_max": _mediana_max(secondi)[1],
+         "instabile": instabile, "campi_instabili": (stab or {}).get("campi_instabili", []),
+         "esercizi_con_durata": [f"{a}/{m}" for a, m in durate],
+         "scansione": any(g.get("scansione") for g in giri)}
+    if vero is not None:
+        p = punteggio_documento(vero, giri)
+        r["macro"], r["kpi"] = _punteggio_medio(p, "macro"), _punteggio_medio(p, "kpi")
+        r["esito_giusto"] = all(g["esito_giusto"] for g in p["giri"])
+    return r
+
+
+def sintesi_corpus(documenti: list[dict]) -> dict:
+    """Conteggi per lotto, per `route_expected` e in totale."""
+    def vuoto():
+        return {"documenti": 0, "importati": 0, "misti": 0, "rifiutati_attesi": 0, "rifiutati_errore": 0,
+                "rifiutati_servizio": 0, "quadrati": 0, "sbilanciati": 0, "instabili": 0, "fonti": defaultdict(int),
+                "secondi": [], "chiamate": []}
+    gruppi = {"totale": defaultdict(vuoto), "lotto": defaultdict(vuoto), "route_expected": defaultdict(vuoto)}
+    for d in documenti:
+        for asse, chiave in (("totale", "tutti"), ("lotto", d["lotto"]), ("route_expected", d["route_expected"])):
+            x = gruppi[asse][chiave]
+            x["documenti"] += 1
+            x["importati"] += d["esito"] == "importato"
+            x["misti"] += d["esito"] == "misto"
+            if d["esito"] == "rifiutato":
+                r = d["rifiuto"] or {}
+                k = "rifiutati_servizio" if r.get("servizio") else "rifiutati_attesi" if r.get("atteso") else "rifiutati_errore"
+                x[k] += 1
+            x["quadrati"] += d["quadra"] == "quadrato"
+            x["sbilanciati"] += d["quadra"] in ("sbilanciato", "misto")
+            x["instabili"] += d["instabile"]
+            x["fonti"][d["fonte"] or "?"] += 1
+            if d["secondi_mediana"] is not None:
+                x["secondi"].append(d["secondi_mediana"])
+            if d["chiamate_mediana"] is not None:
+                x["chiamate"].append(d["chiamate_mediana"])
+    out = {}
+    for asse, g in gruppi.items():
+        out[asse] = {}
+        for k, x in sorted(g.items()):
+            s = sorted(x.pop("secondi"))
+            c = sorted(x.pop("chiamate"))
+            out[asse][k] = {**x, "fonti": dict(sorted(x["fonti"].items())),
+                            "secondi_mediana": s[len(s) // 2] if s else None, "secondi_somma": round(sum(s), 1),
+                            "chiamate_mediana": c[len(c) // 2] if c else None}
+    return out
+
+
+def scrivi_rapporto_corpus(cartella: Path, documenti: list[dict], sin: dict, meta: dict) -> None:
+    json.dump({"meta": meta, "sintesi": sin, "documenti": documenti},
+              open(cartella / "punteggio.json", "w", encoding="utf-8"), indent=1, ensure_ascii=False)
+    f = lambda x: "—" if x is None else f"{x:g}" if isinstance(x, float) else f"{x}"
+    eur = lambda x: "—" if x is None else f"{x:,.2f}".replace(",", "#").replace(".", ",").replace("#", ".")
+    t = sin["totale"]["tutti"]
+    r = [f"# Giro sul corpus — {meta['etichetta']}", "",
+         f"{meta['documenti']} PDF unici, {meta['ripetizioni']} giri ciascuno, commit {meta['commit']}, {meta['data']}. "
+         "Senza verità: misure di esito, quadratura, percorso, costo e stabilità. Per i documenti del campione "
+         "si usano anno e mesi della verità e accanto ci sono macro/KPI; per gli altri l'anno è ricavato dal documento "
+         "(colonna «Anno da»), senza mesi, come un utente che non li inserisce.", "",
+         "| Misura | Valore |", "|---|---|",
+         f"| Importati in tutti i giri | {t['importati']} |",
+         f"| Esito diverso fra i giri | {t['misti']} |",
+         f"| Rifiutati, rifiuto atteso (non bilancio, riepilogo, XBRL) | {t['rifiutati_attesi']} |",
+         f"| Rifiutati, errore da guardare | {t['rifiutati_errore']} |",
+         f"| Rifiutati per servizio non raggiungibile (non misurano l'importatore) | {t['rifiutati_servizio']} |",
+         f"| Salvati quadrati (tutti i giri importati) | {t['quadrati']} |",
+         f"| Salvati sbilanciati (almeno un giro) | {t['sbilanciati']} |",
+         f"| Instabili fra i giri (esito, fonte, quadratura o campi del corrente) | {t['instabili']} |",
+         f"| Secondi per import: mediana / somma delle mediane | {f(t['secondi_mediana'])} / {f(t['secondi_somma'])} |",
+         f"| Chiamate al modello dichiarate: mediana per documento | {f(t['chiamate_mediana'])} |", "",
+         "Le chiamate sono quelle dichiarate dal percorso snello (letture di Qwen e percorso del lettore); "
+         "il ripiego classico non le dichiara.", ""]
+    for asse, titolo in (("lotto", "Per lotto"), ("route_expected", "Per rotta attesa (manifesto)")):
+        r += [f"## {titolo}", "", "| Gruppo | Doc | Importati | Misti | Rif. attesi | Rif. errore | Rif. servizio | "
+              "Quadrati | Sbilanciati | Instabili | Sec. mediana | Fonti |", "|---|---|---|---|---|---|---|---|---|---|---|---|"]
+        for k, x in sin[asse].items():
+            fo = ", ".join(f"{a} {n}" for a, n in x["fonti"].items())
+            r.append(f"| {k} | {x['documenti']} | {x['importati']} | {x['misti']} | {x['rifiutati_attesi']} | "
+                     f"{x['rifiutati_errore']} | {x['rifiutati_servizio']} | {x['quadrati']} | {x['sbilanciati']} | "
+                     f"{x['instabili']} | {f(x['secondi_mediana'])} | {fo} |")
+        r.append("")
+    da_guardare = [d for d in documenti if (d["esito"] != "importato" and not (d["rifiuto"] or {}).get("atteso"))
+                   or d["quadra"] in ("sbilanciato", "misto") or d["instabile"]]
+    r += ["## Da guardare (rifiuti non attesi, sbilanciati, instabili)", "",
+          "| Id | Lotto | Rotta attesa | Esito | Quadra | Sbil. SP max | Utile CE−SP max | Fonte | Instabile | Motivo / errore |",
+          "|---|---|---|---|---|---|---|---|---|---|"]
+    for d in da_guardare:
+        mot = (d["rifiuto"] or {}).get("messaggio", "")[:110] if d["esito"] != "importato" else \
+            ("campi: " + ", ".join(d["campi_instabili"][:6]) if d["campi_instabili"] else "")
+        r.append(f"| {d['id']} | {d['lotto']} | {d['route_expected']} | {d['esito']} {d['importati']}/{d['giri']} | "
+                 f"{f(d['quadra'])} | {eur(d['sbilancio_sp_max'])} | {eur(d['utile_ce_sp_max'])} | {f(d['fonte'])} | "
+                 f"{'sì' if d['instabile'] else 'no'} | {mot.replace('|', '/')} |")
+    durate = [d for d in documenti if d["esercizi_con_durata"]]
+    r += ["", "## Esercizi salvati con una durata (mesi) dichiarata", "",
+          "| Id | Mesi passati all'import | Esercizi (anno/mesi) |", "|---|---|---|"]
+    r += [f"| {d['id']} | {f(d['mesi'])} | {', '.join(d['esercizi_con_durata'])} |" for d in durate] or ["| — | | nessuno |"]
+    r += ["", "## Tutti i documenti", "",
+          "| Id | Lotto | Rotta attesa | Anno (da) | Esito | Quadra | Fonte | Ripiego classico | Chiamate med. | Sec. med./max | Macro | KPI |",
+          "|---|---|---|---|---|---|---|---|---|---|---|---|"]
+    pc = lambda x: "—" if x is None else f"{100 * x:.0f}%"
+    for d in documenti:
+        r.append(f"| {d['id']} | {d['lotto']} | {d['route_expected']} | {f(d['anno'])} ({d['anno_fonte']}) | "
+                 f"{d['esito']} {d['importati']}/{d['giri']} | {f(d['quadra'])} | {f(d['fonte'])} | "
+                 f"{'; '.join(d['ripiego_classico']) or '—'} | {f(d['chiamate_mediana'])} | "
+                 f"{f(d['secondi_mediana'])}/{f(d['secondi_max'])} | {pc(d.get('macro'))} | {pc(d.get('kpi'))} |")
+    (cartella / "punteggio.md").write_text("\n".join(r) + "\n", encoding="utf-8")
+
+
+def lavori_corpus(campione: dict, ripetizioni: int, fatti: set, solo: list[str] | None = None,
+                  lotti: list[str] | None = None) -> tuple[list[dict], list[tuple]]:
+    """I documenti del corpus (con anno e mesi scelti) e i lavori da fare."""
+    docs = documenti_del_corpus(json.load(open(MANIFESTO, encoding="utf-8")), campione)
+    if solo:
+        docs = [d for d in docs if d["id"] in solo]
+    if lotti:
+        docs = [d for d in docs if d["lotto"] in lotti]
+    lavori = []
+    for d in docs:
+        percorso = CORPUS / d["path"]
+        vero = carica_verita(d["id"]) if d["in_campione"] else None
+        if vero and vero["periodi"]:
+            d["anno"], d["anno_fonte"] = anno_del_periodo(vero["periodi"][0]["fine"]), "verità"
+            d["mesi"] = mesi_del_periodo(vero["periodi"][0]["periodo"])
+        else:
+            d["anno"], d["anno_fonte"] = anno_dal_documento(_testo_di_testa(percorso), percorso.name)
+            d["mesi"] = None
+        if not percorso.exists():
+            print(f"{d['id']}: file assente ({d['path']}), saltato", flush=True)
+            d["assente"] = True
+            continue
+        lavori += [(d["id"], n + 1, percorso, d["mesi"], d["anno"]) for n in range(ripetizioni)
+                   if (d["id"], n + 1) not in fatti]
+    return [d for d in docs if not d.get("assente")], lavori
+
+
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     ap.add_argument("--etichetta", default=time.strftime("%Y%m%d-%H%M"))
@@ -789,6 +1086,9 @@ def main() -> None:
     ap.add_argument("--confronta", default=None, metavar="ETICHETTA",
                     help="etichetta di una base in punteggio/: controlla che i valori salvati siano invariati sui documenti stabili")
     ap.add_argument("--da-esiti", default=None, help="cartella di un giro precedente: ricalcola senza importare")
+    ap.add_argument("--corpus", action="store_true",
+                    help="tutti i PDF del manifesto (un id per sha256), rapporto senza verità; macro/KPI accanto per il campione")
+    ap.add_argument("--lotti", default=None, help="con --corpus: solo questi lotti, separati da virgola")
     args = ap.parse_args()
 
     campione = {c["id"]: c for c in json.load(open(CAMPIONE, encoding="utf-8"))["documenti"]}
@@ -810,7 +1110,12 @@ def main() -> None:
                 fatti.add((e["id"], e["giro"]))
                 giri[e["id"]].append(e)
         lavori = []
-        for id_ in ids:
+        if args.corpus:
+            docs, lavori = lavori_corpus(campione, args.ripetizioni, fatti, solo=ids if args.solo else None,
+                                         lotti=args.lotti.split(",") if args.lotti else None)
+            json.dump(docs, open(cartella / "documenti.json", "w", encoding="utf-8"), indent=1, ensure_ascii=False)
+            print(f"corpus: {len(docs)} documenti, {len(lavori)} giri da fare", flush=True)
+        for id_ in ([] if args.corpus else ids):
             vero = carica_verita(id_)
             if vero is None:
                 print(f"{id_}: verità assente, saltato", flush=True)
@@ -839,8 +1144,20 @@ def main() -> None:
         for v in giri.values():
             v.sort(key=lambda e: e["giro"])
 
-    documenti = [punteggio_documento(carica_verita(i), giri[i]) for i in ids if giri.get(i) and carica_verita(i)]
     commit = os.popen(f"git -C {ROOT} rev-parse --short HEAD").read().strip()
+    if args.corpus or (args.da_esiti and (cartella / "documenti.json").exists()):
+        docs = json.load(open(cartella / "documenti.json", encoding="utf-8"))
+        documenti = [documento_corpus(d, giri[d["id"]], carica_verita(d["id"]) if d["in_campione"] else None)
+                     for d in docs if giri.get(d["id"])]
+        meta = {"etichetta": cartella.name, "documenti": len(documenti), "modo": "corpus",
+                "ripetizioni": max((len(v) for v in giri.values()), default=0), "commit": commit,
+                "data": time.strftime("%Y-%m-%d %H:%M")}
+        sin = sintesi_corpus(documenti)
+        scrivi_rapporto_corpus(cartella, documenti, sin, meta)
+        print(json.dumps(sin["totale"], indent=1, ensure_ascii=False))
+        print(f"rapporto: {cartella / 'punteggio.md'}")
+        return
+    documenti = [punteggio_documento(carica_verita(i), giri[i]) for i in ids if giri.get(i) and carica_verita(i)]
     meta = {"etichetta": args.etichetta if not args.da_esiti else cartella.name, "documenti": len(documenti),
             "ripetizioni": max((len(v) for v in giri.values()), default=0), "commit": commit,
             "data": time.strftime("%Y-%m-%d %H:%M")}

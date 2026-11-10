@@ -132,6 +132,7 @@ def probe(
         "prior_year_imported": None,
         "secondi": None,
         "warnings": [],
+        "lettore": None,
         "masked": None,
         # Live-route evidence: #50 needs to prove that the partial comparative
         # path keeps the single-year current column and that its wrong-column
@@ -227,6 +228,7 @@ def probe(
         rec["ivcee_provider"] = vr.get("ivcee_provider")
         rec["dettagli_provider"] = vr.get("dettagli_provider")
         rec["import_snello"] = vr.get("import_snello")
+        rec["lettore"] = vr.get("lettore")
         w = list(res.get("warnings") or []) + list(vr.get("warnings") or [])
         rec["warnings"] = [str(x)[:220] for x in w][:10]
 

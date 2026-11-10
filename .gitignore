@@ -115,7 +115,7 @@ BKPS.XBRL
 ssl/
 
 # Local test PDFs (confidential client bilanci) + diagnostic harness
-Test/
+/Test
 
 # Next.js build artifacts
 .next/
@@ -131,8 +131,8 @@ data/uploads/
 docs/debug/
 docs/debug2/
 docs/debug3/
-inbox/
-tests/debug/
+/inbox
+/tests/debug
 docs/examples/
 
 # Scratch di sessione degli harness OCR/import: log e dump rigenerabili, non specifica
@@ -161,6 +161,6 @@ tests/.banco-business-plan/
 tests/.banco-infrannuale/
 
 # Spazi di lavoro locali degli agenti e backup del DB: mai in git
-.superpowers/
+/.superpowers
 .pi/
 backups/

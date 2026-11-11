@@ -955,3 +955,61 @@ def test_totale_sotto_una_voce_che_finisce_col_suo_nome_non_e_una_foglia(tmp_pat
     doc = _doc(tmp_path, voci)
     corrente, _ = colonne_utili(doc)
     assert "Totale altre riserve" not in {f.etichetta for f in foglie_contabili(doc, corrente)}
+
+
+# --- Fase 5, Task 4 (F2): la colonna corrente di un lato con una colonna spuria ---
+
+from datetime import date as _date  # noqa: E402
+from types import SimpleNamespace  # noqa: E402
+
+from importers.lettore import leggi_importo  # noqa: E402
+from importers.lettore.colonne import Colonna  # noqa: E402
+from importers.lettore.foglie import _colonna_della_riga  # noqa: E402
+from importers.lettore.righe import Documento, Riga  # noqa: E402
+
+
+def _col(i, lato, ruolo="esercizio", fine=None, corrente=False):
+    return Colonna(i, 100.0 + 100 * i, lato, ruolo, fine, None, 12 if fine else None, corrente)
+
+
+def _doc_colonne(colonne, celle_per_lato):
+    """`celle_per_lato`: lato -> lista di insiemi di indici di colonna, una riga ciascuno."""
+    righe = []
+    for lato, righe_lato in celle_per_lato.items():
+        for k, indici in enumerate(righe_lato):
+            righe.append(Riga(id=f"p1r{k}{lato}", pagina=1, y=float(k), lato=lato, sezione="SP", codice="",
+                              etichetta=f"conto {lato}{k}", celle={i: leggi_importo("100,00") for i in indici}))
+    return Documento(righe, colonne, True, [], SimpleNamespace(coppie={}, marcatori=set(), negativi=set()))
+
+
+def test_lato_senza_corrente_legge_la_colonna_dello_stesso_ruolo(tmp_path):
+    # 229: a sinistra il saldo datato; a destra una colonna spuria («516,46» dalle descrizioni) e il saldo vero
+    colonne = [_col(0, "L", "saldo", _date(2025, 12, 31), True), _col(1, "R"), _col(2, "R", "saldo")]
+    doc = _doc_colonne(colonne, {"L": [{0}] * 20, "R": [{1, 2}] * 3 + [{2}] * 17})
+    destra = [r for r in doc.righe if r.lato == "R"][0]
+    assert _colonna_della_riga(doc, 0, destra) == 2
+
+
+def test_lato_senza_corrente_legge_la_colonna_che_domina(tmp_path):
+    # 1430: a destra una colonna di pochi valori (un riepilogo) accanto a quella degli importi, stesso ruolo
+    colonne = [_col(0, "L", fine=_date(2026, 7, 31), corrente=True), _col(1, "R"), _col(2, "R")]
+    doc = _doc_colonne(colonne, {"L": [{0}] * 20, "R": [{1}] * 5 + [{2}] * 20})
+    destra = [r for r in doc.righe if r.lato == "R"][0]
+    assert _colonna_della_riga(doc, 0, destra) == 2
+
+
+def test_due_colonne_piene_senza_data_restano_senza_scelta(tmp_path):
+    # corrente e precedente non datati sull'altro lato: indovinare sarebbe leggere l'anno sbagliato
+    colonne = [_col(0, "L", fine=_date(2025, 12, 31), corrente=True), _col(1, "R"), _col(2, "R")]
+    doc = _doc_colonne(colonne, {"L": [{0}] * 20, "R": [{1, 2}] * 18 + [{2}] * 2})
+    destra = [r for r in doc.righe if r.lato == "R"][0]
+    assert _colonna_della_riga(doc, 0, destra) is None
+
+
+def test_colonna_dei_soli_totali_non_e_mai_la_corrente(tmp_path):
+    # 1456: a sinistra la colonna dei soli totali (4 celle) e quella dei saldi; la data solo sopra la destra
+    colonne = [_col(0, "L"), _col(1, "L"), _col(2, "R", fine=_date(2026, 9, 30), corrente=True)]
+    doc = _doc_colonne(colonne, {"L": [{0}] * 3 + [{1}] * 40, "R": [{2}] * 30})
+    assert colonne_utili(doc) == (1, None)
+    destra = [r for r in doc.righe if r.lato == "R"][0]
+    assert _colonna_della_riga(doc, 1, destra) == 2

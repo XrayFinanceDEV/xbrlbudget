@@ -12,6 +12,7 @@ import re
 import statistics
 from collections import Counter
 from dataclasses import dataclass, field, replace
+from functools import cached_property
 
 import fitz
 
@@ -107,6 +108,14 @@ class Documento:
     def righe_del_prospetto(self) -> list[Riga]:
         """Le righe con `parte == "prospetto"`: le sole con le celle sulle colonne di `colonne`."""
         return [r for r in self.righe if r.parte == "prospetto"]
+
+    @cached_property
+    def celle_per_colonna(self) -> dict[int, int]:
+        """Quante righe del prospetto hanno una cella in ogni colonna (letto dopo la lettura, che non cambia piu')."""
+        conto: Counter = Counter()
+        for r in self.righe_del_prospetto():
+            conto.update(r.celle.keys())
+        return dict(conto)
 
 
 @dataclass

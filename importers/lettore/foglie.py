@@ -81,11 +81,36 @@ class Ancora:
 # Colonne
 # --------------------------------------------------------------------------------------
 
+_QUOTA_SPURIA = 0.1     # una colonna senza data con meno di un decimo delle celle della piu' piena del suo lato
+_DOMINIO = 2            # la colonna che domina il suo lato: almeno il doppio delle celle di ognuna delle altre
+
+
+def _piene(doc: Documento, colonne: list[Colonna]) -> list[Colonna]:
+    """Le colonne di un lato senza quelle spurie (Fase 5, F2: la colonna dei soli totali spostati, un numero dentro le
+    descrizioni). Spuria e' solo una colonna senza data con meno di un decimo delle celle della piu' piena: una
+    colonna datata resta sempre (l'anno precedente stampato sui soli totali e' un periodo, non un difetto)."""
+    conto = doc.celle_per_colonna
+    massimo = max((conto.get(c.indice, 0) for c in colonne), default=0)
+    return [c for c in colonne if c.fine is not None or conto.get(c.indice, 0) >= _QUOTA_SPURIA * massimo]
+
+
+def _dominante(doc: Documento, colonne: list[Colonna]) -> Colonna | None:
+    """La colonna con piu' celle, se ne ha almeno il doppio di ognuna delle altre; altrimenti nessuna (due colonne
+    piene senza data possono essere corrente e precedente: non si indovina)."""
+    conto = doc.celle_per_colonna
+    ordinate = sorted(colonne, key=lambda c: -conto.get(c.indice, 0))
+    if not ordinate:
+        return None
+    if len(ordinate) == 1 or conto.get(ordinate[0].indice, 0) >= _DOMINIO * conto.get(ordinate[1].indice, 0):
+        return ordinate[0]
+    return None
+
+
 def colonne_utili(doc: Documento) -> tuple[int | None, int | None]:
     """(corrente, precedente) fra le colonne di esercizio o di saldo; differenze e percentuali mai."""
     valori = [c for c in doc.colonne if c.ruolo in _RUOLI_VALORE]
     if any(c.lato == "L" for c in valori):     # contrapposte: le colonne di riferimento sono quelle di sinistra,
-        valori = [c for c in valori if c.lato == "L"]   # quelle di destra si leggono con `_colonna_della_riga`
+        valori = _piene(doc, [c for c in valori if c.lato == "L"])   # quelle di destra con `_colonna_della_riga`
     if not valori:
         return None, None
     corrente = next((c for c in valori if c.corrente), valori[0])
@@ -368,10 +393,16 @@ def _colonna_della_riga(doc: Documento, colonna: int, r: Riga) -> int | None:
     base = next((c for c in doc.colonne if c.indice == colonna), None)
     if base is None or r.lato not in ("L", "R") or base.lato not in ("L", "R") or r.lato == base.lato:
         return colonna
-    proprie = [c for c in doc.colonne if c.ruolo in _RUOLI_VALORE and c.lato == base.lato]
-    altre = [c for c in doc.colonne if c.ruolo in _RUOLI_VALORE and c.lato == r.lato]
-    if base.corrente:
+    proprie = _piene(doc, [c for c in doc.colonne if c.ruolo in _RUOLI_VALORE and c.lato == base.lato])
+    altre = _piene(doc, [c for c in doc.colonne if c.ruolo in _RUOLI_VALORE and c.lato == r.lato])
+    if base.corrente or proprie == [base]:      # l'unica colonna piena del suo lato e' la sua corrente (1456)
         scelta = [c for c in altre if c.corrente]
+        if not scelta:
+            # l'altro lato non ha una corrente datata (Fase 5, F2): la colonna dello stesso ruolo se e' una sola
+            # (il saldo accanto a una colonna spuria, 229), altrimenti quella che domina (1430)
+            stesso = [c for c in altre if c.ruolo == base.ruolo]
+            unica = stesso[0] if len(stesso) == 1 else _dominante(doc, stesso or altre)
+            scelta = [unica] if unica is not None else []
     else:
         scelta = [c for c in altre if not c.corrente]
         scelta = scelta[[c for c in proprie if not c.corrente].index(base):][:1] if base in proprie else scelta[:1]

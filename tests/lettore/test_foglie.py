@@ -1028,3 +1028,30 @@ def test_eccedenza_dell_esercizio_precedente_e_un_conto():
     assert not _e_controllo(_riga_sola("ECCEDENZA ESERCIZI PRECEDENTI"))
     assert _e_controllo(_riga_sola("Eccedenza attivo"))
     assert _e_controllo(_riga_sola("ECCEDENZA RICAVI", "CE"))
+
+
+# --- Fase 5, Task 5 (F16): «di cui» che ripartiscono esattamente la voce sono le sue foglie ---
+
+def _debiti_con_di_cui(oltre="18.000,00"):
+    voci = [(50, 112, "STATO PATRIMONIALE PASSIVO")]
+    voci += _righe(140, [("A) PATRIMONIO NETTO",), ("I - Capitale", "10.000,00"), ("D) DEBITI",),
+                         ("4) Debiti verso banche", "30.000,00"), ("di cui esigibili entro", "12.000,00"),
+                         ("di cui esigibili oltre", oltre), ("7) Debiti verso fornitori", "5.000,00"),
+                         ("Totale debiti", "35.000,00"), ("TOTALE PASSIVO", "45.000,00")])
+    return voci
+
+
+def test_di_cui_che_ripartiscono_la_voce_sono_foglie(tmp_path):
+    # 1427: «4) Debiti verso banche» chiude su «di cui entro» + «di cui oltre»: la massa la portano i due «di cui»
+    doc = _doc(tmp_path, _debiti_con_di_cui())
+    f = _per_etichetta(foglie_contabili(doc, 0))
+    assert f["di cui esigibili entro"].importo + f["di cui esigibili oltre"].importo == Decimal("30000.00")
+    assert "4) Debiti verso banche" not in f
+    assert sum(x.importo for x in f.values() if x.lato_sp == "P") == Decimal("45000.00")
+
+
+def test_di_cui_che_non_ripartiscono_la_voce_restano_controlli(tmp_path):
+    # un solo «di cui», o due che non sommano alla voce: sottoinsiemi, la voce resta la foglia
+    doc = _doc(tmp_path, _debiti_con_di_cui(oltre="15.000,00"))
+    f = _per_etichetta(foglie_contabili(doc, 0))
+    assert "di cui esigibili entro" not in f and f["4) Debiti verso banche"].importo == Decimal("30000.00")

@@ -769,6 +769,20 @@ def _parole_in_ordine(etichetta: str, cifre: bool = False) -> list[str]:
                                            and not t.isdigit())]
 
 
+def _di_cui_che_ripartiscono(doc: Documento, r: Riga, col: int, per_id: dict[str, Riga]) -> bool:
+    """«di cui esigibili entro» + «di cui esigibili oltre» che sommano esattamente la voce sopra (padre verificato) e
+    sono i suoi soli figli su quella colonna (Fase 5, F16: 1427): la voce chiude su di loro e non e' una foglia, quindi
+    la massa la portano loro, con la scadenza stampata. Un «di cui» solo, o accanto ad altri conti, resta un
+    sottoinsieme della voce: un controllo."""
+    if not _DI_CUI.search(_norm(r.etichetta)) or not r.padre_verificato or r.padre not in per_id:
+        return False
+    padre = per_id[r.padre]
+    coppie = getattr(doc.profilo, "coppie", {})
+    gruppo = next((padre.figli[k] for k in (col, coppie.get(col)) if k is not None and r.id in padre.figli.get(k, ())),
+                  ())
+    return len(gruppo) >= 2 and all(f in per_id and _DI_CUI.search(_norm(per_id[f].etichetta)) for f in gruppo)
+
+
 def _foglie_grezze(doc: Documento, colonna: int) -> list[Foglia]:
     dal_saldo = 0
     righe = doc.righe_del_prospetto()
@@ -782,7 +796,8 @@ def _foglie_grezze(doc: Documento, colonna: int) -> list[Foglia]:
         precedente, prima_sul_lato[r.lato] = prima_sul_lato.get(r.lato), r
         col = _colonna_della_riga(doc, colonna, r)
         if r.intestazione or col is None or _cella(doc, r, col) is None or _chiude_su(doc, r, col, per_id, ordine) \
-                or (_e_controllo(r) and not _totale_senza_conti(r, precedente)):
+                or (_e_controllo(r) and not _totale_senza_conti(r, precedente)
+                    and not _di_cui_che_ripartiscono(doc, r, col, per_id)):
             continue
         lato_sp = pos[r.id].lato_sp
         p, campo = _percorso(r, perc.posizione(r))

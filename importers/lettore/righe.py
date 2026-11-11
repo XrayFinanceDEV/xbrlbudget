@@ -12,6 +12,7 @@ import re
 import statistics
 from collections import Counter
 from dataclasses import dataclass, field, replace
+from functools import cached_property
 
 import fitz
 
@@ -107,6 +108,14 @@ class Documento:
     def righe_del_prospetto(self) -> list[Riga]:
         """Le righe con `parte == "prospetto"`: le sole con le celle sulle colonne di `colonne`."""
         return [r for r in self.righe if r.parte == "prospetto"]
+
+    @cached_property
+    def celle_per_colonna(self) -> dict[int, int]:
+        """Quante righe del prospetto hanno una cella in ogni colonna (letto dopo la lettura, che non cambia piu')."""
+        conto: Counter = Counter()
+        for r in self.righe_del_prospetto():
+            conto.update(r.celle.keys())
+        return dict(conto)
 
 
 @dataclass
@@ -575,7 +584,10 @@ def _pezzi_della_riga(r: RigaFisica, sezione: str, lettura: _Lettura, forme: lis
         codice, etichetta = trovato.codice, trovato.etichetta
         etichetta_testo = " ".join(etichetta).strip()
         controllo = (codice + " " + etichetta_testo).upper()
-        if _ANAGRAFICA.search(etichetta_testo.upper()) or _RIPORTO.search(controllo) \
+        # un conto col codice e l'importo non e' un'anagrafica anche se si chiama «PIAZZA …» o «… PARTITA IVA …»
+        # (Fase 5, F3: 405, 1325): l'anagrafica si scarta solo su una riga senza codice o senza importi
+        anagrafica = _ANAGRAFICA.search(etichetta_testo.upper()) and not (codice and celle)
+        if anagrafica or _RIPORTO.search(controllo) \
                 or (not celle and _IMPORTI.search(controllo)):
             continue
         if not celle and not codice and not etichetta_testo:

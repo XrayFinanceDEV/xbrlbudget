@@ -405,3 +405,120 @@ def test_fondi_che_sono_debiti_non_sono_contro_conti():
     p = finto.chiamate[0][1]["properties"]
     assert all("sp03.F" not in p[k]["enum"] for k in "abcd")
     assert all("sp03.F" in p[k]["enum"] for k in "efghij")     # «rischi su crediti» e' la svalutazione crediti
+
+
+# --- Fase 5, Task 6: la scadenza stampata, completa e anche sui crediti ---
+
+def test_scadenza_stampata_nelle_forme_dei_gestionali():
+    assert c.scadenza_stampata("MUTUI MEDIO LUNGO TERMIN") == "O"           # troncato dalla colonna
+    assert c.scadenza_stampata("Finanziamenti medio-lungo") == "O"
+    assert c.scadenza_stampata("DEBITI V/BANCHE >12 MESI") == "O"
+    assert c.scadenza_stampata("Debiti v/banche > 12 mesi") == "O"
+    assert c.scadenza_stampata("Crediti oltre l'esercizio successivo") == "O"
+    assert c.scadenza_stampata("Crediti diversi (OE)") == "O"
+    assert c.scadenza_stampata("Debiti < 12 mesi") == "E"
+    assert c.scadenza_stampata("Prestiti a breve termin") == "E"
+    assert c.scadenza_stampata("Crediti (EE)") == "E"
+    assert c.scadenza_stampata("Crediti verso clienti") is None
+
+
+def test_credito_senza_scadenza_stampata_entro_e_con_oltre_oltre():
+    foglie = [F("a", "Crediti v/clienti"), F("b", "Crediti diversi (OE)"), F("c", "Depositi a garanzia oltre 12 mesi"),
+              F("d", "Cliente Rossi", antenati=("CREDITI V/CLIENTI >12 MESI",))]
+    classi = {"a": _M("sp07", dettaglio="sp07a"), "b": _M("sp06"), "c": _M("sp06"), "d": _M("sp06")}
+    out, scelte = c.scadenza_dei_crediti(foglie, classi)
+    assert (out["a"].macro, out["a"].dettaglio) == ("sp06", "sp06a")
+    assert out["b"].macro == "sp07" and out["c"].macro == "sp07" and out["d"].macro == "sp07"
+    assert len(scelte) == 4 and classi["a"].macro == "sp07"     # copie, scelte dichiarate
+
+
+def test_scadenza_dei_crediti_non_tocca_legale_rettifiche_ne_altre_macro():
+    foglie = [F("a", "Crediti", percorso="SPA.C.II.1.O"), F("b", "Fondo svalutazione crediti", lato="R"),
+              F("c", "Cassa")]
+    classi = {"a": _M("sp07", "legale", "sp07a"), "b": c.Classe("sp07", None, "modello", rettifica="SPA.C.II.F"),
+              "c": _M("sp09")}
+    out, scelte = c.scadenza_dei_crediti(foglie, classi)
+    assert out == classi and scelte == []
+
+
+# --- Fase 5, Task 7: le regole del proprietario nelle istruzioni (interruttore IMPORT_REGOLE_NEL_PROMPT) ---
+
+from importers.lettore import regole_proprietario as rp  # noqa: E402
+
+
+class _Sistema(Finto):
+    def __call__(self, system, messaggi, schema, *, max_tokens, timeout):
+        self.sistemi = getattr(self, "sistemi", []) + [system]
+        return super().__call__(system, messaggi, schema, max_tokens=max_tokens, timeout=timeout)
+
+
+def _costo():
+    return F("a", "Sopravvenienze passive", lato="U", sezione="CE", verso="costo")
+
+
+def test_regole_spente_prompt_e_classi_di_prima(monkeypatch):
+    monkeypatch.setenv("IMPORT_REGOLE_NEL_PROMPT", "0")
+    finto = _Sistema("ce12")
+    c.classifica_macro([_costo()], chiama_json=finto)
+    assert finto.sistemi == [c.PROMPT_MACRO]
+    assert "ce19" in finto.chiamate[0][1]["properties"]["a"]["enum"]
+
+
+def test_regole_accese_nel_prompt_senza_la_frase_contraria_a_p6(monkeypatch):
+    monkeypatch.setenv("IMPORT_REGOLE_NEL_PROMPT", "1")
+    finto = _Sistema("ce12")
+    c.classifica_macro([_costo()], chiama_json=finto)
+    sistema = finto.sistemi[0]
+    assert rp.FRASE_CONTRARIA_A_P6 in c.PROMPT_MACRO and rp.FRASE_CONTRARIA_A_P6 not in sistema
+    assert rp.FRASE_SENZA_FORNITORE in sistema       # il fornitore a saldo dare resta un saldo a lato invertito
+    assert all(f"({sigla})" in sistema for sigla, _ in rp.REGOLE_MACRO)
+    assert sistema.rstrip().endswith("Rispondi solo con un JSON {id: codice}.")
+    enum = finto.chiamate[0][1]["properties"]["a"]["enum"]
+    assert "ce18" not in enum and "ce19" not in enum and "ce12" in enum      # D6
+
+
+def test_regole_accese_nel_prompt_dei_dettagli(monkeypatch):
+    monkeypatch.setenv("IMPORT_REGOLE_NEL_PROMPT", "1")
+    finto = _Sistema("sp16b")
+    f = F("a", "Debiti v/soci", lato="R")
+    classi = {"a": _M("sp16")}
+    c.classifica_dettagli([f], classi, chiama_json=finto)
+    assert all(f"({sigla})" in finto.sistemi[0] for sigla, _ in rp.REGOLE_DETTAGLIO)
+    assert classi["a"].dettaglio == "sp16b"
+
+
+def test_regole_senza_nomi_di_clienti_ne_importi():
+    import re
+    testo = " ".join(t for _, t in rp.REGOLE_MACRO + rp.REGOLE_DETTAGLIO)
+    assert not re.search(r"\d{1,3}\.\d{3}|\d+,\d{2}", testo)
+    assert not re.search(r"\b(?:S\.?R\.?L|S\.?P\.?A)\b", testo, re.I)
+
+
+# --- Fase 5, Task 8: il codice del conto come contesto della domanda e nella chiave della cache ---
+
+def _FC(id, etichetta, codice, mastri=("SP", "DEBITI")):
+    return Foglia(id, etichetta, codice, "R", "SP", Decimal(10), None, (), None, None, mastri)
+
+
+def test_codice_del_conto_nel_contesto_e_nella_cache(monkeypatch):
+    monkeypatch.setenv("IMPORT_REGOLE_NEL_PROMPT", "1")
+    finto = Finto("sp16")
+    c.classifica_macro([_FC("a", "Diversi", "2601001"), _FC("b", "Diversi", "4901003")], chiama_json=finto)
+    testo = finto.chiamate[0][0][0]["content"]
+    assert "codice: 2601001" in testo and "codice: 4901003" in testo     # due domande, non una
+
+
+def test_codice_spento_una_domanda_per_nome_e_mastro(monkeypatch):
+    monkeypatch.setenv("IMPORT_REGOLE_NEL_PROMPT", "0")
+    finto = Finto("sp16")
+    c.classifica_macro([_FC("a", "Diversi", "2601001"), _FC("b", "Diversi", "4901003")], chiama_json=finto)
+    testo = finto.chiamate[0][0][0]["content"]
+    assert "codice:" not in testo and len(finto.chiamate[0][1]["properties"]) == 1
+
+
+def test_regole_accese_per_default(monkeypatch):
+    monkeypatch.delenv("IMPORT_REGOLE_NEL_PROMPT", raising=False)
+    assert rp.accese()
+    finto = _Sistema("ce12")
+    c.classifica_macro([_costo()], chiama_json=finto)
+    assert finto.sistemi[0] == rp.prompt_macro(c.PROMPT_MACRO)

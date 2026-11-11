@@ -1363,6 +1363,72 @@ metà lascia il documento non adottato e l'import prosegue sul percorso di §10.
 - titolo di lato che porta il proprio totale («STATO PATRIMONIALE ATTIVO» seguito dal suo totale) ancora, solo se attivo e
   passivo coincidono: un titolo con un numero senza quella prova resta un titolo.
 
+**Le correzioni al lettore della Fase 5** (2026-11-11, piano `docs/superpowers/plans/2026-11-11-fase5-contrapposte-lettura-e-classificazione.md`;
+le misura offline `tests/corpus/foglie_campione.py`, che ripete il percorso fino alla guardia di costo senza modello e
+confronta le foglie documento per documento):
+
+- **sezione all'indietro** (`profilo._sezioni_dalle_chiusure`): una riga ancora senza sezione prende quella del primo
+  totale di chiusura con importi che la segue (attività/passività lo SP, costi/ricavi il CE), anche nelle pagine
+  prima; un titolo ferma la propagazione, e le righe sotto un titolo «nessuna sezione» restano senza. La chiusura di
+  una pagina conta solo dopo il suo ultimo titolo, e «TOTALE ATTIVO CIRCOLANTE» non chiude lo SP;
+- **anagrafica** (`righe._pezzi_della_riga`): «PIAZZA …», «PARTITA IVA …» si scartano solo su una riga senza codice o
+  senza importi: un conto col codice e l'importo resta un conto;
+- **totale di mastro senza conti** (`foglie._totale_senza_conti`): «Totale CLIENTI ITALIA:» subito sotto il titolo del
+  suo mastro, senza conti in mezzo e senza figli in nessuna colonna, è l'unico portatore della massa e diventa una
+  foglia. Il titolo deve finire col nome del totale (davanti solo il codice, in cifre o abbreviato); mai una voce di
+  legge, mai un totale di chiusura;
+- **colonna spuria** (`foglie._piene`, `_dominante`): una colonna senza data con meno di un decimo delle celle della
+  più piena del suo lato non è mai corrente né precedente; l'unica colonna piena di un lato è la sua corrente;
+  sull'altro lato senza corrente datata vale la colonna dello stesso ruolo, se è una sola, o quella con almeno il
+  doppio delle celle di ogni altra. Due colonne piene senza data restano senza scelta;
+- **«di cui» che ripartiscono la voce** (`foglie._di_cui_che_ripartiscono`): due o più «di cui» che sommano
+  esattamente la voce sopra, e sono i suoi soli figli, ne sono le foglie, con la scadenza stampata;
+- **«Eccedenza esercizio precedente»** è un conto del patrimonio netto, non una riga di controllo;
+- **R22 sulle altre riserve**: la voce «Altre riserve» all'unità sopra il suo solo conto al centesimo chiude fino a
+  10 € (la riserva da arrotondamento all'euro sta lì per legge); altrove resta l'euro;
+- **testata dei costi negativa** (`totali._bersaglio`): «B) Costi della produzione» stampata fra parentesi sopra i
+  costi positivi chiude sul suo valore assoluto;
+- **riga di legge fusa** (`foglie._VOCE_FUSA`): «C) Proventi e oneri finanziari - 17) Interessi» è la voce C.17, non un
+  risultato; un costo di legge stampato col meno dentro un risultato è un costo positivo.
+
+**La classificazione della Fase 5** (`importers/lettore/classifica.py`):
+
+- **scadenza dei crediti** (`scadenza_dei_crediti`): come per i debiti, sp06/sp07 li decide il testo stampato (conto o
+  mastro), senza prova entro l'esercizio; le forme riconosciute comprendono «TERMIN» troncato, «MEDIO LUNGO» senza
+  barra, «>12 mesi», «<12 mesi». I totali stampati di crediti e debiti entro/oltre decidono più della regola di
+  testo (`percorso._scadenze_contro_ancore`). Il modello non sceglie mai entro/oltre;
+- **regole del proprietario nelle istruzioni** (`importers/lettore/regole_proprietario.py`, interruttore
+  `IMPORT_REGOLE_NEL_PROMPT`, **acceso per default** dal 2026-11-11, `0` = prompt di prima): le regole di giudizio sulla natura (D3-D16, P5-P7, W4, R3-*),
+  una riga ciascuna, entrano nei prompt della macro-voce e dei dettagli; la frase sul saldo a lato invertito resta
+  per un fornitore qualunque a saldo dare (altri crediti), mentre P6 vale per i conti che si dichiarano anticipo,
+  acconto o caparra; un fondo svalutazione o rischi su crediti rettifica i crediti verso clienti, mai un fondo
+  rischi (toglierla del tutto, nella prima versione, mandava il fornitore fra i ratei e il fondo rischi su crediti
+  fra i fondi rischi: 1531); `ce18`/`ce19` escono dalle classi ammesse (D6); ogni riga
+  porta anche il codice del conto, e la cache distingue due conti con lo stesso nome e codici diversi. Decisione del
+  proprietario (2026-11-11): niente correzioni a parole chiave, la voce la sceglie il modello;
+- **il lettore prima del parser delle situazioni contabili** (`IMPORT_LETTORE_PRIMA`, **acceso per default** dal
+  2026-11-11, decisione del proprietario sulla misura qui sotto; `0` torna al parser prima): quando
+  `situazione_contabile_parser` quadra, il percorso del lettore prova per primo, con lo stesso cancello; se non
+  adotta resta il parser com'è.
+
+*Misura della Fase 5 (86 documenti × 3 giri, giro `fase5-ee2a506`, 2026-11-11, con `IMPORT_LETTORE_PRIMA=1` e
+`IMPORT_REGOLE_NEL_PROMPT=1`, contro `base5-86`): macro-voci esatte 79,2% → 81,7%, dettagli KPI 79,1% → 83,2%, altri
+dettagli 78,7% → 82,8%, esito giusto 97,3% → 97,7%. Sulle contrapposte macro 64,5% → 70,6%, KPI 62,6% → 77,5%,
+dettagli 53,2% → 72,3%; sui conti a colonne 56,8% → 59,4%, KPI 58,7% → 54,4%, dettagli 55,7% → 57,9%. Il lettore adotta
+25 documenti (17 delle 24 contrapposte), uno instabile nell'adozione (1523). Peggiorano, fra i documenti che il lettore
+adottava già, 1523, 1531 e 1566 (KPI), di poco 1407, 1440, 1567. I lettori deterministici, rifatti offline, danno numeri
+identici a `main`; le poche differenze sui loro documenti vengono dalle chiamate al modello del passo dei dettagli.
+Rinunce che restano: massa non classificata (1325, 1401, 229, 615, COLOMBO), oltre soglia (1452, 281), foglie non in
+pari (588, 680, 1410, 1430). Costo per import adottato: mediana 6 chiamate (max 11), 69 s di lettore (max 142 s).*
+
+*Le due leve separate (39 documenti × 3: contrapposte, conti a colonne e i documenti adottati dal lettore; macro / KPI
+/ dettagli). Base `base5-86`: 66,3 / 66,5 / 63,0. Solo `IMPORT_LETTORE_PRIMA` (`fase5-soloprima-d33f5e5`): 69,3 / 72,5 /
+71,7, contrapposte 70,1 / 73,9 / 70,6, nessuna perdita sugli altri adottati. Più le regole riviste
+(`fase5-regole-e4be5f1`): 70,7 / 74,2 / 73,2, contrapposte 71,6 / 76,6 / 72,2, conti a colonne 55,6 / 54,0 / 52,6;
+documenti instabili 12 in entrambi i giri (6 nella base), nessuno instabile nell'adozione. Restano sotto il solo
+lettore-prima 337 e 158 (KPI) e di poco 1531 (macro). Su questi numeri il proprietario ha acceso entrambi gli
+interruttori (2026-11-11).*
+
 *Misura sul campione (78 documenti × 3 giri, `tests/corpus/punteggio.py`, giro `fase3-4de18b6`, 2026-11-09, contro `fase3-502f078` del primo innesto): dei 9 documenti il cui PDF quadra ma l'import no alla Fase 2, **7 escono quadrati in tutti i giri** (contro 2); i due fuori sono attesi (massa non classificabile; foglie davvero non in pari, attivo e passivo affiancati). Documenti salvati sbilanciati 12 → 7, nessuno nuovo. 11 documenti adottati dal lettore, nessuno instabile nell'adozione. Macro-voci esatte 78,7% → 80,6%, dettagli KPI 76,4% → 80,3%, altri dettagli 75,5% → 78,7%. Costo per import adottato: mediana 6 chiamate al modello (max 9, tetto 40 mai toccato), 66 s di lettore (max 153 s).*
 
 *Misura della Fase 4 (78 documenti × 3 giri, giro `fase4-ad2b581`, 2026-11-09, contro `fase3-4de18b6`, percorso classico acceso come ripiego): il lettore adotta **14 documenti** (prima 11), nessuno instabile nell'adozione; i documenti salvati dal modo `legge` scendono da 6 a 4 (restano 161, 1426, 1445 e 1533, i quattro aperti: massa non classificabile, gerarchia senza totali, blocchi di CE, un'eco di 1,30 € che si chiuderebbe solo con un tappo). Documenti salvati sbilanciati 7 → 5, nessuno nuovo; i bersagli restano 7/9 quadrati in tutti i giri. Macro-voci esatte 80,6%, dettagli KPI 80,3% (invariati), altri dettagli 78,7% → 79,5%. I lettori deterministici cambiano numeri solo per A.4 che passa in `ce03a` (Task 5-bis) e su due documenti che ora coincidono con la verità. Il ripiego classico serve solo a tre documenti che nessun percorso snello legge (`non_applicabile`). Costo per import adottato: mediana 6 chiamate (max 9), 64 s di lettore (max 129 s). Due documenti adottati dal lettore perdono un campo: su uno, un conto di 4.178 € classificato dal modello passa da altri debiti a ratei passivi (il lettore è identico byte per byte prima e dopo: è la variabilità del modello); su un altro, 10,57 € di B.III.2.d-bis senza un percorso di legge vanno in `sp07g`.*

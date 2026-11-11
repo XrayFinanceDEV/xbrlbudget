@@ -875,3 +875,216 @@ def test_totale_con_figli_scartati_da_r18_sulla_corrente_non_diventa_foglia(tmp_
     foglie = foglie_contabili(doc, 0)
     assert "Crediti verso clienti" not in [f.etichetta for f in foglie]
     assert sum(f.importo for f in foglie) == Decimal("800.00")
+
+
+# --- Fase 5, Task 3 (F5): un totale di mastro senza conti stampati sotto porta la massa ---
+
+def _verifica_compatta(clienti_coi_conti=False, codice_esteri="0202"):
+    """La stampa compatta di 1325/1401: un mastro col suo totale, e mastri stampati solo col titolo e il totale."""
+    voci = [(15, 100, "SITUAZIONE PATRIMONIALE"), (15, 114, "ATTIVITA'")]
+    righe = [("0101", "BANCHE", None, None), ("01010001", "BANCA ALFA", None, "1.000,00"),
+             ("01010002", "BANCA BETA", None, "500,00"), (None, None, "Totale BANCHE:", "1.500,00"),
+             ("0201", "CLIENTI ITALIA", None, None)]
+    if clienti_coi_conti:
+        righe += [("02010001", "ROSSI SPA", None, "2.000,00"), ("02010002", "BIANCHI SRL", None, "345,67")]
+    righe += [(None, None, "Totale CLIENTI ITALIA:", "2.345,67"), (codice_esteri, "CLIENTI ESTERI", None, None),
+              (None, None, "Totale CLIENTI ESTERI:", "654,33"), (None, None, "TOTALE ATTIVITA'", "4.500,00")]
+    for k, (codice, nome, totale, importo) in enumerate(righe):
+        y = 130 + 14 * k
+        if codice:
+            voci += [(15, y, codice), (147, y, nome)]
+        if totale:
+            voci.append((272, y, totale))
+        if importo:
+            voci.append((532, y, importo))
+    return voci
+
+
+def test_totale_di_mastro_senza_conti_sotto_e_una_foglia(tmp_path):
+    doc = _doc(tmp_path, _verifica_compatta())
+    corrente, _ = colonne_utili(doc)
+    foglie = foglie_contabili(doc, corrente)
+    importi = {f.etichetta: f.importo for f in foglie}
+    assert importi.get("Totale CLIENTI ITALIA:") == Decimal("2345.67")
+    assert importi.get("Totale CLIENTI ESTERI:") == Decimal("654.33")
+    assert "Totale BANCHE:" not in importi      # coi conti sotto resta un totale: mastro OPPURE foglie
+    assert sum(f.importo for f in foglie) == Decimal("4500.00")
+
+
+def test_totale_di_mastro_coi_conti_sotto_resta_un_totale(tmp_path):
+    doc = _doc(tmp_path, _verifica_compatta(clienti_coi_conti=True))
+    corrente, _ = colonne_utili(doc)
+    nomi = {f.etichetta for f in foglie_contabili(doc, corrente)}
+    assert "Totale CLIENTI ITALIA:" not in nomi and {"ROSSI SPA", "BIANCHI SRL"} <= nomi
+
+
+def test_totale_di_mastro_sotto_un_titolo_col_codice_in_lettere(tmp_path):
+    # 1401: «CLIENTI EST CLIENTI ESTERI» / «Totale CLIENTI ESTERI:»
+    doc = _doc(tmp_path, _verifica_compatta(codice_esteri="CLIENTI EST"))
+    corrente, _ = colonne_utili(doc)
+    importi = {f.etichetta: f.importo for f in foglie_contabili(doc, corrente)}
+    assert importi.get("Totale CLIENTI ESTERI:") == Decimal("654.33")
+
+
+def test_totale_di_sezione_sotto_il_suo_titolo_non_e_una_foglia(tmp_path):
+    # 615: il titolo «RICAVI» e «TOTALE RICAVI» chiudono la sezione, non un mastro senza conti
+    voci = [(15, 100, "CONTO ECONOMICO"), (15, 114, "COSTI"), (147, 128, "ACQUISTI MERCI"), (532, 128, "700,00"),
+            (147, 142, "SERVIZI"), (532, 142, "300,00"), (272, 156, "TOTALE COSTI"), (532, 156, "1.000,00"),
+            (15, 170, "RICAVI"), (272, 184, "TOTALE RICAVI"), (532, 184, "1.200,00")]
+    doc = _doc(tmp_path, voci)
+    corrente, _ = colonne_utili(doc)
+    assert "TOTALE RICAVI" not in {f.etichetta for f in foglie_contabili(doc, corrente)}
+
+
+def test_totale_di_una_voce_di_legge_sotto_il_suo_titolo_non_e_una_foglia(tmp_path):
+    # 682: «VI - Altre riserve» / «Totale altre riserve» in uno schema: non e' il mastro compatto di un gestionale
+    voci = [(15, 100, "STATO PATRIMONIALE PASSIVO"), (15, 114, "A) PATRIMONIO NETTO"), (15, 128, "I - Capitale"),
+            (532, 128, "10.000,00"), (15, 142, "VI - Altre riserve"), (272, 156, "Totale altre riserve"),
+            (532, 156, "2.500,00"), (15, 170, "IX - Utile (perdita) dell'esercizio"), (532, 170, "1.000,00"),
+            (272, 184, "Totale patrimonio netto"), (532, 184, "13.500,00")]
+    doc = _doc(tmp_path, voci)
+    corrente, _ = colonne_utili(doc)
+    assert "Totale altre riserve" not in {f.etichetta for f in foglie_contabili(doc, corrente)}
+
+
+def test_totale_sotto_una_voce_che_finisce_col_suo_nome_non_e_una_foglia(tmp_path):
+    # 682: «Varie altre riserve 1 1» (importi nell'etichetta) sopra «Totale altre riserve», che somma le righe sopra
+    voci = [(15, 100, "STATO PATRIMONIALE PASSIVO"), (147, 114, "Riserva straordinaria"), (532, 114, "2.499,00"),
+            (147, 128, "Varie altre riserve 1"), (272, 142, "Totale altre riserve"), (532, 142, "2.500,00"),
+            (147, 156, "Capitale sociale"), (532, 156, "10.000,00"), (147, 170, "Fornitori"), (532, 170, "800,00")]
+    doc = _doc(tmp_path, voci)
+    corrente, _ = colonne_utili(doc)
+    assert "Totale altre riserve" not in {f.etichetta for f in foglie_contabili(doc, corrente)}
+
+
+# --- Fase 5, Task 4 (F2): la colonna corrente di un lato con una colonna spuria ---
+
+from datetime import date as _date  # noqa: E402
+from types import SimpleNamespace  # noqa: E402
+
+from importers.lettore import leggi_importo  # noqa: E402
+from importers.lettore.colonne import Colonna  # noqa: E402
+from importers.lettore.foglie import _colonna_della_riga  # noqa: E402
+from importers.lettore.righe import Documento, Riga  # noqa: E402
+
+
+def _col(i, lato, ruolo="esercizio", fine=None, corrente=False):
+    return Colonna(i, 100.0 + 100 * i, lato, ruolo, fine, None, 12 if fine else None, corrente)
+
+
+def _doc_colonne(colonne, celle_per_lato):
+    """`celle_per_lato`: lato -> lista di insiemi di indici di colonna, una riga ciascuno."""
+    righe = []
+    for lato, righe_lato in celle_per_lato.items():
+        for k, indici in enumerate(righe_lato):
+            righe.append(Riga(id=f"p1r{k}{lato}", pagina=1, y=float(k), lato=lato, sezione="SP", codice="",
+                              etichetta=f"conto {lato}{k}", celle={i: leggi_importo("100,00") for i in indici}))
+    return Documento(righe, colonne, True, [], SimpleNamespace(coppie={}, marcatori=set(), negativi=set()))
+
+
+def test_lato_senza_corrente_legge_la_colonna_dello_stesso_ruolo(tmp_path):
+    # 229: a sinistra il saldo datato; a destra una colonna spuria («516,46» dalle descrizioni) e il saldo vero
+    colonne = [_col(0, "L", "saldo", _date(2025, 12, 31), True), _col(1, "R"), _col(2, "R", "saldo")]
+    doc = _doc_colonne(colonne, {"L": [{0}] * 20, "R": [{1, 2}] * 3 + [{2}] * 17})
+    destra = [r for r in doc.righe if r.lato == "R"][0]
+    assert _colonna_della_riga(doc, 0, destra) == 2
+
+
+def test_lato_senza_corrente_legge_la_colonna_che_domina(tmp_path):
+    # 1430: a destra una colonna di pochi valori (un riepilogo) accanto a quella degli importi, stesso ruolo
+    colonne = [_col(0, "L", fine=_date(2026, 7, 31), corrente=True), _col(1, "R"), _col(2, "R")]
+    doc = _doc_colonne(colonne, {"L": [{0}] * 20, "R": [{1}] * 5 + [{2}] * 20})
+    destra = [r for r in doc.righe if r.lato == "R"][0]
+    assert _colonna_della_riga(doc, 0, destra) == 2
+
+
+def test_due_colonne_piene_senza_data_restano_senza_scelta(tmp_path):
+    # corrente e precedente non datati sull'altro lato: indovinare sarebbe leggere l'anno sbagliato
+    colonne = [_col(0, "L", fine=_date(2025, 12, 31), corrente=True), _col(1, "R"), _col(2, "R")]
+    doc = _doc_colonne(colonne, {"L": [{0}] * 20, "R": [{1, 2}] * 18 + [{2}] * 2})
+    destra = [r for r in doc.righe if r.lato == "R"][0]
+    assert _colonna_della_riga(doc, 0, destra) is None
+
+
+def test_colonna_dei_soli_totali_non_e_mai_la_corrente(tmp_path):
+    # 1456: a sinistra la colonna dei soli totali (4 celle) e quella dei saldi; la data solo sopra la destra
+    colonne = [_col(0, "L"), _col(1, "L"), _col(2, "R", fine=_date(2026, 9, 30), corrente=True)]
+    doc = _doc_colonne(colonne, {"L": [{0}] * 3 + [{1}] * 40, "R": [{2}] * 30})
+    assert colonne_utili(doc) == (1, None)
+    destra = [r for r in doc.righe if r.lato == "R"][0]
+    assert _colonna_della_riga(doc, 1, destra) == 2
+
+
+# --- Fase 5, Task 5 (F17): «Eccedenza esercizio precedente» e' un conto del patrimonio netto, non un controllo ---
+
+def _riga_sola(etichetta, sezione="SP"):
+    return Riga(id="p1r1U", pagina=1, y=1.0, lato="U", sezione=sezione, codice="", etichetta=etichetta,
+                celle={0: leggi_importo("12.345,00")})
+
+
+def test_eccedenza_dell_esercizio_precedente_e_un_conto():
+    from importers.lettore.foglie import _e_controllo
+    assert not _e_controllo(_riga_sola("Eccedenza esercizio precedente"))
+    assert not _e_controllo(_riga_sola("ECCEDENZA ESERCIZI PRECEDENTI"))
+    assert _e_controllo(_riga_sola("Eccedenza attivo"))
+    assert _e_controllo(_riga_sola("ECCEDENZA RICAVI", "CE"))
+
+
+# --- Fase 5, Task 5 (F16): «di cui» che ripartiscono esattamente la voce sono le sue foglie ---
+
+def _debiti_con_di_cui(oltre="18.000,00"):
+    voci = [(50, 112, "STATO PATRIMONIALE PASSIVO")]
+    voci += _righe(140, [("A) PATRIMONIO NETTO",), ("I - Capitale", "10.000,00"), ("D) DEBITI",),
+                         ("4) Debiti verso banche", "30.000,00"), ("di cui esigibili entro", "12.000,00"),
+                         ("di cui esigibili oltre", oltre), ("7) Debiti verso fornitori", "5.000,00"),
+                         ("Totale debiti", "35.000,00"), ("TOTALE PASSIVO", "45.000,00")])
+    return voci
+
+
+def test_di_cui_che_ripartiscono_la_voce_sono_foglie(tmp_path):
+    # 1427: «4) Debiti verso banche» chiude su «di cui entro» + «di cui oltre»: la massa la portano i due «di cui»
+    doc = _doc(tmp_path, _debiti_con_di_cui())
+    f = _per_etichetta(foglie_contabili(doc, 0))
+    assert f["di cui esigibili entro"].importo + f["di cui esigibili oltre"].importo == Decimal("30000.00")
+    assert "4) Debiti verso banche" not in f
+    assert sum(x.importo for x in f.values() if x.lato_sp == "P") == Decimal("45000.00")
+
+
+def test_di_cui_che_non_ripartiscono_la_voce_restano_controlli(tmp_path):
+    # un solo «di cui», o due che non sommano alla voce: sottoinsiemi, la voce resta la foglia
+    doc = _doc(tmp_path, _debiti_con_di_cui(oltre="15.000,00"))
+    f = _per_etichetta(foglie_contabili(doc, 0))
+    assert "di cui esigibili entro" not in f and f["4) Debiti verso banche"].importo == Decimal("30000.00")
+
+
+# --- Fase 5, Task 5 (F9 + F11): testata dei costi stampata negativa, riga di legge fusa con la voce madre ---
+
+def _ce_testata_negativa():
+    voci = [(50, 112, "CONTO ECONOMICO")]
+    voci += _righe(140, [("A) Valore della produzione", "1.500,00"), ("1) Ricavi delle vendite", "1.200,00"),
+                         ("5) Altri ricavi e proventi", "300,00"), ("B) Costi della produzione", "(1.000,00)"),
+                         ("6) Materie prime", "600,00"), ("7) Servizi", "300,00"),
+                         ("14) Oneri diversi di gestione", "100,00"), ("Differenza A - B", "500,00"),
+                         ("C) Proventi e oneri finanziari - 17) Interessi", "(50,00)"),
+                         ("Risultato prima delle imposte", "450,00"), ("20) Imposte sul reddito", "(100,00)"),
+                         ("UTILE D'ESERCIZIO", "350,00")])
+    return voci
+
+
+def test_testata_dei_costi_negativa_chiude_sui_figli_positivi(tmp_path):
+    # 1434, 1433, 1464: «B) Costi della produzione» stampata fra parentesi sopra i costi positivi
+    doc = _doc(tmp_path, _ce_testata_negativa())
+    f = _per_etichetta(foglie_contabili(doc, 0))
+    assert "B) Costi della produzione" not in f
+    assert all(f[e].verso_ce == "costo" for e in ("6) Materie prime", "7) Servizi", "14) Oneri diversi di gestione"))
+
+
+def test_riga_di_legge_fusa_con_la_voce_madre_e_una_foglia(tmp_path):
+    # 1434, 1433: «C) Proventi e oneri finanziari - 17) Interessi» e' la voce 17, non un risultato
+    doc = _doc(tmp_path, _ce_testata_negativa())
+    f = _per_etichetta(foglie_contabili(doc, 0))
+    interessi = f["C) Proventi e oneri finanziari - 17) Interessi"]
+    assert interessi.verso_ce == "costo" and interessi.importo == Decimal("50.00")
+    ricavi = sum(x.importo for x in f.values() if x.verso_ce == "ricavo")
+    costi = sum(x.importo for x in f.values() if x.verso_ce == "costo")
+    assert ricavi - costi == Decimal("350.00")

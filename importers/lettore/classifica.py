@@ -19,7 +19,7 @@ from decimal import Decimal
 
 from importers import llm_provider
 from importers.llm_provider import ContestoEccessivo, LLMProviderError, RispostaTroncata
-from importers.lettore import tavola
+from importers.lettore import regole_proprietario, tavola
 from importers.lettore.foglie import Ancora, Foglia, gettoni_di_legge
 from importers.lettore.totali import _norm
 
@@ -81,7 +81,19 @@ def _lato_colonna(f: Foglia) -> str:
 
 
 def _ammesse(f: Foglia) -> tuple[str, ...]:
-    return tavola.macro_ammesse(_lato_colonna(f), f.sezione or "SP", f.verso_ce)
+    ammesse = tavola.macro_ammesse(_lato_colonna(f), f.sezione or "SP", f.verso_ce)
+    if regole_proprietario.accese():     # D6: nessun campo straordinario (Fase 5, Task 7)
+        ammesse = tuple(m for m in ammesse if m not in regole_proprietario.MACRO_ESCLUSE)
+    return ammesse
+
+
+def _prompt_macro() -> str:
+    """Il prompt del passo 1: quello di sempre, o con le regole del proprietario (`IMPORT_REGOLE_NEL_PROMPT`)."""
+    return regole_proprietario.prompt_macro(PROMPT_MACRO) if regole_proprietario.accese() else PROMPT_MACRO
+
+
+def _prompt_dettaglio() -> str:
+    return regole_proprietario.prompt_dettaglio(PROMPT_DETTAGLIO) if regole_proprietario.accese() else PROMPT_DETTAGLIO
 
 
 # Un contro-conto si riconosce dal nome (decisione del proprietario, 2026-11-09: «contro-conti riconosciuti»): un
@@ -124,8 +136,10 @@ def _classe(codice: str | None, fonte: str, voti: tuple[str, ...] = ()) -> Class
 
 
 def _chiave(f: Foglia) -> tuple:
-    return (_norm(f.etichetta), _norm(f.contesto[-1]) if f.contesto else "", f.lato, f.sezione, f.verso_ce,
-            f.lato_sp)
+    chiave = (_norm(f.etichetta), _norm(f.contesto[-1]) if f.contesto else "", f.lato, f.sezione, f.verso_ce,
+              f.lato_sp)
+    # due conti con lo stesso nome e codici diversi possono avere classi diverse (Fase 5, Task 8)
+    return chiave + (f.codice,) if regole_proprietario.accese() else chiave
 
 
 def _da_percorso(f: Foglia) -> Classe | None:
@@ -149,6 +163,9 @@ def _schema(enum_per_id: dict[str, list[str]]) -> dict:
 
 def _contesto(f: Foglia) -> str:
     parti = []
+    if f.codice and regole_proprietario.accese():
+        # il codice del conto come contesto della domanda, mai come prova di parentela (Fase 5, Task 8)
+        parti.append("codice: " + f.codice)
     if f.contesto:     # i mastri sopra il conto, anche quelli di una catena non verificata: ne dicono la natura
         parti.append("sotto: " + " > ".join(f.contesto[-3:]))
     parti.append({"L": "colonna sinistra", "R": "colonna destra", "U": "colonna unica"}.get(f.lato, f.lato))
@@ -262,7 +279,7 @@ def classifica_macro(foglie: list[Foglia], *, chiama_json=None, cache: dict | No
         da_chiedere.setdefault(k, []).append(f)
     rappresentanti = [gruppo[0] for gruppo in da_chiedere.values()]
     risposte = _in_parallelo([
-        (lambda b=b: _chiama(chiama_json, PROMPT_MACRO, b, {f.id: _enum_macro(f) for f in b},
+        (lambda b=b: _chiama(chiama_json, _prompt_macro(), b, {f.id: _enum_macro(f) for f in b},
                              tavola.ETICHETTE_MACRO, diag=diag)) for b in _blocchi(rappresentanti)])
     per_id: dict[str, str] = {}
     persi: set[str] = set()
@@ -319,7 +336,8 @@ def rivota(foglie: list[Foglia], classi: dict[str, Classe], *, voti: int = 3, ch
         for n in range(voti):
             ordine, nota, opz = _variante(n, b, ancora, somma)
             chiamate.append(lambda o=ordine, nota=nota, opz=opz: _chiama(
-                chiama_json, PROMPT_MACRO, o, {f.id: _enum_macro(f) for f in o}, tavola.ETICHETTE_MACRO, nota, **opz))
+                chiama_json, _prompt_macro(), o, {f.id: _enum_macro(f) for f in o}, tavola.ETICHETTE_MACRO, nota,
+                **opz))
             indice.append(b)
     risposte = _in_parallelo(chiamate)
     raccolti: dict[str, list[str]] = {f.id: [] for f in foglie}
@@ -387,7 +405,7 @@ def classifica_dettagli(foglie: list[Foglia], classi: dict[str, Classe], *, chia
                  for ds in tavola.DETTAGLI.values() for d in ds}
     etichette[ALTRI] = "nessuna delle altre sotto-voci"
     risposte = _in_parallelo([
-        (lambda b=b: _chiama(chiama_json, PROMPT_DETTAGLIO, b, {f.id: enum(f) for f in b}, etichette,
+        (lambda b=b: _chiama(chiama_json, _prompt_dettaglio(), b, {f.id: enum(f) for f in b}, etichette,
                              macro_assegnata={f.id: _voce(classi[f.id]) for f in b}))
         for b in _blocchi(rappresentanti)])
     per_id: dict[str, str] = {}
@@ -412,9 +430,10 @@ def classifica_dettagli(foglie: list[Foglia], classi: dict[str, Classe], *, chia
 # nell'altra): la scadenza la decide il testo, non lui.
 _PERIODO = r"(?:I\s*)?(?:12\s*M|L\W?\s*(?:ANNO|ESERCIZIO)|ES\.?\s*SUCC|ESERCIZIO\s+SUCC)"
 # «(OE)»/«(EE)»: le sigle «oltre/entro l'esercizio» dei gestionali, come le legge `detail_enrichment._ledger_maturity`
-_OLTRE = re.compile(rf"\bOLTRE\s*{_PERIODO}|\bLUNGO\s+TERMINE|\bM(?:EDIO)?\s*/\s*L(?:UNGO)?\b|\bA\s+LUNGO\b"
-                    r"|\(OE[)\s-]")
-_ENTRO = re.compile(rf"\bENTRO\s*{_PERIODO}|\bBREVE\s+TERMINE|\bA\s+BREVE\b|\(EE[)\s-]")
+# Fase 5, Task 6: anche «TERMIN» troncato dalla colonna, «MEDIO LUNGO» senza barra, «>12 mesi» / «<12 mesi»
+_OLTRE = re.compile(rf"\bOLTRE\s*{_PERIODO}|\bLUNGO\s+TERMIN|\bM(?:EDIO)?\s*/\s*L(?:UNGO)?\b|\bA\s+LUNGO\b"
+                    r"|\bMEDIO\W*LUNGO\b|>\s*(?:I\s*)?12\b|\(OE[)\s-]")
+_ENTRO = re.compile(rf"\bENTRO\s*{_PERIODO}|\bBREVE\s+TERMIN|\bA\s+BREVE\b|<\s*(?:I\s*)?12\b|\(EE[)\s-]")
 # interessi maturati in un mastro «medio/lungo» sono dovuti entro l'anno (proprietario, P3 del 2026-11-04)
 _INTERESSI = re.compile(r"\bINTERESS|\bRATEI\b")
 
@@ -459,6 +478,31 @@ def scadenza_dei_debiti(foglie: list[Foglia], classi: dict[str, Classe]) -> tupl
         nuove[f.id] = replace(k, macro=voluta, dettaglio=dettaglio)
         perche = "scadenza stampata" if s else "nessuna scadenza stampata"
         scelte.append(f"debito {'oltre' if voluta == 'sp17' else 'a breve'} ({perche}): {f.id}")
+    return nuove, scelte
+
+
+_CREDITI = {"E": "sp06", "O": "sp07"}
+
+
+def scadenza_dei_crediti(foglie: list[Foglia], classi: dict[str, Classe]) -> tuple[dict[str, Classe], list[str]]:
+    """Crediti verso sp06/sp07 dalla scadenza stampata, senza prova entro l'esercizio (Fase 5, Task 6): come i debiti,
+    la scadenza la decide il testo, non il modello. Solo le classi del modello e solo fra sp06 e sp07; la natura
+    resta, il dettaglio passa alla stessa lettera dell'altra parte. Le imposte anticipate senza scadenza vanno poi
+    oltre per la D14 (`imposte_anticipate_oltre`, dopo il dettaglio). Copie, scelte dichiarate."""
+    nuove = dict(classi)
+    scelte: list[str] = []
+    for f in foglie:
+        k = classi.get(f.id)
+        if k is None or k.fonte == "legale" or k.rettifica or k.macro not in ("sp06", "sp07"):
+            continue
+        s = _scadenza_del_debito(f)
+        voluta = _CREDITI.get(s or "E")
+        if voluta == k.macro:
+            continue
+        dettaglio = voluta + k.dettaglio[4:] if k.dettaglio else None
+        nuove[f.id] = replace(k, macro=voluta, dettaglio=dettaglio)
+        perche = "scadenza stampata" if s else "nessuna scadenza stampata"
+        scelte.append(f"credito {'oltre' if voluta == 'sp07' else 'entro'} ({perche}): {f.id}")
     return nuove, scelte
 
 

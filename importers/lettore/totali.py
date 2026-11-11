@@ -32,7 +32,9 @@ _CENTESIMO = Decimal("0.01")
 _UNITA = Decimal("1")
 # C12: il lessico unico delle righe di controllo (TOTALE, PAREGGIO, SALDO FINALE/GENERALE, ECCEDENZA, il risultato
 # d'esercizio). Una riga di controllo chiude cio' che le sta sopra.
-_DICE_TOTALE = r"\btotal[ei]\b|\bpareggio\b|\bsaldo (?:finale|generale)\b|\beccedenza\b"
+# «Eccedenza esercizio precedente» e' un conto del patrimonio netto, non un controllo (Fase 5, F17: Bilancino)
+_ECCEDENZA = r"\beccedenza\b(?!.*\bprecedent)"
+_DICE_TOTALE = r"\btotal[ei]\b|\bpareggio\b|\bsaldo (?:finale|generale)\b|" + _ECCEDENZA
 _RISULTATO_D_ESERCIZIO = r"\b(?:utile|perdita|perdite|risultato)\b.*\besercizio\b"
 _CONTROLLO = re.compile(_DICE_TOTALE + "|" + _RISULTATO_D_ESERCIZIO)
 DICE_TOTALE = re.compile(_DICE_TOTALE)      # solo le righe che si dichiarano un totale (blocchi.py)
@@ -49,7 +51,7 @@ _ROMANO = re.compile(r"^[ivxlc]+$")
 _SOLO_SEZIONE = {"stato patrimoniale", "conto economico"}
 # Le righe di controllo che chiudono un lato o il conto (pareggio, eccedenza, saldo finale, risultato): non sono una
 # voce, non hanno un titolo e non ne contraddicono nessuno.
-_CHIUSURA = re.compile(r"\bpareggio\b|\bsaldo (?:finale|generale)\b|\beccedenza\b"
+_CHIUSURA = re.compile(r"\bpareggio\b|\bsaldo (?:finale|generale)\b|" + _ECCEDENZA +
                        r"|\b(?:utile|perdita|perdite|risultato)\b.*\besercizio\b")
 _PAROLE_SEZIONE = {"stato", "patrimoniale", "conto", "economico", "attivo", "passivo", "attivita", "passivita", "costi",
                    "ricavi", "sezione"}
@@ -229,6 +231,19 @@ def valore_nel_totale(doc: Documento, totale: Riga, figlio: Riga, colonna: int) 
     return _valore_nel_totale(totale, figlio, colonna, totale.verso.get(colonna, 1), _su_schema(doc))
 
 
+# La testata dei costi della produzione stampata negativa, fra parentesi, sopra i suoi costi positivi (Fase 5, F9:
+# 1434, 1433, 1464): la convenzione del documento mette il segno sulla testata, non sui conti. I membri devono fare
+# il suo valore assoluto.
+_TESTATA_DEI_COSTI = re.compile(r"^b\s?[).\-]\s*costi della produzione\b")
+
+
+def _bersaglio(r: Riga, colonna: int) -> Decimal:
+    v = r.celle[colonna].valore
+    if v < 0 and r.sezione == "CE" and _TESTATA_DEI_COSTI.match(_norm(r.etichetta)):
+        return -v
+    return v
+
+
 def _serie(doc: Documento) -> list[_Serie]:
     out = []
     schema = _su_schema(doc)
@@ -244,7 +259,7 @@ def _serie(doc: Documento) -> list[_Serie]:
             # un risultato chiude sempre cio' che gli sta sopra, come una riga di controllo
             out.append(_Serie(colonna.indice, [_tolleranza_cella(doc, r, colonna.indice) for r in righe], righe, valori,
                               [_di_controllo(r) or _risultato_di_controllo(r, schema) for r in righe],
-                              [r.celle[colonna.indice].valore for r in righe], [_risultato(r, schema) for r in righe],
+                              [_bersaglio(r, colonna.indice) for r in righe], [_risultato(r, schema) for r in righe],
                               [-v if v > 0 and _costo_del_risultato(r) else v for r, v in zip(righe, valori)],
                               [_marcata(r, colonna.indice) for r in righe]))
     return out
@@ -319,6 +334,14 @@ def _all_unita(r: Riga, colonna: int) -> bool:
     return cella.forma == "importo" and not _DECIMALI_STAMPATI.search(cella.testo)
 
 
+# Le altre riserve di uno schema all'unita' contengono la riserva da arrotondamento all'euro (art. 2423 c.c.), che il
+# gestionale non stampa come conto: la voce sopra il suo conto puo' scostarsi di piu' di un euro (Fase 5, F7: 1533,
+# «VI Altre riserve» all'unita' sopra il suo solo conto). Il tetto e' la tolleranza dei totali stampati del percorso
+# snello.
+_ALTRE_RISERVE = re.compile(r"\baltre riserve\b")
+_TOL_ALTRE_RISERVE = Decimal("10")
+
+
 def _catene_all_unita(serie: _Serie, direzione: int) -> None:
     """R22: una voce stampata all'unita' («contributi in conto esercizio 113.946») sopra un solo conto al centesimo
     (113.945,74) non chiude mai come catena esatta (R14), e il totale sopra, in tolleranza, prenderebbe il conto al
@@ -347,7 +370,8 @@ def _catene_all_unita(serie: _Serie, direzione: int) -> None:
                     t.x < f.x - _TOL_RIENTRO or (f.codice and not t.codice)):
                 continue
             versi = [1] + ([-1] if t.lato == "U" and serie.marcati[j] and not serie.marcati[i] else [])
-            verso = next((v for v in versi if abs(serie.bersagli[i] - v * serie.valori[j]) <= _UNITA), None)
+            tol = _TOL_ALTRE_RISERVE if _ALTRE_RISERVE.search(_norm(t.etichetta)) else _UNITA
+            verso = next((v for v in versi if abs(serie.bersagli[i] - v * serie.valori[j]) <= tol), None)
             if verso is None:
                 continue
             # il conto puo' essere a sua volta il totale dei suoi conti («Depositi bancari 5.300,05» = 3.000,10 +
@@ -358,7 +382,7 @@ def _catene_all_unita(serie: _Serie, direzione: int) -> None:
                     _marca(serie, passo, j, sotto)
             k = passo[j]
             if 0 <= k < n and serie.valori[k] and not serie.controllo[k] \
-                    and abs(serie.bersagli[i] - verso * (serie.valori[j] + serie.valori[k])) <= _UNITA:
+                    and abs(serie.bersagli[i] - verso * (serie.valori[j] + serie.valori[k])) <= tol:
                 continue
             serie.verso_cercato[i] = verso
             _marca(serie, passo, i, [j])

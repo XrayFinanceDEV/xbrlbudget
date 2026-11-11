@@ -330,8 +330,9 @@ def _amount(token: str) -> Decimal | None:
 
 # da importers/detail_enrichment.py:_TOTALE_DI_CHIUSURA, main e3455d6
 _TOTALE_DI_CHIUSURA = re.compile(
-    r"TOTALE\s*(?:A\s*PAREGGIO|A\s*QUADRATURA|ATTIVIT|PASSIVIT|ATTIVO|PASSIVO|COSTI|RICAVI)"
-    r"|(?:UTILE|PERDITA)\S*\s+(?:D\W?\s*)?ESERCIZIO|ECCEDENZA")
+    # «TOTALE ATTIVO CIRCOLANTE» e' un sottototale dello schema, non la chiusura dello SP (Fase 5, F1c: 1443)
+    r"TOTALE\s*(?:A\s*PAREGGIO|A\s*QUADRATURA|ATTIVIT|PASSIVIT|ATTIVO(?!\s*CIRCOLANTE)|PASSIVO|COSTI|RICAVI)"
+    r"|(?:UTILE|PERDITA)\S*\s+(?:D\W?\s*)?ESERCIZIO|ECCEDENZA(?!.*PRECEDENT)")
 
 # da importers/detail_enrichment.py:_RIGHE_DI_CHIUSURA, main e3455d6
 _RIGHE_DI_CHIUSURA = 5
@@ -339,7 +340,7 @@ _RIGHE_DI_CHIUSURA = 5
 # da importers/detail_enrichment.py:_CHIUSURA_PER_SEZIONE, main e3455d6
 _CHIUSURA_PER_SEZIONE = (
     ('ce', re.compile(r"TOTALE\s*(?:COSTI|RICAVI)")),
-    ('bs', re.compile(r"TOTALE\s*(?:ATTIVIT|PASSIVIT|ATTIVO\b|PASSIVO\b)")),
+    ('bs', re.compile(r"TOTALE\s*(?:ATTIVIT|PASSIVIT|ATTIVO\b(?!\s*CIRCOLANTE)|PASSIVO\b)")),
 )
 
 # da importers/detail_enrichment.py:_sezione_della_chiusura, main e3455d6

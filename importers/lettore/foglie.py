@@ -15,7 +15,8 @@ from dataclasses import dataclass, replace
 from decimal import Decimal
 
 from importers.lettore import tavola
-from importers.lettore._ereditati import _CONNETTIVI, _scadenza as _scadenza_inizio, _scadenza_in_coda
+from importers.lettore._ereditati import (_CONNETTIVI, _TOTALE_DI_CHIUSURA, _scadenza as _scadenza_inizio,
+                                         _scadenza_in_coda)
 from importers.lettore.righe import Documento, Riga
 from importers.lettore.totali import (DICE_ATTIVO, DICE_PASSIVO, DICE_TOTALE, _CONTROLLO, _RISULTATO_DI_LEGGE,
                                       _RISULTATO, _RISULTATO_ESERCIZIO, _controllo_sotto, _costo_del_risultato,
@@ -80,11 +81,36 @@ class Ancora:
 # Colonne
 # --------------------------------------------------------------------------------------
 
+_QUOTA_SPURIA = 0.1     # una colonna senza data con meno di un decimo delle celle della piu' piena del suo lato
+_DOMINIO = 2            # la colonna che domina il suo lato: almeno il doppio delle celle di ognuna delle altre
+
+
+def _piene(doc: Documento, colonne: list[Colonna]) -> list[Colonna]:
+    """Le colonne di un lato senza quelle spurie (Fase 5, F2: la colonna dei soli totali spostati, un numero dentro le
+    descrizioni). Spuria e' solo una colonna senza data con meno di un decimo delle celle della piu' piena: una
+    colonna datata resta sempre (l'anno precedente stampato sui soli totali e' un periodo, non un difetto)."""
+    conto = doc.celle_per_colonna
+    massimo = max((conto.get(c.indice, 0) for c in colonne), default=0)
+    return [c for c in colonne if c.fine is not None or conto.get(c.indice, 0) >= _QUOTA_SPURIA * massimo]
+
+
+def _dominante(doc: Documento, colonne: list[Colonna]) -> Colonna | None:
+    """La colonna con piu' celle, se ne ha almeno il doppio di ognuna delle altre; altrimenti nessuna (due colonne
+    piene senza data possono essere corrente e precedente: non si indovina)."""
+    conto = doc.celle_per_colonna
+    ordinate = sorted(colonne, key=lambda c: -conto.get(c.indice, 0))
+    if not ordinate:
+        return None
+    if len(ordinate) == 1 or conto.get(ordinate[0].indice, 0) >= _DOMINIO * conto.get(ordinate[1].indice, 0):
+        return ordinate[0]
+    return None
+
+
 def colonne_utili(doc: Documento) -> tuple[int | None, int | None]:
     """(corrente, precedente) fra le colonne di esercizio o di saldo; differenze e percentuali mai."""
     valori = [c for c in doc.colonne if c.ruolo in _RUOLI_VALORE]
     if any(c.lato == "L" for c in valori):     # contrapposte: le colonne di riferimento sono quelle di sinistra,
-        valori = [c for c in valori if c.lato == "L"]   # quelle di destra si leggono con `_colonna_della_riga`
+        valori = _piene(doc, [c for c in valori if c.lato == "L"])   # quelle di destra con `_colonna_della_riga`
     if not valori:
         return None, None
     corrente = next((c for c in valori if c.corrente), valori[0])
@@ -367,10 +393,16 @@ def _colonna_della_riga(doc: Documento, colonna: int, r: Riga) -> int | None:
     base = next((c for c in doc.colonne if c.indice == colonna), None)
     if base is None or r.lato not in ("L", "R") or base.lato not in ("L", "R") or r.lato == base.lato:
         return colonna
-    proprie = [c for c in doc.colonne if c.ruolo in _RUOLI_VALORE and c.lato == base.lato]
-    altre = [c for c in doc.colonne if c.ruolo in _RUOLI_VALORE and c.lato == r.lato]
-    if base.corrente:
+    proprie = _piene(doc, [c for c in doc.colonne if c.ruolo in _RUOLI_VALORE and c.lato == base.lato])
+    altre = _piene(doc, [c for c in doc.colonne if c.ruolo in _RUOLI_VALORE and c.lato == r.lato])
+    if base.corrente or proprie == [base]:      # l'unica colonna piena del suo lato e' la sua corrente (1456)
         scelta = [c for c in altre if c.corrente]
+        if not scelta:
+            # l'altro lato non ha una corrente datata (Fase 5, F2): la colonna dello stesso ruolo se e' una sola
+            # (il saldo accanto a una colonna spuria, 229), altrimenti quella che domina (1430)
+            stesso = [c for c in altre if c.ruolo == base.ruolo]
+            unica = stesso[0] if len(stesso) == 1 else _dominante(doc, stesso or altre)
+            scelta = [unica] if unica is not None else []
     else:
         scelta = [c for c in altre if not c.corrente]
         scelta = scelta[[c for c in proprie if not c.corrente].index(base):][:1] if base in proprie else scelta[:1]
@@ -408,6 +440,8 @@ def _importo(doc: Documento, r: Riga, colonna: int, per_id: dict[str, Riga], lat
         v = valore_nel_totale(doc, padre, r, chiave)
         if _risultato(padre, _su_schema(doc)) and _costo_del_risultato(r):
             v = -v        # il meno e' della somma: il costo e' positivo comunque sia stampato
+        elif _risultato(padre, _su_schema(doc)) and verso_ce == "costo" and v < 0:
+            v = -v        # un costo di legge (C.17 della riga fusa, F11) stampato col meno dentro il risultato
         rovesciato = padre.verso.get(chiave, 1) == -1
     else:
         v = cella.valore
@@ -452,6 +486,9 @@ def gettoni_di_legge(r_etichetta: str, codice: str = "") -> tuple[str, ...]:
     nudo = _PERCORSO_NUDO.match(r_etichetta)
     if nudo:
         return tuple(nudo.group(1).split("."))
+    fusa = _VOCE_FUSA.match(_norm(r_etichetta))
+    if fusa:        # «C) Proventi e oneri finanziari - 17) Interessi»: la voce C.17 (F11)
+        return (fusa["lettera"].upper(), fusa["arabo"] + (f"-{fusa['suffisso']}" if fusa["suffisso"] else ""))
     t = _percorso_etichetta(r_etichetta)
     if t and (len(t) > 1 or _ENUMERATORE.match(r_etichetta)):
         return t
@@ -506,6 +543,11 @@ def _antenati_verificati(r: Riga, per_id: dict[str, Riga]) -> tuple[str, ...]:
 _DI_CUI = re.compile(r"^[-\u2013\s]*\(?di cui\b")
 
 
+# Una voce di legge stampata sulla riga della sua lettera madre («C) Proventi e oneri finanziari - 17) Interessi»,
+# Fase 5, F11: 1434, 1433): l'enumeratore arabo dopo la lettera dice che la riga e' la voce, non il sottototale.
+_VOCE_FUSA = re.compile(r"^(?P<lettera>[a-e])\s?[).\-]\D*?\s(?P<arabo>\d{1,2})\s?(?P<suffisso>bis|ter)?\s?\)\s")
+
+
 def _e_controllo(r: Riga) -> bool:
     """Una riga che chiude o pareggia, non una voce: «Totale…», «A pareggio», e nel conto economico il risultato.
     Anche «di cui esigibili oltre…»: e' un sottoinsieme della voce sopra, contarlo sarebbe contarla due volte."""
@@ -514,6 +556,8 @@ def _e_controllo(r: Riga) -> bool:
         return True
     if DICE_TOTALE.search(n):
         return True
+    if _VOCE_FUSA.search(n):
+        return False        # «C) Proventi e oneri finanziari - 17) Interessi»: la voce 17, non un risultato (F11)
     if r.sezione == "":     # sezione non riconosciuta (il conto economico oltre la pagina): solo il lessico di legge
         return bool(_RISULTATO_DI_LEGGE.search(n) or _CONTROLLO.search(n) and "utile" not in n and "perdit" not in n)
     return r.sezione == "CE" and bool(_CONTROLLO.search(n) or _risultato(r))
@@ -708,6 +752,49 @@ def _chiude_su(doc: Documento, r: Riga, col: int, per_id: dict[str, Riga], ordin
     return False
 
 
+def _totale_senza_conti(r: Riga, precedente: Riga | None) -> bool:
+    """«Totale CLIENTI ITALIA:» stampato subito sotto il titolo del suo mastro («0201 CLIENTI ITALIA», senza importi),
+    senza alcun conto in mezzo (Fase 5, F5: la stampa compatta di 1325, 1401): e' l'unico portatore della massa del
+    mastro, quindi una foglia. Solo un totale che non somma nulla in nessuna colonna e il cui nome e' quello del
+    titolo: coi conti sotto resta un totale (mastro OPPURE foglie, mai entrambi)."""
+    if r.totale or r.figli or precedente is None or not precedente.intestazione or precedente.celle:
+        return False
+    if gettoni_di_legge(precedente.etichetta, precedente.codice):
+        return False        # una voce dello schema di legge («VI - Altre riserve», «B) Immobilizzazioni …»), non un
+                            # mastro del gestionale: il suo totale si legge coi conti o resta un totale (682, 1405)
+    if not DICE_TOTALE.search(_norm(r.etichetta)) or _DI_CUI.search(_norm(r.etichetta)) \
+            or _TOTALE_DI_CHIUSURA.search(r.etichetta.upper()):
+        return False        # «TOTALE RICAVI» sotto il titolo «RICAVI» chiude la sezione, non un mastro (615)
+    nome = _parole_in_ordine(r.etichetta)
+    titolo = _parole_in_ordine(precedente.etichetta, cifre=True)
+    if not nome or titolo[len(titolo) - len(nome):] != nome:
+        return False
+    # davanti al nome il titolo puo' portare solo il codice del mastro, in cifre o abbreviato dal nome
+    # («0201 CLIENTI ITALIA», «CLIENTI IT CLIENTI ITALIA» in 1401); «Varie altre riserve» non e' «altre riserve» (682)
+    return all(t.isdigit() or any(n.startswith(t) for n in nome) for t in titolo[:len(titolo) - len(nome)])
+
+
+def _parole_in_ordine(etichetta: str, cifre: bool = False) -> list[str]:
+    """Le parole di `_parole_nome`, nell'ordine stampato; con `cifre` anche i numeri (il codice del mastro)."""
+    return [t for t in re.split(r"[^0-9a-z]+", _norm(etichetta))
+            if (cifre and t.isdigit()) or (len(t) > 1 and t not in _STOP and not _TIPO_ROMANO.match(t.upper())
+                                           and not t.isdigit())]
+
+
+def _di_cui_che_ripartiscono(doc: Documento, r: Riga, col: int, per_id: dict[str, Riga]) -> bool:
+    """«di cui esigibili entro» + «di cui esigibili oltre» che sommano esattamente la voce sopra (padre verificato) e
+    sono i suoi soli figli su quella colonna (Fase 5, F16: 1427): la voce chiude su di loro e non e' una foglia, quindi
+    la massa la portano loro, con la scadenza stampata. Un «di cui» solo, o accanto ad altri conti, resta un
+    sottoinsieme della voce: un controllo."""
+    if not _DI_CUI.search(_norm(r.etichetta)) or not r.padre_verificato or r.padre not in per_id:
+        return False
+    padre = per_id[r.padre]
+    coppie = getattr(doc.profilo, "coppie", {})
+    gruppo = next((padre.figli[k] for k in (col, coppie.get(col)) if k is not None and r.id in padre.figli.get(k, ())),
+                  ())
+    return len(gruppo) >= 2 and all(f in per_id and _DI_CUI.search(_norm(per_id[f].etichetta)) for f in gruppo)
+
+
 def _foglie_grezze(doc: Documento, colonna: int) -> list[Foglia]:
     dal_saldo = 0
     righe = doc.righe_del_prospetto()
@@ -716,10 +803,13 @@ def _foglie_grezze(doc: Documento, colonna: int) -> list[Foglia]:
     pos = _scorri(righe, doc.contrapposto)
     perc = _Percorsi(righe, pos)
     out: list[Foglia] = []
+    prima_sul_lato: dict[str, Riga] = {}
     for r in righe:
+        precedente, prima_sul_lato[r.lato] = prima_sul_lato.get(r.lato), r
         col = _colonna_della_riga(doc, colonna, r)
         if r.intestazione or col is None or _cella(doc, r, col) is None or _chiude_su(doc, r, col, per_id, ordine) \
-                or _e_controllo(r):
+                or (_e_controllo(r) and not _totale_senza_conti(r, precedente)
+                    and not _di_cui_che_ripartiscono(doc, r, col, per_id)):
             continue
         lato_sp = pos[r.id].lato_sp
         p, campo = _percorso(r, perc.posizione(r))

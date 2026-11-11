@@ -22,7 +22,7 @@ from importers.import_snello import percorsi
 from importers.lettore.celle import leggi_celle
 from importers.lettore.diagnosi import TOLLERANZA_ARROTONDAMENTO
 from importers.lettore.classifica import (classifica_dettagli, classifica_macro, imposte_anticipate_oltre, rivota,
-                                          scadenza_dei_debiti)
+                                          scadenza_dei_crediti, scadenza_dei_debiti)
 from importers.lettore.componi import (Composizione, componi, e_questo_risultato, e_risultato, importo_sp,
                                        lato_sp, risultato_con_segno)
 from importers.lettore.foglie import ancore, colonne_utili, foglie_contabili, senza_colonna
@@ -107,7 +107,7 @@ def _foglie_non_in_pari(foglie, ancore=()) -> str | None:
     return "foglie_non_in_pari"
 
 
-_ANCORE_DEI_DEBITI = ("sp16", "sp17")
+_ANCORE_DEI_DEBITI = ("sp06", "sp07", "sp16", "sp17")    # e dei crediti (Fase 5, Task 6)
 
 
 def _scadenze_contro_ancore(foglie, prima: dict, dopo: dict, ancore, scelte: list[str]) -> tuple[dict, list[str]]:
@@ -214,6 +214,8 @@ def _importa(file_path, contesto_mineru, chiama_json, diag: dict) -> dict:
     # la scadenza dei debiti la decide il testo stampato, prima del dettaglio (sp16a e sp17a sono sotto-voci diverse)
     classi_del_modello = classi
     classi, diag["scadenze"] = scadenza_dei_debiti(tutte, classi)
+    classi, scadenze_crediti = scadenza_dei_crediti(tutte, classi)     # Fase 5, Task 6
+    diag["scadenze"] += scadenze_crediti
     classi, diag["scadenze"] = _scadenze_contro_ancore(foglie_c, classi_del_modello, classi, anc_c, diag["scadenze"])
     prima = conto["n"]
     classi = {k: replace(c) for k, c in classi.items()}      # il dettaglio scrive in posto: mai sugli oggetti del modello

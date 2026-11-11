@@ -409,6 +409,36 @@ def _sezioni_dai_totali_di_conti(pagine: list[list[RigaFisica]], per_pagina: lis
                 da_assegnare = []
 
 
+_CHIUSURA_SP = re.compile(r"TOTALE\s*(?:ATTIVIT|PASSIVIT|ATTIVO\b(?!\s*CIRCOLANTE)|PASSIVO\b)")
+_CHIUSURA_CE = re.compile(r"TOTALE\s*(?:COSTI|RICAVI)")
+
+
+def _sezioni_dalle_chiusure(pagine: list[list[RigaFisica]], colonne: list[Colonna], per_pagina: list[list[str]]) -> None:
+    """All'indietro (Fase 5, F1a: 395, 1325, 1401, 281, 610): ogni riga ancora senza sezione prende quella del primo
+    totale di chiusura con importi che la segue — attivita'/passivita' lo SP, costi/ricavi il CE —, anche nelle
+    pagine prima, come fa `_sezioni_dai_totali_di_conti` coi totali dei conti. Una verifica che dichiara la sezione
+    solo coi totali in fondo. Un titolo ferma la propagazione (le righe sopra «CONTO ECONOMICO» non sono del CE
+    perche' il CE chiude coi costi), e le righe sotto un titolo che dichiara «nessuna sezione» (conti non
+    assegnati, nota) restano senza."""
+    da_assegnare: list[tuple[int, int]] = []
+    fuori = False
+    for n, righe in enumerate(pagine):
+        for k, r in enumerate(righe):
+            titolo = _titolo_sezione(r, colonne)
+            if titolo is not None:
+                da_assegnare, fuori = [], titolo == ""
+            if per_pagina[n][k] == "" and not fuori:
+                da_assegnare.append((n, k))
+            if not da_assegnare or not _ha_celle(r, colonne):
+                continue
+            testo = re.sub(r"\s+", " ", _testo(r).upper())
+            sezione = "SP" if _CHIUSURA_SP.search(testo) else "CE" if _CHIUSURA_CE.search(testo) else None
+            if sezione:
+                for i, j in da_assegnare:
+                    per_pagina[i][j] = sezione
+                da_assegnare = []
+
+
 def _sezioni_dei_lati(pagine: list[list[RigaFisica]], colonne: list[Colonna],
                       confine: float) -> dict[tuple[int, float, str], str]:
     """Due tabelle affiancate (1426: lo stato patrimoniale a sinistra, «CE - Schema Ridotto» a destra): in una
@@ -478,8 +508,12 @@ def _sezioni(pagine: list[list[RigaFisica]], colonne: list[Colonna], avvisi: lis
                           f"sua sezione e qui non c'e' un titolo)")
         out.append(sezioni)
         ultima = titoli[-1][1] if titoli else pagina
-        chiusa = _chiude(_senza_riepilogo(grezze, ultimo_titolo))
+        # la chiusura conta solo dopo l'ultimo titolo della pagina: «TOTALE PASSIVO» sopra «Conto economico»
+        # chiude lo SP, non il CE che comincia sotto (Fase 5, F1b: 1434, 1433, 1405)
+        chiusa = _chiude(_senza_riepilogo(grezze, ultimo_titolo) if ultimo_titolo is None
+                         else _senza_riepilogo(grezze[ultimo_titolo:], 0))
     _sezioni_dai_totali_di_conti(pagine, out)
+    _sezioni_dalle_chiusure(pagine, colonne, out)
     return out
 
 

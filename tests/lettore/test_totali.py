@@ -1015,3 +1015,23 @@ def test_valore_nel_totale_posta_rettificativa():
     assert set(terreni.figli[0]) == {costi.id, fondo.id}
     assert valore_nel_totale(doc, terreni, fondo, 0) == Decimal("-124980.00")
     assert valore_nel_totale(doc, terreni, costi, 0) == Decimal("3033132.00")
+
+
+def test_altre_riserve_all_unita_assorbono_la_riserva_da_arrotondamento(tmp_path):
+    # Fase 5, F7 (1533): «VI Altre riserve» all'unita' sopra il solo conto, con uno scarto oltre l'euro: e' la riserva
+    # da arrotondamento all'unita', che lo schema mette proprio nelle altre riserve. La voce prende il suo conto
+    doc = _leggi(tmp_path, _righe(140, [
+        (50, "I Capitale", "10.000"), (90, "CAPITALE SOCIALE", "10.000,00"),
+        (50, "VI Altre riserve", "52.410"), (90, "RISERVA STRAORDINARIA", "52.408,70"),
+        (50, "IX Utile (perdita) dell'esercizio", "7.500"), (72, "Totale patrimonio netto", "69.910")]))
+    riserve = _riga(doc, "VI Altre riserve")
+    assert _riga(doc, "RISERVA STRAORDINARIA").padre == riserve.id
+    assert riserve.totale and _riga(doc, "RISERVA STRAORDINARIA").id in riserve.figli[0]
+
+
+def test_voce_all_unita_lontana_piu_di_un_euro_dal_conto_resta_senza_figli(tmp_path):
+    # fuori dalle altre riserve lo scarto di arrotondamento resta di un euro: «crediti 5.000» sopra 4.998,70 no
+    doc = _leggi(tmp_path, _righe(140, [
+        (50, "I Capitale", "10.000"), (90, "CAPITALE SOCIALE", "10.000,00"),
+        (50, "crediti tributari", "5.000"), (90, "ERARIO C/IVA", "4.998,70"), (50, "altri", "700")]))
+    assert not _riga(doc, "crediti tributari").totale

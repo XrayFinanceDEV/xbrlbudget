@@ -113,12 +113,30 @@ def colonne_utili(doc: Documento) -> tuple[int | None, int | None]:
         valori = _piene(doc, [c for c in valori if c.lato == "L"])   # quelle di destra con `_colonna_della_riga`
     if not valori:
         return None, None
-    corrente = next((c for c in valori if c.corrente), valori[0])
-    altre = [c for c in valori if c is not corrente and c.ruolo == "esercizio"]
+    # Una coppia parziali -> totali (Q1) e' UN periodo: si legge sulla colonna dei totali, e i conti sui parziali
+    # (`_cella`). La data puo' stare sopra una sola delle due: la colonna dei totali non e' mai il «precedente» dei
+    # suoi parziali (Fase 5: 1451, e lo schema coi conti stampato tutto all'unita').
+    coppie = getattr(doc.profilo, "coppie", {}) or {}
+    per_indice = {c.indice: c for c in doc.colonne}
+
+    def periodo(c: Colonna) -> tuple[Colonna, set[int], object]:
+        totali = next((t for t, p in coppie.items() if p == c.indice), c.indice)
+        membri = {totali, coppie.get(totali, totali)}
+        col = per_indice.get(totali, c)
+        return col, membri, col.fine or next((per_indice[m].fine for m in membri if per_indice[m].fine), None)
+
+    corrente, membri_c, fine_c = periodo(next((c for c in valori if c.corrente), valori[0]))
+    altre, visti = [], set(membri_c)
+    for c in valori:
+        if c.ruolo != "esercizio" or c.indice in visti:
+            continue
+        col, membri, fine = periodo(c)
+        visti |= membri
+        altre.append((col, fine))
     if not altre:
         return corrente.indice, None
-    prima = [c for c in altre if c.fine and corrente.fine and c.fine < corrente.fine]
-    precedente = max(prima, key=lambda c: c.fine) if prima else altre[0]
+    prima = [(c, f) for c, f in altre if f and fine_c and f < fine_c]
+    precedente = max(prima, key=lambda x: x[1])[0] if prima else altre[0][0]
     return corrente.indice, precedente.indice
 
 
@@ -506,6 +524,9 @@ def gettoni_di_legge(r_etichetta: str, codice: str = "") -> tuple[str, ...]:
 
 # «- entro esercizio successivo», «- oltre l'esercizio successivo»: la ripartizione senza «esigibili» (Passepartout)
 _SCADENZA_A_TRATTINO = re.compile(r"^\W*(entro|oltre)\s+(?:l\W?\s*)?esercizio\s+successivo\b", re.I)
+# «a) Entro 12 mesi», «b) Finanziamento soci oltre 12 mesi», «a) Altri debiti entro 12 mesi»: la ripartizione per
+# scadenza che alcuni gestionali stampano sotto la voce, con la lettera (Fase 5)
+_SCADENZA_DODICI_MESI = re.compile(r"\b(entro|oltre)\s+(?:i\s+)?12\s*mesi\b", re.I)
 
 
 def _scadenza(etichette: list[str]) -> str | None:
@@ -513,7 +534,7 @@ def _scadenza(etichette: list[str]) -> str | None:
         s = _scadenza_in_coda(e) or _scadenza_inizio(e)
         if s:
             return "E" if "entro" in s else "O"
-        m = _SCADENZA_A_TRATTINO.match(e)
+        m = _SCADENZA_A_TRATTINO.match(e) or _SCADENZA_DODICI_MESI.search(e)
         if m:
             return "E" if m.group(1).lower() == "entro" else "O"
     return None
@@ -752,6 +773,9 @@ def _chiude_su(doc: Documento, r: Riga, col: int, per_id: dict[str, Riga], ordin
     return False
 
 
+_CONTI_D_ORDINE = re.compile(r"\bconti d\W?\s*ordine\b|\bsistema improprio\b")
+
+
 def _totale_senza_conti(r: Riga, precedente: Riga | None) -> bool:
     """«Totale CLIENTI ITALIA:» stampato subito sotto il titolo del suo mastro («0201 CLIENTI ITALIA», senza importi),
     senza alcun conto in mezzo (Fase 5, F5: la stampa compatta di 1325, 1401): e' l'unico portatore della massa del
@@ -807,6 +831,8 @@ def _foglie_grezze(doc: Documento, colonna: int) -> list[Foglia]:
     for r in righe:
         precedente, prima_sul_lato[r.lato] = prima_sul_lato.get(r.lato), r
         col = _colonna_della_riga(doc, colonna, r)
+        if _CONTI_D_ORDINE.search(_norm(" ".join((r.etichetta,) + tuple(r.percorso)))):
+            continue        # conti d'ordine («Sistema improprio …»): non sono conti dello stato patrimoniale (Fase 5)
         if r.intestazione or col is None or _cella(doc, r, col) is None or _chiude_su(doc, r, col, per_id, ordine) \
                 or (_e_controllo(r) and not _totale_senza_conti(r, precedente)
                     and not _di_cui_che_ripartiscono(doc, r, col, per_id)):
@@ -920,6 +946,18 @@ class _Percorsi:
         self.pos = pos
         self._memo: dict[str, tuple[tuple[str, ...], str | None, bool]] = {}
 
+    def _eco(self, r: Riga) -> bool:
+        """La riga e' l'unico membro del padre, con lo stesso importo, ed e' a sua volta il totale verificato dei suoi
+        conti («5) Altri ricavi e proventi» nella colonna dei totali, «Altri» con lo stesso importo nei parziali, Fase 5): la
+        catena di un solo membro resta un'ipotesi per le somme (R14), ma per il percorso di legge vale come il padre.
+        I suoi conti stanno sotto la voce 5) anche se un sottotitolo li separa."""
+        padre = self.per_id.get(r.padre)
+        if padre is None or not r.totale:
+            return False
+        if not any(g == (r.id,) for g in padre.figli.values()):
+            return False
+        return bool({c.valore for c in padre.celle.values()} & {c.valore for c in r.celle.values() if c.valore})
+
     def _livelli(self, r: Riga) -> tuple[tuple[str, ...], str | None, bool]:
         """(livelli, scadenza, ancorato): `ancorato` dice che la catena porta almeno un enumeratore di legge; un
         padre verificato senza alcun enumerator («Totale», una riga di soli importi) non e' un'autorita'."""
@@ -932,7 +970,7 @@ class _Percorsi:
             return (), None, False
         posizionale = (self.pos[r.id].livelli, self.pos[r.id].scad)
         propri = gettoni_di_legge(r.etichetta, r.codice)
-        padre = self.per_id.get(r.padre) if r.padre and r.padre_verificato else None
+        padre = self.per_id.get(r.padre) if r.padre and (r.padre_verificato or self._eco(r)) else None
         base, scad, ancorato = self._livelli(padre) if padre is not None else ((), None, False)
         romano = _ROMANO_COL_PUNTO.match(r.etichetta) if not propri else None
         if romano and r.totale and ancorato and base and _tipo(base[-1]) == 0 and romano["n"] in _VALORE_ROMANO:

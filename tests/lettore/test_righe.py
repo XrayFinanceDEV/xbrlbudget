@@ -1042,3 +1042,15 @@ def test_riga_di_sola_anagrafica_resta_scartata(tmp_path):
     voci += _conti(140, ["10201", "10202", "10203", "10204", "10205"])
     doc = _leggi(tmp_path, [voci])
     assert not [r for r in doc.righe if "PIAZZA" in r.etichetta or "PARTITA" in r.etichetta]
+
+
+def test_intero_nudo_col_meno_in_coda_in_una_colonna_a_interi(tmp_path):
+    # Fase 5: un gestionale stampa «1.234.567-» e, nella stessa colonna, «321-» senza separatore
+    voci = []
+    for k, (codice, importo) in enumerate([("80101", "1.234.567-"), ("80102", "4.321-"), ("80103", "321-"),
+                                          ("80104", "5.432-"), ("80105", "0"), ("80106", "12.000")]):
+        # allineato a destra a mano: lo scrittore sintetico allinea a destra solo cio' che legge come importo
+        x = 560 - fitz.get_text_length(importo, fontsize=_CORPO) if importo == "321-" else 560
+        voci += [(40, 140 + 14 * k, codice), (110, 140 + 14 * k, f"conto {codice}"), (x, 140 + 14 * k, importo)]
+    doc = _leggi(tmp_path, [voci])
+    assert [c.valore for c in _riga(doc, "conto 80103").celle.values()] == [Decimal("-321")]

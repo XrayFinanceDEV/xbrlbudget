@@ -751,3 +751,15 @@ def test_totale_attivo_circolante_non_e_un_totale_di_chiusura(tmp_path):
         [(50, 230, "TOTALE ATTIVO CIRCOLANTE"), (480, 230, "9.000,00")]
     pagina2 = _conti("1302", 5)
     assert _doc_sezioni(tmp_path, [pagina1, pagina2]).sezioni == {1: "SP", 2: "SP"}
+
+
+def test_valore_della_produzione_apre_il_ce_e_i_conti_d_ordine_chiudono_lo_sp(tmp_path):
+    # Fase 5: un gestionale stampa i conti d'ordine in coda allo SP e comincia il CE con «A) VALORE DELLA PRODUZIONE»
+    # senza titolo, sotto l'intestazione di pagina «CONTI D'ORDINE»
+    pagina1 = [(50, 120, "STATO PATRIMONIALE")] + _conti("1301", 4) + [(50, 200, "TOTALE PASSIVO"), (480, 200, "9.000,00"),
+                                                                        (50, 220, "CONTI D'ORDINE")] + _conti("9901", 2, y0=240)
+    pagina2 = [(50, 100, "CONTI D' ORDINE"), (50, 120, "A) VALORE DELLA PRODUZIONE")] + _conti("7101", 3, y0=140)
+    prof = _doc_sezioni(tmp_path, [pagina1, pagina2])
+    assert prof.sezioni == {1: "SP", 2: "CE"}
+    righe = sorted(prof.sezioni_righe.items(), key=lambda kv: (kv[0][0], kv[0][1]))
+    assert [s for (pg, y), s in righe if pg == 1 and y > 230] == ["", ""]      # i conti d'ordine: nessuna sezione

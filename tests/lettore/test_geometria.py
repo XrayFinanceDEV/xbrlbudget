@@ -63,3 +63,26 @@ def test_timbro_verticale_su_pagina_ruotata_resta_fuori(tmp_path):
     scrivi_pdf(p, [[(400, 100, "1.234,56"), (50, 100, "CLIENTI"), (50, 130, "BANCA")]], rotazione=90)
     righe = _righe(p)
     assert [w.testo for r in righe for w in r.parole] == ["CLIENTI", "1.234,56", "BANCA"]
+
+
+# --- Fase 5: scritte a lettere spaziate ---
+
+def test_lettere_spaziate_tornano_parole():
+    from importers.lettore.geometria import Parola, _ricompatta_lettere
+
+    def lettere(testo, x, passo=8.6, largo=4.4):
+        out = []
+        for ch in testo:
+            if ch != " ":
+                out.append(Parola(x, 100, x + largo, 108, ch))
+            x += passo
+        return out
+    parole = lettere("TOTALE  ATTIVO", 34.2) + [Parola(522, 100, 561, 108, "1.234")]
+    assert [p.testo for p in _ricompatta_lettere(parole)] == ["TOTALE", "ATTIVO", "1.234"]
+
+
+def test_parole_normali_e_due_lettere_restano():
+    from importers.lettore.geometria import Parola, _ricompatta_lettere
+    parole = [Parola(10, 0, 30, 8, "Fondo"), Parola(34, 0, 38, 8, "A"), Parola(42, 0, 47, 8, "B"),
+              Parola(60, 0, 90, 8, "Crediti")]
+    assert [p.testo for p in _ricompatta_lettere(parole)] == ["Fondo", "A", "B", "Crediti"]

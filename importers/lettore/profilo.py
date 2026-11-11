@@ -41,7 +41,8 @@ _MARCA_ANAGRAFICA = re.compile(
     r"REGISTRO\s+(?:DELLE\s+)?IMPRESE|\bI\.\s?V\.|\bVERSATO\b|\bC\.\s?F\.|\bP\.\s?IVA\b"
     r"|\bS\.?\s?(?:P\.?\s?A|R\.?\s?L|A\.?\s?S|N\.?\s?C)\b\.?", re.I)
 # Un intero nudo senza zeri in testa (uno «0» da solo va bene), col segno o tra parentesi.
-_INTERO = re.compile(r"^(?:-?(?:0|[1-9]\d*)|\((?:0|[1-9]\d*)\))$")
+# anche col meno in coda («321-»), come i gestionali che stampano «1.234.567-» nella stessa colonna (Fase 5)
+_INTERO = re.compile(r"^(?:-?(?:0|[1-9]\d*)|\((?:0|[1-9]\d*)\)|[1-9]\d*-)$")
 _GENERATO = re.compile(r"\bgenerato automaticamente\b")
 _SEGUITO_CODICE = re.compile(r"^(?:bis|ter|quater|quinquies)\)?$", re.I)
 _SEPARATORE = re.compile(r"^[-–:.]+$")
@@ -159,8 +160,8 @@ def _in_colonna(p: Parola, colonne: list[Colonna], intere: frozenset[int] = froz
     c = colonna_di(p.x1, colonne)
     if c is None or c.indice not in intere:
         return None
-    v = Decimal(p.testo.strip("()"))
-    v = -v if p.testo.startswith("(") else v
+    v = Decimal(p.testo.strip("()-"))
+    v = -v if p.testo.startswith(("(", "-")) or p.testo.endswith("-") else v
     return Importo(v, "zero" if v == 0 else "importo", p.testo), c
 
 
@@ -339,6 +340,10 @@ def _titolo_di_lato(r: RigaFisica, colonne: list[Colonna]) -> bool:
     return 0 < len(parole) < n and intestazione(" ".join(parole)) in (["Attivo"], ["Passivo"])
 
 
+_APRE_IL_CE = re.compile(r"^A\)?VALOREDELLAPRODUZIONE$")
+_CONTI_D_ORDINE = re.compile(r"^(?:TOTALE)?CONTID\W?ORDINE$")
+
+
 def _titolo_sezione(r: RigaFisica, colonne: list[Colonna]) -> str | None:
     """La sezione che una riga-titolo apre (`detail_enrichment.collect_source_rows`); solo una riga senza
     importi: «UTILE DA CONTO ECONOMICO 5.000,00» nel passivo non apre il CE."""
@@ -352,8 +357,10 @@ def _titolo_sezione(r: RigaFisica, colonne: list[Colonna]) -> str | None:
         return "CE"     # «PERDITE E PROFITTI al 30/09/2026»: il conto economico di certi gestionali (1566)
     if compatto.startswith(("CE-", "SP-")) and len(compatto) < 40:
         return compatto[:2]     # «CE - Schema Ridotto» in testa a una delle due tabelle affiancate (1426)
-    if "CONTINONASSEGNATI" in compatto or compatto.startswith("NOTAINTEGRATIVA"):
-        return ""
+    if _APRE_IL_CE.match(compatto):
+        return "CE"     # «A) VALORE DELLA PRODUZIONE» apre sempre il conto economico di legge, anche senza titolo (Fase 5)
+    if "CONTINONASSEGNATI" in compatto or compatto.startswith("NOTAINTEGRATIVA") or _CONTI_D_ORDINE.match(compatto):
+        return ""       # i conti d'ordine (garanzie, impegni) non sono conti dello stato patrimoniale (Fase 5)
     return None
 
 
@@ -1087,6 +1094,16 @@ _QUOTA_CENTESIMI_PARZIALI = 0.5
 _QUOTA_INTERI_TOTALI = 0.95
 
 
+_QUOTA_CONTI_PARZIALI = 0.3     # la colonna dei parziali: almeno il 30% delle sue righe e' un conto col codice
+_CODICE_DI_CONTO = re.compile(r"^\d{4,}\b")
+
+
+def _quota_conti(righe: list[RigaFisica], celle: list[tuple[int, Decimal]]) -> float:
+    """La quota delle righe della colonna che cominciano col codice di un conto (almeno quattro cifre)."""
+    ks = {k for k, _ in celle}
+    return sum(bool(_CODICE_DI_CONTO.match(_testo(righe[k]).strip())) for k in ks) / len(ks) if ks else 0.0
+
+
 def _coppie(righe: list[RigaFisica], colonne: list[Colonna], intere: frozenset[int]) -> dict[int, int]:
     """Q1: le coppie (parziali, totali) del documento, come {totali: parziali}. Due colonne di valori adiacenti sullo
     stesso lato, che non stampano mai sulla stessa riga, con almeno 4 righe ciascuna; i parziali stampano i centesimi
@@ -1114,6 +1131,11 @@ def _coppie(righe: list[RigaFisica], colonne: list[Colonna], intere: frozenset[i
         centesimi = sum(v != v.to_integral_value() for v in va) / len(va)
         interi = sum(v == v.to_integral_value() for v in vb) / len(vb)
         if centesimi >= _QUOTA_CENTESIMI_PARZIALI and interi >= _QUOTA_INTERI_TOTALI:
+            out[b.indice] = a.indice
+        elif _quota_conti(righe, rb) == 0 and _quota_conti(righe, ra) >= _QUOTA_CONTI_PARZIALI:
+            # stampa tutta all'unita' (Fase 5, schema con i conti di un gestionale): la colonna di destra porta solo
+            # totali e voci di legge, mai un conto col codice; quella di sinistra i conti. E' la colonna dei totali
+            # di una coppia, non un secondo esercizio
             out[b.indice] = a.indice
     return out
 

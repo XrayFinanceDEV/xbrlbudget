@@ -1,5 +1,5 @@
 {
- "descrizione": "Campione unico di 78 documenti del corpus Test/: i 53 della Fase 0 (50 + 3 bilanci completi aggiunti il 2026-10-28; verità e punteggio, Test/_analisi-campione/campione.json) e i 25 della settimana 44 (budget-wk-44, Test/_analisi-campione/wk44/campione.json). I file restano fuori da git: si trovano per sha256 (tests/corpus/manifest.json). 'verita' indica da dove ricavare le cifre vere; null = da scrivere a mano. Analizzati a vista il 2026-10-28 (5 worker codex, Test/_analisi-campione/): tipologie corrette, 'giudizio_atteso' = importabile | importabile con avviso | da rifiutare. L'XBRL depositato vale da verita' solo dove 'coincide'.",
+ "descrizione": "Campione unico di 86 documenti del corpus Test/: i 53 della Fase 0 (50 + 3 bilanci completi aggiunti il 2026-10-28; verità e punteggio, Test/_analisi-campione/campione.json), i 25 della settimana 44 (budget-wk-44, Test/_analisi-campione/wk44/campione.json) e gli 8 scelti dal giro sul corpus del 2026-11-10 (Test/_analisi-campione/nuovi-2611/campione.json). I file restano fuori da git: si trovano per sha256 (tests/corpus/manifest.json). 'verita' indica da dove ricavare le cifre vere; null = da scrivere a mano. Analizzati a vista il 2026-10-28 (5 worker codex, Test/_analisi-campione/): tipologie corrette, 'giudizio_atteso' = importabile | importabile con avviso | da rifiutare. L'XBRL depositato vale da verita' solo dove 'coincide'.",
  "creato": "2026-10-28",
  "documenti": [
   {
@@ -1272,6 +1272,126 @@
     "file": "Test/_analisi-campione/verita/1567.json"
    },
    "giudizio_atteso": "importabile con avviso"
+  },
+  {
+   "id": "355",
+   "sha256": "1378d87943b29bfc2127d50f5775d0bec0ff617c73b4e8721642869fbb24822b",
+   "path": "2026-06/june_sample/errori/budget_355_Bilancio 31.12.24.pdf",
+   "tipologia": "ivcee-dettaglio/codici",
+   "periodo": "annuale 2024",
+   "pagine": 20,
+   "nota": "lotto nuovi-2611 (dal giro sul corpus del 2026-11-10)",
+   "lotto": "nuovi-2611",
+   "verita": {
+    "fonte": "due letture indipendenti (Sonnet, Opus) consolidate",
+    "file": "Test/_analisi-campione/verita/355.json"
+   },
+   "giudizio_atteso": "importabile con avviso"
+  },
+  {
+   "id": "1444",
+   "sha256": "411736eb46b98e7aea5152995ab73624afaa996077d1e42fb48251830c0b3174",
+   "path": "budget-wk-43/budget_1444_ProfilatiBrescia_CE-UE-con-conti_2026-09.pdf",
+   "tipologia": "limite/solo-ce",
+   "periodo": "9 mesi 2026",
+   "pagine": 5,
+   "nota": "lotto nuovi-2611 (dal giro sul corpus del 2026-11-10)",
+   "lotto": "nuovi-2611",
+   "verita": {
+    "fonte": "due letture indipendenti (Sonnet, Opus) consolidate",
+    "file": "Test/_analisi-campione/verita/1444.json"
+   },
+   "giudizio_atteso": "da rifiutare"
+  },
+  {
+   "id": "135",
+   "sha256": "6a883c329240647f3a4068c4b21c3ce6b00936590d06710221c45b6b79c3ec75",
+   "path": "2026-primo-lotto/errori/budget_135_Bilancio_LUGS_2025_COMPLETO.pdf",
+   "tipologia": "limite/da-rifiutare",
+   "periodo": "annuale 2025",
+   "pagine": 2,
+   "nota": "lotto nuovi-2611 (dal giro sul corpus del 2026-11-10)",
+   "lotto": "nuovi-2611",
+   "verita": {
+    "fonte": "due letture indipendenti (Sonnet, Opus) consolidate",
+    "file": "Test/_analisi-campione/verita/135.json"
+   },
+   "giudizio_atteso": "da rifiutare"
+  },
+  {
+   "id": "138",
+   "sha256": "584c912ea3a05fb6ecaaf87c73cc98877deeb2bdb01822ef4e95405824f8337a",
+   "path": "2026-primo-lotto/successSecondo/budget_138_Bilancio_LUGS_2025_FULL_DETTAGLIATO.pdf",
+   "tipologia": "ivcee/anno-singolo",
+   "periodo": "annuale 2025",
+   "pagine": 2,
+   "nota": "lotto nuovi-2611 (dal giro sul corpus del 2026-11-10)",
+   "lotto": "nuovi-2611",
+   "verita": {
+    "fonte": "due letture indipendenti (Sonnet, Opus) consolidate",
+    "file": "Test/_analisi-campione/verita/138.json"
+   },
+   "giudizio_atteso": "importabile con avviso"
+  },
+  {
+   "id": "1430",
+   "sha256": "8a52ae9aa7337126488d2b3fb6ccc8c3c92f02f2a99c0f06894e40e899faeafa",
+   "path": "budget-wk-43/budget_1430_MTD_situazione-riclassificata-conti_2026-07.pdf",
+   "tipologia": "contrapposte",
+   "periodo": "7 mesi 2026",
+   "pagine": 9,
+   "nota": "lotto nuovi-2611 (dal giro sul corpus del 2026-11-10)",
+   "lotto": "nuovi-2611",
+   "verita": {
+    "fonte": "due letture indipendenti (Sonnet, Opus) consolidate",
+    "file": "Test/_analisi-campione/verita/1430.json"
+   },
+   "giudizio_atteso": "importabile con avviso"
+  },
+  {
+   "id": "1451",
+   "sha256": "adb93fa099b7b45af4dee4107c50c91c5f4a98cda3749e483b34e12e88a88b57",
+   "path": "budget-wk-43/budget_1451_ABCLOG_prospetto-provvisorio_2026-08.pdf",
+   "tipologia": "ivcee-dettaglio/descrizioni",
+   "periodo": "8 mesi 2026",
+   "pagine": 8,
+   "nota": "lotto nuovi-2611 (dal giro sul corpus del 2026-11-10)",
+   "lotto": "nuovi-2611",
+   "verita": {
+    "fonte": "due letture indipendenti (Sonnet, Opus) consolidate",
+    "file": "Test/_analisi-campione/verita/1451.json"
+   },
+   "giudizio_atteso": "importabile con avviso"
+  },
+  {
+   "id": "1341",
+   "sha256": "1ddf64cafd3937a241dea897c5d78c77430440aa7ec3ed89ef855b57b2aec936",
+   "path": "2026-10-15/budget_1341_BILANCIO IN XBRL.pdf",
+   "tipologia": "ivcee-dettaglio/2-anni",
+   "periodo": "annuale 2025",
+   "pagine": 13,
+   "nota": "lotto nuovi-2611 (dal giro sul corpus del 2026-11-10)",
+   "lotto": "nuovi-2611",
+   "verita": {
+    "fonte": "due letture indipendenti (Sonnet, Opus) consolidate",
+    "file": "Test/_analisi-campione/verita/1341.json"
+   },
+   "giudizio_atteso": "importabile"
+  },
+  {
+   "id": "1452",
+   "sha256": "fcf5e05f3a4f24276cb71ba2a116cac7dadecbaa0377f163c48a47758bcc66ab",
+   "path": "budget-wk-43/budget_1452_1STOP_situazione_2025.pdf",
+   "tipologia": "contrapposte",
+   "periodo": "annuale 2025",
+   "pagine": 4,
+   "nota": "lotto nuovi-2611 (dal giro sul corpus del 2026-11-10)",
+   "lotto": "nuovi-2611",
+   "verita": {
+    "fonte": "due letture indipendenti (Sonnet, Opus) consolidate",
+    "file": "Test/_analisi-campione/verita/1452.json"
+   },
+   "giudizio_atteso": "importabile"
   }
  ]
 }

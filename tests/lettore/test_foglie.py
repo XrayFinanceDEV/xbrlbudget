@@ -1013,3 +1013,18 @@ def test_colonna_dei_soli_totali_non_e_mai_la_corrente(tmp_path):
     assert colonne_utili(doc) == (1, None)
     destra = [r for r in doc.righe if r.lato == "R"][0]
     assert _colonna_della_riga(doc, 1, destra) == 2
+
+
+# --- Fase 5, Task 5 (F17): «Eccedenza esercizio precedente» e' un conto del patrimonio netto, non un controllo ---
+
+def _riga_sola(etichetta, sezione="SP"):
+    return Riga(id="p1r1U", pagina=1, y=1.0, lato="U", sezione=sezione, codice="", etichetta=etichetta,
+                celle={0: leggi_importo("12.345,00")})
+
+
+def test_eccedenza_dell_esercizio_precedente_e_un_conto():
+    from importers.lettore.foglie import _e_controllo
+    assert not _e_controllo(_riga_sola("Eccedenza esercizio precedente"))
+    assert not _e_controllo(_riga_sola("ECCEDENZA ESERCIZI PRECEDENTI"))
+    assert _e_controllo(_riga_sola("Eccedenza attivo"))
+    assert _e_controllo(_riga_sola("ECCEDENZA RICAVI", "CE"))

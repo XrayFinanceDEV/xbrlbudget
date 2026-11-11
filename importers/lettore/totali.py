@@ -32,7 +32,9 @@ _CENTESIMO = Decimal("0.01")
 _UNITA = Decimal("1")
 # C12: il lessico unico delle righe di controllo (TOTALE, PAREGGIO, SALDO FINALE/GENERALE, ECCEDENZA, il risultato
 # d'esercizio). Una riga di controllo chiude cio' che le sta sopra.
-_DICE_TOTALE = r"\btotal[ei]\b|\bpareggio\b|\bsaldo (?:finale|generale)\b|\beccedenza\b"
+# «Eccedenza esercizio precedente» e' un conto del patrimonio netto, non un controllo (Fase 5, F17: Bilancino)
+_ECCEDENZA = r"\beccedenza\b(?!.*\bprecedent)"
+_DICE_TOTALE = r"\btotal[ei]\b|\bpareggio\b|\bsaldo (?:finale|generale)\b|" + _ECCEDENZA
 _RISULTATO_D_ESERCIZIO = r"\b(?:utile|perdita|perdite|risultato)\b.*\besercizio\b"
 _CONTROLLO = re.compile(_DICE_TOTALE + "|" + _RISULTATO_D_ESERCIZIO)
 DICE_TOTALE = re.compile(_DICE_TOTALE)      # solo le righe che si dichiarano un totale (blocchi.py)
@@ -49,7 +51,7 @@ _ROMANO = re.compile(r"^[ivxlc]+$")
 _SOLO_SEZIONE = {"stato patrimoniale", "conto economico"}
 # Le righe di controllo che chiudono un lato o il conto (pareggio, eccedenza, saldo finale, risultato): non sono una
 # voce, non hanno un titolo e non ne contraddicono nessuno.
-_CHIUSURA = re.compile(r"\bpareggio\b|\bsaldo (?:finale|generale)\b|\beccedenza\b"
+_CHIUSURA = re.compile(r"\bpareggio\b|\bsaldo (?:finale|generale)\b|" + _ECCEDENZA +
                        r"|\b(?:utile|perdita|perdite|risultato)\b.*\besercizio\b")
 _PAROLE_SEZIONE = {"stato", "patrimoniale", "conto", "economico", "attivo", "passivo", "attivita", "passivita", "costi",
                    "ricavi", "sezione"}

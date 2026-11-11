@@ -332,7 +332,7 @@ def _amount(token: str) -> Decimal | None:
 _TOTALE_DI_CHIUSURA = re.compile(
     # «TOTALE ATTIVO CIRCOLANTE» e' un sottototale dello schema, non la chiusura dello SP (Fase 5, F1c: 1443)
     r"TOTALE\s*(?:A\s*PAREGGIO|A\s*QUADRATURA|ATTIVIT|PASSIVIT|ATTIVO(?!\s*CIRCOLANTE)|PASSIVO|COSTI|RICAVI)"
-    r"|(?:UTILE|PERDITA)\S*\s+(?:D\W?\s*)?ESERCIZIO|ECCEDENZA")
+    r"|(?:UTILE|PERDITA)\S*\s+(?:D\W?\s*)?ESERCIZIO|ECCEDENZA(?!.*PRECEDENT)")
 
 # da importers/detail_enrichment.py:_RIGHE_DI_CHIUSURA, main e3455d6
 _RIGHE_DI_CHIUSURA = 5

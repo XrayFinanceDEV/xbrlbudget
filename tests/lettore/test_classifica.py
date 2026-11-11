@@ -439,3 +439,55 @@ def test_scadenza_dei_crediti_non_tocca_legale_rettifiche_ne_altre_macro():
               "c": _M("sp09")}
     out, scelte = c.scadenza_dei_crediti(foglie, classi)
     assert out == classi and scelte == []
+
+
+# --- Fase 5, Task 7: le regole del proprietario nelle istruzioni (interruttore IMPORT_REGOLE_NEL_PROMPT) ---
+
+from importers.lettore import regole_proprietario as rp  # noqa: E402
+
+
+class _Sistema(Finto):
+    def __call__(self, system, messaggi, schema, *, max_tokens, timeout):
+        self.sistemi = getattr(self, "sistemi", []) + [system]
+        return super().__call__(system, messaggi, schema, max_tokens=max_tokens, timeout=timeout)
+
+
+def _costo():
+    return F("a", "Sopravvenienze passive", lato="U", sezione="CE", verso="costo")
+
+
+def test_regole_spente_prompt_e_classi_di_prima(monkeypatch):
+    monkeypatch.delenv("IMPORT_REGOLE_NEL_PROMPT", raising=False)
+    finto = _Sistema("ce12")
+    c.classifica_macro([_costo()], chiama_json=finto)
+    assert finto.sistemi == [c.PROMPT_MACRO]
+    assert "ce19" in finto.chiamate[0][1]["properties"]["a"]["enum"]
+
+
+def test_regole_accese_nel_prompt_senza_la_frase_contraria_a_p6(monkeypatch):
+    monkeypatch.setenv("IMPORT_REGOLE_NEL_PROMPT", "1")
+    finto = _Sistema("ce12")
+    c.classifica_macro([_costo()], chiama_json=finto)
+    sistema = finto.sistemi[0]
+    assert rp.FRASE_CONTRARIA_A_P6 in c.PROMPT_MACRO and rp.FRASE_CONTRARIA_A_P6 not in sistema
+    assert all(f"({sigla})" in sistema for sigla, _ in rp.REGOLE_MACRO)
+    assert sistema.rstrip().endswith("Rispondi solo con un JSON {id: codice}.")
+    enum = finto.chiamate[0][1]["properties"]["a"]["enum"]
+    assert "ce18" not in enum and "ce19" not in enum and "ce12" in enum      # D6
+
+
+def test_regole_accese_nel_prompt_dei_dettagli(monkeypatch):
+    monkeypatch.setenv("IMPORT_REGOLE_NEL_PROMPT", "1")
+    finto = _Sistema("sp16b")
+    f = F("a", "Debiti v/soci", lato="R")
+    classi = {"a": _M("sp16")}
+    c.classifica_dettagli([f], classi, chiama_json=finto)
+    assert all(f"({sigla})" in finto.sistemi[0] for sigla, _ in rp.REGOLE_DETTAGLIO)
+    assert classi["a"].dettaglio == "sp16b"
+
+
+def test_regole_senza_nomi_di_clienti_ne_importi():
+    import re
+    testo = " ".join(t for _, t in rp.REGOLE_MACRO + rp.REGOLE_DETTAGLIO)
+    assert not re.search(r"\d{1,3}\.\d{3}|\d+,\d{2}", testo)
+    assert not re.search(r"\b(?:S\.?R\.?L|S\.?P\.?A)\b", testo, re.I)

@@ -19,7 +19,7 @@ from decimal import Decimal
 
 from importers import llm_provider
 from importers.llm_provider import ContestoEccessivo, LLMProviderError, RispostaTroncata
-from importers.lettore import tavola
+from importers.lettore import regole_proprietario, tavola
 from importers.lettore.foglie import Ancora, Foglia, gettoni_di_legge
 from importers.lettore.totali import _norm
 
@@ -81,7 +81,19 @@ def _lato_colonna(f: Foglia) -> str:
 
 
 def _ammesse(f: Foglia) -> tuple[str, ...]:
-    return tavola.macro_ammesse(_lato_colonna(f), f.sezione or "SP", f.verso_ce)
+    ammesse = tavola.macro_ammesse(_lato_colonna(f), f.sezione or "SP", f.verso_ce)
+    if regole_proprietario.accese():     # D6: nessun campo straordinario (Fase 5, Task 7)
+        ammesse = tuple(m for m in ammesse if m not in regole_proprietario.MACRO_ESCLUSE)
+    return ammesse
+
+
+def _prompt_macro() -> str:
+    """Il prompt del passo 1: quello di sempre, o con le regole del proprietario (`IMPORT_REGOLE_NEL_PROMPT`)."""
+    return regole_proprietario.prompt_macro(PROMPT_MACRO) if regole_proprietario.accese() else PROMPT_MACRO
+
+
+def _prompt_dettaglio() -> str:
+    return regole_proprietario.prompt_dettaglio(PROMPT_DETTAGLIO) if regole_proprietario.accese() else PROMPT_DETTAGLIO
 
 
 # Un contro-conto si riconosce dal nome (decisione del proprietario, 2026-11-09: «contro-conti riconosciuti»): un
@@ -262,7 +274,7 @@ def classifica_macro(foglie: list[Foglia], *, chiama_json=None, cache: dict | No
         da_chiedere.setdefault(k, []).append(f)
     rappresentanti = [gruppo[0] for gruppo in da_chiedere.values()]
     risposte = _in_parallelo([
-        (lambda b=b: _chiama(chiama_json, PROMPT_MACRO, b, {f.id: _enum_macro(f) for f in b},
+        (lambda b=b: _chiama(chiama_json, _prompt_macro(), b, {f.id: _enum_macro(f) for f in b},
                              tavola.ETICHETTE_MACRO, diag=diag)) for b in _blocchi(rappresentanti)])
     per_id: dict[str, str] = {}
     persi: set[str] = set()
@@ -319,7 +331,8 @@ def rivota(foglie: list[Foglia], classi: dict[str, Classe], *, voti: int = 3, ch
         for n in range(voti):
             ordine, nota, opz = _variante(n, b, ancora, somma)
             chiamate.append(lambda o=ordine, nota=nota, opz=opz: _chiama(
-                chiama_json, PROMPT_MACRO, o, {f.id: _enum_macro(f) for f in o}, tavola.ETICHETTE_MACRO, nota, **opz))
+                chiama_json, _prompt_macro(), o, {f.id: _enum_macro(f) for f in o}, tavola.ETICHETTE_MACRO, nota,
+                **opz))
             indice.append(b)
     risposte = _in_parallelo(chiamate)
     raccolti: dict[str, list[str]] = {f.id: [] for f in foglie}
@@ -387,7 +400,7 @@ def classifica_dettagli(foglie: list[Foglia], classi: dict[str, Classe], *, chia
                  for ds in tavola.DETTAGLI.values() for d in ds}
     etichette[ALTRI] = "nessuna delle altre sotto-voci"
     risposte = _in_parallelo([
-        (lambda b=b: _chiama(chiama_json, PROMPT_DETTAGLIO, b, {f.id: enum(f) for f in b}, etichette,
+        (lambda b=b: _chiama(chiama_json, _prompt_dettaglio(), b, {f.id: enum(f) for f in b}, etichette,
                              macro_assegnata={f.id: _voce(classi[f.id]) for f in b}))
         for b in _blocchi(rappresentanti)])
     per_id: dict[str, str] = {}

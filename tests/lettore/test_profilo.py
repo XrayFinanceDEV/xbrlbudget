@@ -713,3 +713,41 @@ def test_colonna_a_interi_di_fatto_al_limite():
     assert intera_di_fatto(38, 2)          # 2 su 40: ancora il 5%
     assert not intera_di_fatto(37, 3)      # 3 su 40: oltre il 5%
     assert intera_di_fatto(5, 0) and not intera_di_fatto(0, 0) and not intera_di_fatto(0, 3)
+
+
+# --- Fase 5, Task 2 (F1): la sezione si decide anche all'indietro, e la chiusura conta dopo l'ultimo titolo ---
+
+def _conti(prefisso, n, y0=140, valori=None):
+    return _tabella([f"{prefisso}{k:02d} Conto {prefisso} {k}" for k in range(n)], colonne=(480,), y0=y0,
+                    valori=valori)
+
+
+def test_righe_senza_sezione_prendono_quella_del_totale_di_chiusura_che_le_segue(tmp_path):
+    # 395, 1325: una verifica senza titoli che dichiara la sezione solo coi totali in fondo
+    pagina1 = _conti("1301", 6)
+    pagina2 = _conti("1302", 4) + [(50, 240, "TOTALE ATTIVITA'"), (480, 240, "9.000,00")]
+    pagina3 = [(50, 120, "CONTO ECONOMICO")] + _conti("7101", 3) + [(50, 200, "TOTALE COSTI"), (480, 200, "800,00")]
+    assert _doc_sezioni(tmp_path, [pagina1, pagina2, pagina3]).sezioni == {1: "SP", 2: "SP", 3: "CE"}
+
+
+def test_la_propagazione_all_indietro_non_scavalca_un_titolo(tmp_path):
+    # righe senza sezione sopra «CONTO ECONOMICO»: il totale dei costi che segue il titolo non le reclama
+    pagina1 = _conti("1301", 6)
+    pagina2 = [(50, 120, "CONTO ECONOMICO")] + _conti("7101", 3) + [(50, 200, "TOTALE COSTI"), (480, 200, "800,00")]
+    assert _doc_sezioni(tmp_path, [pagina1, pagina2]).sezioni == {1: "", 2: "CE"}
+
+
+def test_totale_passivo_prima_del_titolo_del_conto_economico_non_chiude_la_pagina(tmp_path):
+    # 1434: «TOTALE PASSIVO» chiude lo SP, ma «Conto economico» comincia sotto, nella stessa pagina
+    pagina1 = [(50, 100, "STATO PATRIMONIALE")] + _conti("1301", 4, y0=120) + \
+        [(50, 180, "TOTALE PASSIVO"), (480, 180, "9.000,00"), (50, 210, "CONTO ECONOMICO")] + _conti("7101", 2, y0=230)
+    pagina2 = _conti("7102", 5)
+    assert _doc_sezioni(tmp_path, [pagina1, pagina2]).sezioni == {1: "SP+CE", 2: "CE"}
+
+
+def test_totale_attivo_circolante_non_e_un_totale_di_chiusura(tmp_path):
+    # 1443: «TOTALE ATTIVO CIRCOLANTE» in fondo alla pagina non chiude lo stato patrimoniale
+    pagina1 = [(50, 120, "STATO PATRIMONIALE")] + _conti("1301", 5) + \
+        [(50, 230, "TOTALE ATTIVO CIRCOLANTE"), (480, 230, "9.000,00")]
+    pagina2 = _conti("1302", 5)
+    assert _doc_sezioni(tmp_path, [pagina1, pagina2]).sezioni == {1: "SP", 2: "SP"}

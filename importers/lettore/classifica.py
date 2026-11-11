@@ -136,8 +136,10 @@ def _classe(codice: str | None, fonte: str, voti: tuple[str, ...] = ()) -> Class
 
 
 def _chiave(f: Foglia) -> tuple:
-    return (_norm(f.etichetta), _norm(f.contesto[-1]) if f.contesto else "", f.lato, f.sezione, f.verso_ce,
-            f.lato_sp)
+    chiave = (_norm(f.etichetta), _norm(f.contesto[-1]) if f.contesto else "", f.lato, f.sezione, f.verso_ce,
+              f.lato_sp)
+    # due conti con lo stesso nome e codici diversi possono avere classi diverse (Fase 5, Task 8)
+    return chiave + (f.codice,) if regole_proprietario.accese() else chiave
 
 
 def _da_percorso(f: Foglia) -> Classe | None:
@@ -161,6 +163,9 @@ def _schema(enum_per_id: dict[str, list[str]]) -> dict:
 
 def _contesto(f: Foglia) -> str:
     parti = []
+    if f.codice and regole_proprietario.accese():
+        # il codice del conto come contesto della domanda, mai come prova di parentela (Fase 5, Task 8)
+        parti.append("codice: " + f.codice)
     if f.contesto:     # i mastri sopra il conto, anche quelli di una catena non verificata: ne dicono la natura
         parti.append("sotto: " + " > ".join(f.contesto[-3:]))
     parti.append({"L": "colonna sinistra", "R": "colonna destra", "U": "colonna unica"}.get(f.lato, f.lato))

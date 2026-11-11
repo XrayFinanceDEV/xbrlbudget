@@ -491,3 +491,25 @@ def test_regole_senza_nomi_di_clienti_ne_importi():
     testo = " ".join(t for _, t in rp.REGOLE_MACRO + rp.REGOLE_DETTAGLIO)
     assert not re.search(r"\d{1,3}\.\d{3}|\d+,\d{2}", testo)
     assert not re.search(r"\b(?:S\.?R\.?L|S\.?P\.?A)\b", testo, re.I)
+
+
+# --- Fase 5, Task 8: il codice del conto come contesto della domanda e nella chiave della cache ---
+
+def _FC(id, etichetta, codice, mastri=("SP", "DEBITI")):
+    return Foglia(id, etichetta, codice, "R", "SP", Decimal(10), None, (), None, None, mastri)
+
+
+def test_codice_del_conto_nel_contesto_e_nella_cache(monkeypatch):
+    monkeypatch.setenv("IMPORT_REGOLE_NEL_PROMPT", "1")
+    finto = Finto("sp16")
+    c.classifica_macro([_FC("a", "Diversi", "2601001"), _FC("b", "Diversi", "4901003")], chiama_json=finto)
+    testo = finto.chiamate[0][0][0]["content"]
+    assert "codice: 2601001" in testo and "codice: 4901003" in testo     # due domande, non una
+
+
+def test_codice_spento_una_domanda_per_nome_e_mastro(monkeypatch):
+    monkeypatch.delenv("IMPORT_REGOLE_NEL_PROMPT", raising=False)
+    finto = Finto("sp16")
+    c.classifica_macro([_FC("a", "Diversi", "2601001"), _FC("b", "Diversi", "4901003")], chiama_json=finto)
+    testo = finto.chiamate[0][0][0]["content"]
+    assert "codice:" not in testo and len(finto.chiamate[0][1]["properties"]) == 1

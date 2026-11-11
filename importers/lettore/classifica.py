@@ -412,9 +412,10 @@ def classifica_dettagli(foglie: list[Foglia], classi: dict[str, Classe], *, chia
 # nell'altra): la scadenza la decide il testo, non lui.
 _PERIODO = r"(?:I\s*)?(?:12\s*M|L\W?\s*(?:ANNO|ESERCIZIO)|ES\.?\s*SUCC|ESERCIZIO\s+SUCC)"
 # «(OE)»/«(EE)»: le sigle «oltre/entro l'esercizio» dei gestionali, come le legge `detail_enrichment._ledger_maturity`
-_OLTRE = re.compile(rf"\bOLTRE\s*{_PERIODO}|\bLUNGO\s+TERMINE|\bM(?:EDIO)?\s*/\s*L(?:UNGO)?\b|\bA\s+LUNGO\b"
-                    r"|\(OE[)\s-]")
-_ENTRO = re.compile(rf"\bENTRO\s*{_PERIODO}|\bBREVE\s+TERMINE|\bA\s+BREVE\b|\(EE[)\s-]")
+# Fase 5, Task 6: anche «TERMIN» troncato dalla colonna, «MEDIO LUNGO» senza barra, «>12 mesi» / «<12 mesi»
+_OLTRE = re.compile(rf"\bOLTRE\s*{_PERIODO}|\bLUNGO\s+TERMIN|\bM(?:EDIO)?\s*/\s*L(?:UNGO)?\b|\bA\s+LUNGO\b"
+                    r"|\bMEDIO\W*LUNGO\b|>\s*(?:I\s*)?12\b|\(OE[)\s-]")
+_ENTRO = re.compile(rf"\bENTRO\s*{_PERIODO}|\bBREVE\s+TERMIN|\bA\s+BREVE\b|<\s*(?:I\s*)?12\b|\(EE[)\s-]")
 # interessi maturati in un mastro «medio/lungo» sono dovuti entro l'anno (proprietario, P3 del 2026-11-04)
 _INTERESSI = re.compile(r"\bINTERESS|\bRATEI\b")
 
@@ -459,6 +460,31 @@ def scadenza_dei_debiti(foglie: list[Foglia], classi: dict[str, Classe]) -> tupl
         nuove[f.id] = replace(k, macro=voluta, dettaglio=dettaglio)
         perche = "scadenza stampata" if s else "nessuna scadenza stampata"
         scelte.append(f"debito {'oltre' if voluta == 'sp17' else 'a breve'} ({perche}): {f.id}")
+    return nuove, scelte
+
+
+_CREDITI = {"E": "sp06", "O": "sp07"}
+
+
+def scadenza_dei_crediti(foglie: list[Foglia], classi: dict[str, Classe]) -> tuple[dict[str, Classe], list[str]]:
+    """Crediti verso sp06/sp07 dalla scadenza stampata, senza prova entro l'esercizio (Fase 5, Task 6): come i debiti,
+    la scadenza la decide il testo, non il modello. Solo le classi del modello e solo fra sp06 e sp07; la natura
+    resta, il dettaglio passa alla stessa lettera dell'altra parte. Le imposte anticipate senza scadenza vanno poi
+    oltre per la D14 (`imposte_anticipate_oltre`, dopo il dettaglio). Copie, scelte dichiarate."""
+    nuove = dict(classi)
+    scelte: list[str] = []
+    for f in foglie:
+        k = classi.get(f.id)
+        if k is None or k.fonte == "legale" or k.rettifica or k.macro not in ("sp06", "sp07"):
+            continue
+        s = _scadenza_del_debito(f)
+        voluta = _CREDITI.get(s or "E")
+        if voluta == k.macro:
+            continue
+        dettaglio = voluta + k.dettaglio[4:] if k.dettaglio else None
+        nuove[f.id] = replace(k, macro=voluta, dettaglio=dettaglio)
+        perche = "scadenza stampata" if s else "nessuna scadenza stampata"
+        scelte.append(f"credito {'oltre' if voluta == 'sp07' else 'entro'} ({perche}): {f.id}")
     return nuove, scelte
 
 

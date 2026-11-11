@@ -405,3 +405,37 @@ def test_fondi_che_sono_debiti_non_sono_contro_conti():
     p = finto.chiamate[0][1]["properties"]
     assert all("sp03.F" not in p[k]["enum"] for k in "abcd")
     assert all("sp03.F" in p[k]["enum"] for k in "efghij")     # «rischi su crediti» e' la svalutazione crediti
+
+
+# --- Fase 5, Task 6: la scadenza stampata, completa e anche sui crediti ---
+
+def test_scadenza_stampata_nelle_forme_dei_gestionali():
+    assert c.scadenza_stampata("MUTUI MEDIO LUNGO TERMIN") == "O"           # troncato dalla colonna
+    assert c.scadenza_stampata("Finanziamenti medio-lungo") == "O"
+    assert c.scadenza_stampata("DEBITI V/BANCHE >12 MESI") == "O"
+    assert c.scadenza_stampata("Debiti v/banche > 12 mesi") == "O"
+    assert c.scadenza_stampata("Crediti oltre l'esercizio successivo") == "O"
+    assert c.scadenza_stampata("Crediti diversi (OE)") == "O"
+    assert c.scadenza_stampata("Debiti < 12 mesi") == "E"
+    assert c.scadenza_stampata("Prestiti a breve termin") == "E"
+    assert c.scadenza_stampata("Crediti (EE)") == "E"
+    assert c.scadenza_stampata("Crediti verso clienti") is None
+
+
+def test_credito_senza_scadenza_stampata_entro_e_con_oltre_oltre():
+    foglie = [F("a", "Crediti v/clienti"), F("b", "Crediti diversi (OE)"), F("c", "Depositi a garanzia oltre 12 mesi"),
+              F("d", "Cliente Rossi", antenati=("CREDITI V/CLIENTI >12 MESI",))]
+    classi = {"a": _M("sp07", dettaglio="sp07a"), "b": _M("sp06"), "c": _M("sp06"), "d": _M("sp06")}
+    out, scelte = c.scadenza_dei_crediti(foglie, classi)
+    assert (out["a"].macro, out["a"].dettaglio) == ("sp06", "sp06a")
+    assert out["b"].macro == "sp07" and out["c"].macro == "sp07" and out["d"].macro == "sp07"
+    assert len(scelte) == 4 and classi["a"].macro == "sp07"     # copie, scelte dichiarate
+
+
+def test_scadenza_dei_crediti_non_tocca_legale_rettifiche_ne_altre_macro():
+    foglie = [F("a", "Crediti", percorso="SPA.C.II.1.O"), F("b", "Fondo svalutazione crediti", lato="R"),
+              F("c", "Cassa")]
+    classi = {"a": _M("sp07", "legale", "sp07a"), "b": c.Classe("sp07", None, "modello", rettifica="SPA.C.II.F"),
+              "c": _M("sp09")}
+    out, scelte = c.scadenza_dei_crediti(foglie, classi)
+    assert out == classi and scelte == []

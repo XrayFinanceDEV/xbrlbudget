@@ -575,7 +575,10 @@ def _pezzi_della_riga(r: RigaFisica, sezione: str, lettura: _Lettura, forme: lis
         codice, etichetta = trovato.codice, trovato.etichetta
         etichetta_testo = " ".join(etichetta).strip()
         controllo = (codice + " " + etichetta_testo).upper()
-        if _ANAGRAFICA.search(etichetta_testo.upper()) or _RIPORTO.search(controllo) \
+        # un conto col codice e l'importo non e' un'anagrafica anche se si chiama «PIAZZA …» o «… PARTITA IVA …»
+        # (Fase 5, F3: 405, 1325): l'anagrafica si scarta solo su una riga senza codice o senza importi
+        anagrafica = _ANAGRAFICA.search(etichetta_testo.upper()) and not (codice and celle)
+        if anagrafica or _RIPORTO.search(controllo) \
                 or (not celle and _IMPORTI.search(controllo)):
             continue
         if not celle and not codice and not etichetta_testo:

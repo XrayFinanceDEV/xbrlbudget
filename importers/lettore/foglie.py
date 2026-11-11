@@ -15,7 +15,8 @@ from dataclasses import dataclass, replace
 from decimal import Decimal
 
 from importers.lettore import tavola
-from importers.lettore._ereditati import _CONNETTIVI, _scadenza as _scadenza_inizio, _scadenza_in_coda
+from importers.lettore._ereditati import (_CONNETTIVI, _TOTALE_DI_CHIUSURA, _scadenza as _scadenza_inizio,
+                                         _scadenza_in_coda)
 from importers.lettore.righe import Documento, Riga
 from importers.lettore.totali import (DICE_ATTIVO, DICE_PASSIVO, DICE_TOTALE, _CONTROLLO, _RISULTATO_DI_LEGGE,
                                       _RISULTATO, _RISULTATO_ESERCIZIO, _controllo_sotto, _costo_del_risultato,
@@ -708,6 +709,35 @@ def _chiude_su(doc: Documento, r: Riga, col: int, per_id: dict[str, Riga], ordin
     return False
 
 
+def _totale_senza_conti(r: Riga, precedente: Riga | None) -> bool:
+    """«Totale CLIENTI ITALIA:» stampato subito sotto il titolo del suo mastro («0201 CLIENTI ITALIA», senza importi),
+    senza alcun conto in mezzo (Fase 5, F5: la stampa compatta di 1325, 1401): e' l'unico portatore della massa del
+    mastro, quindi una foglia. Solo un totale che non somma nulla in nessuna colonna e il cui nome e' quello del
+    titolo: coi conti sotto resta un totale (mastro OPPURE foglie, mai entrambi)."""
+    if r.totale or r.figli or precedente is None or not precedente.intestazione or precedente.celle:
+        return False
+    if gettoni_di_legge(precedente.etichetta, precedente.codice):
+        return False        # una voce dello schema di legge («VI - Altre riserve», «B) Immobilizzazioni …»), non un
+                            # mastro del gestionale: il suo totale si legge coi conti o resta un totale (682, 1405)
+    if not DICE_TOTALE.search(_norm(r.etichetta)) or _DI_CUI.search(_norm(r.etichetta)) \
+            or _TOTALE_DI_CHIUSURA.search(r.etichetta.upper()):
+        return False        # «TOTALE RICAVI» sotto il titolo «RICAVI» chiude la sezione, non un mastro (615)
+    nome = _parole_in_ordine(r.etichetta)
+    titolo = _parole_in_ordine(precedente.etichetta, cifre=True)
+    if not nome or titolo[len(titolo) - len(nome):] != nome:
+        return False
+    # davanti al nome il titolo puo' portare solo il codice del mastro, in cifre o abbreviato dal nome
+    # («0201 CLIENTI ITALIA», «CLIENTI IT CLIENTI ITALIA» in 1401); «Varie altre riserve» non e' «altre riserve» (682)
+    return all(t.isdigit() or any(n.startswith(t) for n in nome) for t in titolo[:len(titolo) - len(nome)])
+
+
+def _parole_in_ordine(etichetta: str, cifre: bool = False) -> list[str]:
+    """Le parole di `_parole_nome`, nell'ordine stampato; con `cifre` anche i numeri (il codice del mastro)."""
+    return [t for t in re.split(r"[^0-9a-z]+", _norm(etichetta))
+            if (cifre and t.isdigit()) or (len(t) > 1 and t not in _STOP and not _TIPO_ROMANO.match(t.upper())
+                                           and not t.isdigit())]
+
+
 def _foglie_grezze(doc: Documento, colonna: int) -> list[Foglia]:
     dal_saldo = 0
     righe = doc.righe_del_prospetto()
@@ -716,10 +746,12 @@ def _foglie_grezze(doc: Documento, colonna: int) -> list[Foglia]:
     pos = _scorri(righe, doc.contrapposto)
     perc = _Percorsi(righe, pos)
     out: list[Foglia] = []
+    prima_sul_lato: dict[str, Riga] = {}
     for r in righe:
+        precedente, prima_sul_lato[r.lato] = prima_sul_lato.get(r.lato), r
         col = _colonna_della_riga(doc, colonna, r)
         if r.intestazione or col is None or _cella(doc, r, col) is None or _chiude_su(doc, r, col, per_id, ordine) \
-                or _e_controllo(r):
+                or (_e_controllo(r) and not _totale_senza_conti(r, precedente)):
             continue
         lato_sp = pos[r.id].lato_sp
         p, campo = _percorso(r, perc.posizione(r))

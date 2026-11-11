@@ -875,3 +875,83 @@ def test_totale_con_figli_scartati_da_r18_sulla_corrente_non_diventa_foglia(tmp_
     foglie = foglie_contabili(doc, 0)
     assert "Crediti verso clienti" not in [f.etichetta for f in foglie]
     assert sum(f.importo for f in foglie) == Decimal("800.00")
+
+
+# --- Fase 5, Task 3 (F5): un totale di mastro senza conti stampati sotto porta la massa ---
+
+def _verifica_compatta(clienti_coi_conti=False, codice_esteri="0202"):
+    """La stampa compatta di 1325/1401: un mastro col suo totale, e mastri stampati solo col titolo e il totale."""
+    voci = [(15, 100, "SITUAZIONE PATRIMONIALE"), (15, 114, "ATTIVITA'")]
+    righe = [("0101", "BANCHE", None, None), ("01010001", "BANCA ALFA", None, "1.000,00"),
+             ("01010002", "BANCA BETA", None, "500,00"), (None, None, "Totale BANCHE:", "1.500,00"),
+             ("0201", "CLIENTI ITALIA", None, None)]
+    if clienti_coi_conti:
+        righe += [("02010001", "ROSSI SPA", None, "2.000,00"), ("02010002", "BIANCHI SRL", None, "345,67")]
+    righe += [(None, None, "Totale CLIENTI ITALIA:", "2.345,67"), (codice_esteri, "CLIENTI ESTERI", None, None),
+              (None, None, "Totale CLIENTI ESTERI:", "654,33"), (None, None, "TOTALE ATTIVITA'", "4.500,00")]
+    for k, (codice, nome, totale, importo) in enumerate(righe):
+        y = 130 + 14 * k
+        if codice:
+            voci += [(15, y, codice), (147, y, nome)]
+        if totale:
+            voci.append((272, y, totale))
+        if importo:
+            voci.append((532, y, importo))
+    return voci
+
+
+def test_totale_di_mastro_senza_conti_sotto_e_una_foglia(tmp_path):
+    doc = _doc(tmp_path, _verifica_compatta())
+    corrente, _ = colonne_utili(doc)
+    foglie = foglie_contabili(doc, corrente)
+    importi = {f.etichetta: f.importo for f in foglie}
+    assert importi.get("Totale CLIENTI ITALIA:") == Decimal("2345.67")
+    assert importi.get("Totale CLIENTI ESTERI:") == Decimal("654.33")
+    assert "Totale BANCHE:" not in importi      # coi conti sotto resta un totale: mastro OPPURE foglie
+    assert sum(f.importo for f in foglie) == Decimal("4500.00")
+
+
+def test_totale_di_mastro_coi_conti_sotto_resta_un_totale(tmp_path):
+    doc = _doc(tmp_path, _verifica_compatta(clienti_coi_conti=True))
+    corrente, _ = colonne_utili(doc)
+    nomi = {f.etichetta for f in foglie_contabili(doc, corrente)}
+    assert "Totale CLIENTI ITALIA:" not in nomi and {"ROSSI SPA", "BIANCHI SRL"} <= nomi
+
+
+def test_totale_di_mastro_sotto_un_titolo_col_codice_in_lettere(tmp_path):
+    # 1401: «CLIENTI EST CLIENTI ESTERI» / «Totale CLIENTI ESTERI:»
+    doc = _doc(tmp_path, _verifica_compatta(codice_esteri="CLIENTI EST"))
+    corrente, _ = colonne_utili(doc)
+    importi = {f.etichetta: f.importo for f in foglie_contabili(doc, corrente)}
+    assert importi.get("Totale CLIENTI ESTERI:") == Decimal("654.33")
+
+
+def test_totale_di_sezione_sotto_il_suo_titolo_non_e_una_foglia(tmp_path):
+    # 615: il titolo «RICAVI» e «TOTALE RICAVI» chiudono la sezione, non un mastro senza conti
+    voci = [(15, 100, "CONTO ECONOMICO"), (15, 114, "COSTI"), (147, 128, "ACQUISTI MERCI"), (532, 128, "700,00"),
+            (147, 142, "SERVIZI"), (532, 142, "300,00"), (272, 156, "TOTALE COSTI"), (532, 156, "1.000,00"),
+            (15, 170, "RICAVI"), (272, 184, "TOTALE RICAVI"), (532, 184, "1.200,00")]
+    doc = _doc(tmp_path, voci)
+    corrente, _ = colonne_utili(doc)
+    assert "TOTALE RICAVI" not in {f.etichetta for f in foglie_contabili(doc, corrente)}
+
+
+def test_totale_di_una_voce_di_legge_sotto_il_suo_titolo_non_e_una_foglia(tmp_path):
+    # 682: «VI - Altre riserve» / «Totale altre riserve» in uno schema: non e' il mastro compatto di un gestionale
+    voci = [(15, 100, "STATO PATRIMONIALE PASSIVO"), (15, 114, "A) PATRIMONIO NETTO"), (15, 128, "I - Capitale"),
+            (532, 128, "10.000,00"), (15, 142, "VI - Altre riserve"), (272, 156, "Totale altre riserve"),
+            (532, 156, "2.500,00"), (15, 170, "IX - Utile (perdita) dell'esercizio"), (532, 170, "1.000,00"),
+            (272, 184, "Totale patrimonio netto"), (532, 184, "13.500,00")]
+    doc = _doc(tmp_path, voci)
+    corrente, _ = colonne_utili(doc)
+    assert "Totale altre riserve" not in {f.etichetta for f in foglie_contabili(doc, corrente)}
+
+
+def test_totale_sotto_una_voce_che_finisce_col_suo_nome_non_e_una_foglia(tmp_path):
+    # 682: «Varie altre riserve 1 1» (importi nell'etichetta) sopra «Totale altre riserve», che somma le righe sopra
+    voci = [(15, 100, "STATO PATRIMONIALE PASSIVO"), (147, 114, "Riserva straordinaria"), (532, 114, "2.499,00"),
+            (147, 128, "Varie altre riserve 1"), (272, 142, "Totale altre riserve"), (532, 142, "2.500,00"),
+            (147, 156, "Capitale sociale"), (532, 156, "10.000,00"), (147, 170, "Fornitori"), (532, 170, "800,00")]
+    doc = _doc(tmp_path, voci)
+    corrente, _ = colonne_utili(doc)
+    assert "Totale altre riserve" not in {f.etichetta for f in foglie_contabili(doc, corrente)}

@@ -1023,3 +1023,22 @@ def test_intero_nudo_resta_testo_dove_i_centesimi_non_sono_l_eccezione(tmp_path)
     doc = _leggi(tmp_path, [_totali_all_unita(3)])
     riga = next(r for r in doc.righe if r.etichetta.startswith("Assegni"))
     assert 0 not in riga.celle
+
+
+# --- Fase 5, Task 3 (F3): una riga di conto col codice e l'importo non e' un'anagrafica ---
+
+@pytest.mark.parametrize("etichetta", ["PIAZZA DEL MERCATO SRL", "IVA PARTITA IVA ESTERA", "VIA ROMA SRL"])
+def test_conto_col_codice_e_l_importo_non_e_un_anagrafica(tmp_path, etichetta):
+    # 405 (un cliente che si chiama «PIAZZA …»), 1325 (un conto IVA «… PARTITA IVA …»): righe col codice e l'importo
+    voci = _conti(140, ["10201", "10202", "10203", "10204", "10205"])
+    voci += [(40, 210, "10208"), (110, 210, etichetta), (560, 210, "315,40")]
+    doc = _leggi(tmp_path, [voci])
+    riga = _riga(doc, etichetta)
+    assert riga.codice == "10208" and [c.valore for c in riga.celle.values()] == [Decimal("315.40")]
+
+
+def test_riga_di_sola_anagrafica_resta_scartata(tmp_path):
+    voci = [(50, 100, "PIAZZA GARIBALDI 4 - 20100 MILANO"), (50, 112, "PARTITA IVA 01234567890")]
+    voci += _conti(140, ["10201", "10202", "10203", "10204", "10205"])
+    doc = _leggi(tmp_path, [voci])
+    assert not [r for r in doc.righe if "PIAZZA" in r.etichetta or "PARTITA" in r.etichetta]

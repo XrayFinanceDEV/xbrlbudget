@@ -274,6 +274,15 @@ def _lettore_acceso() -> bool:
     return os.environ.get("IMPORT_LETTORE", "1").strip().lower() not in _SPENTO
 
 
+# Esperimento: i lettori deterministici davanti ai quali il percorso del lettore prova per primo, solo con
+# IMPORT_LETTORE_PRIMA acceso (spento di default: nulla cambia).
+_PARSER_DOPO_IL_LETTORE = ("situazione_contabile_parser",)
+
+
+def _lettore_prima() -> bool:
+    return os.environ.get("IMPORT_LETTORE_PRIMA", "0").strip().lower() not in _SPENTO + ("",)
+
+
 _CHIAVI_REPORT = ("foglie", "ancore", "blocchi", "voti", "foglie_rivotate", "chiamate", "classi_per_fonte", "secondi",
                   "mesi_precedente", "motivo", "tetto_chiamate", "chiamate_dettagli")
 
@@ -330,11 +339,29 @@ def importa(file_path: str, *, ocr_text: str | None = None, analizza=None, leggi
     # dettagli (enrich_pdf_details) le deriva il testo, mai un modello.
     from importers.import_snello.deterministico import tentativo as _tenta_deterministico
     _det = _tenta_deterministico(file_path, ocr_text)
+    if _det["adottato"] and _det["parser"] in _PARSER_DOPO_IL_LETTORE and _lettore_prima() and _lettore_acceso():
+        # Esperimento (2026-11-11, spento di default): sulle situazioni contabili il parser quadra ma classifica
+        # per parole chiave; qui il percorso del lettore prova per primo, con lo stesso cancello. Se non adotta,
+        # resta il candidato del parser, invariato.
+        _lett, _rep = _tenta_lettore(file_path)
+        if _lett is not None:
+            try:
+                from importers.struttura_documento.analisi import struttura_deterministica
+                struttura = struttura_deterministica(file_path, modo=_MODO_DA_PARSER["lettore"])
+                r = _risultato_deterministico(_lett, struttura, _MODO_DA_PARSER["lettore"], t0)
+                r.report["lettore_percorso"] = {**_rep, "prima_di": _det["parser"]}
+                return r
+            except Exception as exc:  # noqa: BLE001 - resta il candidato del parser
+                _rep = {"esito": "eccezione_adozione", "errore": f"{type(exc).__name__}: {exc}"[:300]}
+        _det["lettore_prima"] = _rep
     if _det["adottato"]:
         from importers.struttura_documento.analisi import struttura_deterministica
         modo = _MODO_DA_PARSER.get(_det["parser"], "legge")
         struttura = struttura_deterministica(file_path, modo=modo)
-        return _risultato_deterministico(_det, struttura, modo, t0)
+        r = _risultato_deterministico(_det, struttura, modo, t0)
+        if "lettore_prima" in _det:
+            r.report["lettore_percorso"] = {**_det["lettore_prima"], "prima_di": _det["parser"]}
+        return r
 
     # Fase 3 (Task 7): il percorso del lettore, dopo i lettori noti e prima del modello di oggi, con lo
     # stesso cancello di adozione. Spento da IMPORT_LETTORE=0 (allora nulla qui cambia).

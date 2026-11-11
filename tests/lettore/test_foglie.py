@@ -1088,3 +1088,16 @@ def test_riga_di_legge_fusa_con_la_voce_madre_e_una_foglia(tmp_path):
     ricavi = sum(x.importo for x in f.values() if x.verso_ce == "ricavo")
     costi = sum(x.importo for x in f.values() if x.verso_ce == "costo")
     assert ricavi - costi == Decimal("350.00")
+
+
+def test_ripartizione_entro_oltre_12_mesi_con_la_lettera(tmp_path):
+    # Fase 5: «4) Debiti verso banche» / «a) Entro 12 mesi» / «b) Oltre 12 mesi» coi conti sotto
+    voci = [(50, 112, "STATO PATRIMONIALE PASSIVO")]
+    voci += _righe(140, [("D) DEBITI",), ("4) Debiti verso banche", "9.000,00"), (60, "a) Entro 12 mesi", "1.000,00"),
+                         (80, "BANCA C/ANTICIPI", "1.000,00"), (60, "b) Oltre 12 mesi", "8.000,00"),
+                         (80, "MUTUO PASSIVO", "5.000,00"), (80, "FINANZIAMENTO AUTO", "3.000,00"),
+                         ("Totale debiti", "9.000,00")])
+    doc = _doc(tmp_path, voci)
+    f = _per_etichetta(foglie_contabili(doc, 0))
+    assert f["MUTUO PASSIVO"].percorso_legale.endswith(".O") and f["FINANZIAMENTO AUTO"].percorso_legale.endswith(".O")
+    assert f["BANCA C/ANTICIPI"].percorso_legale.endswith(".E")

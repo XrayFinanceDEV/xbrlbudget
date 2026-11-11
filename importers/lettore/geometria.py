@@ -79,4 +79,52 @@ def righe_fisiche(parole: list[Parola], pagina: int) -> list[RigaFisica]:
             r["cy"] = sum((w.y0 + w.y1) / 2 for w in r["parole"]) / len(r["parole"])
         else:
             righe.append({"parole": [p], "y0": p.y0, "y1": p.y1, "cy": cy})
-    return [RigaFisica(pagina, r["cy"], sorted(r["parole"], key=lambda w: w.x0)) for r in righe]
+    return [RigaFisica(pagina, r["cy"], _ricompatta_lettere(sorted(r["parole"], key=lambda w: w.x0))) for r in righe]
+
+
+_MIN_LETTERE_SPAZIATE = 3
+_PASSO_MASSIMO = 2.5      # fra due lettere della stessa scritta spaziata: al piu' due caratteri e mezzo di vuoto
+_STACCO_PAROLA = 1.5      # fra due parole: uno stacco di almeno una volta e mezza il passo fra le lettere
+
+
+def _lettera(p: Parola) -> bool:
+    return len(p.testo) == 1 and p.testo.isalpha() and p.testo.isupper()
+
+
+def _ricompatta_lettere(parole: list[Parola]) -> list[Parola]:
+    """Le scritte a lettere spaziate («T O T A L E   A T T I V O», «S T A T O   P A T R I M O N I A L E») tornano
+    parole (Fase 5): una lettera maiuscola per token, almeno tre di fila a passo regolare. Lo stacco piu' largo del
+    passo fra le lettere separa le parole («TOTALE», «ATTIVO»), come lo legge chi guarda la pagina. Senza, titoli e
+    totali di sezione non si riconoscono: lato e ancore restano ignoti."""
+    out: list[Parola] = []
+    i, n = 0, len(parole)
+    while i < n:
+        if not _lettera(parole[i]):
+            out.append(parole[i])
+            i += 1
+            continue
+        j = i
+        while j + 1 < n and _lettera(parole[j + 1]) and \
+                parole[j + 1].x0 - parole[j].x1 <= _PASSO_MASSIMO * max(parole[j].x1 - parole[j].x0, 1.0):
+            j += 1
+        gruppo = parole[i:j + 1]
+        if len(gruppo) < _MIN_LETTERE_SPAZIATE:
+            out.extend(gruppo)
+            i = j + 1
+            continue
+        stacchi = [b.x0 - a.x1 for a, b in zip(gruppo, gruppo[1:])]
+        passo = min(stacchi)
+        pezzo = [gruppo[0]]
+        for stacco, p in zip(stacchi, gruppo[1:]):
+            if stacco > _STACCO_PAROLA * max(passo, 0.5):
+                out.append(_unisci(pezzo))
+                pezzo = []
+            pezzo.append(p)
+        out.append(_unisci(pezzo))
+        i = j + 1
+    return out
+
+
+def _unisci(pezzo: list[Parola]) -> Parola:
+    return Parola(pezzo[0].x0, min(p.y0 for p in pezzo), pezzo[-1].x1, max(p.y1 for p in pezzo),
+                  "".join(p.testo for p in pezzo))

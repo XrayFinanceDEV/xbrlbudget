@@ -166,7 +166,7 @@ def _valore_di_somma(r: Riga, colonna: int) -> Decimal:
 # (A - B)», «Risultato prima delle imposte», «21) Utile (perdita) dell'esercizio», «Totale proventi e oneri finanziari
 # (15 + 16 - 17 + - 17-bis)», «Totale delle rettifiche». Dentro una di queste somme i costi della produzione, gli
 # interessi e oneri, le svalutazioni e le imposte, stampati positivi, si sottraggono.
-_RISULTATO = re.compile(r"\bdifferenza\b|\brisultato\b|\butile\b|\bperdita\b|\bproventi e oneri\b"
+_RISULTATO = re.compile(r"\bdiffer(?:enza)?\b|\brisultato\b|\butile\b|\bperdita\b|\bproventi e oneri\b"
                         r"|\brettifiche di valore\b|\btotale (?:delle )?rettifiche\b")
 _COSTO_DEL_RISULTATO = re.compile(r"\bcosti della produzione\b|\binteressi e (?:altri )?oneri\b|\bsvalutazion"
                                   r"|\bimposte (?:sul reddito|correnti|relative|differite)|\btotale (?:delle )?imposte\b")
@@ -592,7 +592,12 @@ def _coppie_parziali_totali(doc: Documento, tutte: list[_Serie]) -> None:
         return
     consumati: dict[int, set[int]] = defaultdict(set)
     for serie in tutte:
-        for membri in serie.figli.values():
+        for i, membri in serie.figli.items():
+            # un risultato del conto economico stampato fra i conti («UTILE D'ESERCIZIO» col codice, che somma tutti
+            # i conti del CE) non toglie i conti alle voci della colonna dei totali: e' la loro somma, non una voce
+            # (Fase 5)
+            if serie.risultato[i]:
+                continue
             consumati[serie.colonna].update(id(serie.righe[m]) for m in membri)
     propri = {(id(serie.righe[i]), serie.colonna) for serie in tutte for i in serie.figli}
     gruppi: dict[tuple[str, str], list[Riga]] = defaultdict(list)
@@ -615,6 +620,15 @@ def _coppie_parziali_totali(doc: Documento, tutte: list[_Serie]) -> None:
                 t.verso[parziali] = -1
 
 
+# Il titolo di una voce: un codice, o la numerazione di legge («1.B.1.4 …», «b)», «5)», «II -»). Un sottotitolo senza
+# importo e senza numerazione («Altri» sotto «5) Altri ricavi e proventi») non chiude la voce sopra (Fase 5).
+_NUMERAZIONE = re.compile(r"^\s*(?:[a-e]\s?\)|\d{1,2}(?:\s?-?\s?(?:bis|ter|quater))?\s?\)|[ivx]+\s?[).\-]|\d+(?:\.\w+)+)")
+
+
+def _titolo_di_voce(r: Riga) -> bool:
+    return bool(r.codice) or bool(_NUMERAZIONE.match(_norm(r.etichetta)))
+
+
 def _gruppi_di_coppia(doc: Documento, righe: list[Riga], totali: int, parziali: int, direzione: int,
                       consumati: set[int], propri: set[tuple[int, int]], saltate: set[str]
                       ) -> list[tuple[Riga, list[Riga], list[Riga], int]]:
@@ -631,6 +645,7 @@ def _gruppi_di_coppia(doc: Documento, righe: list[Riga], totali: int, parziali: 
         for j in passo:
             r = righe[j]
             if totali in r.celle or (parziali not in r.celle and r.intestazione and r.id not in saltate
+                                     and _titolo_di_voce(r)
                                      and r.x is not None and t.x is not None and r.x <= t.x + _TOL_RIENTRO):
                 break
             finestra.append(r)

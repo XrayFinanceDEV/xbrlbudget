@@ -225,7 +225,7 @@ def test_dettagli_del_lettore_non_si_rifanno_dopo_l_adozione():
     assert pdf_importer._dettagli_gia_letti({"fonte": "qwen"}, False, False, {}) is None
 
 
-# --- Esperimento IMPORT_LETTORE_PRIMA (2026-11-11): il lettore prova prima del parser delle situazioni contabili ---
+# --- IMPORT_LETTORE_PRIMA (2026-11-11, acceso per default): il lettore prova prima del parser delle situazioni contabili ---
 
 def _parser_adottato(monkeypatch, parser="situazione_contabile_parser"):
     monkeypatch.setattr(deterministico, "tentativo",
@@ -241,7 +241,7 @@ def _parser_adottato(monkeypatch, parser="situazione_contabile_parser"):
 
 def test_lettore_prima_spento_non_tocca_il_parser(tmp_path, monkeypatch):
     _parser_adottato(monkeypatch)
-    monkeypatch.delenv("IMPORT_LETTORE_PRIMA", raising=False)
+    monkeypatch.setenv("IMPORT_LETTORE_PRIMA", "0")
     monkeypatch.setattr(import_snello, "_tenta_lettore", lambda f: (_ for _ in ()).throw(AssertionError("chiamato")))
     r = import_snello.importa(str(tmp_path / "x.pdf"))
     assert r.report["fonte"] == "deterministico:situazione_contabile_parser"
@@ -272,3 +272,13 @@ def test_lettore_prima_solo_davanti_alle_situazioni_contabili(tmp_path, monkeypa
     monkeypatch.setenv("IMPORT_LETTORE_PRIMA", "1")
     monkeypatch.setattr(import_snello, "_tenta_lettore", lambda f: (_ for _ in ()).throw(AssertionError("chiamato")))
     assert import_snello.importa(str(tmp_path / "x.pdf")).report["fonte"] == "deterministico:xbrl_reso_parser"
+
+
+def test_lettore_prima_acceso_per_default(tmp_path, monkeypatch):
+    _parser_adottato(monkeypatch)
+    monkeypatch.delenv("IMPORT_LETTORE_PRIMA", raising=False)
+    chiamato = []
+    monkeypatch.setattr(import_snello, "_tenta_lettore", lambda f: chiamato.append(f) or (None, {"esito": "vuoto"}))
+    r = import_snello.importa(str(tmp_path / "x.pdf"))
+    assert chiamato and r.report["fonte"] == "deterministico:situazione_contabile_parser"
+    assert r.report["lettore_percorso"]["prima_di"] == "situazione_contabile_parser"

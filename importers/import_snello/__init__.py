@@ -274,13 +274,15 @@ def _lettore_acceso() -> bool:
     return os.environ.get("IMPORT_LETTORE", "1").strip().lower() not in _SPENTO
 
 
-# Esperimento: i lettori deterministici davanti ai quali il percorso del lettore prova per primo, solo con
-# IMPORT_LETTORE_PRIMA acceso (spento di default: nulla cambia).
+# I lettori deterministici davanti ai quali il percorso del lettore prova per primo (Fase 5, Task 9; acceso per
+# default dal 2026-11-11, decisione del proprietario sulla misura `fase5-ee2a506`: sulle contrapposte macro +5,6, KPI
+# +11,3, dettagli +17,4 punti, nessuna perdita sugli altri documenti). IMPORT_LETTORE_PRIMA=0 torna al parser prima.
 _PARSER_DOPO_IL_LETTORE = ("situazione_contabile_parser",)
 
 
 def _lettore_prima() -> bool:
-    return os.environ.get("IMPORT_LETTORE_PRIMA", "0").strip().lower() not in _SPENTO + ("",)
+    """Acceso salvo ``IMPORT_LETTORE_PRIMA`` = 0/false/no/off; conta solo col percorso del lettore acceso."""
+    return os.environ.get("IMPORT_LETTORE_PRIMA", "1").strip().lower() not in _SPENTO
 
 
 _CHIAVI_REPORT = ("foglie", "ancore", "blocchi", "voti", "foglie_rivotate", "chiamate", "classi_per_fonte", "secondi",
@@ -340,7 +342,7 @@ def importa(file_path: str, *, ocr_text: str | None = None, analizza=None, leggi
     from importers.import_snello.deterministico import tentativo as _tenta_deterministico
     _det = _tenta_deterministico(file_path, ocr_text)
     if _det["adottato"] and _det["parser"] in _PARSER_DOPO_IL_LETTORE and _lettore_prima() and _lettore_acceso():
-        # Esperimento (2026-11-11, spento di default): sulle situazioni contabili il parser quadra ma classifica
+        # Acceso per default (IMPORT_LETTORE_PRIMA): sulle situazioni contabili il parser quadra ma classifica
         # per parole chiave; qui il percorso del lettore prova per primo, con lo stesso cancello. Se non adotta,
         # resta il candidato del parser, invariato.
         _lett, _rep = _tenta_lettore(file_path)

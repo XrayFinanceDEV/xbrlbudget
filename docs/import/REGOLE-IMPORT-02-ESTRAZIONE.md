@@ -1403,7 +1403,8 @@ confronta le foglie documento per documento):
   con saldo dare negli altri crediti (contraria a P6); `ce18`/`ce19` escono dalle classi ammesse (D6); ogni riga
   porta anche il codice del conto, e la cache distingue due conti con lo stesso nome e codici diversi. Decisione del
   proprietario (2026-11-11): niente correzioni a parole chiave, la voce la sceglie il modello;
-- **il lettore prima del parser delle situazioni contabili** (`IMPORT_LETTORE_PRIMA`, spento per default): quando
+- **il lettore prima del parser delle situazioni contabili** (`IMPORT_LETTORE_PRIMA`, **acceso per default** dal
+  2026-11-11, decisione del proprietario sulla misura qui sotto; `0` torna al parser prima): quando
   `situazione_contabile_parser` quadra, il percorso del lettore prova per primo, con lo stesso cancello; se non
   adotta resta il parser com'è.
 

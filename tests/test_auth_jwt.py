@@ -234,3 +234,26 @@ def test_un_jwt_supabase_vero_ma_troncato_esce_401(client, token_vero):
 
     assert r.status_code == 401
     assert r.headers.get("WWW-Authenticate") == "Bearer"
+
+
+# --- Creazione azienda: il 400 dice il motivo, in italiano --------------------
+
+def test_partita_iva_doppia_nomina_l_azienda_che_la_usa(client):
+    c, settings, mp = client
+    mp.setattr(settings, "DEV_USER_ID", DEV_ID)
+    assert c.post("/api/v1/companies", json={"name": "Alfa Srl", "tax_id": "01234567890", "sector": 1}).status_code == 201
+
+    r = c.post("/api/v1/companies", json={"name": "Beta Srl", "tax_id": "01234567890", "sector": 1})
+    assert r.status_code == 400
+    assert "01234567890" in r.json()["detail"] and "Alfa Srl" in r.json()["detail"]
+
+
+def test_limite_aziende_risponde_400_col_motivo(client):
+    c, settings, mp = client
+    mp.setattr(settings, "DEV_USER_ID", DEV_ID)
+    mp.setattr(settings, "MAX_COMPANIES_PER_USER", 1)
+    assert c.post("/api/v1/companies", json={"name": "Alfa Srl", "sector": 1}).status_code == 201
+
+    r = c.post("/api/v1/companies", json={"name": "Beta Srl", "sector": 1})
+    assert r.status_code == 400
+    assert r.json()["detail"].startswith("Limite aziende raggiunto (1)")

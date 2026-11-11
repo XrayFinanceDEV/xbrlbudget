@@ -231,6 +231,19 @@ def valore_nel_totale(doc: Documento, totale: Riga, figlio: Riga, colonna: int) 
     return _valore_nel_totale(totale, figlio, colonna, totale.verso.get(colonna, 1), _su_schema(doc))
 
 
+# La testata dei costi della produzione stampata negativa, fra parentesi, sopra i suoi costi positivi (Fase 5, F9:
+# 1434, 1433, 1464): la convenzione del documento mette il segno sulla testata, non sui conti. I membri devono fare
+# il suo valore assoluto.
+_TESTATA_DEI_COSTI = re.compile(r"^b\s?[).\-]\s*costi della produzione\b")
+
+
+def _bersaglio(r: Riga, colonna: int) -> Decimal:
+    v = r.celle[colonna].valore
+    if v < 0 and r.sezione == "CE" and _TESTATA_DEI_COSTI.match(_norm(r.etichetta)):
+        return -v
+    return v
+
+
 def _serie(doc: Documento) -> list[_Serie]:
     out = []
     schema = _su_schema(doc)
@@ -246,7 +259,7 @@ def _serie(doc: Documento) -> list[_Serie]:
             # un risultato chiude sempre cio' che gli sta sopra, come una riga di controllo
             out.append(_Serie(colonna.indice, [_tolleranza_cella(doc, r, colonna.indice) for r in righe], righe, valori,
                               [_di_controllo(r) or _risultato_di_controllo(r, schema) for r in righe],
-                              [r.celle[colonna.indice].valore for r in righe], [_risultato(r, schema) for r in righe],
+                              [_bersaglio(r, colonna.indice) for r in righe], [_risultato(r, schema) for r in righe],
                               [-v if v > 0 and _costo_del_risultato(r) else v for r, v in zip(righe, valori)],
                               [_marcata(r, colonna.indice) for r in righe]))
     return out

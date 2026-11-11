@@ -440,6 +440,8 @@ def _importo(doc: Documento, r: Riga, colonna: int, per_id: dict[str, Riga], lat
         v = valore_nel_totale(doc, padre, r, chiave)
         if _risultato(padre, _su_schema(doc)) and _costo_del_risultato(r):
             v = -v        # il meno e' della somma: il costo e' positivo comunque sia stampato
+        elif _risultato(padre, _su_schema(doc)) and verso_ce == "costo" and v < 0:
+            v = -v        # un costo di legge (C.17 della riga fusa, F11) stampato col meno dentro il risultato
         rovesciato = padre.verso.get(chiave, 1) == -1
     else:
         v = cella.valore
@@ -484,6 +486,9 @@ def gettoni_di_legge(r_etichetta: str, codice: str = "") -> tuple[str, ...]:
     nudo = _PERCORSO_NUDO.match(r_etichetta)
     if nudo:
         return tuple(nudo.group(1).split("."))
+    fusa = _VOCE_FUSA.match(_norm(r_etichetta))
+    if fusa:        # «C) Proventi e oneri finanziari - 17) Interessi»: la voce C.17 (F11)
+        return (fusa["lettera"].upper(), fusa["arabo"] + (f"-{fusa['suffisso']}" if fusa["suffisso"] else ""))
     t = _percorso_etichetta(r_etichetta)
     if t and (len(t) > 1 or _ENUMERATORE.match(r_etichetta)):
         return t
@@ -538,6 +543,11 @@ def _antenati_verificati(r: Riga, per_id: dict[str, Riga]) -> tuple[str, ...]:
 _DI_CUI = re.compile(r"^[-\u2013\s]*\(?di cui\b")
 
 
+# Una voce di legge stampata sulla riga della sua lettera madre («C) Proventi e oneri finanziari - 17) Interessi»,
+# Fase 5, F11: 1434, 1433): l'enumeratore arabo dopo la lettera dice che la riga e' la voce, non il sottototale.
+_VOCE_FUSA = re.compile(r"^(?P<lettera>[a-e])\s?[).\-]\D*?\s(?P<arabo>\d{1,2})\s?(?P<suffisso>bis|ter)?\s?\)\s")
+
+
 def _e_controllo(r: Riga) -> bool:
     """Una riga che chiude o pareggia, non una voce: «Totale…», «A pareggio», e nel conto economico il risultato.
     Anche «di cui esigibili oltre…»: e' un sottoinsieme della voce sopra, contarlo sarebbe contarla due volte."""
@@ -546,6 +556,8 @@ def _e_controllo(r: Riga) -> bool:
         return True
     if DICE_TOTALE.search(n):
         return True
+    if _VOCE_FUSA.search(n):
+        return False        # «C) Proventi e oneri finanziari - 17) Interessi»: la voce 17, non un risultato (F11)
     if r.sezione == "":     # sezione non riconosciuta (il conto economico oltre la pagina): solo il lessico di legge
         return bool(_RISULTATO_DI_LEGGE.search(n) or _CONTROLLO.search(n) and "utile" not in n and "perdit" not in n)
     return r.sezione == "CE" and bool(_CONTROLLO.search(n) or _risultato(r))

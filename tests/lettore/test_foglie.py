@@ -1055,3 +1055,36 @@ def test_di_cui_che_non_ripartiscono_la_voce_restano_controlli(tmp_path):
     doc = _doc(tmp_path, _debiti_con_di_cui(oltre="15.000,00"))
     f = _per_etichetta(foglie_contabili(doc, 0))
     assert "di cui esigibili entro" not in f and f["4) Debiti verso banche"].importo == Decimal("30000.00")
+
+
+# --- Fase 5, Task 5 (F9 + F11): testata dei costi stampata negativa, riga di legge fusa con la voce madre ---
+
+def _ce_testata_negativa():
+    voci = [(50, 112, "CONTO ECONOMICO")]
+    voci += _righe(140, [("A) Valore della produzione", "1.500,00"), ("1) Ricavi delle vendite", "1.200,00"),
+                         ("5) Altri ricavi e proventi", "300,00"), ("B) Costi della produzione", "(1.000,00)"),
+                         ("6) Materie prime", "600,00"), ("7) Servizi", "300,00"),
+                         ("14) Oneri diversi di gestione", "100,00"), ("Differenza A - B", "500,00"),
+                         ("C) Proventi e oneri finanziari - 17) Interessi", "(50,00)"),
+                         ("Risultato prima delle imposte", "450,00"), ("20) Imposte sul reddito", "(100,00)"),
+                         ("UTILE D'ESERCIZIO", "350,00")])
+    return voci
+
+
+def test_testata_dei_costi_negativa_chiude_sui_figli_positivi(tmp_path):
+    # 1434, 1433, 1464: «B) Costi della produzione» stampata fra parentesi sopra i costi positivi
+    doc = _doc(tmp_path, _ce_testata_negativa())
+    f = _per_etichetta(foglie_contabili(doc, 0))
+    assert "B) Costi della produzione" not in f
+    assert all(f[e].verso_ce == "costo" for e in ("6) Materie prime", "7) Servizi", "14) Oneri diversi di gestione"))
+
+
+def test_riga_di_legge_fusa_con_la_voce_madre_e_una_foglia(tmp_path):
+    # 1434, 1433: «C) Proventi e oneri finanziari - 17) Interessi» e' la voce 17, non un risultato
+    doc = _doc(tmp_path, _ce_testata_negativa())
+    f = _per_etichetta(foglie_contabili(doc, 0))
+    interessi = f["C) Proventi e oneri finanziari - 17) Interessi"]
+    assert interessi.verso_ce == "costo" and interessi.importo == Decimal("50.00")
+    ricavi = sum(x.importo for x in f.values() if x.verso_ce == "ricavo")
+    costi = sum(x.importo for x in f.values() if x.verso_ce == "costo")
+    assert ricavi - costi == Decimal("350.00")

@@ -1398,9 +1398,12 @@ confronta le foglie documento per documento):
   barra, «>12 mesi», «<12 mesi». I totali stampati di crediti e debiti entro/oltre decidono più della regola di
   testo (`percorso._scadenze_contro_ancore`). Il modello non sceglie mai entro/oltre;
 - **regole del proprietario nelle istruzioni** (`importers/lettore/regole_proprietario.py`, interruttore
-  `IMPORT_REGOLE_NEL_PROMPT`, spento per default): le regole di giudizio sulla natura (D3-D16, P5-P7, W4, R3-*),
-  una riga ciascuna, entrano nei prompt della macro-voce e dei dettagli; sparisce la frase che mandava un fornitore
-  con saldo dare negli altri crediti (contraria a P6); `ce18`/`ce19` escono dalle classi ammesse (D6); ogni riga
+  `IMPORT_REGOLE_NEL_PROMPT`, **acceso per default** dal 2026-11-11, `0` = prompt di prima): le regole di giudizio sulla natura (D3-D16, P5-P7, W4, R3-*),
+  una riga ciascuna, entrano nei prompt della macro-voce e dei dettagli; la frase sul saldo a lato invertito resta
+  per un fornitore qualunque a saldo dare (altri crediti), mentre P6 vale per i conti che si dichiarano anticipo,
+  acconto o caparra; un fondo svalutazione o rischi su crediti rettifica i crediti verso clienti, mai un fondo
+  rischi (toglierla del tutto, nella prima versione, mandava il fornitore fra i ratei e il fondo rischi su crediti
+  fra i fondi rischi: 1531); `ce18`/`ce19` escono dalle classi ammesse (D6); ogni riga
   porta anche il codice del conto, e la cache distingue due conti con lo stesso nome e codici diversi. Decisione del
   proprietario (2026-11-11): niente correzioni a parole chiave, la voce la sceglie il modello;
 - **il lettore prima del parser delle situazioni contabili** (`IMPORT_LETTORE_PRIMA`, **acceso per default** dal
@@ -1417,6 +1420,14 @@ adottava già, 1523, 1531 e 1566 (KPI), di poco 1407, 1440, 1567. I lettori dete
 identici a `main`; le poche differenze sui loro documenti vengono dalle chiamate al modello del passo dei dettagli.
 Rinunce che restano: massa non classificata (1325, 1401, 229, 615, COLOMBO), oltre soglia (1452, 281), foglie non in
 pari (588, 680, 1410, 1430). Costo per import adottato: mediana 6 chiamate (max 11), 69 s di lettore (max 142 s).*
+
+*Le due leve separate (39 documenti × 3: contrapposte, conti a colonne e i documenti adottati dal lettore; macro / KPI
+/ dettagli). Base `base5-86`: 66,3 / 66,5 / 63,0. Solo `IMPORT_LETTORE_PRIMA` (`fase5-soloprima-d33f5e5`): 69,3 / 72,5 /
+71,7, contrapposte 70,1 / 73,9 / 70,6, nessuna perdita sugli altri adottati. Più le regole riviste
+(`fase5-regole-e4be5f1`): 70,7 / 74,2 / 73,2, contrapposte 71,6 / 76,6 / 72,2, conti a colonne 55,6 / 54,0 / 52,6;
+documenti instabili 12 in entrambi i giri (6 nella base), nessuno instabile nell'adozione. Restano sotto il solo
+lettore-prima 337 e 158 (KPI) e di poco 1531 (macro). Su questi numeri il proprietario ha acceso entrambi gli
+interruttori (2026-11-11).*
 
 *Misura sul campione (78 documenti × 3 giri, `tests/corpus/punteggio.py`, giro `fase3-4de18b6`, 2026-11-09, contro `fase3-502f078` del primo innesto): dei 9 documenti il cui PDF quadra ma l'import no alla Fase 2, **7 escono quadrati in tutti i giri** (contro 2); i due fuori sono attesi (massa non classificabile; foglie davvero non in pari, attivo e passivo affiancati). Documenti salvati sbilanciati 12 → 7, nessuno nuovo. 11 documenti adottati dal lettore, nessuno instabile nell'adozione. Macro-voci esatte 78,7% → 80,6%, dettagli KPI 76,4% → 80,3%, altri dettagli 75,5% → 78,7%. Costo per import adottato: mediana 6 chiamate al modello (max 9, tetto 40 mai toccato), 66 s di lettore (max 153 s).*
 

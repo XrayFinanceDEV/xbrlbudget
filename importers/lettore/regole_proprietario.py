@@ -9,7 +9,9 @@ D15, R3-CARTE, R3-RATEI, R3-NCR, P2/P3), la scadenza (`classifica.scadenza_dei_d
 Fonte: i file `ISTRUZIONI-*.md` del campione (fuori git), regole D1-D17, P2-P7, W4, R3-*. Una riga per regola, generale,
 senza nomi di clienti. Prompt e documentazione leggono la stessa fonte.
 
-Interruttore `IMPORT_REGOLE_NEL_PROMPT` (spento per default: il prompt resta quello di prima, parola per parola).
+Interruttore `IMPORT_REGOLE_NEL_PROMPT`, acceso per default dal 2026-11-11 (decisione del proprietario sulla misura
+`fase5-regole-e4be5f1`, 39 documenti x 3: +1,4 punti di macro, +1,7 di KPI e dettagli sul solo lettore-prima, nessun
+documento instabile in piu'); `0` = il prompt di prima, parola per parola.
 """
 from __future__ import annotations
 
@@ -19,8 +21,8 @@ _SPENTO = ("0", "false", "no", "off")
 
 
 def accese() -> bool:
-    """`IMPORT_REGOLE_NEL_PROMPT`: acceso con un valore qualunque fuori da 0/false/no/off; assente = spento."""
-    return os.environ.get("IMPORT_REGOLE_NEL_PROMPT", "0").strip().lower() not in _SPENTO + ("",)
+    """`IMPORT_REGOLE_NEL_PROMPT`: acceso salvo 0/false/no/off (acceso per default dal 2026-11-11)."""
+    return os.environ.get("IMPORT_REGOLE_NEL_PROMPT", "1").strip().lower() not in _SPENTO
 
 
 # D6: nessun campo straordinario. Le voci stampate come straordinarie vanno nella voce di natura (regola sotto).

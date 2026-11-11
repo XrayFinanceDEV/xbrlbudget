@@ -457,7 +457,7 @@ def _costo():
 
 
 def test_regole_spente_prompt_e_classi_di_prima(monkeypatch):
-    monkeypatch.delenv("IMPORT_REGOLE_NEL_PROMPT", raising=False)
+    monkeypatch.setenv("IMPORT_REGOLE_NEL_PROMPT", "0")
     finto = _Sistema("ce12")
     c.classifica_macro([_costo()], chiama_json=finto)
     assert finto.sistemi == [c.PROMPT_MACRO]
@@ -509,8 +509,16 @@ def test_codice_del_conto_nel_contesto_e_nella_cache(monkeypatch):
 
 
 def test_codice_spento_una_domanda_per_nome_e_mastro(monkeypatch):
-    monkeypatch.delenv("IMPORT_REGOLE_NEL_PROMPT", raising=False)
+    monkeypatch.setenv("IMPORT_REGOLE_NEL_PROMPT", "0")
     finto = Finto("sp16")
     c.classifica_macro([_FC("a", "Diversi", "2601001"), _FC("b", "Diversi", "4901003")], chiama_json=finto)
     testo = finto.chiamate[0][0][0]["content"]
     assert "codice:" not in testo and len(finto.chiamate[0][1]["properties"]) == 1
+
+
+def test_regole_accese_per_default(monkeypatch):
+    monkeypatch.delenv("IMPORT_REGOLE_NEL_PROMPT", raising=False)
+    assert rp.accese()
+    finto = _Sistema("ce12")
+    c.classifica_macro([_costo()], chiama_json=finto)
+    assert finto.sistemi[0] == rp.prompt_macro(c.PROMPT_MACRO)

@@ -321,6 +321,14 @@ def _all_unita(r: Riga, colonna: int) -> bool:
     return cella.forma == "importo" and not _DECIMALI_STAMPATI.search(cella.testo)
 
 
+# Le altre riserve di uno schema all'unita' contengono la riserva da arrotondamento all'euro (art. 2423 c.c.), che il
+# gestionale non stampa come conto: la voce sopra il suo conto puo' scostarsi di piu' di un euro (Fase 5, F7: 1533,
+# «VI Altre riserve» all'unita' sopra il suo solo conto). Il tetto e' la tolleranza dei totali stampati del percorso
+# snello.
+_ALTRE_RISERVE = re.compile(r"\baltre riserve\b")
+_TOL_ALTRE_RISERVE = Decimal("10")
+
+
 def _catene_all_unita(serie: _Serie, direzione: int) -> None:
     """R22: una voce stampata all'unita' («contributi in conto esercizio 113.946») sopra un solo conto al centesimo
     (113.945,74) non chiude mai come catena esatta (R14), e il totale sopra, in tolleranza, prenderebbe il conto al
@@ -349,7 +357,8 @@ def _catene_all_unita(serie: _Serie, direzione: int) -> None:
                     t.x < f.x - _TOL_RIENTRO or (f.codice and not t.codice)):
                 continue
             versi = [1] + ([-1] if t.lato == "U" and serie.marcati[j] and not serie.marcati[i] else [])
-            verso = next((v for v in versi if abs(serie.bersagli[i] - v * serie.valori[j]) <= _UNITA), None)
+            tol = _TOL_ALTRE_RISERVE if _ALTRE_RISERVE.search(_norm(t.etichetta)) else _UNITA
+            verso = next((v for v in versi if abs(serie.bersagli[i] - v * serie.valori[j]) <= tol), None)
             if verso is None:
                 continue
             # il conto puo' essere a sua volta il totale dei suoi conti («Depositi bancari 5.300,05» = 3.000,10 +
@@ -360,7 +369,7 @@ def _catene_all_unita(serie: _Serie, direzione: int) -> None:
                     _marca(serie, passo, j, sotto)
             k = passo[j]
             if 0 <= k < n and serie.valori[k] and not serie.controllo[k] \
-                    and abs(serie.bersagli[i] - verso * (serie.valori[j] + serie.valori[k])) <= _UNITA:
+                    and abs(serie.bersagli[i] - verso * (serie.valori[j] + serie.valori[k])) <= tol:
                 continue
             serie.verso_cercato[i] = verso
             _marca(serie, passo, i, [j])

@@ -470,6 +470,7 @@ def test_regole_accese_nel_prompt_senza_la_frase_contraria_a_p6(monkeypatch):
     c.classifica_macro([_costo()], chiama_json=finto)
     sistema = finto.sistemi[0]
     assert rp.FRASE_CONTRARIA_A_P6 in c.PROMPT_MACRO and rp.FRASE_CONTRARIA_A_P6 not in sistema
+    assert rp.FRASE_SENZA_FORNITORE in sistema       # il fornitore a saldo dare resta un saldo a lato invertito
     assert all(f"({sigla})" in sistema for sigla, _ in rp.REGOLE_MACRO)
     assert sistema.rstrip().endswith("Rispondi solo con un JSON {id: codice}.")
     enum = finto.chiamate[0][1]["properties"]["a"]["enum"]

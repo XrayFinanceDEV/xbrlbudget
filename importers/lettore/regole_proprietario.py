@@ -26,15 +26,22 @@ def accese() -> bool:
 # D6: nessun campo straordinario. Le voci stampate come straordinarie vanno nella voce di natura (regola sotto).
 MACRO_ESCLUSE = ("ce18", "ce19")
 
-# La frase del prompt di prima che contraddice P6: un fornitore con saldo dare fra le attivita' e' spesso un acconto
-# (rimanenze o immobilizzazioni), non un credito verso altri.
+# La frase del prompt di prima va precisata per P6: un fornitore qualunque con saldo dare fra le attivita' resta un
+# saldo a lato invertito (crediti verso altri, come nelle verita': 1531), ma un anticipo, un acconto o una caparra a
+# fornitori dichiarati sono acconti (rimanenze o immobilizzazioni, 1566). Toglierla del tutto mandava il fornitore a
+# saldo dare fra i ratei e risconti (misura fase5-ee2a506).
 FRASE_CONTRARIA_A_P6 = "un fornitore, un debito o un rateo passivo con saldo dare fra le attivita'"
-FRASE_SENZA_FORNITORE = "un debito o un rateo passivo con saldo dare fra le attivita'"
+FRASE_SENZA_FORNITORE = ("un fornitore che non e' un anticipo o una caparra, un debito o un rateo passivo con saldo "
+                         "dare fra le attivita'")
 
 # Passo 1: la macro-voce. (sigla, istruzione)
 REGOLE_MACRO: tuple[tuple[str, str], ...] = (
-    ("P6", "Anticipi, acconti e caparre versati ai fornitori sono acconti: nelle rimanenze (sp05), oppure fra le "
-           "immobilizzazioni materiali (sp03) se l'acquisto e' un cespite; senza indicazione, nelle rimanenze."),
+    ("P6", "Un conto che si dichiara anticipo, acconto o caparra versati ai fornitori e' un acconto: nelle "
+           "rimanenze (sp05), oppure fra le immobilizzazioni materiali (sp03) se l'acquisto e' un cespite; senza "
+           "indicazione, nelle rimanenze. Un fornitore qualunque con saldo dare resta un credito (sp06)."),
+    ("FSC", "Un fondo svalutazione crediti o un fondo rischi su crediti (anche «tassato») stampato fra le passivita' "
+            "rettifica i crediti verso clienti (sp06.F): non e' un fondo rischi. Un fondo ammortamento rettifica il "
+            "suo cespite (sp02.F o sp03.F), mai i crediti."),
     ("P5", "I depositi cauzionali versati sono immobilizzazioni finanziarie (sp04), anche se il nome dice una "
            "scadenza."),
     ("P7", "Costi di ricerca, sviluppo e pubblicita' capitalizzati sono immobilizzazioni immateriali (sp02)."),

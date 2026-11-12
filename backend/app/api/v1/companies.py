@@ -97,7 +97,8 @@ def create_company(
         if existing:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"Company with tax_id {company.tax_id} already exists"
+                detail=f"La partita IVA {company.tax_id} è già usata dall'azienda «{existing.name}». "
+                       f"Apri quella, oppure correggi la partita IVA.",
             )
 
     db_company = models.Company(**company.model_dump(), user_id=user_id)

@@ -22,6 +22,7 @@ import {
 } from "@/lib/pratica-ingresso";
 import type { CompanyWithScenarios, ExistingBalanceOption, ScenarioSummary } from "@/types/api";
 import { getSectorName } from "@/lib/formatters";
+import { getErrorMessage } from "@/lib/utils";
 import { toast } from "sonner";
 import {
   Building2,
@@ -226,7 +227,7 @@ export default function Home() {
       toast.success("Azienda creata con successo");
       await refreshCompanies();
     } catch (err: unknown) {
-      toast.error(err instanceof Error ? err.message : "Errore durante la creazione");
+      toast.error(getErrorMessage(err, "Errore durante la creazione"));
     } finally {
       setSaving(false);
     }
@@ -252,7 +253,7 @@ export default function Home() {
       toast.success("Azienda aggiornata");
       await refreshCompanies();
     } catch (err: unknown) {
-      toast.error(err instanceof Error ? err.message : "Errore durante l'aggiornamento");
+      toast.error(getErrorMessage(err, "Errore durante l'aggiornamento"));
     } finally {
       setSaving(false);
     }
@@ -265,7 +266,7 @@ export default function Home() {
       toast.success("Azienda eliminata");
       await refreshCompanies();
     } catch (err: unknown) {
-      toast.error(err instanceof Error ? err.message : "Errore durante l'eliminazione");
+      toast.error(getErrorMessage(err, "Errore durante l'eliminazione"));
     }
   };
 
@@ -316,7 +317,7 @@ export default function Home() {
       setBilanciEsistenti(bilanci);
       setChooserStage("origine");
     } catch (err: unknown) {
-      toast.error(err instanceof Error ? err.message : "Impossibile leggere i bilanci esistenti");
+      toast.error(getErrorMessage(err, "Impossibile leggere i bilanci esistenti"));
     } finally {
       if (richiesta === richiestaBilanci.current) setCaricamentoBilanci(false);
     }
@@ -347,7 +348,7 @@ export default function Home() {
       await refreshCompanies();
       entra(ingressoDaBilancioEsistente(companyId, bilancioScelto, scenario.id));
     } catch (err: unknown) {
-      toast.error(err instanceof Error ? err.message : "Impossibile creare la pratica");
+      toast.error(getErrorMessage(err, "Impossibile creare la pratica"));
     } finally {
       setCreazioneDaEsistente(false);
     }

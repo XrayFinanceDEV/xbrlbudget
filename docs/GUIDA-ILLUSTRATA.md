@@ -232,8 +232,9 @@ proiezione — ma per cambiarle non sei qui: si cambiano in **Proiezione**.
 
 ![Proiezione](images/guida/06-proiezione.jpg)
 
-**A che cosa serve.** Qui il parziale diventa anno pieno: 22 righe di conto economico che puoi
-digitare a mano, e uno stato patrimoniale proiettato che **il server** adatta di conseguenza.
+**A che cosa serve.** Qui il parziale diventa anno pieno: 21 voci di conto economico che puoi
+digitare a mano (le due variazioni di magazzino le calcola il motore), e uno stato patrimoniale
+proiettato che **il server** adatta di conseguenza.
 
 **Che cosa c'è a schermo**
 

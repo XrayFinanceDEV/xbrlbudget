@@ -41,7 +41,11 @@ aggiornare le origini del **genitore** (sotto).
 
 Il quarto servizio, `mineru`, sta dietro il compose profile `mineru` ed è **escluso da ogni
 comando compose**, `build` compreso: la sua immagine è `FROM vllm/vllm-openai` e sul VPS non
-ci deve andare. `MINERU_OCR_ENABLED` nel compose è `false` di default.
+ci deve andare. Il compose non dichiara alcuna variabile `MINERU_*` in `environment:` (dal
+2026-10-14: lì scavalcherebbe `.env.docker`): il MinerU dei VPS è quello di gx10, acceso dalla
+credenziale Jenkins `budget-env-staging` (`MINERU_OCR_ENABLED`, `MINERU_BASE_URL`, `MINERU_API_KEY`,
+`MINERU_EXPECTED_VERSION`). Senza quelle variabili l'OCR è spento, per il default di `config.py`
+(`MINERU_OCR_ENABLED: bool = False`). → `docs/import/REGOLE-IMPORT-02-ESTRAZIONE.md` §5-bis
 
 ## La pipeline, stadio per stadio (`Jenkinsfile`)
 

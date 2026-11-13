@@ -266,7 +266,10 @@ ciò che non si può non sapere. Ogni voce dice la regola e **cosa si rompe** a 
   xlsx non è un bilancio e si rifiuta (`PDFImportError`). Su uno schema di legge uno squadrato è un
   difetto del lettore da correggere; resta ammesso per bilanci di verifica e sezioni contrapposte.
   Fra i lettori deterministici e il modello c'è ora il **percorso del lettore** (le foglie del lettore di righe, classe per id dal modello, mai un importo; si adotta solo attraverso lo stesso cancello `deterministico.esito`; interruttore `IMPORT_LETTORE=0`; sulle situazioni contabili prova **prima** di `situazione_contabile_parser`, che resta se il lettore non adotta: `IMPORT_LETTORE_PRIMA`, acceso dal 2026-11-11, `0` = parser prima; le regole del proprietario sulla natura dei conti stanno nelle istruzioni al modello, non in parole chiave (`importers/lettore/regole_proprietario.py`, `IMPORT_REGOLE_NEL_PROMPT`, acceso dal 2026-11-11); → `docs/import/REGOLE-IMPORT-02-ESTRAZIONE.md` §11, `REGOLE-IMPORT-04-QUADRATURE.md` §14). Il ripiego sull'importatore attuale resta solo per un'estrazione vuota, una struttura non
-  riconosciuta o un'eccezione imprevista. Il divieto di plug e il contratto "riferimenti, non
+  riconosciuta o un'eccezione imprevista, e col motore snello si può spegnere: `IMPORT_RIPIEGO_CLASSICO=0` (acceso per
+  default) fa uscire un documento che lo snello non adotta con un `PDFImportError` che ne dice il motivo, prima di salvare qualunque cosa;
+  acceso o spento, il motivo si dichiara sempre in `validation_report["import_snello"]["ripiego_classico"]`
+  (`usato`, `motivo`). Il divieto di plug e il contratto "riferimenti, non
   importi" valgono per l'importatore attuale.
 
 ### Quadratura, diagnostica e verdetti
@@ -1148,7 +1151,7 @@ Projects a partial year (say 9 months) to a full 12 months, against a reference 
   comes from the partial, with or without the signal.
   → `docs/import/REGOLE-IMPORT-05-INFRANNUALE.md` §5
 - **Un solo motore di proiezione, e sta in Python.** L'aritmetica che ricapitola ciò che è già a
-  schermo (i sottototali delle 22 righe di CE che l'utente digita) sta nel client; tutto ciò che
+  schermo (i sottototali delle voci di CE che l'utente digita) sta nel client; tutto ciò che
   **deriva** uno stato patrimoniale da un conto economico — rotazioni, quote residue, imposte,
   rimborso del debito, plug di cassa — sta in `calculations/intra_year_engine.py`. Il gemello
   TypeScript che girava fino al 2026-09-02 (`computeProjectedBS` in `lib/pratica-projected-bs.ts`, più
@@ -1218,7 +1221,8 @@ saltarne uno produce una voce che non compare da nessuna parte, senza alcun erro
 
 ### Tab Proiezione, tab Stampa, grafici Indicatori
 
-La Proiezione rende 22 righe di CE modificabili a mano e ne ricalcola i sottototali; da lì
+La Proiezione rende le voci di CE, 21 modificabili a mano (`EDITABLE_CE_CODES`) più le due variazioni di magazzino
+calcolate dal motore, e ne ricalcola i sottototali; da lì
 `calculateProjectedBS` costruisce lo SP proiettato e salva le ipotesi. La Stampa non ha più i
 commenti AI né «Genera commenti AI» (tolti il 2026-10-09: i testi stanno nel report PDF e Word);
 gli endpoint `…/infrannuale/ai-comments` restano nel codice senza chiamante. I due grafici degli indicatori sono un componente

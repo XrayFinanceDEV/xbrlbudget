@@ -90,6 +90,28 @@ tributari, previdenza, altri.
 Nel report di validazione ogni importo è serializzato **come stringa**: nessuna perdita di
 precisione passando da decimale a virgola mobile.
 
+### La durata dell'anno precedente (dal 2026-11-04)
+
+La colonna di confronto di un infrannuale può essere lo stesso periodo dell'anno prima (giugno su
+giugno) o l'anno prima intero. Se un semestre si salva come anno intero diventa un anno base falso, e
+sostituisce l'anno intero già importato: le macro-voci quadrano e nessun controllo se ne accorge.
+Per questo l'anno precedente estratto dallo stesso PDF si salva con la durata **stampata**
+(`importers/pdf_importer.py`, blocco dell'anno precedente):
+
+- se ha adottato il percorso del lettore, decide la colonna del lettore (`mesi_precedente`, vedi
+  pagina 02 §11, punto 7), anche a periodo pieno;
+- altrimenti, solo quando l'import è infrannuale (`period_months` passato), decide
+  `importers/durata_comparato.mesi_del_comparato`: le date di fine mese dell'anno prima stampate nelle
+  prime tre pagine. Una sola data di chiusura decide: il 31/12 vale anno intero, il 30/06 vale 6 mesi.
+  Due chiusure diverse, o nessuna, lasciano la durata ignota.
+
+Un precedente parziale si salva con `period_months` = mesi, **accanto** all'anno intero e senza
+toccarlo, con l'avviso `ANNO PRECEDENTE PARZIALE`. A durata ignota la colonna si salva come anno
+intero (`ANNO PRECEDENTE COME ANNO INTERO`), ma **non sostituisce** un anno intero già presente:
+resta quello, con l'avviso `ANNO PRECEDENTE NON SOSTITUITO`. Il record esistente si cerca sulla stessa
+durata (`period_months` = mesi, oppure `NULL`/`12`), come vuole la regola di `CLAUDE.md` su
+`period_months`. `result["prior_period_months"]` riporta la durata salvata.
+
 ### La provenienza si legge a posteriori
 
 Un import non ordinario resta riconoscibile **dopo**, senza rieseguirlo, da due posti:

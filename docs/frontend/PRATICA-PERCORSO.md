@@ -369,12 +369,15 @@ trasferimento del calcolo è questa la regola e la suite attuale.
 La Proiezione non è una tabella di sola lettura: l'utente sovrascrive a mano quasi ogni riga
 del conto economico proiettato, e lo stato patrimoniale si adegua.
 
-**Ventidue codici sono editabili** (`EDITABLE_CE_CODES`, `lib/pratica-codes.ts:2-24`) — e
-sono ventidue *diversi* dai trentadue override che il backend accetta:
+**Ventuno codici sono editabili** (`EDITABLE_CE_CODES`, `lib/pratica-codes.ts:13-35`) — e
+sono ventuno *diversi* dai trentadue override che il backend accetta:
 
-- ci sono tutte le voci di primo livello `ce01`–`ce20` **tranne `ce17`**, sostituito dalle sue
-  due sotto-voci `ce17a_rivalutazioni` e `ce17b_svalutazioni`;
-- l'unica altra sotto-voce è `ce11b_altri_accantonamenti`;
+- ci sono tutte le voci di primo livello `ce01`–`ce20` **tranne tre**: `ce17`, sostituito dalle sue
+  due sotto-voci `ce17a_rivalutazioni` e `ce17b_svalutazioni`, e le due variazioni di magazzino
+  `ce02`/`ce10` (`DERIVED_CE_CODES`), che dal 2026-09-16 calcola il motore dal movimento dello stato
+  patrimoniale: la riga compare, ma non si digita;
+- le altre sotto-voci sono `ce11b_altri_accantonamenti` e, dal 2026-11-09 (Task 5-bis),
+  `ce03a_incrementi_immobilizzazioni` (A.4), accanto a `ce03` che resta A.3;
 - **`ce08a`–`d` e `ce09a`–`d` NON sono editabili qui**, benché il backend abbia le loro
   colonne di override e `/forecast/income` le renda modificabili. Personale e ammortamenti si
   toccano nella Proiezione solo al livello dell'aggregato.

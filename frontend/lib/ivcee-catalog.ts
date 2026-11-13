@@ -521,7 +521,7 @@ export function depthOf(code: string): number {
 /**
  * La voce è una sotto-voce di dettaglio, quella che Rettifiche rientra.
  * NON coincide con depthOf(code) > 0, e la differenza è misurata, non
- * supposta: sulle 78 righe che RettificheTab rende con renderSection,
+ * supposta: sulle 79 righe che RettificheTab rende con renderSection,
  * depthOf > 0 ne seleziona 42, questa 32. Le 10 di scarto sono sp12a..h e
  * ce17a/b — voci che il catalogo appende a un aggregato sintetico
  * (sp12_riserve, ce17_rettifiche_attivita_fin) ma che nello schema art. 2424

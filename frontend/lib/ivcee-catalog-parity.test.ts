@@ -857,7 +857,7 @@ const ATTESI_RIENTRATI: string[] = [
   "ce09d_svalutazione_crediti",
 ];
 
-/** Le 78 righe che RettificheTab passa a renderSection (i debiti hanno un
+/** Le 79 righe che RettificheTab passa a renderSection (i debiti hanno un
  *  loro blocco, debtRow, che non chiede il rientro a nessuno). Era un altro
  *  rifacimento a mano della stessa sequenza; ora la dichiara il modulo delle
  *  regole, che è anche quello da cui il componente legge gli elenchi. */

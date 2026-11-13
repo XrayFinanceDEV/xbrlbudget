@@ -69,10 +69,11 @@ Per il calcolo del cashflow e della PFN (Posizione Finanziaria Netta), i debiti 
 |------|----------|-------------|-------------|------|
 | **ce01** | `ce01_ricavi_vendite` | 1) | Ricavi delle vendite e delle prestazioni | Fatturato principale |
 | **ce02** | `ce02_variazioni_rimanenze` | 2) | Variazioni delle rimanenze di prodotti in corso di lavorazione, semilavorati e finiti | Positivo = incremento scorte. Da NON confondere con voce 11) |
-| **ce03** | `ce03_lavori_interni` | 4) | Incrementi di immobilizzazioni per lavori interni | Capitalizzazione costi interni |
+| **ce03** | `ce03_lavori_interni` | 3) | Variazioni dei lavori in corso su ordinazione | A.3. Il nome della colonna è storico: dal 2026-11-09 (Task 5-bis) ogni importatore scrive qui solo A.3 |
+| **ce03a** | `ce03a_incrementi_immobilizzazioni` | 4) | Incrementi di immobilizzazioni per lavori interni | A.4, capitalizzazione di costi interni |
 | **ce04** | `ce04_altri_ricavi` | 5) | Altri ricavi e proventi | Include contributi in conto esercizio |
 
-**Valore della Produzione (VP) = ce01 + ce02 + ce03 + ce04**
+**Valore della Produzione (VP) = ce01 + ce02 + ce03 + ce03a + ce04** (`calculations/ce_result.py`)
 
 ### B) Costi della Produzione
 
@@ -191,7 +192,7 @@ Posizione Finanziaria Netta (PFN) = (sp16a + sp17a + sp16b + sp17b + sp16c + sp1
 ### Vincoli Conto Economico
 
 ```
-VP   = ce01 + ce02 + ce03 + ce04
+VP   = ce01 + ce02 + ce03 + ce03a + ce04
 COPRO = ce05 + ce06 + ce07 + ce08 + ce09 + ce10 + ce11 + ce11b + ce12
 EBIT  = VP − COPRO
 Risultato ante imposte = EBIT + (ce13 + ce14 − ce15 + ce16) + ce17 + (ce18 − ce19)
@@ -242,7 +243,7 @@ Elenco dei tag XBRL più comuni per ciascun campo (priority_1 dalla mappatura V2
 |-------|-----------------------|
 | ce01 | `itcc-ci:ValoreProduzioneRicaviVenditePrestazioni` |
 | ce02 | `itcc-ci:ValoreProduzioneVariazioniRimanenze` |
-| ce03 | `itcc-ci:ValoreProduzioneIncrementoImmobilizzazioniLavoriInterni` |
+| ce03a | `itcc-ci:ValoreProduzioneIncrementiImmobilizzazioniLavoriInterni` (priority_2: `…IncrementoImmobilizzazioniLavoriInterni`) |
 | ce04 | `itcc-ci:ValoreProduzioneAltriRicaviProventiTotaleAltriRicaviProventi` |
 | ce05 | `itcc-ci:CostiProduzioneMateriePrimeSussidiarieConsumoMerci` |
 | ce06 | `itcc-ci:CostiProduzioneServizi` |

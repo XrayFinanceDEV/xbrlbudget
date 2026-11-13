@@ -261,7 +261,7 @@ Ogni riga rende `labelOf(field)` — la grafia **autonoma** del catalogo IV-CEE
 un'intestazione che la spieghi, e nel giornale delle rettifiche quell'intestazione non c'è.
 
 Il **rientro** delle sotto-voci lo dichiara il catalogo (`isDettaglio`), non si deduce dalla
-profondità del codice. Non è un dettaglio estetico: sulle 78 righe passate a `renderSection`,
+profondità del codice. Non è un dettaglio estetico: sulle 79 righe passate a `renderSection`,
 `depthOf(code) > 0` ne selezionerebbe 42 contro le 32 corrette. Le 10 di scarto sono `sp12a..h` e
 `ce17a/b` — hanno un padre nel catalogo ma portano già la propria lettera di schema (`A.II)`,
 `18)`) e restano a filo. Il confronto è pinnato in `ivcee-catalog-parity.test.ts`.

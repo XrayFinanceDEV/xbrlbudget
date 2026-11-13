@@ -224,7 +224,7 @@ sulle righe che portano un campo fissava il codice, non il testo. Un futuro «ar
 quegli elenchi non vanno aggiornati per far passare il test. L'unica eccezione è una riga aggiunta
 di proposito (§3).
 
-**Il testo di ogni etichetta**: `ATTESI_CONFRONTO_LABELS` (87 grafie contestuali),
+**Il testo di ogni etichetta**: `ATTESI_CONFRONTO_LABELS` (88 grafie contestuali),
 `ATTESI_LABELS_AUTONOME` (tutte e 100 le autonome), `ATTESI_PROSPETTO_LABELS` (le 108 righe di
 prospetto che portano un campo). Qui un cambiamento deliberato è legittimo e si aggiorna la riga
 nello stesso commit che cambia il testo. Quello che non è legittimo è aggiornarla per far tornare
@@ -236,8 +236,8 @@ Il test copre anche il rientro di Rettifiche: `isDettaglio` seleziona 32 delle 7
 `18)`) e restano a filo (→ `RETTIFICHE.md` §6).
 
 **L'ordine di resa di Rettifiche è dichiarato una volta sola** (2026-08-11):
-`RETTIFICHE_RENDER_SECTIONS` (gli elenchi passati a `renderSection`, in ordine, 78 righe) e
-`RETTIFICHE_RENDER_ORDER` (ogni codice reso, debiti compresi, 92). Li consumano il componente
+`RETTIFICHE_RENDER_SECTIONS` (gli elenchi passati a `renderSection`, in ordine, 79 righe) e
+`RETTIFICHE_RENDER_ORDER` (ogni codice reso, debiti compresi, 93). Li consumano il componente
 **e** i due test. Prima ognuno dei tre lo riscriveva a mano, e il rifacimento del test di parità
 aveva **perso** `sp18_ratei_risconti_passivi`: pinnava 91 codici dove la vista ne rende 92, quindi
 non si sarebbe accorto della sparizione di sp18. **Limite noto:** questo fissa quali elenchi e in

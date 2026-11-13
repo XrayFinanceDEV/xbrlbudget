@@ -884,3 +884,9 @@ protocollo `1`.
   20 minuti, migrare l'endpoint a `/tasks` con polling invece di aumentare ancora i timeout.
 - La pagina annuale `/import` non è stata modificata: perimetro corrente = import iniziale
   della pagina infrannuale.
+
+> **Superato (riallineamento del 2026-11-13).** Dal 2026-10-26 (commit `80ac6bf`) il client parla l'API di
+> MinerU 4 su gx10 (`/v1/health`, `/v1/file_parse` con `tier=advanced`, polling su `/v1/tasks/{id}/result`):
+> `MINERU_BACKEND` e `MINERU_LANGUAGE` non esistono più, `MINERU_EXPECTED_VERSION` vale `4` e fissa solo il
+> numero maggiore, e il MinerU dei VPS è quello di gx10, non il container locale. Lo stato attuale è in
+> `docs/import/REGOLE-IMPORT-02-ESTRAZIONE.md` §5-bis.

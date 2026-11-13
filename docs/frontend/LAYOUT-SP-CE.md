@@ -230,7 +230,7 @@ prospetto che portano un campo). Qui un cambiamento deliberato è legittimo e si
 nello stesso commit che cambia il testo. Quello che non è legittimo è aggiornarla per far tornare
 verde la suite **senza sapere perché il testo si è mosso**.
 
-Il test copre anche il rientro di Rettifiche: `isDettaglio` seleziona 32 delle 78 righe passate a
+Il test copre anche il rientro di Rettifiche: `isDettaglio` seleziona 32 delle 79 righe passate a
 `renderSection`, dove `depthOf(code) > 0` ne selezionerebbe 42 — le 10 di scarto sono `sp12a..h` e
 `ce17a/b`, che hanno un padre nel catalogo ma portano già la propria lettera di schema (`A.II)`,
 `18)`) e restano a filo (→ `RETTIFICHE.md` §6).

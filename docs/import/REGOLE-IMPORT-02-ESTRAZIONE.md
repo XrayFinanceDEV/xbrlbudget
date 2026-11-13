@@ -1433,6 +1433,17 @@ interruttori (2026-11-11).*
 
 *Misura della Fase 4 (78 documenti × 3 giri, giro `fase4-ad2b581`, 2026-11-09, contro `fase3-4de18b6`, percorso classico acceso come ripiego): il lettore adotta **14 documenti** (prima 11), nessuno instabile nell'adozione; i documenti salvati dal modo `legge` scendono da 6 a 4 (restano 161, 1426, 1445 e 1533, i quattro aperti: massa non classificabile, gerarchia senza totali, blocchi di CE, un'eco di 1,30 € che si chiuderebbe solo con un tappo). Documenti salvati sbilanciati 7 → 5, nessuno nuovo; i bersagli restano 7/9 quadrati in tutti i giri. Macro-voci esatte 80,6%, dettagli KPI 80,3% (invariati), altri dettagli 78,7% → 79,5%. I lettori deterministici cambiano numeri solo per A.4 che passa in `ce03a` (Task 5-bis) e su due documenti che ora coincidono con la verità. Il ripiego classico serve solo a tre documenti che nessun percorso snello legge (`non_applicabile`). Costo per import adottato: mediana 6 chiamate (max 9), 64 s di lettore (max 129 s). Due documenti adottati dal lettore perdono un campo: su uno, un conto di 4.178 € classificato dal modello passa da altri debiti a ratei passivi (il lettore è identico byte per byte prima e dopo: è la variabilità del modello); su un altro, 10,57 € di B.III.2.d-bis senza un percorso di legge vanno in `sp07g`.*
 
+### Il ripiego sul percorso classico si può spegnere (Fase 4, 2026-11-09)
+
+`IMPORT_RIPIEGO_CLASSICO` è **acceso per default**; `0`/`false`/`no`/`off` lo spegne
+(`pdf_importer._ripiego_classico_acceso`). Quando lo snello non adotta un documento, o non è stato tentato, il motivo
+si dichiara sempre in `validation_report["import_snello"]["ripiego_classico"]` (`usato`, `motivo`, da
+`_motivo_ripiego_classico`), acceso o spento. Spento, il documento non passa all'importatore classico: esce con un
+`PDFImportError` («percorso classico spento (IMPORT_RIPIEGO_CLASSICO=0) e il percorso snello non ha adottato il
+documento (motivo)») prima di salvare qualunque cosa. Conta solo col motore snello: con `IMPORT_MOTORE=classico`
+non ha effetto. È l'interruttore dei giri di misura «a classico spento»: dice quali documenti si reggono solo sul
+classico.
+
 ### I parser di layout sono congelati (Fase 4, 2026-11)
 
 Con il percorso generico del lettore, i parser per singolo layout di gestionale dentro

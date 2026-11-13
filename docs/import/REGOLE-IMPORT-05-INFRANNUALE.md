@@ -53,6 +53,12 @@ annualizzazione**.
 Nell'interfaccia questo è il pannello giallo "Serve il bilancio storico {anno}", con due strade:
 caricare il PDF annuale, oppure **"Prosegui senza l'anno precedente (solo annualizzazione)"**.
 
+La colonna di confronto stampata nel PDF infrannuale **non** fa sempre da riferimento. Se copre
+lo stesso periodo dell'anno prima (giugno su giugno) si salva come periodo parziale, accanto
+all'anno intero e senza sostituirlo, e il riferimento resta da importare. Se non stampa la data di
+chiusura non sostituisce un anno intero già importato. → pagina 06, «La durata dell'anno
+precedente».
+
 ### Regime 1 — con riferimento: crescita sul riferimento
 
 | Voce | Regola |

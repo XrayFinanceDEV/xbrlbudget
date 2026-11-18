@@ -3,20 +3,20 @@
   "hash_algorithm": "sha256",
   "scope": "Test/**/*.(pdf|xbrl|xml|csv), excluding Test/_analysis",
   "summary": {
-    "physical_files": 233,
-    "unique_contents": 230,
+    "physical_files": 311,
+    "unique_contents": 308,
     "formats": {
       "csv": 1,
-      "pdf": 211,
-      "xbrl": 18
+      "pdf": 284,
+      "xbrl": 23
     },
     "routes": {
       "csv": 1,
       "ivcee": 55,
       "trial_balance": 19,
-      "unknown": 135,
+      "unknown": 208,
       "unsupported": 2,
-      "xbrl": 18
+      "xbrl": 23
     },
     "verified": 1,
     "truth_orphans": []
@@ -89,12 +89,45 @@
       "status": "open"
     },
     {
+      "sha256": "06595ccbe12ec2f2396e4c7b415bf79428c143c3b6007983d23a4a7acd01f9de",
+      "paths": [
+        "budget-wk-47/budget_1776_ELEKTROVENT 30.09.pdf"
+      ],
+      "format": "pdf",
+      "size_bytes": 295145,
+      "route_expected": "unknown",
+      "subtype": null,
+      "status": "open"
+    },
+    {
+      "sha256": "071d6cb331683cd3f0a609aea4c9c41c2df1fefc01bf35d3bfd5b16a18b7446a",
+      "paths": [
+        "budget-wk-47/budget_1740_PresentazioneSituazione310326.pdf"
+      ],
+      "format": "pdf",
+      "size_bytes": 1431642,
+      "route_expected": "unknown",
+      "subtype": null,
+      "status": "open"
+    },
+    {
       "sha256": "075195c5c2d7f9cb7bee5c3e5ce86154bf3cd6389895b41ea79d67e494b0084f",
       "paths": [
         "budget-wk-43/budget_1411_Napolitano_CEE-ordinario_2026-09_v1.pdf"
       ],
       "format": "pdf",
       "size_bytes": 128425,
+      "route_expected": "unknown",
+      "subtype": null,
+      "status": "open"
+    },
+    {
+      "sha256": "07a26b099e4a79237160e0c6a690e2c19b02b979904884cd08f8fe6d70141a8e",
+      "paths": [
+        "budget-wk-46/budget_1714_CUTTING EDGES situazione contabile al 30.09.2026.pdf"
+      ],
+      "format": "pdf",
+      "size_bytes": 407189,
       "route_expected": "unknown",
       "subtype": null,
       "status": "open"
@@ -117,6 +150,17 @@
       ],
       "format": "pdf",
       "size_bytes": 296983,
+      "route_expected": "unknown",
+      "subtype": null,
+      "status": "open"
+    },
+    {
+      "sha256": "0c9d163fd2656a13bc52ee593989daebcfef1da76afabd66eba66cbc729fbc63",
+      "paths": [
+        "budget-wk-47/budget_1782_MSIT 30 09 2026-2.pdf"
+      ],
+      "format": "pdf",
+      "size_bytes": 28075,
       "route_expected": "unknown",
       "subtype": null,
       "status": "open"
@@ -221,6 +265,17 @@
       "status": "open"
     },
     {
+      "sha256": "17cfe5f50526722538577947d4d56a998dec9bc61f655189e9964b114ab573e8",
+      "paths": [
+        "budget-wk-46/budget_1705_MSIT - Stampa situazione contabile ordinarie_start_ MULTI versione_ 2026.01.02 c.pdf"
+      ],
+      "format": "pdf",
+      "size_bytes": 33438,
+      "route_expected": "unknown",
+      "subtype": null,
+      "status": "open"
+    },
+    {
       "sha256": "1a81de857cfcfe7c92ee3b4c68ceee8081a411441936dbfaf1091ca917e2aed3",
       "paths": [
         "2026-06/june_xbrl/budget_364_02718750025-20251231.xbrl"
@@ -238,6 +293,28 @@
       ],
       "format": "pdf",
       "size_bytes": 31028,
+      "route_expected": "unknown",
+      "subtype": null,
+      "status": "open"
+    },
+    {
+      "sha256": "1af9a001196d3227ad5ea7ad1db724013c7be65119efbd8e17a3e118abee7f2f",
+      "paths": [
+        "budget-wk-47/budget_1773_02052940349.xbrl.pdf"
+      ],
+      "format": "pdf",
+      "size_bytes": 199071,
+      "route_expected": "unknown",
+      "subtype": null,
+      "status": "open"
+    },
+    {
+      "sha256": "1bb68030ca1fb2bcd82f6a4f3d269852588f9f09fb38f20d61e373c903e554ce",
+      "paths": [
+        "budget-wk-47/budget_1784_EXTRATECH_181126.pdf"
+      ],
+      "format": "pdf",
+      "size_bytes": 549588,
       "route_expected": "unknown",
       "subtype": null,
       "status": "open"
@@ -265,12 +342,34 @@
       "status": "open"
     },
     {
+      "sha256": "1cad82d91998184ed72ca1397875c6e089663cecec4efcedbb0d904fff780970",
+      "paths": [
+        "budget-wk-47/budget_1758_Ni.Bi.xbrl.25.Taoticket.xbrl"
+      ],
+      "format": "xbrl",
+      "size_bytes": 319938,
+      "route_expected": "xbrl",
+      "subtype": "native_xbrl",
+      "status": "open"
+    },
+    {
       "sha256": "1ddf64cafd3937a241dea897c5d78c77430440aa7ec3ed89ef855b57b2aec936",
       "paths": [
         "2026-10-15/budget_1341_BILANCIO IN XBRL.pdf"
       ],
       "format": "pdf",
       "size_bytes": 852748,
+      "route_expected": "unknown",
+      "subtype": null,
+      "status": "open"
+    },
+    {
+      "sha256": "1fdc051ceb6f22496d0b4f1aa7c1a7c4f98b29bfc87ed880518b9557330734f9",
+      "paths": [
+        "budget-wk-46/budget_1708_BILANCIO 2025 (3).pdf"
+      ],
+      "format": "pdf",
+      "size_bytes": 124338,
       "route_expected": "unknown",
       "subtype": null,
       "status": "open"
@@ -284,6 +383,28 @@
       "size_bytes": 446351,
       "route_expected": "ivcee",
       "subtype": "bilancio XBRL esteso con sottoconti (provvisorio)",
+      "status": "open"
+    },
+    {
+      "sha256": "1ff8e6c595602d0c5d00f9fcdd59296482549ed4f315c9cbc8784b4340119c3a",
+      "paths": [
+        "budget-wk-46/budget_1639_Test maggio 2026 su dicembre 2025 OK.pdf"
+      ],
+      "format": "pdf",
+      "size_bytes": 79130,
+      "route_expected": "unknown",
+      "subtype": null,
+      "status": "open"
+    },
+    {
+      "sha256": "217c99c0bfacb3ff80fad8dfd94f88e2ce8ed05b4b1a32958b169cef60d4ac7d",
+      "paths": [
+        "budget-wk-47/budget_1743_Laguna_Componenti_Bilancio_2025_DEMO.pdf"
+      ],
+      "format": "pdf",
+      "size_bytes": 73027,
+      "route_expected": "unknown",
+      "subtype": null,
       "status": "open"
     },
     {
@@ -315,6 +436,17 @@
       ],
       "format": "pdf",
       "size_bytes": 347005,
+      "route_expected": "unknown",
+      "subtype": null,
+      "status": "open"
+    },
+    {
+      "sha256": "241168fa53ccce41ad6178e4583ce3cd488db63d1079f6e2ada36346f2bb40a4",
+      "paths": [
+        "budget-wk-47/budget_1749_BIL 31-12-2025.pdf"
+      ],
+      "format": "pdf",
+      "size_bytes": 253643,
       "route_expected": "unknown",
       "subtype": null,
       "status": "open"
@@ -419,12 +551,34 @@
       "status": "open"
     },
     {
+      "sha256": "2935ebd98cc0f79384647cd7ffb91fd6856e57f0b991dec03b1b8a3389b00dcb",
+      "paths": [
+        "budget-wk-47/budget_1745_TELEMA_30.09.2026_IV_Direttiva_quadrato.pdf"
+      ],
+      "format": "pdf",
+      "size_bytes": 5335,
+      "route_expected": "unknown",
+      "subtype": null,
+      "status": "open"
+    },
+    {
       "sha256": "296c6c132785aeb200862877288c5923568065b4cbf009102fc6ea6d451f5105",
       "paths": [
         "budget-wk-44/budget_1562_vis_agr_izfyxmihyy_2025.pdf"
       ],
       "format": "pdf",
       "size_bytes": 145808,
+      "route_expected": "unknown",
+      "subtype": null,
+      "status": "open"
+    },
+    {
+      "sha256": "29f45eaae46440cb9997537a33a00945caf4b22e4442578f1fadf4320ea751e8",
+      "paths": [
+        "budget-wk-46/budget_1665_Vismara_31_08_2026_Bilancio_CEE_IV_Direttiva.pdf"
+      ],
+      "format": "pdf",
+      "size_bytes": 11539,
       "route_expected": "unknown",
       "subtype": null,
       "status": "open"
@@ -562,6 +716,17 @@
       "status": "open"
     },
     {
+      "sha256": "339e9b0426245bb6ea71d71426c12e876207d36ca4a0ae366c141850b4548deb",
+      "paths": [
+        "budget-wk-46/budget_1695_SITUAZIONE PROVVISORIA 30062026.pdf"
+      ],
+      "format": "pdf",
+      "size_bytes": 21410,
+      "route_expected": "unknown",
+      "subtype": null,
+      "status": "open"
+    },
+    {
       "sha256": "33efb5a57b2b61ca451425f27d38c1970efe2ce7cd6b98b7034b368871429784",
       "paths": [
         "2026-10-weekend/budget_1404_Metaldecor_Bilancio_solo_2025.pdf"
@@ -584,6 +749,17 @@
       "status": "open"
     },
     {
+      "sha256": "34abeed06c4b1f4621ae6fd6abdda99266505533fc9ce4b95a8e15797fa70d63",
+      "paths": [
+        "budget-wk-46/budget_1700_FLLI ONOFRIO 2025.pdf"
+      ],
+      "format": "pdf",
+      "size_bytes": 24586,
+      "route_expected": "unknown",
+      "subtype": null,
+      "status": "open"
+    },
+    {
       "sha256": "3545cbd3136e9fd9cda12f4592b82221ada7be4a88cf68979631008d00cbc66a",
       "paths": [
         "2026-primo-lotto/successTerzo/success/budget_313_INQCEED-001.pdf"
@@ -601,6 +777,17 @@
       ],
       "format": "pdf",
       "size_bytes": 37063,
+      "route_expected": "unknown",
+      "subtype": null,
+      "status": "open"
+    },
+    {
+      "sha256": "35b8f70c21a9796890f6de5c36bc258e621ea63b87fd37e76d425af6f79337c9",
+      "paths": [
+        "budget-wk-47/budget_1772_BILANCIO PER FORMULA.pdf"
+      ],
+      "format": "pdf",
+      "size_bytes": 384350,
       "route_expected": "unknown",
       "subtype": null,
       "status": "open"
@@ -683,6 +870,17 @@
       "status": "open"
     },
     {
+      "sha256": "3f27a0920a2de75d3b9dbd5edde9bfd8316d97e0de0f489532b686a9b61bed79",
+      "paths": [
+        "budget-wk-47/budget_1774_BILANCIO PER FORMULA.pdf"
+      ],
+      "format": "pdf",
+      "size_bytes": 509495,
+      "route_expected": "unknown",
+      "subtype": null,
+      "status": "open"
+    },
+    {
       "sha256": "411736eb46b98e7aea5152995ab73624afaa996077d1e42fb48251830c0b3174",
       "paths": [
         "budget-wk-43/budget_1444_ProfilatiBrescia_CE-UE-con-conti_2026-09.pdf"
@@ -700,6 +898,17 @@
       ],
       "format": "pdf",
       "size_bytes": 121776,
+      "route_expected": "unknown",
+      "subtype": null,
+      "status": "open"
+    },
+    {
+      "sha256": "414ca5802b29a702fa6c62533bf99c29268607fc90bf0e1429543183d8115224",
+      "paths": [
+        "budget-wk-46/budget_1699_PROVVISORIO 30092026.pdf"
+      ],
+      "format": "pdf",
+      "size_bytes": 22974,
       "route_expected": "unknown",
       "subtype": null,
       "status": "open"
@@ -744,6 +953,28 @@
       ],
       "format": "pdf",
       "size_bytes": 32430,
+      "route_expected": "unknown",
+      "subtype": null,
+      "status": "open"
+    },
+    {
+      "sha256": "47032e51e2c5cb2f8822cc478b2cf68c4b086c36e341ee7fbdb890dd3c7d3e1b",
+      "paths": [
+        "budget-wk-47/budget_1753_Bilancio CEE 2025 DEF.pdf"
+      ],
+      "format": "pdf",
+      "size_bytes": 148446,
+      "route_expected": "unknown",
+      "subtype": null,
+      "status": "open"
+    },
+    {
+      "sha256": "48f7ade7414bc4c6d50e87e39184950a848541c363c449c4497ad1bc40ee6eb9",
+      "paths": [
+        "budget-wk-46/budget_1667_CONTO ECONOMICO AL 30.9.2026.pdf"
+      ],
+      "format": "pdf",
+      "size_bytes": 564668,
       "route_expected": "unknown",
       "subtype": null,
       "status": "open"
@@ -870,6 +1101,17 @@
       "status": "open"
     },
     {
+      "sha256": "55d9f4aee4d601da8b381065df8a6f23fb545732555e9a56577817d580f1e8f8",
+      "paths": [
+        "budget-wk-46/budget_1707_MSIT-001 (17).pdf"
+      ],
+      "format": "pdf",
+      "size_bytes": 24875,
+      "route_expected": "unknown",
+      "subtype": null,
+      "status": "open"
+    },
+    {
       "sha256": "55e27ecf081fcd55463c92787560b4b11e823c942b9a34571ecb16c2ecd8ee5b",
       "paths": [
         "budget-wk-43/budget_1469_Metaldecor_bilancio-dettaglio_2025.pdf"
@@ -925,12 +1167,34 @@
       "status": "open"
     },
     {
+      "sha256": "5a82c04065567e1d3ba2835599725ec93655e58e1ff6f9005551fd2d369702a8",
+      "paths": [
+        "budget-wk-47/budget_1746_30062026.pdf"
+      ],
+      "format": "pdf",
+      "size_bytes": 38545,
+      "route_expected": "unknown",
+      "subtype": null,
+      "status": "open"
+    },
+    {
       "sha256": "5c27b6af55fdeb4de129f95a80066f6195b6fb05ee73c3292550dcd3350a8fa9",
       "paths": [
         "budget-wk-43/budget_1464_Metaldecor_civilistico-abbreviato_2025.pdf"
       ],
       "format": "pdf",
       "size_bytes": 19045,
+      "route_expected": "unknown",
+      "subtype": null,
+      "status": "open"
+    },
+    {
+      "sha256": "5c7c0826ca44b46f3cbf5132701882ce0de547d918df327e40d7933813956494",
+      "paths": [
+        "budget-wk-46/budget_1673_BILANCIOINSPECTA31122025.pdf"
+      ],
+      "format": "pdf",
+      "size_bytes": 47237,
       "route_expected": "unknown",
       "subtype": null,
       "status": "open"
@@ -947,6 +1211,28 @@
       "status": "open"
     },
     {
+      "sha256": "620f06645848169ebca0c2527cda07bb8cd1064f66b91dd38f3ab6fdc6822bf9",
+      "paths": [
+        "budget-wk-46/budget_1684_ICARE 30092026.pdf"
+      ],
+      "format": "pdf",
+      "size_bytes": 17293,
+      "route_expected": "unknown",
+      "subtype": null,
+      "status": "open"
+    },
+    {
+      "sha256": "63702e46912aa9f5bd61a1e6f47146ab63efc20b039c401da59ab6ffbd1aaae3",
+      "paths": [
+        "budget-wk-47/budget_1752_Aste bilancio cee solo al 31 10 2026.pdf"
+      ],
+      "format": "pdf",
+      "size_bytes": 96760,
+      "route_expected": "unknown",
+      "subtype": null,
+      "status": "open"
+    },
+    {
       "sha256": "638b6f36f01b45c42fdc5acafd049f631f88ed3b69a566823f3ab42e08ff5a66",
       "paths": [
         "2026-primo-lotto/successTerzo/success/budget_328_2025- ELLE ERRE BIL.pdf"
@@ -955,6 +1241,17 @@
       "size_bytes": 515506,
       "route_expected": "ivcee",
       "subtype": "IV CEE ordinario civilistico (voci di legge)",
+      "status": "open"
+    },
+    {
+      "sha256": "63db1458a1fd8dd7da572f4ebe513fc767f0200585e77bfd45f6897c5f4b96a8",
+      "paths": [
+        "budget-wk-46/budget_1674_CEMS_Bilancio_30-06-2026_IV_Direttiva (1) (1).pdf"
+      ],
+      "format": "pdf",
+      "size_bytes": 7097,
+      "route_expected": "unknown",
+      "subtype": null,
       "status": "open"
     },
     {
@@ -1035,6 +1332,28 @@
       "status": "open"
     },
     {
+      "sha256": "6956924c8e93321b5bc3611a992757c9316d511c02f3f15408329871fe6721fe",
+      "paths": [
+        "budget-wk-46/budget_1645_bozza 31_08_26 VISMARA CON SAL.pdf"
+      ],
+      "format": "pdf",
+      "size_bytes": 16500,
+      "route_expected": "unknown",
+      "subtype": null,
+      "status": "open"
+    },
+    {
+      "sha256": "6a4e1b4f41ea5e1339ec0a7c3fe8d6da28594b7fa6b4bc0c34968cf112f2a16d",
+      "paths": [
+        "budget-wk-47/budget_1729_TELEMA_ BDV PROVVISORIO 30.09.2026.pdf"
+      ],
+      "format": "pdf",
+      "size_bytes": 2102127,
+      "route_expected": "unknown",
+      "subtype": null,
+      "status": "open"
+    },
+    {
       "sha256": "6a851d6757b6041a7611400d27d7617d4ece9d58b1e8b16da3eb496f0ea62d97",
       "paths": [
         "budget-wk-44/budget_1529_Bilancio 2025.pdf"
@@ -1054,6 +1373,17 @@
       "size_bytes": 3466,
       "route_expected": "ivcee",
       "subtype": "sintetico riclassificato, macrovoci aggregate",
+      "status": "open"
+    },
+    {
+      "sha256": "6b1240148ad1360eea809631f1dc151a31d30b058eac8a3116999b025bacaf18",
+      "paths": [
+        "budget-wk-46/budget_1696_2025-1.pdf"
+      ],
+      "format": "pdf",
+      "size_bytes": 18608,
+      "route_expected": "unknown",
+      "subtype": null,
       "status": "open"
     },
     {
@@ -1096,6 +1426,17 @@
       ],
       "format": "pdf",
       "size_bytes": 334174,
+      "route_expected": "unknown",
+      "subtype": null,
+      "status": "open"
+    },
+    {
+      "sha256": "6f2194903d72026bd8093b3d856526cba790f4beba122dee174bd0f0348fab5e",
+      "paths": [
+        "budget-wk-47/budget_1727_Stampa_bilancio_di_verifica 31 10.pdf"
+      ],
+      "format": "pdf",
+      "size_bytes": 33287,
       "route_expected": "unknown",
       "subtype": null,
       "status": "open"
@@ -1213,6 +1554,17 @@
       "status": "open"
     },
     {
+      "sha256": "75fedb26760260206094d26d7d72b98e187288aedd50af5896ca3abb9e617349",
+      "paths": [
+        "budget-wk-46/budget_1720_Bilancio_IV_CEE_2025_Cutting_Edges_Srl.pdf"
+      ],
+      "format": "pdf",
+      "size_bytes": 546006,
+      "route_expected": "unknown",
+      "subtype": null,
+      "status": "open"
+    },
+    {
       "sha256": "75fef3d401d04b84bc0826c5ca46dc7a70fe43f11bf7b7bb8d01a3b726e5f852",
       "paths": [
         "budget-wk-43/budget_1406_SGH_bilancio-esercizio_2025.pdf"
@@ -1279,6 +1631,17 @@
       "status": "open"
     },
     {
+      "sha256": "7f31231a44f5656b62661bdbde4903b9fd26db6753a699f7d6d3f06d36acb52e",
+      "paths": [
+        "budget-wk-47/budget_1742_TELEMA_BDV_30.09.2026_IV_Direttiva_sintesi.pdf"
+      ],
+      "format": "pdf",
+      "size_bytes": 8240,
+      "route_expected": "unknown",
+      "subtype": null,
+      "status": "open"
+    },
+    {
       "sha256": "81ac04526d0628ebf1c178d114947955995e1639c88e348d5c638c8044cae60e",
       "paths": [
         "2026-primo-lotto/success/budget_173_BILANCIO CEE AL 31.12.2025.pdf"
@@ -1318,6 +1681,72 @@
       ],
       "format": "pdf",
       "size_bytes": 55671,
+      "route_expected": "unknown",
+      "subtype": null,
+      "status": "open"
+    },
+    {
+      "sha256": "85e8f2a95d82a1e7272e0667327bacb0187d5fff04d9efafd47d221add07be48",
+      "paths": [
+        "budget-wk-46/budget_1713_RAMM_Bilancio_2025.pdf"
+      ],
+      "format": "pdf",
+      "size_bytes": 7309,
+      "route_expected": "unknown",
+      "subtype": null,
+      "status": "open"
+    },
+    {
+      "sha256": "8627982d563e7bbd28fadbc6d845a2584fa3abc4ce13041c5b0ce3f697073592",
+      "paths": [
+        "budget-wk-46/budget_1646_notaintegrativaordinaria.pdf"
+      ],
+      "format": "pdf",
+      "size_bytes": 166727,
+      "route_expected": "unknown",
+      "subtype": null,
+      "status": "open"
+    },
+    {
+      "sha256": "868447b1fbcbf452f862543d65eae8c1c65f4eee8a2e7b460e8758a8b5da722e",
+      "paths": [
+        "budget-wk-46/budget_1670_detail_riclass 2024-2025.pdf"
+      ],
+      "format": "pdf",
+      "size_bytes": 66045,
+      "route_expected": "unknown",
+      "subtype": null,
+      "status": "open"
+    },
+    {
+      "sha256": "878e71b222b2b1cb7f217ea3e637d416cd626dd707dbf6b49702be8c48853511",
+      "paths": [
+        "budget-wk-46/budget_1718_XBRL_BILN0195 - GZN6K7N9WKQB861K08N5.pdf"
+      ],
+      "format": "pdf",
+      "size_bytes": 230574,
+      "route_expected": "unknown",
+      "subtype": null,
+      "status": "open"
+    },
+    {
+      "sha256": "87c505459688628d16af5094d53e02b1bb0b8c0c1b1efe697cefd3b99d08ffce",
+      "paths": [
+        "budget-wk-47/budget_1750_Aste bilancio cee al 31 10 2026.pdf"
+      ],
+      "format": "pdf",
+      "size_bytes": 126674,
+      "route_expected": "unknown",
+      "subtype": null,
+      "status": "open"
+    },
+    {
+      "sha256": "88721206df03218cfea59a986650c1d15e01ea6f22037ed4e9312413f4d67589",
+      "paths": [
+        "budget-wk-46/budget_1672_BILANCIO31102026INSPECTAANALISI.pdf"
+      ],
+      "format": "pdf",
+      "size_bytes": 451831,
       "route_expected": "unknown",
       "subtype": null,
       "status": "open"
@@ -1466,6 +1895,17 @@
       "status": "open"
     },
     {
+      "sha256": "93d839ea1ea69e92733ffa00312ac106472956bc5906fc91b178e0caa2d3f77a",
+      "paths": [
+        "budget-wk-46/budget_1706_MSIT-001 (16).pdf"
+      ],
+      "format": "pdf",
+      "size_bytes": 24481,
+      "route_expected": "unknown",
+      "subtype": null,
+      "status": "open"
+    },
+    {
       "sha256": "959c7edaa0214b2da143fa7a4270d4d6fdc9c80b161a2f0cf0ab60c746333fc3",
       "paths": [
         "2026-06/june_sample/success/budget_353_Bilancio 31.12.25.pdf"
@@ -1488,12 +1928,34 @@
       "status": "open"
     },
     {
+      "sha256": "98bfc33a2cac348e824a857bfc48f515dbae23d8443bed58d7f609a432e29484",
+      "paths": [
+        "budget-wk-46/budget_1685_2025.pdf"
+      ],
+      "format": "pdf",
+      "size_bytes": 17676,
+      "route_expected": "unknown",
+      "subtype": null,
+      "status": "open"
+    },
+    {
       "sha256": "9969c60490e8bd83fd9d0e122ebe96207c97dc0fdc3e07276fa8ecd2ede2aeee",
       "paths": [
         "budget-wk-43/budget_1425_Napolitano_CEE-ordinario_2026-09_v3.pdf"
       ],
       "format": "pdf",
       "size_bytes": 53207,
+      "route_expected": "unknown",
+      "subtype": null,
+      "status": "open"
+    },
+    {
+      "sha256": "998c3efa1e0170768f7e4bf2c24dfd8ee47a88cc40289fff32c6b534d3294e25",
+      "paths": [
+        "budget-wk-46/budget_1697_MSIT 30 09 2026.pdf"
+      ],
+      "format": "pdf",
+      "size_bytes": 22050,
       "route_expected": "unknown",
       "subtype": null,
       "status": "open"
@@ -1521,6 +1983,17 @@
       "status": "open"
     },
     {
+      "sha256": "9bf3aff095d1be53766e0d2e5a29f373a6a1e8caeea8811ec10d6fb065e2a670",
+      "paths": [
+        "budget-wk-46/budget_1647_bozza 31_08_26 VISMARA CON SAL - BILANCIO CEE.pdf"
+      ],
+      "format": "pdf",
+      "size_bytes": 62960,
+      "route_expected": "unknown",
+      "subtype": null,
+      "status": "open"
+    },
+    {
       "sha256": "9c797a078bd4aa7ef67e9091d09787b9746a62b787f119c025200cce9e3b5be2",
       "paths": [
         "2026-06/june_sample/success/budget_385_2025 STC ISTANZA04399920984.pdf"
@@ -1532,6 +2005,17 @@
       "status": "open"
     },
     {
+      "sha256": "9ed657ca4f66b86211e80b3f0ed16aa0cfb8b302b437f93ddb953f3acea951f7",
+      "paths": [
+        "budget-wk-46/budget_1677_nixbrlabbn04132620040 (3).xbrl"
+      ],
+      "format": "xbrl",
+      "size_bytes": 209502,
+      "route_expected": "xbrl",
+      "subtype": "native_xbrl",
+      "status": "open"
+    },
+    {
       "sha256": "9f1f60c84df6419cfc7f7e677749eecdf693d2094cd8f98c087b006abe171358",
       "paths": [
         "2026-06/june_xbrl/budget_421_nixbrlabbn01465850160.xbrl"
@@ -1540,6 +2024,28 @@
       "size_bytes": 368346,
       "route_expected": "xbrl",
       "subtype": "native_xbrl",
+      "status": "open"
+    },
+    {
+      "sha256": "9f47efa15dc5e762ca4877a29e400d63a4017bbf93fbcf582d7e6a01e6d42413",
+      "paths": [
+        "budget-wk-46/budget_1703_MSIT-001 30 09 2026-1.pdf"
+      ],
+      "format": "pdf",
+      "size_bytes": 28319,
+      "route_expected": "unknown",
+      "subtype": null,
+      "status": "open"
+    },
+    {
+      "sha256": "9fae8198cd60e0e093794bedcd94b24b9c0edab0fcf737583eb6aacc3c7de92f",
+      "paths": [
+        "budget-wk-46/budget_1642_Test giugno 2026.pdf"
+      ],
+      "format": "pdf",
+      "size_bytes": 957578,
+      "route_expected": "unknown",
+      "subtype": null,
       "status": "open"
     },
     {
@@ -1609,6 +2115,17 @@
       "status": "open"
     },
     {
+      "sha256": "a584fa75f033a74a4175516329e6b40256342b0e1befbd3524ebc15da5dc56e4",
+      "paths": [
+        "budget-wk-46/budget_1721_Riclassificazione_IV_Direttiva_CEE_Cutting_Edges_30-09-2026.pdf"
+      ],
+      "format": "pdf",
+      "size_bytes": 100762,
+      "route_expected": "unknown",
+      "subtype": null,
+      "status": "open"
+    },
+    {
       "sha256": "a59d5baf41accd4a7906d62022fae1ed486666ce0f84d8a5bbfb4ffec679a8b3",
       "paths": [
         "2026-primo-lotto/successSecondo/budget_272_BILANCIO OTTICO 2024.pdf"
@@ -1675,6 +2192,17 @@
       "status": "open"
     },
     {
+      "sha256": "ac799bdbfecb47416198620d3f920076bc69e816522a6deb7ce7c8452fe249a5",
+      "paths": [
+        "budget-wk-46/budget_1712_RAMM_Bilancio_2024.pdf"
+      ],
+      "format": "pdf",
+      "size_bytes": 7351,
+      "route_expected": "unknown",
+      "subtype": null,
+      "status": "open"
+    },
+    {
       "sha256": "adb93fa099b7b45af4dee4107c50c91c5f4a98cda3749e483b34e12e88a88b57",
       "paths": [
         "budget-wk-43/budget_1451_ABCLOG_prospetto-provvisorio_2026-08.pdf"
@@ -1683,6 +2211,17 @@
       "size_bytes": 337857,
       "route_expected": "unknown",
       "subtype": null,
+      "status": "open"
+    },
+    {
+      "sha256": "aeedab16f960eb2e79253ef73212ce0ff976494d416bde793ec30c6515c71fc9",
+      "paths": [
+        "budget-wk-47/budget_1788_OUT_LASTBIL_IC06564880968.xbrl"
+      ],
+      "format": "xbrl",
+      "size_bytes": 164917,
+      "route_expected": "xbrl",
+      "subtype": "native_xbrl",
       "status": "open"
     },
     {
@@ -1738,6 +2277,17 @@
       "size_bytes": 282716,
       "route_expected": "ivcee",
       "subtype": "abbreviato con dettaglio conti per descrizione",
+      "status": "open"
+    },
+    {
+      "sha256": "b345423e1a1379435fd52c54faff262ef7d157c1fc59dadbf1d9cd65beaa8f5f",
+      "paths": [
+        "budget-wk-47/budget_1759_bilancio riclassificato 2025.pdf"
+      ],
+      "format": "pdf",
+      "size_bytes": 389029,
+      "route_expected": "unknown",
+      "subtype": null,
       "status": "open"
     },
     {
@@ -1818,6 +2368,17 @@
       "status": "open"
     },
     {
+      "sha256": "b9bf6588dd9bf1366bf4739e68c4ed0234201c31dddc98a59ffeb41d42d59cc2",
+      "paths": [
+        "budget-wk-46/budget_1710_Mirale bilancio 2025.pdf"
+      ],
+      "format": "pdf",
+      "size_bytes": 18683,
+      "route_expected": "unknown",
+      "subtype": null,
+      "status": "open"
+    },
+    {
       "sha256": "bbb1f5e0d2b498b9d74590edce0be5bce064c3ca5125c1485ffa5eb9be22031b",
       "paths": [
         "budget-wk-43/budget_1437_LaC2_bilancio-esercizio_2025.pdf"
@@ -1836,6 +2397,39 @@
       ],
       "format": "pdf",
       "size_bytes": 131295,
+      "route_expected": "unknown",
+      "subtype": null,
+      "status": "open"
+    },
+    {
+      "sha256": "bdd8eaefacfff771c633e0a51d1c1877e693a2e52898115cf1f225d4a6497c9c",
+      "paths": [
+        "budget-wk-46/budget_1690_bilancio provvisorio 30092026.pdf"
+      ],
+      "format": "pdf",
+      "size_bytes": 28116,
+      "route_expected": "unknown",
+      "subtype": null,
+      "status": "open"
+    },
+    {
+      "sha256": "be8ab8f64770eb536f3af9a7a532f3a126362ab81892f3f39fd6b7e0ae5c0e0c",
+      "paths": [
+        "budget-wk-46/budget_1641_Test bilancio 06-2026 su 12-2025.pdf"
+      ],
+      "format": "pdf",
+      "size_bytes": 79110,
+      "route_expected": "unknown",
+      "subtype": null,
+      "status": "open"
+    },
+    {
+      "sha256": "bfe3d0ac259c2ace87f717bed82c9c750ac4657c91dcb4b5166cb2b3b80cc030",
+      "paths": [
+        "budget-wk-47/budget_1786_Situazione contabile al 30.09.2026_.pdf"
+      ],
+      "format": "pdf",
+      "size_bytes": 24417,
       "route_expected": "unknown",
       "subtype": null,
       "status": "open"
@@ -1874,6 +2468,28 @@
       "status": "open"
     },
     {
+      "sha256": "c312f91e2d8255c7a2fe1f02ff316c60ef5e65c8e016b65f8ed4357fdb7e7a36",
+      "paths": [
+        "budget-wk-46/budget_1671_BILANCIO31102026INSPECTA.pdf"
+      ],
+      "format": "pdf",
+      "size_bytes": 116425,
+      "route_expected": "unknown",
+      "subtype": null,
+      "status": "open"
+    },
+    {
+      "sha256": "c3b5b35280006dfa19504ba43d7d8fa3e847bd39e91475d43e3ade6f064df4e6",
+      "paths": [
+        "budget-wk-46/budget_1701_MSIT onofrio 30 09 2026.pdf"
+      ],
+      "format": "pdf",
+      "size_bytes": 21643,
+      "route_expected": "unknown",
+      "subtype": null,
+      "status": "open"
+    },
+    {
       "sha256": "c4a56c6ec14e878517da4255a05962d6ec956959ca8f5eb3967f5d734e193705",
       "paths": [
         "2026-primo-lotto/successTerzo/success/budget_336_00a2fc11-15fa-4623-9200-fbcea15b618c.pdf"
@@ -1891,6 +2507,28 @@
       ],
       "format": "pdf",
       "size_bytes": 39846,
+      "route_expected": "unknown",
+      "subtype": null,
+      "status": "open"
+    },
+    {
+      "sha256": "c5d7f1c6b2bee08dfaf4f91b919cff9d47b37d42f880071431311d71c1fab14f",
+      "paths": [
+        "budget-wk-46/budget_1704_31122025-1.pdf"
+      ],
+      "format": "pdf",
+      "size_bytes": 29572,
+      "route_expected": "unknown",
+      "subtype": null,
+      "status": "open"
+    },
+    {
+      "sha256": "c5e35fc7b06782a3d1a83e1667728cbb16c3ab726478381e94959f92e67ef7bc",
+      "paths": [
+        "budget-wk-46/budget_1689_BILANCIO 30062026.pdf"
+      ],
+      "format": "pdf",
+      "size_bytes": 46372,
       "route_expected": "unknown",
       "subtype": null,
       "status": "open"
@@ -1918,6 +2556,17 @@
       "status": "open"
     },
     {
+      "sha256": "c9a25cd40800ec73096d7633ca9492991dff4413d60536318e1b203f871298a8",
+      "paths": [
+        "budget-wk-47/budget_1761_PROSPETTO BILANCIO 2025.pdf"
+      ],
+      "format": "pdf",
+      "size_bytes": 34175,
+      "route_expected": "unknown",
+      "subtype": null,
+      "status": "open"
+    },
+    {
       "sha256": "c9d88fcc667b2250f0b09679ab727d3edcb0c68264412e1d666a05b94f43fabb",
       "paths": [
         "budget-wk-43/budget_1433_PanificioTagliabue_IVCEE-semplificato_2026-09-11.pdf"
@@ -1929,12 +2578,34 @@
       "status": "open"
     },
     {
+      "sha256": "c9f71a851a10967babe98ef4819b677918a6a82f1c0a33a58ba793490e734ad4",
+      "paths": [
+        "budget-wk-46/budget_1659_06827170967-20251231.xbrl"
+      ],
+      "format": "xbrl",
+      "size_bytes": 364043,
+      "route_expected": "xbrl",
+      "subtype": "native_xbrl",
+      "status": "open"
+    },
+    {
       "sha256": "ca395c93c4c02cf9f42772dd5c0a57bc4f9cf28fb2175aac9075d3ef74e0cbbd",
       "paths": [
         "budget-wk-43/budget_1427_MTD_IVCEE-rettificato_2026-07.pdf"
       ],
       "format": "pdf",
       "size_bytes": 9032,
+      "route_expected": "unknown",
+      "subtype": null,
+      "status": "open"
+    },
+    {
+      "sha256": "cb3ca46ac7b580e2c2a80d209884f4bf2cd6a2ba7404be615f11bd30637a09ef",
+      "paths": [
+        "budget-wk-47/budget_1785_EXTRATECH_31122025.pdf"
+      ],
+      "format": "pdf",
+      "size_bytes": 199760,
       "route_expected": "unknown",
       "subtype": null,
       "status": "open"
@@ -1984,6 +2655,17 @@
       "status": "open"
     },
     {
+      "sha256": "cecfd9364fd58e7ed91207007b75311a06d9566fa2e167156c789b99395a3fc4",
+      "paths": [
+        "budget-wk-47/budget_1733_DEFINITIVO AL 31.12.2025.pdf"
+      ],
+      "format": "pdf",
+      "size_bytes": 99645,
+      "route_expected": "unknown",
+      "subtype": null,
+      "status": "open"
+    },
+    {
       "sha256": "d003281adadf4912066dbcd2479a601f8d257b2e5b72df37258bc50f14a89a6d",
       "paths": [
         "budget-wk-44/budget_1566_bilancio al 300926 con valore merce di competenza.pdf"
@@ -2003,6 +2685,17 @@
       "size_bytes": 94905,
       "route_expected": "ivcee",
       "subtype": "CEE sintetico riclassificato con scostamenti",
+      "status": "open"
+    },
+    {
+      "sha256": "d084c11236593c11d7017cdaa178542c84b0a550ffc3c8a53a57d8eccc23ec0d",
+      "paths": [
+        "budget-wk-46/budget_1668_BILANCIO verifica 30.09.26.pdf"
+      ],
+      "format": "pdf",
+      "size_bytes": 620704,
+      "route_expected": "unknown",
+      "subtype": null,
       "status": "open"
     },
     {
@@ -2061,6 +2754,17 @@
       "status": "open"
     },
     {
+      "sha256": "d436de21ab8d55db3ddcc5cff267e454675a3348d16eddba2d41332978629b6e",
+      "paths": [
+        "budget-wk-47/budget_1744_Laguna_Componenti_Bilancio_2024_DEMO.pdf"
+      ],
+      "format": "pdf",
+      "size_bytes": 29332,
+      "route_expected": "unknown",
+      "subtype": null,
+      "status": "open"
+    },
+    {
       "sha256": "d45175b28242224f3949db812ef6fdb5b790a927e81cf457c788111fc0acd7d0",
       "paths": [
         "2026-primo-lotto/successSecondo/budget_132_Oprandi Fabrizio - 30.04.2026.pdf"
@@ -2094,6 +2798,17 @@
       "status": "open"
     },
     {
+      "sha256": "d53e00ff03cd4ea90a117781c31de4a7707b633d4184f40f5c71485243740241",
+      "paths": [
+        "budget-wk-46/budget_1702_BILANCIO 2025.pdf"
+      ],
+      "format": "pdf",
+      "size_bytes": 22800,
+      "route_expected": "unknown",
+      "subtype": null,
+      "status": "open"
+    },
+    {
       "sha256": "d59a05a36b2cbe811631d3ea718a90fbc0f7cd2a9bbf4766d3b9490857657e71",
       "paths": [
         "2026-primo-lotto/success/budget_315_BERTELLI_BilancioCEE_PROVV_2025.pdf"
@@ -2102,6 +2817,17 @@
       "size_bytes": 82970,
       "route_expected": "ivcee",
       "subtype": "provvisorio IV CEE ordinario completo (mono-colonna)",
+      "status": "open"
+    },
+    {
+      "sha256": "d5d00be752a0fd6219d1babda91b415f9a8afb113d2d5bb7bb53b07105e7ed96",
+      "paths": [
+        "budget-wk-46/budget_1676_MSIT-001 (14).pdf"
+      ],
+      "format": "pdf",
+      "size_bytes": 26439,
+      "route_expected": "unknown",
+      "subtype": null,
       "status": "open"
     },
     {
@@ -2127,12 +2853,45 @@
       "status": "open"
     },
     {
+      "sha256": "d7c65764df5ea953d0cc88556510f321b099ee0755ec645d6259a6b23dd3a8bc",
+      "paths": [
+        "budget-wk-47/budget_1783_DOLCI 2025.pdf"
+      ],
+      "format": "pdf",
+      "size_bytes": 29791,
+      "route_expected": "unknown",
+      "subtype": null,
+      "status": "open"
+    },
+    {
+      "sha256": "d89d2e8eacd7d6c7dbb35380b1a55c68ea20fbd2a3362237d76b1b78397b1b0c",
+      "paths": [
+        "budget-wk-47/budget_1738_TELEMA_BDV_30.09.2026_IV_Direttiva.pdf"
+      ],
+      "format": "pdf",
+      "size_bytes": 51183,
+      "route_expected": "unknown",
+      "subtype": null,
+      "status": "open"
+    },
+    {
       "sha256": "d920d72a5a28761486f2b2ee35612a98e2b721c5ccd1ff9be55a111163dbfb7e",
       "paths": [
         "2026-06/june_sample/success/budget_379_BILAQ-001 (4).pdf"
       ],
       "format": "pdf",
       "size_bytes": 26733,
+      "route_expected": "unknown",
+      "subtype": null,
+      "status": "open"
+    },
+    {
+      "sha256": "db70edba40bacf839ee4b38bcb3856737dcae05f0ac48785e0ad3ace1a1d4faa",
+      "paths": [
+        "budget-wk-47/budget_1764_PROSPETTO BILANCIO COMPARATO.pdf"
+      ],
+      "format": "pdf",
+      "size_bytes": 38234,
       "route_expected": "unknown",
       "subtype": null,
       "status": "open"
@@ -2157,6 +2916,17 @@
       "size_bytes": 73265,
       "route_expected": "trial_balance",
       "subtype": "SOLO conto economico per competenza (no SP)",
+      "status": "open"
+    },
+    {
+      "sha256": "dc39d1bcb76d855bec75d77f22985ae9a9d43b1845d48c781d036a7c4b6ed160",
+      "paths": [
+        "budget-wk-46/budget_1686_ERREGI 30-09-2026.pdf"
+      ],
+      "format": "pdf",
+      "size_bytes": 1127052,
+      "route_expected": "unknown",
+      "subtype": null,
       "status": "open"
     },
     {
@@ -2215,6 +2985,17 @@
       "status": "open"
     },
     {
+      "sha256": "de5c320ed8fe86b26dbff0645aa8f790327344cbf7b84fc92ceafb092edaade8",
+      "paths": [
+        "budget-wk-47/budget_1757_2025.pdf"
+      ],
+      "format": "pdf",
+      "size_bytes": 694495,
+      "route_expected": "unknown",
+      "subtype": null,
+      "status": "open"
+    },
+    {
       "sha256": "de99f0515fc2a4b4b4f9b5b407d62b486f253f678196814db390a149b6cf6919",
       "paths": [
         "2026-06/june_sample/success/budget_419_bil2025cona.pdf"
@@ -2265,6 +3046,39 @@
       ],
       "format": "pdf",
       "size_bytes": 250910,
+      "route_expected": "unknown",
+      "subtype": null,
+      "status": "open"
+    },
+    {
+      "sha256": "e56c6bf6547782b5572d52c512b76e8b38f700971901fa98144d458ad6f28ade",
+      "paths": [
+        "budget-wk-46/budget_1638_disel 30-06-2026 crisi.pdf"
+      ],
+      "format": "pdf",
+      "size_bytes": 940965,
+      "route_expected": "unknown",
+      "subtype": null,
+      "status": "open"
+    },
+    {
+      "sha256": "e605f333bcfdef47e163e6b7cf4d77565aa1b3cbcff77ca7c1da0584ed03a28f",
+      "paths": [
+        "budget-wk-46/budget_1698_CARUSO 2025.pdf"
+      ],
+      "format": "pdf",
+      "size_bytes": 23888,
+      "route_expected": "unknown",
+      "subtype": null,
+      "status": "open"
+    },
+    {
+      "sha256": "e6393ee9d2ba862abb6af818f83430c4070448b8cda5ff0b8d9d66fc12c5e736",
+      "paths": [
+        "budget-wk-47/budget_1756_30.09.2026.pdf"
+      ],
+      "format": "pdf",
+      "size_bytes": 37813,
       "route_expected": "unknown",
       "subtype": null,
       "status": "open"
@@ -2325,6 +3139,17 @@
       "status": "open"
     },
     {
+      "sha256": "e91c1ad28df960b61de8d49e1e13b0414bcb1047aa096f1cedc6a76220047c75",
+      "paths": [
+        "budget-wk-47/budget_1768_PROSPETTO BILANCIO 2024.pdf"
+      ],
+      "format": "pdf",
+      "size_bytes": 34676,
+      "route_expected": "unknown",
+      "subtype": null,
+      "status": "open"
+    },
+    {
       "sha256": "ea99fafa38086733968779cdbc1fa557eb161399945076e2f28340b2664fdb58",
       "paths": [
         "2026-primo-lotto/sez-contrapposte/budget_211_Gustopronto srl bilancio di verifica dettaglio conti.pdf"
@@ -2353,6 +3178,17 @@
       ],
       "format": "pdf",
       "size_bytes": 264326,
+      "route_expected": "unknown",
+      "subtype": null,
+      "status": "open"
+    },
+    {
+      "sha256": "ef795f871d6140aa1d60908538f216ad558522a96482c9d2d9a76404bcef55c1",
+      "paths": [
+        "budget-wk-46/budget_1680_MSIT-001 (15).pdf"
+      ],
+      "format": "pdf",
+      "size_bytes": 27797,
       "route_expected": "unknown",
       "subtype": null,
       "status": "open"
@@ -2591,6 +3427,17 @@
       "status": "open"
     },
     {
+      "sha256": "fef5d2cbd316053ea0e9c1576aeed5bd0d7753af919fdfce5b40293c1b33fea2",
+      "paths": [
+        "budget-wk-47/budget_1771_06883650019_2026.xbrl"
+      ],
+      "format": "xbrl",
+      "size_bytes": 100261,
+      "route_expected": "xbrl",
+      "subtype": "native_xbrl",
+      "status": "open"
+    },
+    {
       "sha256": "ff0d6f8b71bbb784cdba712c99eaadd38cf7c551f5843f652244b4d979b4f0de",
       "paths": [
         "2026-primo-lotto/sciolti/Anomalie-budget.pdf"
@@ -2599,6 +3446,17 @@
       "size_bytes": 655108,
       "route_expected": "unsupported",
       "subtype": "email di segnalazione bug (no prospetto)",
+      "status": "open"
+    },
+    {
+      "sha256": "ff47b7ec8b2aab1bd6ebacdcf7bd927c51825d89f50da8e01e1a9821384068a6",
+      "paths": [
+        "budget-wk-46/budget_1717_Report-Bilancio-CUTTING-EDGES-SRL-SOCIETA-BENEFIT.pdf"
+      ],
+      "format": "pdf",
+      "size_bytes": 308641,
+      "route_expected": "unknown",
+      "subtype": null,
       "status": "open"
     }
   ]

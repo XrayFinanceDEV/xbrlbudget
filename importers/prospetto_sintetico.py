@@ -195,7 +195,6 @@ def estrai_da_mineru(context) -> Optional[dict]:
 
 def _estrai_righe(righe: list[tuple[str, str, Decimal]]) -> dict:
     from importers.import_snello.percorsi import NOMI, campo_da_percorso, famiglia
-    from importers.schema_etichette_parser import _VALORE_PRODUZIONE
 
     bs: dict[str, Decimal] = {}
     ce: dict[str, Decimal] = {}
@@ -249,10 +248,10 @@ def _estrai_righe(righe: list[tuple[str, str, Decimal]]) -> dict:
         m = re.match(r"^([a-d])\.(\d{1,2})(-bis)?\)", e)
         if m:
             lettera, num, bis = m.group(1).upper(), m.group(2), m.group(3) or ""
-            if lettera == "A":
-                campo = _VALORE_PRODUZIONE.get(num)
-            else:
-                campo = campo_da_percorso(f"CE.{lettera}.{num}{bis}")
+            # A.3 in ce03 e A.4 in ce03a passano dalla tavola unica come ogni altra voce (decisione del
+            # proprietario 2026-11-09, Task 5-bis): la mappa propria di A) che stava qui e' stata tolta da
+            # schema_etichette con 29eefdb, e questo lettore e' rimasto a importarla (ImportError, 1405)
+            campo = campo_da_percorso(f"CE.{lettera}.{num}{bis}")
             if campo is None or campo not in NOMI:
                 return _rifiuto("riga_non_riconosciuta", didascalia=e, sezione="CE")
             if lettera in voci_ce:

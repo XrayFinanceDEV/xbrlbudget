@@ -13,8 +13,9 @@ import fitz
 import pytest
 
 _RADICE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-_PDF_REALE = os.path.join(_RADICE, "Test", "2026-10-weekend",
-                          "budget_1405_Metaldecor_Bilancio_CEE_Semplificato_2025.pdf")
+# il corpus sta fuori dal repo: IMPORT_CORPUS_ROOT quando c'e' (PC senza il collegamento Test/), se no Test/
+_CORPUS = os.environ.get("IMPORT_CORPUS_ROOT") or os.path.join(_RADICE, "Test")
+_PDF_REALE = os.path.join(_CORPUS, "2026-10-weekend", "budget_1405_Metaldecor_Bilancio_CEE_Semplificato_2025.pdf")
 
 _SP_ATTIVO = [("B) Immobilizzazioni immateriali", "1.000,00"), ("B) Immobilizzazioni materiali", "2.000,00"),
               ("B) Immobilizzazioni finanziarie", "100,00"), ("Totale B) Immobilizzazioni", "3.100,00"),
@@ -35,9 +36,9 @@ _CE = [("A.1) Ricavi delle vendite e delle prestazioni", "10.000,00"), ("A.5) Al
        ("UTILE DELL'ESERCIZIO", "800,00")]
 
 
-def _pdf(tmp_path, ritocca=None):
+def _pdf(tmp_path, ritocca=None, ce=None):
     righe = [("STATO PATRIMONIALE - ATTIVO", None), *_SP_ATTIVO, ("STATO PATRIMONIALE - PASSIVO", None),
-             *_SP_PASSIVO, ("CONTO ECONOMICO", None), *_CE]
+             *_SP_PASSIVO, ("CONTO ECONOMICO", None), *(ce or _CE)]
     if ritocca:
         righe = [(e, ritocca.get(e, v)) for e, v in righe]
     doc = fitz.open()
@@ -75,6 +76,23 @@ def test_le_materiali_vanno_in_impianti_e_le_altre_nel_secchio_della_famiglia(tm
     assert bs["sp05"] == bs["sp05a"] and bs["sp06"] == bs["sp06a"] == D("1500.00")
 
 
+def test_le_voci_del_valore_della_produzione_dalla_tavola_unica(tmp_path):
+    # A.3 (lavori in corso su ordinazione) in ce03 e A.4 (incrementi per lavori interni) in ce03a, come in ogni
+    # altro lettore (Task 5-bis, 2026-11-09). Questo lettore importava ancora la mappa di A) tolta con 29eefdb e
+    # usciva con un ImportError, preso a valle per «non di questa famiglia»: 1405 finiva a Qwen.
+    from importers.prospetto_sintetico import estrai
+    voci_a = [("A.1) Ricavi delle vendite e delle prestazioni", "9.400,00"),
+              ("A.2) Variazioni delle rimanenze di prodotti", "300,00"),
+              ("A.3) Variazioni dei lavori in corso su ordinazione", "200,00"),
+              ("A.4) Incrementi di immobilizzazioni per lavori interni", "100,00"),
+              ("A.5) Altri ricavi e proventi", "500,00")]
+    letto = estrai(_pdf(tmp_path, ce=voci_a + _CE[2:]))
+    assert "rifiuto" not in letto
+    ce = letto["ce"]
+    assert (ce["ce01"], ce["ce02"], ce["ce03"], ce["ce03a"], ce["ce04"]) == (
+        D("9400.00"), D("300.00"), D("200.00"), D("100.00"), D("500.00"))
+
+
 def test_un_totale_che_non_torna_rifiuta_senza_correggere(tmp_path):
     from importers.prospetto_sintetico import estrai
     letto = estrai(_pdf(tmp_path, {"Totale C) Attivo circolante": "2.399,00"}))
@@ -97,7 +115,7 @@ def test_una_riga_che_non_si_sa_collocare_rifiuta(tmp_path):
 def test_un_bilancio_di_legge_non_e_un_prospetto_sintetico():
     from importers.prospetto_sintetico import riconosci
     for nome in ("COLOMBO.pdf",):
-        pdf = os.path.join(_RADICE, "Test", nome)
+        pdf = os.path.join(_CORPUS, nome)
         if os.path.exists(pdf):
             assert riconosci(pdf) is False
 

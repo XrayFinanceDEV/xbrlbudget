@@ -68,6 +68,13 @@ def _avvisi_fondi_snello(diag: dict) -> list[str]:
             'FONDO GIA\' NETTATO: la voce stampa gia\' il valore al netto del fondo, che non e\' '
             'stato sottratto una seconda volta ('
             + ', '.join(f'{q[:-2]} {v}' for q, v in gia_nettati) + ').')
+    non_dettagliato = diag.get('valore_produzione_non_dettagliato')
+    if non_dettagliato:
+        # decisione del proprietario 2026-11-19: la voce A senza dettaglio va nei ricavi delle vendite
+        avvisi.append(
+            'VALORE DELLA PRODUZIONE NON DETTAGLIATO: il documento stampa solo il totale di A) '
+            '(' + ', '.join(non_dettagliato) + '), messo per intero nei ricavi delle vendite (ce01). '
+            'Se comprende variazioni delle rimanenze, incrementi o altri ricavi, ripartirlo in Rettifiche.')
     tagliate = diag.get('immobilizzazioni_negative_tagliate')
     if tagliate:
         # budget_1452: i fondi degli immateriali (1.086,25) superano il costo storico (1.000)

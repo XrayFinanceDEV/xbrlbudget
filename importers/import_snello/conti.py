@@ -810,7 +810,7 @@ def da_coppie(coppie):
     +30.517/+7.831)."""
     diag = {"non_mappati": [], "escluse": [], "risultato_stampato": None, "lato_corretti": 0,
             "lato_irrisolti": [], "risultato_duplicato": [], "padri_esclusi": [],
-            "ce_segno_forzato": []}
+            "ce_segno_forzato": [], "valore_produzione_non_dettagliato": []}
     # Si scarta solo la coppia IDENTICA (la stessa voce letta due volte, es. una pagina condivisa
     # fra lettura SP e CE). Lo stesso percorso con importi diversi sono voci distinte che la
     # legenda non separa (le sotto-lettere di B.III.2: budget_597 ne perdeva 26.268) e si sommano.
@@ -879,6 +879,13 @@ def da_coppie(coppie):
                for q in tutti):
             continue
         codice = campo_di_legge(p)
+        if codice is None and p == "CE.A":
+            # «A) Valore della produzione» stampato senza A.1-A.5 (nessuna sotto-voce letta: altrimenti
+            # il padre e' gia' caduto sopra). Decisione del proprietario 2026-11-19: va nei ricavi delle
+            # vendite, dichiarato; l'utente lo ripartisce in Rettifiche. Prima finiva in non_mappati e
+            # il CE restava coi soli costi (budget_1772/1774: milioni di sbilancio).
+            codice = "ce01"
+            diag["valore_produzione_non_dettagliato"].append(str(v.quantize(_C)))
         if codice is None:
             diag["non_mappati" if p not in ("X", "R") else "escluse"].append([p, p, str(v.quantize(_C))])
             continue

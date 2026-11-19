@@ -1178,3 +1178,18 @@ def test_la_scadenza_del_totale_resta_se_le_sotto_voci_lette_non_la_ricompongono
     bs, ce, diag = da_coppie(coppie)
     assert bs["sp06_crediti_breve"] == D("3830477.21")
     assert diag["scadenza_del_totale"] == []
+
+
+def test_il_valore_della_produzione_senza_dettaglio_va_nei_ricavi_delle_vendite():
+    # budget_1772/1774 (cifre inventate): lo schema stampa solo «A) Valore della produzione».
+    # Decisione del proprietario 2026-11-19: ricavi delle vendite, dichiarato.
+    bs, ce, diag = da_coppie([("CE.A", D("900000")), ("CE.B.6", D("500000")), ("CE.B.7", D("300000"))])
+    assert ce["ce01_ricavi_vendite"] == D("900000")
+    assert diag["valore_produzione_non_dettagliato"] == ["900000.00"]
+    assert not diag["non_mappati"]
+
+
+def test_il_valore_della_produzione_dettagliato_resta_alle_sue_voci():
+    bs, ce, diag = da_coppie([("CE.A", D("950000")), ("CE.A.1", D("900000")), ("CE.A.5", D("50000"))])
+    assert ce["ce01_ricavi_vendite"] == D("900000")
+    assert diag["valore_produzione_non_dettagliato"] == []

@@ -1075,6 +1075,15 @@ Le regole aggiunte con la misura sul campione:
   interi, la cella non ha decimali, o sta nella colonna dei totali di una coppia), anche sopra figli al centesimo
   della stessa colonna (1533, 682: voci e conti in una colonna); altrimenti al centesimo. La chiusura esatta vince
   ancora su quella in tolleranza (R17).
+- **Partite nominative (bilancio a quattro sezioni, P1.1 di OMNI, 2026-11-19).** Sotto un conto clienti o fornitori
+  il documento stampa le partite (il numero di partita in una colonna a destra del codice del conto, poi il nome):
+  sommano al conto, ma sono spesso più di 80 (caso A di OMNI, PDF 33fe940c: 96 clienti, 179 fornitori) e due o tre partite dello
+  stesso cliente si compensano. Senza il gruppo il conto e le partite si contavano entrambi
+  e il documento restava sbilanciato. Oltre gli 80 membri vale ora **solo la chiusura esatta** al centesimo, fino a 1000 membri
+  (`totali._TETTO_MEMBRI_ESATTI`; la tolleranza resta entro gli 80). E un tratto che si annulla non ferma la ricerca
+  quando ogni sua riga ha il codice incolonnato come il primo membro e più a destra di almeno uno scalino del codice
+  del totale (`_partite_che_si_annullano`): sono sorelle un livello sotto, non un mastro con la sua foglia; senza
+  rientro il tratto ferma la ricerca come prima.
 - **Coppie parziali → totali (Q1, decisione del proprietario 2026-11-05).** In alcuni schemi con dettaglio i conti
   stanno nella colonna «parziali» e la voce che li somma nella colonna «totali» accanto (638, 1331, 1451, 1540,
   1558).
@@ -1281,7 +1290,9 @@ il lettore gira sul solo PDF.
      l'etichetta nuda, cambiando idea da una corsa all'altra.
    - **La scadenza dei debiti la decide il testo** (`classifica.scadenza_dei_debiti`, prima del passo 2): un debito
      del modello va su `sp17` solo con una prova stampata nel conto o nel mastro («oltre 12 mesi/l'esercizio», «lungo
-     termine», «medio/lungo», «m/l», le sigle «(OE)»/«(EE)» dei gestionali), altrimenti su `sp16` (CLAUDE.md, «Debito senza scadenza dichiarata → a breve»;
+     termine», «medio/lungo», «m/l», le sigle «(OE)»/«(EE)» dei gestionali; anche abbreviate o troncate dalla colonna,
+     «OLTRE ESERC. SUCC.», «OLTRE L'ESERC. SU», un «OLTRE»/«ENTRO» come ultima parola del conto — budget_700, P1.1 di
+     OMNI, 2026-11-19: sei finanziamenti «OLTRE» finivano tutti a breve), altrimenti su `sp16` (CLAUDE.md, «Debito senza scadenza dichiarata → a breve»;
      il mastro «medio/lungo» è una scadenza dichiarata, gli interessi sotto di lui restano entro). Il dettaglio passa
      alla stessa lettera. Le classi `legale` portano già la loro scadenza. `diagnostica["scadenze"]`.
    - **Imposte anticipate senza scadenza stampata oltre 12 mesi** (`imposte_anticipate_oltre`, dopo il passo 2,

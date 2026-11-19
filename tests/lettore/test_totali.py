@@ -1087,3 +1087,82 @@ def test_due_gemelli_allo_stesso_rientro_non_fanno_una_catena_di_tre(tmp_path):
                                         ("Portafoglio", "500,00"), ("Effetti all'incasso", "500,00"),
                                         ("Effetti gemello", "500,00"), ("Totale crediti", "2.000,00")]))
     assert not _riga(doc, "Effetti gemello").totale and not _riga(doc, "Effetti all'incasso").figli.get(0)
+
+
+# --- P1.1 di OMNI: le partite nominative del bilancio a quattro sezioni (caso A di OMNI, PDF 33fe940c, cifre inventate) ---------------
+# Conto «Clienti terzi Italia» col codice a sinistra, poi le partite col numero di partita in una colonna piu' a destra.
+# Le partite sommano al conto: senza il gruppo il conto e le partite venivano contati entrambi.
+
+def _quattro_sezioni(conti, *, x_partita=80, per_pagina=60):
+    """`conti`: (codice, etichetta, importo) per i conti e (None, etichetta, importo) per le partite, numerate."""
+    pagine, voci, y, partita = [], [], 60, 0
+    for codice, etichetta, importo in conti:
+        if codice is None:
+            partita += 1
+            voci.append((x_partita, y, str(100 + partita)))
+        else:
+            voci.append((40, y, codice))
+        voci += [(130, y, etichetta), (480, y, importo)]
+        y += 12
+        if len(voci) >= per_pagina * 3:
+            pagine.append(voci)
+            voci, y = [], 60
+    pagine.append(voci)
+    return pagine
+
+
+def _euro_it(centesimi: int) -> str:
+    intero, cent = divmod(abs(centesimi), 100)
+    testo = f"{intero:,}".replace(",", ".") + f",{cent:02d}"
+    return ("-" if centesimi < 0 else "") + testo
+
+
+def _leggi_pagine(tmp_path, pagine) -> Documento:
+    p = tmp_path / "quattro.pdf"
+    scrivi_pdf(p, pagine)
+    return leggi_pdf(str(p))
+
+
+def test_partite_oltre_ottanta_chiudono_il_conto_su_piu_pagine(tmp_path):
+    partite = [(None, f"CLIENTE {k:03d} SRL", 1000 + 37 * k) for k in range(1, 97)]       # 96, come il caso A di OMNI
+    estero = [(None, "CLIENTE ESTERO KFT", 415000)]
+    italia = sum(c for _, _, c in partite)
+    conti = ([("11.03", "CLIENTI", _euro_it(italia + 415000)), ("11.03.01", "Clienti terzi Italia", _euro_it(italia))]
+             + [(None, e, _euro_it(c)) for _, e, c in partite]
+             + [("11.03.03", "Clienti terzi Estero", "4.150,00")] + [(None, e, _euro_it(c)) for _, e, c in estero]
+             + [("15", "CREDITI VARI", "500,00"), ("15.01", "Anticipi a fornitori", "500,00")])
+    doc = _leggi_pagine(tmp_path, _quattro_sezioni(conti))
+    conto = _riga(doc, "Clienti terzi Italia")
+    assert conto.totale
+    assert len(conto.figli[0]) == 96
+    assert all(_riga(doc, e).padre == conto.id and _riga(doc, e).padre_verificato for _, e, _ in partite)
+    assert _riga(doc, "Clienti terzi Italia").padre == _riga(doc, "CLIENTI").id
+
+
+def test_partite_dello_stesso_cliente_che_si_compensano(tmp_path):
+    righe = [("33.03.01", "Fornitori terzi Italia", "5.000,00"), (None, "ALFA SRL", "3.000,00"),
+             (None, "GAMMA SRL", "1.250,00"), (None, "GAMMA SAS", "1.700,00"),
+             (None, "GAMMA SNC", "-2.950,00"), (None, "BETA SPA", "2.000,00"),
+             ("33.05", "Fatture da ricevere", "100,00")]
+    doc = _leggi_pagine(tmp_path, _quattro_sezioni(righe))
+    conto = _conto_col_nome(doc, "Fornitori terzi Italia")
+    assert conto.totale
+    assert {_riga(doc, e).padre for e in ("ALFA SRL", "GAMMA SRL", "GAMMA SNC", "BETA SPA")} == {conto.id}
+    assert all(_riga(doc, e).padre_verificato for e in ("GAMMA SRL", "GAMMA SAS", "GAMMA SNC"))
+
+
+def _conto_col_nome(doc, nome):
+    """Su poche righe il lettore puo' non staccare il codice dall'etichetta («33.03.01 Fornitori terzi Italia»)."""
+    trovate = [r for r in doc.righe if r.etichetta == nome or r.etichetta.endswith(" " + nome)]
+    assert len(trovate) == 1, [r.etichetta for r in doc.righe]
+    return trovate[0]
+
+
+def test_conti_che_si_annullano_senza_rientro_non_fanno_un_gruppo(tmp_path):
+    # gli stessi importi con i codici tutti allo stesso margine: +x e -x possono essere un mastro e la sua foglia,
+    # quindi il tratto che si annulla ferma ancora la ricerca
+    righe = [("33.03.01", "Fornitori terzi Italia", "5.000,00"), ("33.03.02", "ALFA SRL", "3.000,00"),
+             ("33.03.03", "GAMMA SRL", "1.250,00"), ("33.03.04", "GAMMA STORNO", "-1.250,00"),
+             ("33.03.05", "BETA SPA", "2.000,00"), ("33.05", "Fatture da ricevere", "100,00")]
+    doc = _leggi_pagine(tmp_path, _quattro_sezioni(righe, x_partita=40))
+    assert not _conto_col_nome(doc, "Fornitori terzi Italia").figli.get(0)

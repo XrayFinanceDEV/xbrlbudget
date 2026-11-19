@@ -28,6 +28,10 @@ if TYPE_CHECKING:
 
 _RUOLI_VALORE = ("esercizio", "saldo")
 _TETTO_MEMBRI = 80
+# Oltre gli 80 membri solo una chiusura esatta al centesimo: le partite nominative di un mastro clienti o fornitori
+# (bilancio a quattro sezioni, caso A di OMNI, PDF 33fe940c: 96 clienti e 179 fornitori sotto un conto) sommano al conto, e senza
+# il gruppo venivano contate insieme al conto. La tolleranza resta entro gli 80: oltre, un quasi-pari e' un caso.
+_TETTO_MEMBRI_ESATTI = 1000
 _CENTESIMO = Decimal("0.01")
 _UNITA = Decimal("1")
 # C12: il lessico unico delle righe di controllo (TOTALE, PAREGGIO, SALDO FINALE/GENERALE, ECCEDENZA, il risultato
@@ -291,13 +295,14 @@ def _cerca(serie: _Serie, passo: list[int], i: int, kmin: int, valori: list[Deci
     che si annullano: non e' un gruppo. Lo stesso per un tratto che si annulla da solo (somme parziali che si
     ripetono): un mastro e la sua foglia, +x e -x, finirebbero contati due volte. Una catena (un solo importo) vale
     solo all'uguaglianza esatta e mai con un figlio meno rientrato del totale (R14). Il tetto di 80 membri non vale
-    per una riga di controllo (R15): «Totale costi» chiude anche centocinquanta conti."""
+    per una riga di controllo (R15): «Totale costi» chiude anche centocinquanta conti. Per le altre righe, oltre gli 80
+    membri e fino a `_TETTO_MEMBRI_ESATTI` vale solo la chiusura esatta (le partite di un mastro clienti)."""
     tol = serie.tolleranze[i]
     bersaglio = serie.bersagli[i]
     n = len(valori)
-    tetto = n if serie.controllo[i] else _TETTO_MEMBRI
+    tetto = n if serie.controllo[i] else _TETTO_MEMBRI_ESATTI
     s, j, membri, pieni = Decimal(0), passo[i], [], 0
-    parziali = {Decimal(0)}
+    parziali = {Decimal(0): 0}      # somma parziale -> quanti membri l'avevano fatta (l'inizio del tratto che si annulla)
     # R17: una chiusura entro la tolleranza resta in attesa finche' la somma resta nella finestra: se piu' avanti la
     # stessa ricerca chiude esatta (14.445,49 -> 14.445,48 col conto da -0,01, 1478), vince l'esatta
     in_tolleranza: list[int] | None = None
@@ -305,7 +310,10 @@ def _cerca(serie: _Serie, passo: list[int], i: int, kmin: int, valori: list[Deci
         s += valori[j]
         membri.append(j)
         pieni += valori[j] != 0
-        if pieni and abs(s - bersaglio) <= tol:
+        oltre_il_tetto = not serie.controllo[i] and len(membri) > _TETTO_MEMBRI
+        if oltre_il_tetto and in_tolleranza is not None:
+            return in_tolleranza
+        if pieni and (s == bersaglio if oltre_il_tetto else abs(s - bersaglio) <= tol):
             if pieni < kmin:
                 return in_tolleranza
             if pieni == 1 and (s != bersaglio or _meno_rientrato(serie, membri, i) or _controllo_figlio_unico(
@@ -322,11 +330,26 @@ def _cerca(serie: _Serie, passo: list[int], i: int, kmin: int, valori: list[Deci
         elif in_tolleranza is not None:
             return in_tolleranza
         if valori[j]:
-            if s in parziali and not _costo_e_suo_fondo(serie, membri, valori):
+            if s in parziali and not _costo_e_suo_fondo(serie, membri, valori) \
+                    and not _partite_che_si_annullano(serie, membri, parziali[s], i):
                 return in_tolleranza
-            parziali.add(s)
+            parziali[s] = len(membri)
         j = passo[j]
     return in_tolleranza
+
+
+def _partite_che_si_annullano(serie: _Serie, membri: list[int], inizio: int, i: int) -> bool:
+    """La somma torna a un valore gia' visto perche' partite dello stesso cliente si compensano («ALFA SRL
+    500,00» e «ALFA srl -500,00» fra le partite di «Clienti terzi Italia», caso A di OMNI, PDF 33fe940c, bilancio a quattro
+    sezioni). Non e' un mastro contato con la sua foglia: ogni riga del tratto `membri[inizio:]` ha il codice
+    incolonnato come il primo membro della ricerca, piu' a destra di almeno uno scalino del codice del totale - sono
+    sorelle, un livello sotto. Un mastro e la sua foglia senza rientro (codici allo stesso margine) restano fermi."""
+    totale, primo = serie.righe[i], serie.righe[membri[0]]
+    if totale.x is None or primo.x is None or not primo.codice or primo.x < totale.x + _SCALINO:
+        return False
+    tratto = [serie.righe[m] for m in membri[inizio:]]
+    return bool(tratto) and all(r.codice and r.x is not None and abs(r.x - primo.x) <= _TOL_RIENTRO
+                                and not r.figli and not r.totale for r in tratto)
 
 
 _NOME_FONDO = re.compile(r"\bf\.?\s*/\s*amm|\bf\.?\s*do\b|\bfondo\b|\bfondi\b|ammortament")

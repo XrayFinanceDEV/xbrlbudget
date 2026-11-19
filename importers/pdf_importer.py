@@ -1788,6 +1788,8 @@ def import_pdf_balance_sheet(
             def _balances(d):
                 return bool(d) and mapper.validate_balance(rollup_debiti_aggregates(d))
 
+            _letture_sp: list = []   # le letture SP dell'ultimo tentativo (un anno, due anni)
+
             def _attempt():
                 """One extraction pass: single-year current + dual pass for the prior,
                 falling back to the dual-pass current when the single-year one does not
@@ -1797,8 +1799,11 @@ def import_pdf_balance_sheet(
                 bs, ce = extract_pdf_with_llm(file_path, force_llm=True)
                 prior_bs = prior_ce = None
                 read_comparative = False
+                _letture_sp.clear()
+                _letture_sp.append(bs)
                 try:
                     dual_bs, dual_ce, prior_bs, prior_ce = extract_pdf_both_years_with_llm(file_path)
+                    _letture_sp.append(dual_bs)
                     if _single_year_read_prior_column(bs, dual_bs, prior_bs):
                         # Quadrerebbe lo stesso: e' l'anno sbagliato, non un foglio rotto.
                         read_comparative = True
@@ -1842,6 +1847,22 @@ def import_pdf_balance_sheet(
                     best = (bs, ce, prior_bs_data, prior_ce_data)
                 if current_ok and prior_ok:
                     best = (bs, ce, prior_bs_data, prior_ce_data)
+                    break
+                # La riprova serve contro una lettura sbilanciata, non contro un prospetto che
+                # non c'e': se il tentativo ha letto uno SP vuoto (Attivo = Passivo = 0, sia la
+                # lettura a un anno sia quella a due) altri due giri danno lo stesso vuoto, a
+                # quattro chiamate l'uno (budget_1667: dieci minuti prima dello stesso rifiuto).
+                try:
+                    from importers.iv_cee_hierarchy import check_quadratura
+                    _sp_vuoto = len(_letture_sp) == 2 and all(
+                        (not letto) or check_quadratura(letto).is_empty for letto in _letture_sp)
+                except Exception:
+                    _sp_vuoto = False
+                if _sp_vuoto:
+                    logger.info(
+                        f"Extraction attempt {attempt + 1}: empty balance sheet; "
+                        "not retrying (nothing to re-read)"
+                    )
                     break
                 logger.info(
                     f"Extraction attempt {attempt + 1}: current_balances={current_ok}, "

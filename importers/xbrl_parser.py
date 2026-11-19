@@ -10,6 +10,7 @@ from datetime import datetime
 from database.models import BalanceSheet, IncomeStatement, Company, FinancialYear
 from database.db import SessionLocal
 from config import SUPPORTED_TAXONOMIES, CSV_HTML_ENTITIES_TO_REPLACE
+from importers.nome_azienda import denominazione_xbrl, tax_id_pulito
 import json
 import os
 
@@ -216,19 +217,12 @@ class XBRLParser:
                 if identifier is not None:
                     entity_info['tax_id'] = identifier.text
 
-                # Extract entity name from facts (if present)
-                # Look for common entity name elements
-                for elem in root.iter():
-                    # Safely get tag as string
-                    try:
-                        tag_str = etree.QName(elem).localname.lower() if hasattr(elem, 'tag') else ''
-                    except:
-                        tag_str = str(elem.tag).lower() if elem.tag else ''
-
-                    if 'denominazione' in tag_str or 'ragionesociale' in tag_str or 'name' in tag_str:
-                        if elem.text:
-                            entity_info['name'] = self.clean_xbrl_text(elem.text)
-                            break
+                # Ragione sociale per tag esatto (importers/nome_azienda.py): la
+                # ricerca per sottostringa 'name' prendeva «AccantoNAMEnti...».
+                nome = denominazione_xbrl(root)
+                if nome:
+                    entity_info['name'] = nome
+                entity_info['tax_id'] = tax_id_pulito(entity_info.get('tax_id'))
 
         return entity_info
 

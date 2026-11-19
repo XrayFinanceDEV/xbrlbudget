@@ -27,11 +27,23 @@ class CompanyUpdate(BaseModel):
     notes: Optional[str] = None
 
 
-class CompanyInDB(CompanyBase):
-    """Company schema with database fields"""
+class CompanyInDB(BaseModel):
+    """Company schema with database fields.
+
+    Schema di LETTURA: non riapplica i vincoli dell'input (`CompanyBase`) alle
+    righe già salvate. SQLite non fa rispettare `String(255)`/`String(20)`, e un
+    importer ha scritto nomi di 590 caratteri (un paragrafo HTML della nota
+    integrativa): con i vincoli qui, quella riga sola faceva rispondere 500 a
+    `GET /companies` e l'utente non vedeva più nessuna delle sue aziende — e
+    ricreandole riceveva 400 per P.IVA già usata. Una riga anomala si mostra e si
+    rinomina; i vincoli restano su `CompanyCreate`/`CompanyUpdate`."""
     model_config = ConfigDict(from_attributes=True)
 
     id: int
+    name: str
+    tax_id: Optional[str] = None
+    sector: int
+    notes: Optional[str] = None
     created_at: datetime
     updated_at: datetime
 

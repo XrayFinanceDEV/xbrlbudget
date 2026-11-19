@@ -17,6 +17,7 @@ from datetime import datetime
 from database.db import SessionLocal
 from database.models import Company, FinancialYear, BalanceSheet, IncomeStatement
 from importers.pdf_mapper import IVCEEMapper
+from importers.nome_azienda import nome_azienda_pulito
 from config import Sector
 
 logger = logging.getLogger(__name__)
@@ -2651,7 +2652,9 @@ def import_pdf_balance_sheet(
                 raise PDFImportError(f"Company with ID {company_id} not found")
         elif create_company and company_name:
             company = Company(
-                name=company_name,
+                # Mai oltre i 255 caratteri né vuoto: un nome fuori schema fa
+                # rispondere 500 a tutta la lista aziende (importers/nome_azienda.py).
+                name=nome_azienda_pulito(company_name) or "Azienda importata",
                 tax_id=None,
                 sector=sector or Sector.SERVIZI.value,
                 user_id=user_id,

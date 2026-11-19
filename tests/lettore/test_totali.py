@@ -1063,3 +1063,27 @@ def test_cespite_interamente_ammortizzato_non_ferma_il_totale(tmp_path):
     assert totale.totale
     assert set(totale.figli[0]) == {_riga(doc, e).id for e in ("Impianti", "ATTREZZATURE", "F/AMM ATTREZZATURE",
                                                                "Altri beni")}
+
+
+def test_catena_di_tre_livelli_col_sottoconto_rientrato(tmp_path):
+    # budget_1689 (cifre inventate): mastro, conto e sottoconto rientrato con lo stesso importo. La scorciatoia
+    # consumava il conto come figlio unico del mastro, e il sottoconto restava una foglia accanto a lui
+    doc = _leggi(tmp_path, _righe(140, [("Crediti commerciali", "1.500,00"),
+                                        ("Clienti", "1.000,00"), ("Clienti Italia", "700,00"),
+                                        ("Clienti estero", "300,00"),
+                                        ("Portafoglio", "500,00"), ("Effetti all'incasso", "500,00"),
+                                        (110, "Effetti sottoconto", "500,00"), ("Crediti vari", "40,00"),
+                                        ("Anticipi", "40,00")]))
+    effetti = _riga(doc, "Effetti all'incasso")
+    assert effetti.totale and tuple(effetti.figli[0]) == (_riga(doc, "Effetti sottoconto").id,)
+    assert _riga(doc, "Portafoglio").totale and _riga(doc, "Crediti commerciali").totale
+
+
+def test_due_gemelli_allo_stesso_rientro_non_fanno_una_catena_di_tre(tmp_path):
+    # lo stesso importo allo stesso rientro e' un fratello, non un sottoconto: la seconda riga resta una foglia
+    doc = _leggi(tmp_path, _righe(140, [("Crediti commerciali", "1.500,00"),
+                                        ("Clienti", "1.000,00"), ("Clienti Italia", "700,00"),
+                                        ("Clienti estero", "300,00"),
+                                        ("Portafoglio", "500,00"), ("Effetti all'incasso", "500,00"),
+                                        ("Effetti gemello", "500,00"), ("Totale crediti", "2.000,00")]))
+    assert not _riga(doc, "Effetti gemello").totale and not _riga(doc, "Effetti all'incasso").figli.get(0)

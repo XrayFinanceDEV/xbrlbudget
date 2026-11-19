@@ -478,6 +478,42 @@ def _figli_del_consumato(serie: _Serie, passo: list[int], i: int, direzione: int
     return 1
 
 
+_LIVELLI_CATENA = 4
+
+
+def _catena_sotto_la_catena(serie: _Serie, passo: list[int], sotto: list[int], direzione: int) -> int:
+    """Il figlio unico appena consumato dalla scorciatoia ha a sua volta un figlio unico con lo stesso importo,
+    rientrato piu' a destra di lui: «PORTAFOGLIO CLIENTI», il conto «Effetti all'incasso» e il sottoconto rientrato
+    «Effetti all'incasso», tre righe con lo stesso importo (budget_1689). Consumato, il conto usciva dal cammino senza
+    aver preso il suo sottoconto, che restava una foglia accanto a lui: l'importo contato due volte. Solo a somma
+    esatta e solo con il rientro che lo dice (un gemello allo stesso rientro e' un fratello, non un figlio); la somma
+    del totale sopra si rifa' comunque dopo (`_risolvi`), e se non torna tutto si disfa."""
+    valori = serie.valori
+    n = len(valori)
+    marcati = 0
+    for _ in range(_LIVELLI_CATENA):
+        f = next((x for x in sotto if valori[x]), None)
+        if f is None or not serie.candidabile[f] or serie.righe[f].x is None:
+            return marcati
+        j = f + direzione
+        while 0 <= j < n and not serie.vivo[j]:
+            j += direzione
+        if not 0 <= j < n or serie.righe[j].x is None or serie.righe[j].x <= serie.righe[f].x + _SCALINO:
+            return marcati
+        salvato = passo[f]
+        passo[f] = j
+        figli = _cerca_membri(serie, passo, f, 1)
+        if figli is None or f in figli or sum(1 for x in figli if valori[x]) != 1 \
+                or sum((valori[x] for x in figli), Decimal(0)) != serie.bersagli[f]:
+            passo[f] = salvato
+            return marcati
+        _marca(serie, passo, f, figli)
+        passo[f] = salvato
+        marcati += 1
+        sotto = figli
+    return marcati
+
+
 def _risolvi(serie: _Serie, ammessi: list[bool], direzione: int, kmin: int) -> int:
     """Una passata nella direzione data (-1: i figli stanno sopra il totale), sui soli candidati `ammessi`: come
     `import_snello/righe.py:_risolvi_totali`, compreso il membro a figlio unico risolto prima di essere consumato,
@@ -515,6 +551,7 @@ def _risolvi(serie: _Serie, ammessi: list[bool], direzione: int, kmin: int) -> i
                     _marca(serie, passo, m, sotto)
                     catene += 1
                     annidata = annidata or _annidata(serie, m, sotto)
+                    catene += _catena_sotto_la_catena(serie, passo, sotto, direzione)
         if prima is not None:
             nuovi = _cerca_membri(serie, passo, i, kmin)
             if nuovi is not None:

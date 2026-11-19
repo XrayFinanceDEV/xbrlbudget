@@ -11,6 +11,7 @@ from dataclasses import dataclass
 from database.models import BalanceSheet, IncomeStatement, Company, FinancialYear
 from database.db import SessionLocal
 from config import SUPPORTED_TAXONOMIES, CSV_HTML_ENTITIES_TO_REPLACE
+from importers.nome_azienda import denominazione_xbrl, tax_id_pulito
 import json
 import os
 import logging
@@ -394,11 +395,6 @@ class EnhancedXBRLParser:
                     except:
                         local_name = str(elem.tag) if elem.tag else ''
 
-                    tag_lower = local_name.lower()
-
-                    if not entity_info.get('name') and ('denominazione' in tag_lower or 'ragionesociale' in tag_lower or 'name' in tag_lower):
-                        if elem.text:
-                            entity_info['name'] = self.clean_xbrl_text(elem.text)
 
                     # Extract P.IVA and CF from DatiAnagrafici section
                     if local_name == 'DatiAnagraficiPartitaIva' and elem.text and elem.text.strip():
@@ -413,6 +409,14 @@ class EnhancedXBRLParser:
             entity_info['tax_id'] = codice_fiscale
         elif partita_iva:
             entity_info['tax_id'] = partita_iva
+
+        # Ragione sociale per tag esatto, pulita e entro i 255 caratteri: la ricerca
+        # per sottostringa prendeva «...CoordiNAMEnto» (un paragrafo HTML) e
+        # quel nome faceva rispondere 500 alla lista aziende (importers/nome_azienda.py).
+        nome = denominazione_xbrl(root)
+        if nome:
+            entity_info['name'] = nome
+        entity_info['tax_id'] = tax_id_pulito(entity_info.get('tax_id'))
 
         return entity_info
 

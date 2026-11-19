@@ -6,7 +6,14 @@ import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import rehypeSlug from "rehype-slug";
 import { describe, it, expect } from "vitest";
-import { hrefGuida, indiceGuida, srcImmagineGuida } from "./guida";
+import {
+  etichettaRitornoGuida,
+  hrefGuida,
+  hrefVersoGuida,
+  indiceGuida,
+  ritornoDallaGuida,
+  srcImmagineGuida,
+} from "./guida";
 
 describe("guida in app", () => {
   it("le schermate passano da docs/images/guida a /guida", () => {
@@ -41,5 +48,33 @@ describe("guida in app", () => {
       { id: "a", testo: "A", livello: 1 },
       { id: "note-1", testo: "Note", livello: 2 },
     ]);
+  });
+});
+
+describe("ritorno dalla guida", () => {
+  it("il bottone Guida porta con sé la pagina di partenza", () => {
+    expect(hrefVersoGuida("/pratica")).toBe("/guida?da=%2Fpratica");
+    expect(hrefVersoGuida("/forecast/income")).toBe("/guida?da=%2Fforecast%2Fincome");
+  });
+
+  it("dalla guida stessa il bottone non si ricorda la guida", () => {
+    expect(hrefVersoGuida("/guida")).toBe("/guida");
+  });
+
+  it("si torna solo a un percorso interno, altrimenti alla home", () => {
+    expect(ritornoDallaGuida("/pratica")).toBe("/pratica");
+    expect(ritornoDallaGuida(null)).toBe("/");
+    expect(ritornoDallaGuida("")).toBe("/");
+    expect(ritornoDallaGuida("https://altro.example")).toBe("/");
+    expect(ritornoDallaGuida("//altro.example")).toBe("/");
+    expect(ritornoDallaGuida("/\\altro.example")).toBe("/");
+    expect(ritornoDallaGuida("/guida")).toBe("/");
+  });
+
+  it("l'etichetta nomina la pagina; la home non ne ha una sua", () => {
+    expect(etichettaRitornoGuida("/pratica")).toBe("Torna alla pratica");
+    expect(etichettaRitornoGuida("/forecast/balance")).toBe("Torna allo SP previsionale");
+    expect(etichettaRitornoGuida("/qualcosa")).toBe("Torna indietro");
+    expect(etichettaRitornoGuida("/")).toBeNull();
   });
 });

@@ -2,10 +2,12 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { useEffect, useState } from "react";
 import { cn } from "@/lib/utils";
 import { useApp } from "@/contexts/AppContext";
 import { usePratica } from "@/contexts/PraticaContext";
 import { PraticaStepper } from "@/components/PraticaStepper";
+import { etichettaRitornoGuida, ritornoDallaGuida } from "@/lib/guida";
 import {
   Building2,
   FileSpreadsheet,
@@ -14,6 +16,7 @@ import {
   Wallet,
   FileText,
   ChevronDown,
+  ArrowLeft,
 } from "lucide-react";
 import {
   DropdownMenu,
@@ -43,8 +46,9 @@ export function Navigation() {
   const { pratica } = usePratica();
   const isForecastActive = pathname.startsWith("/forecast");
 
-  // La guida è una lettura a sé: né la nav né lo stepper della pratica.
-  if (pathname.startsWith("/guida")) return null;
+  // La guida è una lettura a sé: né la nav né lo stepper della pratica, ma una
+  // via d'uscita sì — dentro l'iframe non c'è il «indietro» del browser.
+  if (pathname.startsWith("/guida")) return <BarraGuida />;
 
   // La home "Aziende & Pratiche" è una pagina intera, quindi la nav resta.
   // Dentro una pratica comanda lo stepper: mai due barre insieme.
@@ -131,6 +135,39 @@ export function Navigation() {
               </Link>
             );
           })}
+        </nav>
+      </div>
+    </div>
+  );
+}
+
+/** La barra della guida: il ritorno alla pagina da cui si è aperta e la home. */
+function BarraGuida() {
+  // `?da=` si legge in un effetto, non con useSearchParams: /guida è statica e
+  // useSearchParams lì vorrebbe un confine Suspense; né nell'inizializzatore di
+  // useState, che sbaglierebbe l'idratazione.
+  const [ritorno, setRitorno] = useState("/");
+  useEffect(() => {
+    setRitorno(ritornoDallaGuida(new URLSearchParams(window.location.search).get("da")));
+  }, []);
+  const etichetta = etichettaRitornoGuida(ritorno);
+  const stile =
+    "flex items-center gap-1.5 whitespace-nowrap px-3 py-3 text-sm font-medium text-muted-foreground border-b-2 border-transparent hover:text-foreground hover:border-border transition-colors";
+
+  return (
+    <div className="border-b border-border bg-background">
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+        <nav className="flex items-center gap-1 overflow-x-auto" aria-label="Uscita dalla guida">
+          {etichetta && (
+            <Link href={ritorno} className={stile}>
+              <ArrowLeft className="h-4 w-4" />
+              {etichetta}
+            </Link>
+          )}
+          <Link href="/" className={stile}>
+            <Building2 className="h-4 w-4" />
+            Aziende &amp; Pratiche
+          </Link>
         </nav>
       </div>
     </div>

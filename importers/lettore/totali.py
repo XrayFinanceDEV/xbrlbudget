@@ -322,11 +322,25 @@ def _cerca(serie: _Serie, passo: list[int], i: int, kmin: int, valori: list[Deci
         elif in_tolleranza is not None:
             return in_tolleranza
         if valori[j]:
-            if s in parziali:
+            if s in parziali and not _costo_e_suo_fondo(serie, membri, valori):
                 return in_tolleranza
             parziali.add(s)
         j = passo[j]
     return in_tolleranza
+
+
+_NOME_FONDO = re.compile(r"\bf\.?\s*/\s*amm|\bf\.?\s*do\b|\bfondo\b|\bfondi\b|ammortament")
+
+
+def _costo_e_suo_fondo(serie: _Serie, membri: list[int], valori: list[Decimal]) -> bool:
+    """La somma torna a un valore gia' visto perche' un cespite interamente ammortizzato e il suo fondo si
+    annullano («ATTREZZATURE 2.500,00» e «F/AMM ATTREZZATURE -2.500,00», senza la riga della voce sopra: 1753). Non e'
+    un mastro contato con la sua foglia: le ultime due righe con un importo sono uguali e opposte, e una delle due e'
+    un fondo per nome."""
+    pieni = [m for m in membri if valori[m]][-2:]
+    if len(pieni) < 2 or valori[pieni[0]] != -valori[pieni[1]]:
+        return False
+    return any(_NOME_FONDO.search(_norm(serie.righe[m].etichetta)) for m in pieni)
 
 
 def _all_unita(r: Riga, colonna: int) -> bool:

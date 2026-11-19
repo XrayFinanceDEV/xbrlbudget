@@ -1051,3 +1051,15 @@ def test_mastro_consumato_dal_totale_sopra_trova_ancora_i_suoi_conti(tmp_path):
     assert portafoglio.totale
     assert set(portafoglio.figli[0]) == {_riga(doc, e).id for e in ("Effetti all'incasso", "Ricevute bancarie")}
     assert _riga(doc, "Crediti commerciali").totale
+
+
+def test_cespite_interamente_ammortizzato_non_ferma_il_totale(tmp_path):
+    # 1753, 1467 (cifre inventate): sotto il totale, un costo e il suo fondo che si annullano, senza la riga della
+    # voce sopra; la somma torna a un valore gia' visto, ma non e' un mastro contato con la sua foglia
+    doc = _leggi(tmp_path, _righe(140, [("Impianti", "300,00"), ("ATTREZZATURE", "250,00"),
+                                        ("F/AMM ATTREZZATURE", "-250,00"), ("Altri beni", "120,00"),
+                                        ("TOTALE IMMOBILIZZAZIONI MATERIALI", "420,00")]))
+    totale = _riga(doc, "TOTALE IMMOBILIZZAZIONI MATERIALI")
+    assert totale.totale
+    assert set(totale.figli[0]) == {_riga(doc, e).id for e in ("Impianti", "ATTREZZATURE", "F/AMM ATTREZZATURE",
+                                                               "Altri beni")}

@@ -73,6 +73,17 @@ def colonna_di(x_destra: float, colonne: list[Colonna]) -> Colonna | None:
     return min(vicine, key=lambda c: abs(c.x_destra - x_destra)) if vicine else None
 
 
+# Un importo solo sulla riga, che manca la colonna oltre `_TOL_COLONNA`, entra nell'unica colonna entro il doppio
+# (un importo riscritto a mano in un altro carattere, spostato di qualche punto: 1772, 16,5 pt).
+_TOL_COLONNA_UNICA = 2 * _TOL_COLONNA
+
+
+def colonna_unica_vicina(x_destra: float, colonne: list[Colonna]) -> Colonna | None:
+    """L'unica colonna il cui bordo destro dista al piu' `_TOL_COLONNA_UNICA`; None se nessuna o piu' di una."""
+    vicine = [c for c in colonne if abs(c.x_destra - x_destra) <= _TOL_COLONNA_UNICA]
+    return vicine[0] if len(vicine) == 1 else None
+
+
 def colonne_documento(righe: list[RigaFisica]) -> list[Colonna]:
     colonne = _colonne_dai_bordi(righe)
     if not colonne:

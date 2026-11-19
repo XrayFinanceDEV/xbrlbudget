@@ -17,7 +17,9 @@ from functools import cached_property
 import fitz
 
 from importers.lettore._ereditati import forma_strutturale, frase_aperta, intestazione
-from importers.lettore.colonne import Colonna, colonna_di
+from importers.lettore.colonne import Colonna, colonna_di, colonna_unica_vicina
+_X0_MINIMO_CELLA = 150.0      # come `colonne._X0_MINIMO`: a sinistra c'e' la didascalia
+_DATA_NELLA_RIGA = re.compile(r"\b\d{1,2}[/.-]\d{1,2}[/.-](?:\d{2}|\d{4})\b")
 from importers.lettore.geometria import Parola, RigaFisica, parole_pagina, righe_fisiche
 from importers.lettore.importi import Importo, leggi_importo, segno_del_lato
 from importers.lettore.totali import assegna_padri, marca_totali
@@ -224,6 +226,17 @@ def _celle_del_lato(parole: list[Parola], colonne: list[Colonna], lato: str, pag
         # l'importo seguito da un rimando di nota («46.078 (1)») sta nella colonna dove il rimando la chiude
         if trovati[i] is None and _rimando_di_nota(parole, i + 1):
             trovati[i] = _in_colonna(Parola(p.x0, p.y0, parole[i + 1].x1, p.y1, p.testo), colonne, intere)
+    # un importo solo sulla riga, fuori dalla tolleranza di ogni colonna ma vicino a una sola di esse, e' una cella
+    # di quella colonna: un importo riscritto a mano in un altro carattere (1772) finiva nell'etichetta, e la voce
+    # restava senza importo
+    importi_riga = [i for i, p in enumerate(parole) if p.x0 > _X0_MINIMO_CELLA and leggi_importo(p.testo) is not None]
+    if (len(importi_riga) == 1 and all(t is None for t in trovati)
+            and not any(_DATA_NELLA_RIGA.search(p.testo) for p in parole)
+            and not 1900 <= abs(leggi_importo(parole[importi_riga[0]].testo).valore) <= 2100):
+        # non su una riga di titolo con la data, ne' su un anno letto come importo (OCR: «2026,00», 1410)
+        i = importi_riga[0]
+        if (c := colonna_unica_vicina(parole[i].x1, colonne)) is not None and not _rimando_di_nota(parole, i):
+            trovati[i] = (leggi_importo(parole[i].testo), c)
     trovati = [None if t is None or t[1].lato != lato or _rimando_di_nota(parole, i)
                or (leggi_importo(p.testo) is None and _riferimento_davanti(parole, i)) else t
                for i, (p, t) in enumerate(zip(parole, trovati))]

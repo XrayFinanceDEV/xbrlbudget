@@ -1065,3 +1065,23 @@ def test_meno_attaccato_all_euro_e_il_segno_dell_importo():
     stampati = {}
     testi = [p.testo for p in _ricuci(parole, stampati)]
     assert testi == ["RISULTATO", "-12.345", "-", "6.789"]
+
+
+def test_importo_solo_spostato_entra_nell_unica_colonna_vicina(tmp_path):
+    # 1772 (cifre inventate): l'importo di una riga, riscritto in un altro carattere, sta 18 pt a sinistra del bordo
+    # della colonna; prima finiva nell'etichetta e la voce restava senza importo
+    from importers.lettore import leggi_pdf
+    from tests.lettore.pdf_sintetico import scrivi_pdf
+    voci = []
+    for k, (e, v) in enumerate([("Voce uno", "1.000"), ("Voce due", "2.000"), ("Voce tre", "3.000"),
+                                ("Voce quattro", "4.000"), ("Voce cinque", "5.000")]):
+        voci += [(50, 140 + k * 14, e), (500, 140 + k * 14, v)]
+    voci += [(50, 230, "A) Valore della produzione"), (482, 230, "9.876")]
+    voci += [(50, 244, "Bilancio al 31/12/2025"), (482, 244, "2.025")]
+    p = tmp_path / "s.pdf"
+    scrivi_pdf(p, [voci])
+    doc = leggi_pdf(str(p))
+    riga = next(r for r in doc.righe if r.etichetta.startswith("A) Valore"))
+    assert [c.valore for c in riga.celle.values()] == [9876]
+    # una riga di titolo con la data non prende l'anno come importo
+    assert all(c.valore != 2025 for r in doc.righe for c in r.celle.values())

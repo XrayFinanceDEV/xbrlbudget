@@ -270,3 +270,28 @@ def test_una_situazione_contabile_con_codici_puntati_non_e_un_riepilogo():
     ])
     assert _is_aggregated_summary(testo) is False
     assert _is_aggregated_summary("Immobilizzazioni: 1.200,00\nCrediti: 300,00\nPatrimonio netto: 900,00") is True
+
+
+def test_uno_sbilancio_oltre_meta_dell_attivo_e_una_lettura_non_riuscita(monkeypatch):
+    # Decisione del proprietario (2026-11-19), budget_1786: 105 milioni di sbilancio su un attivo di circa 9.
+    # Cifre inventate.
+    import pytest
+    from types import SimpleNamespace
+    from importers import pdf_importer as pi
+    from importers.import_snello import verifica
+
+    monkeypatch.setattr(verifica, "totali_stampati", lambda *_a, **_k: {"totale_attivo": Decimal("1000000")})
+    with pytest.raises(pi.PDFImportError, match="Lettura non riuscita"):
+        pi._rifiuta_lettura_non_riuscita("x.pdf", SimpleNamespace(totale_attivo=Decimal("1600000"), totale_passivo=Decimal("990000")))
+    # sotto la meta': resta un bilancio sbilanciato, importato con l'avviso
+    pi._rifiuta_lettura_non_riuscita("x.pdf", SimpleNamespace(totale_attivo=Decimal("1000000"), totale_passivo=Decimal("700000")))
+
+
+def test_un_totale_stampato_assurdo_non_fa_da_base(monkeypatch):
+    from types import SimpleNamespace
+    from importers import pdf_importer as pi
+    from importers.import_snello import verifica
+
+    monkeypatch.setattr(verifica, "totali_stampati", lambda *_a, **_k: {"totale_attivo": Decimal("11.36")})
+    # base = il lato piu' grande letto (1.000.000), sbilancio 100.000: si importa
+    pi._rifiuta_lettura_non_riuscita("x.pdf", SimpleNamespace(totale_attivo=Decimal("1000000"), totale_passivo=Decimal("900000")))

@@ -29,6 +29,9 @@ _RIFIUTI: tuple[tuple[str, re.Pattern, str], ...] = (
      "gestionale (con il testo selezionabile), non una scansione o una foto."),
     ("lettura_incompleta", re.compile(r"Lettura del passivo mancante", re.I),
      "E' un errore di lettura, non del file: riprova l'import."),
+    ("lettura_non_riuscita", re.compile(r"Lettura non riuscita", re.I),
+     "Riprova l'import. Se si ripete, carica il PDF esportato direttamente dal gestionale (bilancio o situazione "
+     "contabile con stato patrimoniale e conto economico), non una scansione o un prospetto rielaborato."),
     ("non_bilancio", re.compile(r"Stato Patrimoniale risulta vuoto|nessun dato contabile|nessuno scheletro di "
                                 r"legge|non riconosciuto|non importabile come bilancio completo", re.I),
      "Nel file non c'e' un prospetto di bilancio leggibile: controlla che sia il bilancio o la situazione "

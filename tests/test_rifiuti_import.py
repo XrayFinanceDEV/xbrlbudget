@@ -45,3 +45,8 @@ def test_il_422_di_un_pdf_rifiutato_porta_il_suggerimento():
     assert d["suggerimento"] and d["details"] == d["suggerimento"]
     ignoto = _dettaglio_rifiuto(PDFImportError("qualcos'altro"))
     assert ignoto["suggerimento"] is None and ignoto["details"] == "Il file non è stato importato."
+
+
+def test_la_lettura_non_riuscita_ha_il_suo_suggerimento():
+    assert _categoria("Lettura non riuscita: lo stato patrimoniale letto non quadra di €40.000,00") \
+        == "lettura_non_riuscita"

@@ -10,6 +10,16 @@ from tests.test_coge_provider import RIGHE_PAREGGIO, _pdf
 from tests.test_snello_innesto import _db_in_memoria, _risultato_quadrato, _vieta_estrattori_di_oggi
 
 
+@pytest.fixture(autouse=True)
+def _senza_guardia_lettura_non_riuscita(monkeypatch):
+    """La fixture PDF di route C («Cassa 1.000 / Fornitori 1.000») e' un giocattolo: il parser classico ne legge solo
+    la cassa, uno sbilancio del 100%, che dal 2026-11-19 si rifiuta come lettura non riuscita. Questi test provano
+    altro; la guardia ha i suoi test in tests/test_unbalanced_import.py."""
+    from importers import pdf_importer as _pi
+    monkeypatch.setattr(_pi, "_rifiuta_lettura_non_riuscita", lambda *a, **k: None)
+
+
+
 def _importa(tmp_path, nome, utente):
     return pdf_importer.import_pdf_balance_sheet(
         file_path=_pdf(tmp_path, RIGHE_PAREGGIO), fiscal_year=2025, company_name=nome,

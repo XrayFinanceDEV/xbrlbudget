@@ -86,6 +86,39 @@ def _avvisi_fondi_snello(diag: dict) -> list[str]:
     return avvisi
 
 
+# Decisione del proprietario (2026-11-19): uno sbilancio oltre meta' del totale attivo non e' un bilancio da
+# rettificare, e' una lettura non riuscita («non ha senso importare con sbilanci cosi' elevati»).
+_SBILANCIO_MASSIMO_QUOTA = Decimal("0.5")
+# Un totale attivo stampato sotto un quarto del lato piu' grande letto non fa da base: e' un totale letto male
+# (budget_1753, prima della correzione dei sotto-totali: 11,36 € contro milioni).
+_QUOTA_MINIMA_TOTALE_STAMPATO = Decimal("0.25")
+
+
+def _rifiuta_lettura_non_riuscita(file_path: str, qd) -> None:
+    """Uno sbilancio oltre la meta' del totale attivo stampato (o, senza un totale stampato credibile, del lato piu'
+    grande letto) e' una lettura fallita: manca meta' del bilancio o piu', e Rettifiche non e' lo strumento per
+    ricostruirlo (budget_1786: 105 milioni di sbilancio su un attivo di circa 9). Si rifiuta col motivo, invece di
+    salvare numeri senza senso. Uno sbilancio piu' piccolo resta importato con l'avviso, come sempre."""
+    att, pas = abs(Decimal(qd.totale_attivo or 0)), abs(Decimal(qd.totale_passivo or 0))
+    sbilancio = abs(att - pas)
+    letto = max(att, pas)
+    base = letto
+    try:
+        from importers.import_snello.verifica import totali_stampati
+        stampato = totali_stampati(file_path).get("totale_attivo")
+        if stampato is not None and Decimal(stampato) >= _QUOTA_MINIMA_TOTALE_STAMPATO * letto:
+            base = Decimal(stampato)
+    except Exception:
+        pass
+    if base <= 0 or sbilancio <= _SBILANCIO_MASSIMO_QUOTA * base:
+        return
+    raise PDFImportError(
+        "Lettura non riuscita: lo stato patrimoniale letto non quadra di "
+        f"€{_euro_it(sbilancio)} (attivo €{_euro_it(att)}, passivo €{_euro_it(pas)}), piu' della meta' del "
+        f"totale attivo (€{_euro_it(base)}). Non e' un bilancio da correggere in Rettifiche: il documento non e' "
+        "stato letto correttamente e non e' stato importato.")
+
+
 def _rifiuta_passivo_non_letto(bs) -> None:
     """Un attivo letto con il passivo tutto a zero non e' un bilancio sbilanciato: e' una lettura
     mancante (budget_1423/1418, vLLM che ometteva sp11-sp18 e pydantic che li riempiva a zero).
@@ -2525,6 +2558,7 @@ def import_pdf_balance_sheet(
                         "Importazione non salvata: nessun dato contabile "
                         f"estratto dal documento ({reason})"
                     )
+                _rifiuta_lettura_non_riuscita(file_path, _qd)
                 # Sbilancio, mismatch CE/SP o plug mascherato: importabile e
                 # correggibile in Rettifiche. Allinea finalmente il codice a
                 # quanto CLAUDE.md gia' afferma per la rotta C ("Trial-balance

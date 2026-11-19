@@ -16,6 +16,16 @@ from importers.struttura_documento.analisi import Struttura
 from tests.test_coge_provider import RIGHE_PAREGGIO, _pdf
 
 
+@pytest.fixture(autouse=True)
+def _senza_guardia_lettura_non_riuscita(monkeypatch):
+    """La fixture PDF di route C («Cassa 1.000 / Fornitori 1.000») e' un giocattolo: il parser classico ne legge solo
+    la cassa, uno sbilancio del 100%, che dal 2026-11-19 si rifiuta come lettura non riuscita. Questi test provano
+    altro; la guardia ha i suoi test in tests/test_unbalanced_import.py."""
+    from importers import pdf_importer as _pi
+    monkeypatch.setattr(_pi, "_rifiuta_lettura_non_riuscita", lambda *a, **k: None)
+
+
+
 def _db_in_memoria(monkeypatch):
     from sqlalchemy import create_engine
     from sqlalchemy.orm import sessionmaker

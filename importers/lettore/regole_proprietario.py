@@ -67,6 +67,9 @@ REGOLE_MACRO: tuple[tuple[str, str], ...] = (
     ("R3-ASSOC", "I ricavi da associazione in partecipazione sono altri ricavi (ce04)."),
     ("W4", "La variazione dei lavori in corso su ordinazione e' ce03; i lavori interni capitalizzati (incrementi di "
            "immobilizzazioni) sono ce03a."),
+    # decisione del proprietario 2026-11-19 (budget_1645): il modello metteva i SAL in ce03 e i ricavi delle vendite a zero
+    ("SAL", "Gli stati di avanzamento lavori fatturati (SAL) sono ricavi delle vendite (ce01), non variazione dei "
+            "lavori in corso su ordinazione (ce03): ce03 e' solo la variazione delle rimanenze di commesse."),
     ("D3", "Lavoro somministrato, interinale o staff leasing e' costo del personale (ce08), non servizi."),
     ("D8", "Costi per natura, anche contro il mastro del gestionale: carburanti, cancelleria, materiale di consumo "
            "e di pulizia, DPI, imballaggi, dazi e oneri accessori d'acquisto sono materie (ce05); bolli, tasse di "

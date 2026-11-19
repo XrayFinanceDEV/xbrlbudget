@@ -1101,3 +1101,18 @@ def test_ripartizione_entro_oltre_12_mesi_con_la_lettera(tmp_path):
     f = _per_etichetta(foglie_contabili(doc, 0))
     assert f["MUTUO PASSIVO"].percorso_legale.endswith(".O") and f["FINANZIAMENTO AUTO"].percorso_legale.endswith(".O")
     assert f["BANCA C/ANTICIPI"].percorso_legale.endswith(".E")
+
+
+def test_esercizio_coi_totali_di_lato_opposti_e_un_saldo(tmp_path):
+    # 1642 (cifre inventate): nessuna testata «Saldo», ma «TOT ATTIVO» positivo e «TOT PASSIVO» uguale e negativo:
+    # la colonna e' dare - avere, e il segno decide il lato
+    voci = [(50, 100, "STATO PATRIMONIALE al 30/06/2026")]
+    dati = [("1 ATTIVO", None), ("Banca", "1.000,00"), ("Clienti", "250,00"), ("TOT ATTIVO", "1.250,00"),
+            ("2 PASSIVO", None), ("Fornitori", "900,00-"), ("Capitale", "350,00-"), ("TOT PASSIVO", "1.250,00-")]
+    for k, (e, v) in enumerate(dati):
+        voci += [(50, 140 + k * 14, e)] + ([(500, 140 + k * 14, v)] if v else [])
+    doc = _doc(tmp_path, voci)
+    foglie = _per_etichetta(foglie_contabili(doc, colonne_utili(doc)[0]))
+    assert {foglie[e].lato_sp for e in ("Banca", "Clienti")} == {"A"}
+    assert {foglie[e].lato_sp for e in ("Fornitori", "Capitale")} == {"P"}
+    assert foglie["Fornitori"].importo == Decimal("900.00")

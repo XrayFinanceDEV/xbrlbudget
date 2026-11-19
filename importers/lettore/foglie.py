@@ -584,14 +584,44 @@ def _e_controllo(r: Riga) -> bool:
     return r.sezione == "CE" and bool(_CONTROLLO.search(n) or _risultato(r))
 
 
+_GENERALE_ABBREVIATO = re.compile(r"^tot(?:ale)?\.?\s+(attivo|passivo)$")
+_saldi_dai_generali: dict[tuple[int, int], bool] = {}
+
+
+def _saldo_dai_generali(doc: Documento, colonna: int) -> bool:
+    """Una colonna «esercizio» che e' in realta' un saldo dare - avere: lo stato patrimoniale stampa il totale
+    dell'attivo positivo e quello del passivo uguale e negativo (la struttura IV Dir. CEE di SAP, «TOT ATTIVO
+    1.250.000,00» e «TOT PASSIVO 1.250.000,00-», 1642). Senza, passivo e ricavi restavano negativi e le foglie
+    non potevano mai quadrare. Decide il documento coi suoi due totali, mai un segno da solo."""
+    chiave = (id(doc), colonna)
+    if chiave not in _saldi_dai_generali:
+        stampati: dict[str, list[Decimal]] = {"attivo": [], "passivo": []}
+        for r in doc.righe_del_prospetto():
+            m = _GENERALE_ABBREVIATO.match(_nome(r)) if r.sezione == "SP" else None
+            cella = r.celle.get(colonna) if m else None
+            if cella is not None and cella.valore:
+                stampati[m.group(1)].append(cella.valore)
+        a, p = stampati["attivo"], stampati["passivo"]
+        _saldi_dai_generali.clear() if len(_saldi_dai_generali) > 64 else None
+        _saldi_dai_generali[chiave] = (len(a) == 1 and len(p) == 1 and a[0] > 0 > p[0]
+                                       and abs(a[0] + p[0]) <= Decimal("0.01"))
+    return _saldi_dai_generali[chiave]
+
+
 def _e_saldo(doc: Documento, r: Riga, colonna: int) -> bool:
     """La cella sta in una colonna di saldi (dare - avere, il testo della testata) di una tabella a lato unico, e il
     segno e' stampato: il documento ha dei saldi negativi, oppure la colonna porta la lettera D/A (1561: il saldo
     e' assoluto, la lettera D/A e' il segno). Un saldo che non e' mai negativo e senza lettera non dice il lato
-    dal segno."""
-    return (r.lato == "U" and any(c.indice == colonna and c.ruolo == "saldo" for c in doc.colonne)
-            and (bool(doc.profilo.negativi & {"meno", "parentesi", "meno-finale", "meno-staccato", "meno-colonna"})
-                 or colonna in doc.profilo.marcatori))
+    dal segno. Una colonna «esercizio» e' un saldo quando i totali stampati dell'attivo e del passivo sono opposti
+    (`_saldo_dai_generali`)."""
+    if r.lato != "U":
+        return False
+    ruolo = next((c.ruolo for c in doc.colonne if c.indice == colonna), None)
+    segno_stampato = (bool(doc.profilo.negativi & {"meno", "parentesi", "meno-finale", "meno-staccato", "meno-colonna"})
+                      or colonna in doc.profilo.marcatori)
+    if not segno_stampato:
+        return False
+    return ruolo == "saldo" or (ruolo == "esercizio" and _saldo_dai_generali(doc, colonna))
 
 
 def _lato_dal_saldo(r: Riga, lato_sp: str | None, verso: str | None, v: Decimal) -> tuple[str | None, str | None, Decimal]:

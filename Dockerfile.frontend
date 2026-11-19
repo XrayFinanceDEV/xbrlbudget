@@ -1,9 +1,9 @@
-FROM node:20-alpine AS deps
+FROM node:24-alpine AS deps
 WORKDIR /app
 COPY frontend/package.json frontend/package-lock.json* ./
 RUN npm ci
 
-FROM node:20-alpine AS builder
+FROM node:24-alpine AS builder
 WORKDIR /app
 COPY --from=deps /app/node_modules ./node_modules
 # final-report.ts imports the contract from the repository-level sibling.
@@ -23,7 +23,7 @@ ARG NEXT_PUBLIC_PARENT_ORIGIN=""
 ENV NEXT_PUBLIC_PARENT_ORIGIN=${NEXT_PUBLIC_PARENT_ORIGIN}
 RUN npm run build
 
-FROM node:20-alpine AS runner
+FROM node:24-alpine AS runner
 WORKDIR /app
 ENV NODE_ENV=production
 RUN addgroup --system --gid 1001 nodejs && adduser --system --uid 1001 nextjs

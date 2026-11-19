@@ -179,6 +179,16 @@ def _totale_generale(r: Riga) -> str | None:
     return None
 
 
+_CONTO_CON_BARRE = re.compile(r"^\d+(?:/\d+)+$")
+
+
+def _codice_di_conto(codice: str) -> bool:
+    """Il codice di un conto del piano dei conti con le barre («15/0005/1711»): un totale con questo codice e' un
+    mastro di conti, non la chiusura di una voce di legge, e non riporta indietro l'outline (1753: un conto letto per
+    totale del conto sotto, 27,40 = 0,00 + 27,40, azzerava «C.II» e le liquidita' restavano senza percorso)."""
+    return bool(codice) and bool(_CONTO_CON_BARRE.match(codice.strip()))
+
+
 def _lato_del_titolo(r: Riga, gettoni: tuple[str, ...]) -> str | None:
     """«A» | «P» se la riga e' il titolo di un lato («STATO PATRIMONIALE ATTIVO», «Passivo»): breve, senza numerazione
     di legge e senza essere un totale."""
@@ -321,7 +331,7 @@ def _scorri(righe: list[Riga], contrapposto: bool = True) -> dict[str, _Posizion
         if r.sezione == "SP":
             lato_sp = {"L": "A", "R": "P"}.get(r.lato, stato) if contrapposto else stato
         out[r.id] = _Posizione(lato_sp, tuple(g for g in livelli if g), scadenze.get(chiave))
-        if r.totale and not gettoni and not _totale_generale(r) and not s_riga:
+        if r.totale and not gettoni and not _totale_generale(r) and not s_riga and not _codice_di_conto(r.codice):
             # (una ripartizione «- entro esercizio successivo» divide la voce per scadenza, non la chiude)
             # un totale chiuso senza numerazione («Totale crediti») chiude la voce che porta il suo nome: sotto di lui
             # i livelli tornano a quelli del titolo, meno quello chiuso
@@ -512,7 +522,7 @@ def gettoni_di_legge(r_etichetta: str, codice: str = "") -> tuple[str, ...]:
         return t
     m = _ENUMERATORE.match(r_etichetta)
     if not m:
-        return ()
+        return _gettoni_col_codice_di_struttura(r_etichetta, codice)
     if m["lettera"]:
         return (m["lettera"].upper(),)
     if m["romano"]:
@@ -520,6 +530,34 @@ def gettoni_di_legge(r_etichetta: str, codice: str = "") -> tuple[str, ...]:
     if m["arabo"]:
         return (m["arabo"] + (f"-{m['suffisso'].lower()}" if m["suffisso"] else ""),)
     return (m["minuscola"],)
+
+
+# Il codice della struttura di legge che certi gestionali stampano davanti alla voce: sezione (A attivo, P passivo,
+# E economico), lettera della voce, poi le cifre dei livelli («AB010400 4 Concessioni…», «EB000700 7 Per servizi»,
+# «AC020502 5-bis crediti tributari», 1753). Su una riga cosi' l'enumeratore in testa all'etichetta vale anche
+# senza parentesi («B IMMOBILIZZAZIONI», «II CREDITI»), e il numero o la lettera in coda al codice e' la voce.
+_CODICE_DI_STRUTTURA = re.compile(r"^[APE][A-E]\d{6}(?:\s+(?P<arabo>\d{1,2})|(?P<lettera>[a-z]))?$")
+_ENUMERATORE_NUDO = re.compile(
+    r"^\s*(?:(?P<lettera>[A-E])|(?P<romano>[IVX]{1,4})|(?P<arabo>\d{1,2})(?:-(?P<suffisso>bis|ter|quater))?)\s+\S",
+    re.I)
+
+
+def _gettoni_col_codice_di_struttura(etichetta: str, codice: str) -> tuple[str, ...]:
+    m = _CODICE_DI_STRUTTURA.match(codice or "")
+    if not m:
+        return ()
+    e = _ENUMERATORE_NUDO.match(etichetta)
+    if e and e["lettera"] and e["lettera"].isupper():
+        return (e["lettera"],)
+    if e and e["romano"] and e["romano"].isupper():
+        return (e["romano"],)
+    if e and e["arabo"]:
+        return (e["arabo"] + (f"-{e['suffisso'].lower()}" if e["suffisso"] else ""),)
+    if m["arabo"]:
+        return (m["arabo"],)
+    if m["lettera"]:
+        return (m["lettera"],)
+    return ()
 
 
 # «- entro esercizio successivo», «- oltre l'esercizio successivo»: la ripartizione senza «esigibili» (Passepartout)
@@ -997,6 +1035,11 @@ class _Percorsi:
         if _totale_generale(r):
             # «A) TOTALE STATO PATRIMONIALE - ATTIVO»: la lettera numera il lato, non la voce A di legge; un totale
             # di sezione verificato sotto di lui («C) TOTALE ATTIVO CIRCOLANTE») non deve ereditarla
+            return (), None, False
+        if r.sezione == "CE" and e_riga_del_risultato(r.etichetta):
+            # «21) Utile (perdite) dell'esercizio» e' una differenza: ha fra i membri «Totale proventi e oneri
+            # finanziari», ma non e' la voce sopra di loro. Il suo «21» faceva scartare il «17» dei conti degli
+            # interessi come un arabo sotto un arabo (1753: oneri finanziari e imposte senza voce di legge)
             return (), None, False
         posizionale = (self.pos[r.id].livelli, self.pos[r.id].scad)
         propri = gettoni_di_legge(r.etichetta, r.codice)

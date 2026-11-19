@@ -174,6 +174,29 @@ def test_teamsystem_hyphenated_total_is_read_as_the_control_total():
     assert totals["passivo"] == D("7560377.53")
 
 
+def test_sub_total_captions_are_not_the_side_total():
+    # Importi PRIMA della propria etichetta (budget_1753, cifre inventate): il primo numero
+    # dopo «Totale attivo circolante» e' lo scostamento percentuale della riga seguente, e
+    # quello dopo «Totale passivo corrente» appartiene a un'altra riga. Nessuno dei due e'
+    # il totale di lato: meglio «non letto» che un'ancora di pochi euro.
+    text = """
+    1.200.000,00
+    1.100.000,00
+    TOTALE ATTIVO CIRCOLANTE
+    -12,40
+    -8.400,00
+    Totale passivo corrente
+    -4,50
+    Totale attività non correnti
+    -7,25
+    """
+
+    totals = _declared_control_totals("unused.pdf", text=text)
+
+    assert totals["attivo"] is None
+    assert totals["passivo"] is None
+
+
 def test_section_heading_amount_is_a_control_total_without_totale_keyword():
     text = """
     2

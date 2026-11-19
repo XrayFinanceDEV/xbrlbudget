@@ -35,7 +35,14 @@ def e_riga_del_risultato(etichetta: str) -> bool:
     """La riga del risultato d'esercizio: «Utile (perdita) dell'esercizio», o un'etichetta di sole parole del
     risultato («Utile»)."""
     n = _norm(etichetta)
+    if _VOCE_DI_COSTI_O_RICAVI.search(n):
+        return False
     return bool(_RISULTATO_ESERCIZIO.search(n) or _RISULTATO_NUDO.match(n))
+
+
+# «PERDITE E COSTI VARI D'ESERCIZIO» e' un mastro di costi, non la perdita dell'esercizio (budget_1645): la riga del
+# risultato non nomina costi, oneri, spese, ricavi o proventi
+_VOCE_DI_COSTI_O_RICAVI = re.compile(r"\b(?:costi|oneri|spese|ricavi|proventi)\b")
 
 # L'enumeratore di una voce di legge stampato come titolo: «C)», «II -», «1)», «5-bis)», «c)». Il maiuscolo A-E
 # vuole la parentesi e il romano la parentesi o il trattino, cosi' «A. Rossi s.r.l.» e «I.V.A.» non sono voci.
@@ -177,6 +184,16 @@ def _totale_generale(r: Riga) -> str | None:
     if "pareggio" in parole and r.lato in ("L", "R"):
         return "attivo" if r.lato == "L" else "passivo"
     return None
+
+
+_CONTO_CON_BARRE = re.compile(r"^\d+(?:/\d+)+$")
+
+
+def _codice_di_conto(codice: str) -> bool:
+    """Il codice di un conto del piano dei conti con le barre («15/0005/1711»): un totale con questo codice e' un
+    mastro di conti, non la chiusura di una voce di legge, e non riporta indietro l'outline (1753: un conto letto per
+    totale del conto sotto, 27,40 = 0,00 + 27,40, azzerava «C.II» e le liquidita' restavano senza percorso)."""
+    return bool(codice) and bool(_CONTO_CON_BARRE.match(codice.strip()))
 
 
 def _lato_del_titolo(r: Riga, gettoni: tuple[str, ...]) -> str | None:
@@ -321,7 +338,7 @@ def _scorri(righe: list[Riga], contrapposto: bool = True) -> dict[str, _Posizion
         if r.sezione == "SP":
             lato_sp = {"L": "A", "R": "P"}.get(r.lato, stato) if contrapposto else stato
         out[r.id] = _Posizione(lato_sp, tuple(g for g in livelli if g), scadenze.get(chiave))
-        if r.totale and not gettoni and not _totale_generale(r) and not s_riga:
+        if r.totale and not gettoni and not _totale_generale(r) and not s_riga and not _codice_di_conto(r.codice):
             # (una ripartizione «- entro esercizio successivo» divide la voce per scadenza, non la chiude)
             # un totale chiuso senza numerazione («Totale crediti») chiude la voce che porta il suo nome: sotto di lui
             # i livelli tornano a quelli del titolo, meno quello chiuso
@@ -512,7 +529,7 @@ def gettoni_di_legge(r_etichetta: str, codice: str = "") -> tuple[str, ...]:
         return t
     m = _ENUMERATORE.match(r_etichetta)
     if not m:
-        return ()
+        return _gettoni_col_codice_di_struttura(r_etichetta, codice)
     if m["lettera"]:
         return (m["lettera"].upper(),)
     if m["romano"]:
@@ -520,6 +537,34 @@ def gettoni_di_legge(r_etichetta: str, codice: str = "") -> tuple[str, ...]:
     if m["arabo"]:
         return (m["arabo"] + (f"-{m['suffisso'].lower()}" if m["suffisso"] else ""),)
     return (m["minuscola"],)
+
+
+# Il codice della struttura di legge che certi gestionali stampano davanti alla voce: sezione (A attivo, P passivo,
+# E economico), lettera della voce, poi le cifre dei livelli («AB010400 4 Concessioni…», «EB000700 7 Per servizi»,
+# «AC020502 5-bis crediti tributari», 1753). Su una riga cosi' l'enumeratore in testa all'etichetta vale anche
+# senza parentesi («B IMMOBILIZZAZIONI», «II CREDITI»), e il numero o la lettera in coda al codice e' la voce.
+_CODICE_DI_STRUTTURA = re.compile(r"^[APE][A-E]\d{6}(?:\s+(?P<arabo>\d{1,2})|(?P<lettera>[a-z]))?$")
+_ENUMERATORE_NUDO = re.compile(
+    r"^\s*(?:(?P<lettera>[A-E])|(?P<romano>[IVX]{1,4})|(?P<arabo>\d{1,2})(?:-(?P<suffisso>bis|ter|quater))?)\s+\S",
+    re.I)
+
+
+def _gettoni_col_codice_di_struttura(etichetta: str, codice: str) -> tuple[str, ...]:
+    m = _CODICE_DI_STRUTTURA.match(codice or "")
+    if not m:
+        return ()
+    e = _ENUMERATORE_NUDO.match(etichetta)
+    if e and e["lettera"] and e["lettera"].isupper():
+        return (e["lettera"],)
+    if e and e["romano"] and e["romano"].isupper():
+        return (e["romano"],)
+    if e and e["arabo"]:
+        return (e["arabo"] + (f"-{e['suffisso'].lower()}" if e["suffisso"] else ""),)
+    if m["arabo"]:
+        return (m["arabo"],)
+    if m["lettera"]:
+        return (m["lettera"],)
+    return ()
 
 
 # «- entro esercizio successivo», «- oltre l'esercizio successivo»: la ripartizione senza «esigibili» (Passepartout)
@@ -584,14 +629,44 @@ def _e_controllo(r: Riga) -> bool:
     return r.sezione == "CE" and bool(_CONTROLLO.search(n) or _risultato(r))
 
 
+_GENERALE_ABBREVIATO = re.compile(r"^tot(?:ale)?\.?\s+(attivo|passivo)$")
+_saldi_dai_generali: dict[tuple[int, int], bool] = {}
+
+
+def _saldo_dai_generali(doc: Documento, colonna: int) -> bool:
+    """Una colonna «esercizio» che e' in realta' un saldo dare - avere: lo stato patrimoniale stampa il totale
+    dell'attivo positivo e quello del passivo uguale e negativo (la struttura IV Dir. CEE di SAP, «TOT ATTIVO
+    1.250.000,00» e «TOT PASSIVO 1.250.000,00-», 1642). Senza, passivo e ricavi restavano negativi e le foglie
+    non potevano mai quadrare. Decide il documento coi suoi due totali, mai un segno da solo."""
+    chiave = (id(doc), colonna)
+    if chiave not in _saldi_dai_generali:
+        stampati: dict[str, list[Decimal]] = {"attivo": [], "passivo": []}
+        for r in doc.righe_del_prospetto():
+            m = _GENERALE_ABBREVIATO.match(_nome(r)) if r.sezione == "SP" else None
+            cella = r.celle.get(colonna) if m else None
+            if cella is not None and cella.valore:
+                stampati[m.group(1)].append(cella.valore)
+        a, p = stampati["attivo"], stampati["passivo"]
+        _saldi_dai_generali.clear() if len(_saldi_dai_generali) > 64 else None
+        _saldi_dai_generali[chiave] = (len(a) == 1 and len(p) == 1 and a[0] > 0 > p[0]
+                                       and abs(a[0] + p[0]) <= Decimal("0.01"))
+    return _saldi_dai_generali[chiave]
+
+
 def _e_saldo(doc: Documento, r: Riga, colonna: int) -> bool:
     """La cella sta in una colonna di saldi (dare - avere, il testo della testata) di una tabella a lato unico, e il
     segno e' stampato: il documento ha dei saldi negativi, oppure la colonna porta la lettera D/A (1561: il saldo
     e' assoluto, la lettera D/A e' il segno). Un saldo che non e' mai negativo e senza lettera non dice il lato
-    dal segno."""
-    return (r.lato == "U" and any(c.indice == colonna and c.ruolo == "saldo" for c in doc.colonne)
-            and (bool(doc.profilo.negativi & {"meno", "parentesi", "meno-finale", "meno-staccato", "meno-colonna"})
-                 or colonna in doc.profilo.marcatori))
+    dal segno. Una colonna «esercizio» e' un saldo quando i totali stampati dell'attivo e del passivo sono opposti
+    (`_saldo_dai_generali`)."""
+    if r.lato != "U":
+        return False
+    ruolo = next((c.ruolo for c in doc.colonne if c.indice == colonna), None)
+    segno_stampato = (bool(doc.profilo.negativi & {"meno", "parentesi", "meno-finale", "meno-staccato", "meno-colonna"})
+                      or colonna in doc.profilo.marcatori)
+    if not segno_stampato:
+        return False
+    return ruolo == "saldo" or (ruolo == "esercizio" and _saldo_dai_generali(doc, colonna))
 
 
 def _lato_dal_saldo(r: Riga, lato_sp: str | None, verso: str | None, v: Decimal) -> tuple[str | None, str | None, Decimal]:
@@ -967,6 +1042,11 @@ class _Percorsi:
         if _totale_generale(r):
             # «A) TOTALE STATO PATRIMONIALE - ATTIVO»: la lettera numera il lato, non la voce A di legge; un totale
             # di sezione verificato sotto di lui («C) TOTALE ATTIVO CIRCOLANTE») non deve ereditarla
+            return (), None, False
+        if r.sezione == "CE" and e_riga_del_risultato(r.etichetta):
+            # «21) Utile (perdite) dell'esercizio» e' una differenza: ha fra i membri «Totale proventi e oneri
+            # finanziari», ma non e' la voce sopra di loro. Il suo «21» faceva scartare il «17» dei conti degli
+            # interessi come un arabo sotto un arabo (1753: oneri finanziari e imposte senza voce di legge)
             return (), None, False
         posizionale = (self.pos[r.id].livelli, self.pos[r.id].scad)
         propri = gettoni_di_legge(r.etichetta, r.codice)

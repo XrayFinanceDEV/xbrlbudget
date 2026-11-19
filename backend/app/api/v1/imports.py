@@ -24,6 +24,22 @@ from importers.pdf_importer import import_pdf_balance_sheet, PDFImportError
 
 router = APIRouter()
 
+
+def _dettaglio_rifiuto(e: PDFImportError) -> dict:
+    """Il corpo del 422 di un PDF rifiutato: il motivo, e quando si riconosce una categoria e che cosa caricare al
+    suo posto (`importers.rifiuti_import`), cosi' che l'utente carichi il file giusto. `details` resta per i client
+    che lo leggono gia', in italiano."""
+    from importers.rifiuti_import import suggerimento_rifiuto
+    suggerimento = suggerimento_rifiuto(str(e)) or {}
+    return {
+        "success": False,
+        "error": str(e),
+        "error_type": "PDFImportError",
+        "categoria": suggerimento.get("categoria"),
+        "suggerimento": suggerimento.get("suggerimento"),
+        "details": suggerimento.get("suggerimento") or "Il file non è stato importato.",
+    }
+
 MAX_PDF_SIZE = 50 * 1024 * 1024  # 50MB
 
 
@@ -531,15 +547,7 @@ async def upload_pdf(
 
     except PDFImportError as e:
         mark_error(db, upload_record, e)
-        raise HTTPException(
-            status_code=422,
-            detail={
-                "success": False,
-                "error": str(e),
-                "error_type": "PDFImportError",
-                "details": "Failed to extract data from PDF. Check file format and content."
-            }
-        )
+        raise HTTPException(status_code=422, detail=_dettaglio_rifiuto(e))
     except ValueError as e:
         mark_error(db, upload_record, e)
         raise HTTPException(
@@ -727,11 +735,7 @@ async def upload_pdf_ocr(
         )
     except PDFImportError as e:
         mark_error(db, upload_record, e)
-        raise HTTPException(
-            status_code=422,
-            detail={"success": False, "error": str(e), "error_type": "PDFImportError",
-                    "details": "Import contabile fallito sul risultato OCR."},
-        )
+        raise HTTPException(status_code=422, detail=_dettaglio_rifiuto(e))
     except ValueError as e:
         mark_error(db, upload_record, e)
         raise HTTPException(

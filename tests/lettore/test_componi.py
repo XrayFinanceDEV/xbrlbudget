@@ -357,3 +357,27 @@ def test_credito_tributario_negativo_fra_i_debiti_tributari():
     k = componi(foglie, {"c": C("sp09"), "t": C("sp06", "sp06e"), "p": C("sp16", "sp16g")}, [])
     assert k.bs["sp16e_debiti_tributari_breve"] == D(70) and k.bs.get("sp06e_crediti_tributari_breve", 0) == 0
     assert k.sbilancio == 0
+
+
+def test_fondo_abbinato_per_etichetta_anche_col_codice_del_conto_nell_etichetta():
+    # budget_1645 (importi inventati): il codice stampato dentro l'etichetta e' diverso fra fondo e cespite, e non
+    # deve impedire l'abbinamento per nome
+    foglie = [F("i", 400, etichetta="! 101012 IMPIANTI !"), F("s", 900, etichetta="! 104001 SPESE DI COSTITUZIONE E IMPIANTO!"),
+              F("fi", 400, "R", etichetta="! ! 207012 FONDO AMMORTAMENTO IMPIANTI ! !"),
+              F("fs", 850, "R", etichetta="! ! 207021 FONDO AMM.TO SPESE DI COSTITUZIO! !"), F("d", 50, "R", etichetta="Debiti")]
+    classi = {"i": C("sp03", "sp03b"), "s": C("sp02", "sp02a"),
+              "fi": R("sp03", "SPA.B.II.F"), "fs": R("sp02", "SPA.B.I.F"), "d": C("sp16")}
+    k = componi(foglie, classi, [])
+    assert k.bs["sp03b_impianti_macchinari"] == 0 and k.bs["sp02_immob_immateriali"] == D(50)
+    assert not k.tagliate and k.sbilancio == 0
+
+
+def test_fondo_per_famiglia_resta_nella_macro_del_modello_se_ci_sta():
+    # la famiglia degli impianti comprende un immateriale piu' grande («costituzione e impianto»): il fondo che il
+    # modello mette fra i materiali si netta sugli impianti materiali, che lo contengono
+    foglie = [F("i", 400, etichetta="IMPIANTI"), F("s", 900, etichetta="SPESE DI COSTITUZIONE E IMPIANTO"),
+              F("fi", 400, "R", etichetta="F.DO AMM. MACCHINARI"), F("d", 900, "R", etichetta="Debiti")]
+    classi = {"i": C("sp03", "sp03b"), "s": C("sp02", "sp02a"), "fi": R("sp03", "SPA.B.II.F"), "d": C("sp16")}
+    k = componi(foglie, classi, [])
+    assert k.bs["sp03_immob_materiali"] == 0 and k.bs["sp02_immob_immateriali"] == D(900)
+    assert k.sbilancio == 0

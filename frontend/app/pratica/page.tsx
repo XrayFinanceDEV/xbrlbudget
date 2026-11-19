@@ -83,6 +83,7 @@ import {
 } from "@/components/ui/alert-dialog";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Alert, AlertTitle, AlertDescription } from "@/components/ui/alert";
+import { rifiutoDaErrore, type RifiutoImport } from "@/lib/import-rifiuto";
 import { AnagraficheStep } from "@/components/pratica/AnagraficheStep";
 import { RettificheTab } from "@/components/pratica/RettificheTab";
 import { ComparisonTable } from "@/components/pratica/ComparisonTable";
@@ -155,6 +156,8 @@ export default function InfraannualePage() {
   // the input on the FIRST pick (clearing the shown name), which looked like the upload
   // failed and only "worked" on the second attempt.
   const [fileResetKey, setFileResetKey] = useState(0);
+  // L'ultimo import PDF rifiutato: motivo e che cosa caricare, a schermo finche' l'utente non cambia file o riprova.
+  const [rifiuto, setRifiuto] = useState<RifiutoImport | null>(null);
   const [fiscalYear, setFiscalYear] = useState(new Date().getFullYear());
   const [periodMonths, setPeriodMonths] = useState(9);
   const [importing, setImporting] = useState(false);
@@ -625,6 +628,7 @@ export default function InfraannualePage() {
 
     setImporting(true);
     setActiveImportMethod(requestedMethod);
+    setRifiuto(null);
     // Clear stale rettifiche state from any previous import
     verifica.clear();
     storico.clear();
@@ -705,7 +709,13 @@ export default function InfraannualePage() {
       } else {
         fallback = "Errore durante l'importazione";
       }
-      toast.error(getErrorMessage(error, fallback));
+      const rifiutato = rifiutoDaErrore(error);
+      if (rifiutato) {
+        setRifiuto(rifiutato);
+        toast.error("Il file non è stato importato: il motivo è indicato sotto.");
+      } else {
+        toast.error(getErrorMessage(error, fallback));
+      }
     } finally {
       setImporting(false);
       setActiveImportMethod(null);
@@ -1449,7 +1459,10 @@ export default function InfraannualePage() {
                     key={`main-file-${fileResetKey}`}
                     type="file"
                     accept={importType === "xbrl" ? ".xbrl,.XBRL,.xml,.XML" : ".pdf,.PDF"}
-                    onChange={(e) => setFile(e.target.files?.[0] || null)}
+                    onChange={(e) => {
+                      setFile(e.target.files?.[0] || null);
+                      setRifiuto(null);
+                    }}
                   />
                 </div>
               </div>
@@ -1594,6 +1607,21 @@ export default function InfraannualePage() {
                 </div>
               ) : (
                 <div className="space-y-3">
+                {rifiuto && !importing && (
+                  <Alert variant="destructive">
+                    <AlertTriangle className="h-4 w-4" />
+                    <AlertTitle>Il file non è stato importato</AlertTitle>
+                    <AlertDescription className="space-y-2">
+                      <p>{rifiuto.motivo}</p>
+                      {rifiuto.suggerimento && (
+                        <p>
+                          <span className="font-medium">Che cosa caricare: </span>
+                          {rifiuto.suggerimento}
+                        </p>
+                      )}
+                    </AlertDescription>
+                  </Alert>
+                )}
                 {activeImportMethod === "pdf" && <ImportProgressBar />}
                 <div className="flex flex-wrap justify-end gap-3">
                   {importType === "pdf" ? (

@@ -162,3 +162,38 @@ def test_un_attivo_letto_col_passivo_tutto_a_zero_e_una_lettura_mancante_non_si_
             user_id="passivo-a-zero",
         )
 
+
+
+def test_uno_stato_patrimoniale_vuoto_non_si_rilegge_altre_due_volte(
+    route_ab_non_risolta_dal_deterministico, monkeypatch,
+):
+    """budget_1667: un prospetto senza SP letto vuoto dalla lettura a un anno E da quella a
+    due anni non si rilegge: altri due giri davano lo stesso vuoto, dopo dieci minuti."""
+    tmp_path = route_ab_non_risolta_dal_deterministico
+    monkeypatch.setenv("PDF_LLM_PROVIDER_IVCEE", "gx10")
+    monkeypatch.setenv("GX10_API_KEY", "x")
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    monkeypatch.setattr(importer, "has_comparative_ivcee_columns", lambda *_: True, raising=False)
+    monkeypatch.setattr(standard, "has_comparative_ivcee_columns", lambda *a, **k: True)
+    letture = []
+
+    def un_anno(*a, **k):
+        letture.append("un anno")
+        return {}, {"ce01_ricavi_vendite": Decimal("50")}
+
+    def due_anni(*a, **k):
+        letture.append("due anni")
+        return {}, {"ce01_ricavi_vendite": Decimal("50")}, {}, {}
+
+    monkeypatch.setattr(P, "extract_pdf_with_llm", un_anno)
+    monkeypatch.setattr(P, "extract_pdf_both_years_with_llm", due_anni)
+    _db_in_memoria(monkeypatch)
+
+    with pytest.raises(PDFImportError):
+        importer.import_pdf_balance_sheet(
+            file_path=_pdf(tmp_path), fiscal_year=2025,
+            company_name="SP vuoto", create_company=True, sector=1,
+            user_id="sp-vuoto",
+        )
+
+    assert letture == ["un anno", "due anni"]

@@ -73,6 +73,17 @@ def colonna_di(x_destra: float, colonne: list[Colonna]) -> Colonna | None:
     return min(vicine, key=lambda c: abs(c.x_destra - x_destra)) if vicine else None
 
 
+# Un importo solo sulla riga, che manca la colonna oltre `_TOL_COLONNA`, entra nell'unica colonna entro il doppio
+# (un importo riscritto a mano in un altro carattere, spostato di qualche punto: 1772, 16,5 pt).
+_TOL_COLONNA_UNICA = 2 * _TOL_COLONNA
+
+
+def colonna_unica_vicina(x_destra: float, colonne: list[Colonna]) -> Colonna | None:
+    """L'unica colonna il cui bordo destro dista al piu' `_TOL_COLONNA_UNICA`; None se nessuna o piu' di una."""
+    vicine = [c for c in colonne if abs(c.x_destra - x_destra) <= _TOL_COLONNA_UNICA]
+    return vicine[0] if len(vicine) == 1 else None
+
+
 def colonne_documento(righe: list[RigaFisica]) -> list[Colonna]:
     colonne = _colonne_dai_bordi(righe)
     if not colonne:
@@ -438,6 +449,7 @@ def _ruoli(colonne: list[Colonna], valori: list[list], parole: dict[int, set[str
            periodi: dict[int, tuple]) -> None:
     matrice = [riga[2] for riga in valori]
     esercizi: list[int] = []
+    differenze: list[int] = []
     for c in colonne:
         nomi = parole.get(c.indice, set())
         testata = {_RUOLI_TESTATA[n] for n in nomi if n in _RUOLI_TESTATA}
@@ -454,6 +466,11 @@ def _ruoli(colonne: list[Colonna], valori: list[list], parole: dict[int, set[str
         if c.indice not in periodi and any(
                 e_differenza(matrice, c.indice, a, b) for a in esercizi for b in esercizi if a < b):
             c.ruolo = "differenza"
+            differenze.append(c.indice)
+            continue
+        if c.indice not in periodi and any(
+                _e_percentuale(matrice, c.indice, d, b) for d in differenze for b in esercizi):
+            c.ruolo = "percentuale"     # lo scostamento relativo stampato con un decimale («13,0-», SAP: 1642)
             continue
         analisi = nomi & _ANALISI
         if analisi:     # i numeri non lo dicono, l'intestazione dice che non e' un esercizio
@@ -462,6 +479,23 @@ def _ruoli(colonne: list[Colonna], valori: list[list], parole: dict[int, set[str
             continue
         c.ruolo = "esercizio"
         esercizi.append(c.indice)
+
+
+_TOL_PERCENTUALE = Decimal("0.06")      # una percentuale stampata con un decimale, arrotondata
+_QUOTA_PERCENTUALE = 0.8                 # le righe fuori scala o tagliate («999,9») non la smentiscono
+
+
+def _e_percentuale(valori: list[list], k: int, d: int, base: int) -> bool:
+    """La colonna k e' lo scostamento percentuale della differenza d sull'esercizio `base`: |k| = |100 * d / base|,
+    entro l'arrotondamento a un decimale, su almeno quattro righe su cinque fra quelle (tre o piu') che portano tutte
+    e tre con la base diversa da zero e una differenza vera. Le colonne di percentuali con tre decimali le riconosce
+    gia' la forma dell'importo; queste no, e diventavano esercizi su cui nascevano catene finte."""
+    prove = [(r[k], r[d], r[base]) for r in valori if r[k] is not None and r[d] is not None
+             and r[base] is not None and r[base] != 0 and r[d] != 0]
+    if len(prove) < 3:
+        return False
+    giuste = sum(1 for v, diff, b in prove if abs(abs(v) - abs(100 * diff / b)) <= _TOL_PERCENTUALE)
+    return giuste >= _QUOTA_PERCENTUALE * len(prove)
 
 
 def _e_mastro(valori: list[list], m: int, f: int) -> bool:

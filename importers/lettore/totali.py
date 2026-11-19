@@ -322,11 +322,25 @@ def _cerca(serie: _Serie, passo: list[int], i: int, kmin: int, valori: list[Deci
         elif in_tolleranza is not None:
             return in_tolleranza
         if valori[j]:
-            if s in parziali:
+            if s in parziali and not _costo_e_suo_fondo(serie, membri, valori):
                 return in_tolleranza
             parziali.add(s)
         j = passo[j]
     return in_tolleranza
+
+
+_NOME_FONDO = re.compile(r"\bf\.?\s*/\s*amm|\bf\.?\s*do\b|\bfondo\b|\bfondi\b|ammortament")
+
+
+def _costo_e_suo_fondo(serie: _Serie, membri: list[int], valori: list[Decimal]) -> bool:
+    """La somma torna a un valore gia' visto perche' un cespite interamente ammortizzato e il suo fondo si
+    annullano («ATTREZZATURE 2.500,00» e «F/AMM ATTREZZATURE -2.500,00», senza la riga della voce sopra: 1753). Non e'
+    un mastro contato con la sua foglia: le ultime due righe con un importo sono uguali e opposte, e una delle due e'
+    un fondo per nome."""
+    pieni = [m for m in membri if valori[m]][-2:]
+    if len(pieni) < 2 or valori[pieni[0]] != -valori[pieni[1]]:
+        return False
+    return any(_NOME_FONDO.search(_norm(serie.righe[m].etichetta)) for m in pieni)
 
 
 def _all_unita(r: Riga, colonna: int) -> bool:
@@ -439,6 +453,67 @@ def _marca(serie: _Serie, passo: list[int], i: int, membri: list[int]) -> None:
     passo[i] = passo[membri[-1]]
 
 
+def _figli_del_consumato(serie: _Serie, passo: list[int], i: int, direzione: int) -> int:
+    """Un mastro gia' consumato come membro di un totale piu' in alto (il conto «11.07» dentro «11», il mastro
+    «71.03» dentro «71») non ha ancora cercato i propri conti: uscito dal cammino, la sua passata non arrivava piu',
+    e mastro e conti restavano foglie insieme, contati due volte (budget_1689). Li cerca fra le righe vive accanto a
+    lui nella direzione del documento, solo come gruppo (almeno due importi) e solo a somma esatta: un mastro con un
+    conto solo e' una catena, e la catena la risolve gia' la scorciatoia di `_risolvi` prima di consumarlo."""
+    n = len(serie.valori)
+    j = i + direzione
+    while 0 <= j < n and not serie.vivo[j]:
+        j += direzione
+    if not 0 <= j < n:
+        return 0
+    salvato = passo[i]
+    passo[i] = j
+    membri = _cerca_membri(serie, passo, i, 2)
+    base = serie.sottratti if serie.risultato[i] else serie.valori
+    verso = serie.verso_cercato.get(i, 1)
+    if membri is None or i in membri or verso * sum((base[m] for m in membri), Decimal(0)) != serie.bersagli[i]:
+        passo[i] = salvato
+        return 0
+    _marca(serie, passo, i, membri)
+    passo[i] = salvato      # resta fuori dal cammino: e' gia' un membro del totale sopra
+    return 1
+
+
+_LIVELLI_CATENA = 4
+
+
+def _catena_sotto_la_catena(serie: _Serie, passo: list[int], sotto: list[int], direzione: int) -> int:
+    """Il figlio unico appena consumato dalla scorciatoia ha a sua volta un figlio unico con lo stesso importo,
+    rientrato piu' a destra di lui: «PORTAFOGLIO CLIENTI», il conto «Effetti all'incasso» e il sottoconto rientrato
+    «Effetti all'incasso», tre righe con lo stesso importo (budget_1689). Consumato, il conto usciva dal cammino senza
+    aver preso il suo sottoconto, che restava una foglia accanto a lui: l'importo contato due volte. Solo a somma
+    esatta e solo con il rientro che lo dice (un gemello allo stesso rientro e' un fratello, non un figlio); la somma
+    del totale sopra si rifa' comunque dopo (`_risolvi`), e se non torna tutto si disfa."""
+    valori = serie.valori
+    n = len(valori)
+    marcati = 0
+    for _ in range(_LIVELLI_CATENA):
+        f = next((x for x in sotto if valori[x]), None)
+        if f is None or not serie.candidabile[f] or serie.righe[f].x is None:
+            return marcati
+        j = f + direzione
+        while 0 <= j < n and not serie.vivo[j]:
+            j += direzione
+        if not 0 <= j < n or serie.righe[j].x is None or serie.righe[j].x <= serie.righe[f].x + _SCALINO:
+            return marcati
+        salvato = passo[f]
+        passo[f] = j
+        figli = _cerca_membri(serie, passo, f, 1)
+        if figli is None or f in figli or sum(1 for x in figli if valori[x]) != 1 \
+                or sum((valori[x] for x in figli), Decimal(0)) != serie.bersagli[f]:
+            passo[f] = salvato
+            return marcati
+        _marca(serie, passo, f, figli)
+        passo[f] = salvato
+        marcati += 1
+        sotto = figli
+    return marcati
+
+
 def _risolvi(serie: _Serie, ammessi: list[bool], direzione: int, kmin: int) -> int:
     """Una passata nella direzione data (-1: i figli stanno sopra il totale), sui soli candidati `ammessi`: come
     `import_snello/righe.py:_risolvi_totali`, compreso il membro a figlio unico risolto prima di essere consumato,
@@ -450,6 +525,9 @@ def _risolvi(serie: _Serie, ammessi: list[bool], direzione: int, kmin: int) -> i
     ordine = range(n) if direzione == -1 else range(n - 1, -1, -1)
     marcati = 0
     for i in ordine:
+        if not vivo[i] and serie.candidabile[i] and ammessi[i] and kmin >= 2 and valori[i]:
+            marcati += _figli_del_consumato(serie, passo, i, direzione)
+            continue
         # un totale a zero (a - b = 0, il costo e il suo fondo) vale con due importi veri, come ogni gruppo
         if not vivo[i] or not serie.candidabile[i] or not ammessi[i] or (not serie.bersagli[i] and kmin < 2):
             continue
@@ -473,6 +551,7 @@ def _risolvi(serie: _Serie, ammessi: list[bool], direzione: int, kmin: int) -> i
                     _marca(serie, passo, m, sotto)
                     catene += 1
                     annidata = annidata or _annidata(serie, m, sotto)
+                    catene += _catena_sotto_la_catena(serie, passo, sotto, direzione)
         if prima is not None:
             nuovi = _cerca_membri(serie, passo, i, kmin)
             if nuovi is not None:

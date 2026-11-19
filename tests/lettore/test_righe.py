@@ -1054,3 +1054,34 @@ def test_intero_nudo_col_meno_in_coda_in_una_colonna_a_interi(tmp_path):
         voci += [(40, 140 + 14 * k, codice), (110, 140 + 14 * k, f"conto {codice}"), (x, 140 + 14 * k, importo)]
     doc = _leggi(tmp_path, [voci])
     assert [c.valore for c in _riga(doc, "conto 80103").celle.values()] == [Decimal("-321")]
+
+
+def test_meno_attaccato_all_euro_e_il_segno_dell_importo():
+    # 1720 (cifre inventate): «−€ 74.878» con il meno sul simbolo dell'euro, staccato dalla cifra
+    from importers.lettore.geometria import Parola
+    from importers.lettore.righe import _ricuci
+    parole = [Parola(10, 0, 60, 8, "RISULTATO"), Parola(300, 0, 310, 8, "−€"),
+              Parola(312, 0, 340, 8, "12.345"), Parola(400, 0, 405, 8, "-"), Parola(420, 0, 448, 8, "6.789")]
+    stampati = {}
+    testi = [p.testo for p in _ricuci(parole, stampati)]
+    assert testi == ["RISULTATO", "-12.345", "-", "6.789"]
+
+
+def test_importo_solo_spostato_entra_nell_unica_colonna_vicina(tmp_path):
+    # 1772 (cifre inventate): l'importo di una riga, riscritto in un altro carattere, sta 18 pt a sinistra del bordo
+    # della colonna; prima finiva nell'etichetta e la voce restava senza importo
+    from importers.lettore import leggi_pdf
+    from tests.lettore.pdf_sintetico import scrivi_pdf
+    voci = []
+    for k, (e, v) in enumerate([("Voce uno", "1.000"), ("Voce due", "2.000"), ("Voce tre", "3.000"),
+                                ("Voce quattro", "4.000"), ("Voce cinque", "5.000")]):
+        voci += [(50, 140 + k * 14, e), (500, 140 + k * 14, v)]
+    voci += [(50, 230, "A) Valore della produzione"), (482, 230, "9.876")]
+    voci += [(50, 244, "Bilancio al 31/12/2025"), (482, 244, "2.025")]
+    p = tmp_path / "s.pdf"
+    scrivi_pdf(p, [voci])
+    doc = leggi_pdf(str(p))
+    riga = next(r for r in doc.righe if r.etichetta.startswith("A) Valore"))
+    assert [c.valore for c in riga.celle.values()] == [9876]
+    # una riga di titolo con la data non prende l'anno come importo
+    assert all(c.valore != 2025 for r in doc.righe for c in r.celle.values())

@@ -1398,7 +1398,7 @@ confronta le foglie documento per documento):
   barra, «>12 mesi», «<12 mesi». I totali stampati di crediti e debiti entro/oltre decidono più della regola di
   testo (`percorso._scadenze_contro_ancore`). Il modello non sceglie mai entro/oltre;
 - **regole del proprietario nelle istruzioni** (`importers/lettore/regole_proprietario.py`, interruttore
-  `IMPORT_REGOLE_NEL_PROMPT`, **acceso per default** dal 2026-11-11, `0` = prompt di prima): le regole di giudizio sulla natura (D3-D16, P5-P7, W4, R3-*),
+  `IMPORT_REGOLE_NEL_PROMPT`, **acceso per default** dal 2026-11-11, `0` = prompt di prima): le regole di giudizio sulla natura (D3-D16, P5-P7, W4, R3-*, e dal 2026-11-19 SAL: gli stati di avanzamento lavori fatturati sono ricavi delle vendite, `ce01`, non A.3),
   una riga ciascuna, entrano nei prompt della macro-voce e dei dettagli; la frase sul saldo a lato invertito resta
   per un fornitore qualunque a saldo dare (altri crediti), mentre P6 vale per i conti che si dichiarano anticipo,
   acconto o caparra; un fondo svalutazione o rischi su crediti rettifica i crediti verso clienti, mai un fondo

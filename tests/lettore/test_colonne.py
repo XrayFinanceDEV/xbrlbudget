@@ -336,3 +336,14 @@ def test_costi_e_ricavi_senza_saldo_restano_testata_di_lato(tmp_path):
     voci += _righe_dati([430, 540], list(zip(_A, _B)))
     cols = _colonne(tmp_path, voci)
     assert {c.ruolo for c in cols} == {"esercizio"}
+
+
+def test_scostamento_percentuale_con_un_decimale_non_e_un_esercizio():
+    # 1642, 1750 (cifre inventate): corrente, precedente, differenza e lo scostamento relativo con un decimale
+    # («13,0-»); la forma dell'importo non lo dice percentuale, l'aritmetica si'
+    from decimal import Decimal as D
+    from importers.lettore.colonne import _e_percentuale
+    righe = [[D("870"), D("1000"), D("-130"), D("-13.0")], [D("2200"), D("2000"), D("200"), D("10.0")],
+             [D("50"), D("80"), D("-30"), D("-37.5")], [D("300"), D("300"), D("0"), D("0.0")]]
+    assert _e_percentuale(righe, 3, 2, 1)
+    assert not _e_percentuale(righe, 0, 2, 1)

@@ -68,6 +68,13 @@ def _avvisi_fondi_snello(diag: dict) -> list[str]:
             'FONDO GIA\' NETTATO: la voce stampa gia\' il valore al netto del fondo, che non e\' '
             'stato sottratto una seconda volta ('
             + ', '.join(f'{q[:-2]} {v}' for q, v in gia_nettati) + ').')
+    non_dettagliato = diag.get('valore_produzione_non_dettagliato')
+    if non_dettagliato:
+        # decisione del proprietario 2026-11-19: la voce A senza dettaglio va nei ricavi delle vendite
+        avvisi.append(
+            'VALORE DELLA PRODUZIONE NON DETTAGLIATO: il documento stampa solo il totale di A) '
+            '(' + ', '.join(non_dettagliato) + '), messo per intero nei ricavi delle vendite (ce01). '
+            'Se comprende variazioni delle rimanenze, incrementi o altri ricavi, ripartirlo in Rettifiche.')
     tagliate = diag.get('immobilizzazioni_negative_tagliate')
     if tagliate:
         # budget_1452: i fondi degli immateriali (1.086,25) superano il costo storico (1.000)
@@ -77,6 +84,39 @@ def _avvisi_fondi_snello(diag: dict) -> list[str]:
             + '). E\' un errore del documento: l\'immobilizzazione netta e\' stata portata a '
             'zero e l\'eccedenza resta come sbilancio dichiarato - correggere in Rettifiche.')
     return avvisi
+
+
+# Decisione del proprietario (2026-11-19): uno sbilancio oltre meta' del totale attivo non e' un bilancio da
+# rettificare, e' una lettura non riuscita («non ha senso importare con sbilanci cosi' elevati»).
+_SBILANCIO_MASSIMO_QUOTA = Decimal("0.5")
+# Un totale attivo stampato sotto un quarto del lato piu' grande letto non fa da base: e' un totale letto male
+# (budget_1753, prima della correzione dei sotto-totali: 11,36 € contro milioni).
+_QUOTA_MINIMA_TOTALE_STAMPATO = Decimal("0.25")
+
+
+def _rifiuta_lettura_non_riuscita(file_path: str, qd) -> None:
+    """Uno sbilancio oltre la meta' del totale attivo stampato (o, senza un totale stampato credibile, del lato piu'
+    grande letto) e' una lettura fallita: manca meta' del bilancio o piu', e Rettifiche non e' lo strumento per
+    ricostruirlo (budget_1786: 105 milioni di sbilancio su un attivo di circa 9). Si rifiuta col motivo, invece di
+    salvare numeri senza senso. Uno sbilancio piu' piccolo resta importato con l'avviso, come sempre."""
+    att, pas = abs(Decimal(qd.totale_attivo or 0)), abs(Decimal(qd.totale_passivo or 0))
+    sbilancio = abs(att - pas)
+    letto = max(att, pas)
+    base = letto
+    try:
+        from importers.import_snello.verifica import totali_stampati
+        stampato = totali_stampati(file_path).get("totale_attivo")
+        if stampato is not None and Decimal(stampato) >= _QUOTA_MINIMA_TOTALE_STAMPATO * letto:
+            base = Decimal(stampato)
+    except Exception:
+        pass
+    if base <= 0 or sbilancio <= _SBILANCIO_MASSIMO_QUOTA * base:
+        return
+    raise PDFImportError(
+        "Lettura non riuscita: lo stato patrimoniale letto non quadra di "
+        f"€{_euro_it(sbilancio)} (attivo €{_euro_it(att)}, passivo €{_euro_it(pas)}), piu' della meta' del "
+        f"totale attivo (€{_euro_it(base)}). Non e' un bilancio da correggere in Rettifiche: il documento non e' "
+        "stato letto correttamente e non e' stato importato.")
 
 
 def _rifiuta_passivo_non_letto(bs) -> None:
@@ -575,6 +615,12 @@ def _is_aggregated_summary(text: str) -> bool:
         r'(?im)^\s*(?:[A-D][.\)]\s*)?(?:II|III|IV|VIII|VII|VI|IX|V|X)\b', text)
     has_esigibili = bool(re.search(r'esigibili\s+(?:entro|oltre)', text, re.I))
     has_codes = bool(re.search(r'(?m)^\s*\d{4,}\b', text))
+    # Codici puntati alfanumerici seguiti dalla descrizione («10.05.3K - CONCESSIONI», «20.30.CL -
+    # DEBITI VS.ALTRI FINANZIATORI»): sono conti di un gestionale, non macro-voci. Senza, una
+    # situazione contabile vera finiva fra i riepiloghi e veniva rifiutata (budget_1776/1786).
+    if not has_codes:
+        has_codes = len(re.findall(
+            r'(?m)^\s*\d{2,3}\.\d{2,3}(?:\.[0-9A-Z]{1,12})?\s+-\s+\S', text)) >= 5
     return len(romans) < 3 and not has_esigibili and not has_codes
 
 
@@ -1788,6 +1834,8 @@ def import_pdf_balance_sheet(
             def _balances(d):
                 return bool(d) and mapper.validate_balance(rollup_debiti_aggregates(d))
 
+            _letture_sp: list = []   # le letture SP dell'ultimo tentativo (un anno, due anni)
+
             def _attempt():
                 """One extraction pass: single-year current + dual pass for the prior,
                 falling back to the dual-pass current when the single-year one does not
@@ -1797,8 +1845,11 @@ def import_pdf_balance_sheet(
                 bs, ce = extract_pdf_with_llm(file_path, force_llm=True)
                 prior_bs = prior_ce = None
                 read_comparative = False
+                _letture_sp.clear()
+                _letture_sp.append(bs)
                 try:
                     dual_bs, dual_ce, prior_bs, prior_ce = extract_pdf_both_years_with_llm(file_path)
+                    _letture_sp.append(dual_bs)
                     if _single_year_read_prior_column(bs, dual_bs, prior_bs):
                         # Quadrerebbe lo stesso: e' l'anno sbagliato, non un foglio rotto.
                         read_comparative = True
@@ -1842,6 +1893,22 @@ def import_pdf_balance_sheet(
                     best = (bs, ce, prior_bs_data, prior_ce_data)
                 if current_ok and prior_ok:
                     best = (bs, ce, prior_bs_data, prior_ce_data)
+                    break
+                # La riprova serve contro una lettura sbilanciata, non contro un prospetto che
+                # non c'e': se il tentativo ha letto uno SP vuoto (Attivo = Passivo = 0, sia la
+                # lettura a un anno sia quella a due) altri due giri danno lo stesso vuoto, a
+                # quattro chiamate l'uno (budget_1667: dieci minuti prima dello stesso rifiuto).
+                try:
+                    from importers.iv_cee_hierarchy import check_quadratura
+                    _sp_vuoto = len(_letture_sp) == 2 and all(
+                        (not letto) or check_quadratura(letto).is_empty for letto in _letture_sp)
+                except Exception:
+                    _sp_vuoto = False
+                if _sp_vuoto:
+                    logger.info(
+                        f"Extraction attempt {attempt + 1}: empty balance sheet; "
+                        "not retrying (nothing to re-read)"
+                    )
                     break
                 logger.info(
                     f"Extraction attempt {attempt + 1}: current_balances={current_ok}, "
@@ -2491,6 +2558,7 @@ def import_pdf_balance_sheet(
                         "Importazione non salvata: nessun dato contabile "
                         f"estratto dal documento ({reason})"
                     )
+                _rifiuta_lettura_non_riuscita(file_path, _qd)
                 # Sbilancio, mismatch CE/SP o plug mascherato: importabile e
                 # correggibile in Rettifiche. Allinea finalmente il codice a
                 # quanto CLAUDE.md gia' afferma per la rotta C ("Trial-balance

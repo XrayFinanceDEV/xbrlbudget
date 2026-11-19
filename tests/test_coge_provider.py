@@ -10,6 +10,16 @@ import pytest
 from importers import llm_provider, pdf_extractor_llm as P
 from importers.llm_provider import LLMProviderError
 
+
+@pytest.fixture(autouse=True)
+def _senza_guardia_lettura_non_riuscita(monkeypatch):
+    """La fixture PDF di route C («Cassa 1.000 / Fornitori 1.000») e' un giocattolo: il parser classico ne legge solo
+    la cassa, uno sbilancio del 100%, che dal 2026-11-19 si rifiuta come lettura non riuscita. Questi test provano
+    altro; la guardia ha i suoi test in tests/test_unbalanced_import.py."""
+    from importers import pdf_importer as _pi
+    monkeypatch.setattr(_pi, "_rifiuta_lettura_non_riuscita", lambda *a, **k: None)
+
+
 # ATTENZIONE: PDFImportError e' definita DUE volte, in pdf_extractor_llm.py:29 e in
 # pdf_importer.py:51, e sono classi diverse. extract_trial_balance_with_llm solleva quella
 # dell'estrattore: e' quella che i test devono aspettarsi.

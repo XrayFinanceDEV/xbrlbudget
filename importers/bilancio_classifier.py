@@ -54,6 +54,21 @@ class Classification(NamedTuple):
 # ---------------------------------------------------------------------------
 # Segnali
 # ---------------------------------------------------------------------------
+# Voci di legge del conto economico (art. 2425) che contengono una parola patrimoniale: non
+# dicono che il documento abbia uno stato patrimoniale. Testo deaccentato, minuscolo, spazi
+# compressi (vedi ``sp_present`` in ``compute_signals``).
+_VOCI_CE_CON_PAROLE_PATRIMONIALI = (
+    r"svalutazion\w*\s+(?:delle\s+)?immob\w*",
+    r"ammortament\w*\s+(?:delle\s+)?immob\w*",
+    r"iscritt\w*\s+nelle\s+immobilizzazioni",
+    r"(?:compresi|iscritt\w*)\s+nell'?\s*attivo\s+circolante",
+    r"attivita'?\s+e\s+passivita'?\s+finanziari\w*",
+)
+
+
+_MIN_CONTI_VERIFICA = 30
+
+
 def compute_signals(text: str, file_path: Optional[str] = None) -> Dict[str, object]:
     # Deaccentazione: i marker cercati piu' avanti sono scritti SENZA accento
     # ("passivita", "disponibilita liquide"), quindi senza questo passaggio non
@@ -104,11 +119,26 @@ def compute_signals(text: str, file_path: Optional[str] = None) -> Dict[str, obj
     # Conservativo: basta UNO qualsiasi di questi marker patrimoniali per dire "ha lo SP".
     # NB: niente "rimanenze" qui — "variazione delle rimanenze" è una voce di CONTO
     # ECONOMICO, quindi non è un marker patrimoniale affidabile (regge 196/335 solo-CE).
+    # Stessa ragione per le voci di legge del CONTO ECONOMICO che contengono una parola
+    # patrimoniale (art. 2425: B.10 «svalutazioni delle immobilizzazioni», A.4 «incrementi
+    # ... iscritti nelle immobilizzazioni», D «rettifiche di valore di attivita' e passivita'
+    # finanziarie»): si tolgono dal testo prima di cercare i marker patrimoniali. Un CE
+    # riclassificato da solo (budget_1667) passava per bilancio completo, finiva sulla rotta
+    # IV-CEE e veniva rifiutato dopo dieci minuti di letture del modello invece che subito.
+    _sp_low = re.sub(r"\s+", " ", low)
+    for _voce_ce in _VOCI_CE_CON_PAROLE_PATRIMONIALI:
+        _sp_low = re.sub(_voce_ce, " ", _sp_low)
+    _sp_nos = re.sub(r"\s+", "", _sp_low)
+
+    def has_sp(marker: str) -> bool:
+        return (marker in _sp_low) or (marker.replace(" ", "") in _sp_nos)
+
     s["sp_present"] = bool(
-        s["stato_patrimoniale"] or s["totale_attivo"] or s["immobilizzazioni"]
-        or has("patrimonio netto") or has("attivo circolante") or has("passivita")
-        or has("disponibilita liquide")
-        or has("debiti verso") or has("crediti verso") or has("capitale sociale")
+        has_sp("stato patrimoniale") or re.search(r"totale\s+attivo", _sp_low)
+        or ("totaleattivo" in _sp_nos) or ("immobilizzazioni" in _sp_nos)
+        or has_sp("patrimonio netto") or has_sp("attivo circolante") or has_sp("passivita")
+        or has_sp("disponibilita liquide")
+        or has_sp("debiti verso") or has_sp("crediti verso") or has_sp("capitale sociale")
     )
     # contenuto ECONOMICO presente (CE)
     s["ce_present"] = bool(
@@ -148,6 +178,13 @@ def compute_signals(text: str, file_path: Optional[str] = None) -> Dict[str, obj
         s["is_sc"] = bool(is_situazione_contabile(text))
     except Exception:
         s["is_sc"] = False
+    # Un elenco di conti con le colonne dare/avere e nessun percorso di legge e' una situazione contabile anche
+    # quando il rilevatore dei layout non ne riconosce la forma (codici puntati alfanumerici «10.05.3K», conti a 8
+    # cifre col partitario sotto): finiva fra gli schemi di legge, letto da Qwen come uno schema (budget_1776, 13
+    # milioni di sbilancio), o rifiutato come «non riconosciuto» (budget_1562, 667).
+    s["verifica_per_conti"] = bool(
+        s["dare_avere"] and int(s["coge_codes"]) >= _MIN_CONTI_VERIFICA and int(s["cee_path"]) < 5
+        and not s["riclassificata"] and not s["dettaglio"])
 
     return s
 
@@ -251,7 +288,7 @@ def classify_bilancio(file_path: Optional[str] = None, text: Optional[str] = Non
                                   "high", s, "marker 'dettaglio' + conti CoGe + scheletro IV CEE")
 
     # ----- C: bilancio di verifica / situazione contabile -----
-    if s["pareggio"] or s["verifica"] or s["is_sc"] or s["contrapposte"]:
+    if s["pareggio"] or s["verifica"] or s["is_sc"] or s["contrapposte"] or s["verifica_per_conti"]:
         # IV CEE strutturato ma con codici conto di dettaglio (es. sottoconti DEPI
         # dentro lo schema di legge, budget_313/314): è B, NON una verifica. Vale
         # solo se NON ci sono i marker forti di verifica (pareggio/verifica/contrapposte).
@@ -282,6 +319,21 @@ def classify_bilancio(file_path: Optional[str] = None, text: Optional[str] = Non
             conf = "med" if s["legal_skeleton"] else "low"
         return Classification(MACRO_A, sub, ROUTE_IVCEE, gest, conf, s,
                               "scheletro IV CEE / tassonomia, nessun elenco conti")
+
+    # ----- Contabilità semplificata: ricavi e costi, pochi conti patrimoniali -----
+    # Un elenco conti c'e' (budget_1710), ma e' il riepilogo fiscale di una contabilita'
+    # semplificata: ricavi, costi, «utile fiscale» e qualche cespite, senza cassa, crediti,
+    # debiti ne' patrimonio netto. Si rifiuta come prima; cambia solo il motivo, che diceva
+    # «né elenco conti».
+    _compatto = re.sub(r"\s+", " ", low)
+    if ("utile fiscale" in _compatto
+            and ("riepilogo dei ricavi" in _compatto or "riepilogo dei costi" in _compatto)
+            and "patrimonio netto" not in _compatto):
+        return Classification(
+            MACRO_OTHER, "contabilità semplificata", ROUTE_UNSUPPORTED, gest, "high", s,
+            "situazione di contabilità semplificata (riepilogo di ricavi e costi e pochi "
+            "conti patrimoniali): manca lo stato patrimoniale completo (cassa, crediti, "
+            "debiti, patrimonio netto)")
 
     # ----- fallback: non riconosciuto come bilancio completo -----
     return Classification(MACRO_OTHER, "non riconosciuto", ROUTE_UNSUPPORTED, gest,

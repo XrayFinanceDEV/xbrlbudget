@@ -4098,7 +4098,7 @@ def _declared_control_totals(file_path: str, text: Optional[str] = None,
     low = "".join(c for c in unicodedata.normalize("NFKD", low) if not unicodedata.combining(c))
     nos = re.sub(r"[ \t]+", "", low)  # collapse intra-line spacing (keep newlines)
 
-    def _largest_after(markers, hays=None, colonna=None) -> Optional[Decimal]:
+    def _largest_after(markers, hays=None, colonna=None, sottototali=()) -> Optional[Decimal]:
         """Largest Italian-number amount occurring within ~80 chars after any marker.
         `hays` = [(text, is_nospaces), ...]; defaults to the full normal + no-spaces
         text. The no-spaces flag decides which form of the marker to search.
@@ -4107,12 +4107,21 @@ def _declared_control_totals(file_path: str, text: Optional[str] = None,
         FIRST parseable number after the marker enters the largest-across-occurrences
         comparison. With ``colonna``: every number in the window is collected first, and
         ``_valore_in_colonna`` picks the one the caller's column rule identifies - an
-        occurrence whose count of numbers doesn't resolve contributes nothing."""
+        occurrence whose count of numbers doesn't resolve contributes nothing.
+
+        ``sottototali``: continuations that turn the marker into the caption of a SUB-total
+        («totale attivo» dentro «Totale attivo circolante (C)»): that occurrence is not the
+        total and contributes nothing. Sul layout con gli importi PRIMA dell'etichetta
+        (budget_1753) il primo numero dopo «Totale attivo circolante» era la percentuale di
+        scostamento della riga seguente, e quei centesimi passavano per il totale attivo."""
         best: Optional[Decimal] = None
         for hay, is_nos in (hays or ((low, False), (nos, True))):
+            seguiti = tuple(s.replace(" ", "") for s in sottototali) if is_nos else sottototali
             for mk in markers:
                 pat = re.escape(mk.replace(" ", "")) if is_nos else re.escape(mk)
                 for hit in re.finditer(pat, hay):
+                    if seguiti and hay[hit.end(): hit.end() + 40].lstrip(" \t").startswith(seguiti):
+                        continue
                     window = hay[hit.end(): hit.end() + 80]
                     if colonna is not None:
                         # Le colonne di UN rigo di controllo stanno tutte sulla sua stessa
@@ -4153,15 +4162,23 @@ def _declared_control_totals(file_path: str, text: Optional[str] = None,
     _pareggio_markers = ["totale a pareggio", "totale a quadratura"]
     out["pareggio"] = (_largest_after(_pareggio_markers, hays=_sp_hays, colonna=colonna)
                        or _largest_after(_pareggio_markers, colonna=colonna))
+    # I nomi dei sotto-totali che cominciano come il totale di lato: schema di legge
+    # («Totale attivo circolante») e prospetti riclassificati («attivo corrente/immobilizzato»,
+    # «passivo consolidato», «passività a breve»). Un'occorrenza seguita da uno di questi non
+    # e' il totale dello stato patrimoniale.
+    _sottototali_di_lato = (
+        "circolante", "corrent", "non corrent", "immobilizzat", "fiss", "finanziari",
+        "consolidat", "a breve", "a medio", "a lungo", "di breve", "di medio", "di lungo",
+    )
     out["attivo"] = _largest_after([
         "totale attivo", "totale attivita", "totale dell'attivo",
         "totale stato patrimoniale attivo", "totale stato patrimoniale - attivo",
-    ], colonna=colonna)
+    ], colonna=colonna, sottototali=_sottototali_di_lato)
     out["passivo"] = _largest_after([
         "totale passivo", "totale passivita", "totale a pareggio passivo",
         "totale passivo e patrimonio netto", "totale passivita e netto",
         "totale stato patrimoniale passivo", "totale stato patrimoniale - passivo",
-    ], colonna=colonna)
+    ], colonna=colonna, sottototali=_sottototali_di_lato)
 
     # Some detailed reclassified exports print the top-level section total directly
     # below ``Stato patrimoniale attivo/passivo`` without the word ``Totale``

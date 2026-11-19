@@ -1101,3 +1101,71 @@ def test_ripartizione_entro_oltre_12_mesi_con_la_lettera(tmp_path):
     f = _per_etichetta(foglie_contabili(doc, 0))
     assert f["MUTUO PASSIVO"].percorso_legale.endswith(".O") and f["FINANZIAMENTO AUTO"].percorso_legale.endswith(".O")
     assert f["BANCA C/ANTICIPI"].percorso_legale.endswith(".E")
+
+
+def test_esercizio_coi_totali_di_lato_opposti_e_un_saldo(tmp_path):
+    # 1642 (cifre inventate): nessuna testata «Saldo», ma «TOT ATTIVO» positivo e «TOT PASSIVO» uguale e negativo:
+    # la colonna e' dare - avere, e il segno decide il lato
+    voci = [(50, 100, "STATO PATRIMONIALE al 30/06/2026")]
+    dati = [("1 ATTIVO", None), ("Banca", "1.000,00"), ("Clienti", "250,00"), ("TOT ATTIVO", "1.250,00"),
+            ("2 PASSIVO", None), ("Fornitori", "900,00-"), ("Capitale", "350,00-"), ("TOT PASSIVO", "1.250,00-")]
+    for k, (e, v) in enumerate(dati):
+        voci += [(50, 140 + k * 14, e)] + ([(500, 140 + k * 14, v)] if v else [])
+    doc = _doc(tmp_path, voci)
+    foglie = _per_etichetta(foglie_contabili(doc, colonne_utili(doc)[0]))
+    assert {foglie[e].lato_sp for e in ("Banca", "Clienti")} == {"A"}
+    assert {foglie[e].lato_sp for e in ("Fornitori", "Capitale")} == {"P"}
+    assert foglie["Fornitori"].importo == Decimal("900.00")
+
+
+def test_codice_di_struttura_del_gestionale_porta_la_voce():
+    # 1753: «AB000000 B IMMOBILIZZAZIONI», «AB010400 4 Concessioni…», «AC020502 5-bis crediti tributari»
+    from importers.lettore.foglie import gettoni_di_legge
+    assert gettoni_di_legge("B IMMOBILIZZAZIONI", "AB000000") == ("B",)
+    assert gettoni_di_legge("II CREDITI", "AC020000") == ("II",)
+    assert gettoni_di_legge("Concessioni, licenze, marchi", "AB010400 4") == ("4",)
+    assert gettoni_di_legge("5-bis Crediti tributari", "AC020502") == ("5-bis",)
+    assert gettoni_di_legge("in imprese controllanti", "EC001500c") == ("c",)
+    # senza il codice di struttura l'enumeratore nudo non vale («A Rossi», «I.V.A.»)
+    assert gettoni_di_legge("B IMMOBILIZZAZIONI", "") == ()
+    assert gettoni_di_legge("B IMMOBILIZZAZIONI", "15/0005/1711") == ()
+
+
+def test_un_totale_col_codice_di_un_conto_non_chiude_la_voce_di_legge():
+    from importers.lettore.foglie import _codice_di_conto
+    assert _codice_di_conto("15/0005/1711")
+    assert not _codice_di_conto("AC020504")
+    assert not _codice_di_conto("")
+
+
+def test_il_risultato_d_esercizio_non_e_la_voce_sopra_gli_oneri(tmp_path):
+    # 1753 (cifre inventate): «21) Utile» chiude come differenza anche il totale dei proventi e oneri finanziari; il
+    # suo «21» non deve togliere ai conti degli interessi la voce 17
+    righe = [("CONTO ECONOMICO", None), ("A) Valore della produzione", None), ("1) Ricavi delle vendite", "1.000,00"),
+             ("Totale valore della produzione", "1.000,00"), ("B) Costi della produzione", None),
+             ("7) Per servizi", "600,00"), ("Totale costi della produzione", "600,00"),
+             ("C) Proventi e oneri finanziari", None), ("16) TOTALE altri proventi finanziari", "20,00"),
+             ("17) interessi e altri oneri finanziari", None),
+             ("INTERESSI BANCA ROSSI", "70,00"), ("SPESE BANCA BIANCHI", "30,00"),
+             ("17) TOTALE interessi e altri oneri finanziari", "100,00"),
+             ("TOTALE PROVENTI E ONERI FINANZIARI", "-80,00"),
+             ("A-B+C TOTALE RISULTATO PRIMA DELLE IMPOSTE", "320,00"),
+             ("20) Imposte sul reddito dell'esercizio", "90,00"),
+             ("21) Utile (perdite) dell'esercizio", "230,00")]
+    voci = []
+    for k, (e, v) in enumerate(righe):
+        voci += [(50, 120 + k * 14, e)] + ([(500, 120 + k * 14, v)] if v else [])
+    doc = _doc(tmp_path, voci)
+    foglie = _per_etichetta(foglie_contabili(doc, colonne_utili(doc)[0]))
+    assert foglie["INTERESSI BANCA ROSSI"].percorso_legale == "CE.C.17"
+    assert foglie["INTERESSI BANCA ROSSI"].verso_ce == "costo"
+
+
+def test_un_mastro_di_perdite_e_costi_d_esercizio_non_e_il_risultato():
+    # budget_1645: il mastro «PERDITE E COSTI VARI D'ESERCIZIO» diventava l'ancora dell'utile, col suo importo negato
+    from importers.lettore.foglie import e_riga_del_risultato
+    assert not e_riga_del_risultato("! 990     PERDITE E COSTI VARI D'ESERCIZIO!")
+    assert not e_riga_del_risultato("PROVENTI DIVERSI DELL'ESERCIZIO E UTILE SU CAMBI")
+    assert e_riga_del_risultato("Utile d'esercizio")
+    assert e_riga_del_risultato("Perdita dell'esercizio")
+    assert e_riga_del_risultato("21) Utile (perdita) dell'esercizio")

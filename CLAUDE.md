@@ -259,7 +259,10 @@ ciò che non si può non sapere. Ogni voce dice la regola e **cosa si rompe** a 
   sbilancio dichiarato (esito `"squadrato"`, nessun tappo — Task 17, 2026-09-27: «se il bilancio
   non è quadrato deve essere comunque importato con avviso, l'utente lo correggerà nella tab
   rettifiche»), salvando la lettura **più vicina** fra quella del modello e una deterministica
-  vicina ma oltre i 10 € (Task 28). Un documento che si contraddice da solo (attivo ≠ passivo
+  vicina ma oltre i 10 € (Task 28). **Salvo uno sbilancio oltre metà del totale attivo stampato**
+  (o del lato più grande letto, senza un totale credibile): è una lettura non riuscita e si rifiuta
+  (`_rifiuta_lettura_non_riuscita`, decisione del proprietario 2026-11-19: «non ha senso importare
+  con sbilanci così elevati»). Un documento che si contraddice da solo (attivo ≠ passivo
   stampati, o utile SP ≠ utile CE stampati, entrambi letti dal testo) si importa com'è con un
   avviso che cita i numeri stampati, senza rilettura (sul risultato la nota dice «bilancio
   squadrato di partenza»). Un riepilogo di poche macro-voci tipo export

@@ -582,6 +582,12 @@ def _is_aggregated_summary(text: str) -> bool:
         r'(?im)^\s*(?:[A-D][.\)]\s*)?(?:II|III|IV|VIII|VII|VI|IX|V|X)\b', text)
     has_esigibili = bool(re.search(r'esigibili\s+(?:entro|oltre)', text, re.I))
     has_codes = bool(re.search(r'(?m)^\s*\d{4,}\b', text))
+    # Codici puntati alfanumerici seguiti dalla descrizione («10.05.3K - CONCESSIONI», «20.30.CL -
+    # DEBITI VS.ALTRI FINANZIATORI»): sono conti di un gestionale, non macro-voci. Senza, una
+    # situazione contabile vera finiva fra i riepiloghi e veniva rifiutata (budget_1776/1786).
+    if not has_codes:
+        has_codes = len(re.findall(
+            r'(?m)^\s*\d{2,3}\.\d{2,3}(?:\.[0-9A-Z]{1,12})?\s+-\s+\S', text)) >= 5
     return len(romans) < 3 and not has_esigibili and not has_codes
 
 

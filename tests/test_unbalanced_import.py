@@ -253,3 +253,20 @@ def test_snello_squadrato_reason_dichiara_i_tre_scarti_misurati():
 
 def test_snello_squadrato_reason_tollera_una_misura_assente():
     assert _snello_squadrato_reason({}).startswith(_UNBALANCED_WARNING_PREFIX)
+
+
+def test_una_situazione_contabile_con_codici_puntati_non_e_un_riepilogo():
+    # budget_1776/1786 (testo inventato): conti «10.05.3K - ...» di un gestionale, senza numeri
+    # romani ne' «esigibili»; prima passavano per un riepilogo per macro-voci e venivano rifiutati.
+    from importers.pdf_importer import _is_aggregated_summary
+    testo = "\n".join([
+        "STATO PATRIMONIALE - ATTIVO",
+        "   10.05.3K - CONCESSIONI-LICENZE-MARCHI", "1.000,00",
+        "   10.05.3N - MANUTENZIONI E RIPARAZIONI", "200,00",
+        "  10.05 - Immobilizzazioni immateriali", "1.200,00",
+        "   10.07.46 - TERRENI", "5.000,00",
+        "   20.30.CS - FORNITORI", "-3.000,00",
+        "   20.30.DR - DEBITI TRIBUTARI", "-400,00",
+    ])
+    assert _is_aggregated_summary(testo) is False
+    assert _is_aggregated_summary("Immobilizzazioni: 1.200,00\nCrediti: 300,00\nPatrimonio netto: 900,00") is True

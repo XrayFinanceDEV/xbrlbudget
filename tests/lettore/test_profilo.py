@@ -763,3 +763,17 @@ def test_valore_della_produzione_apre_il_ce_e_i_conti_d_ordine_chiudono_lo_sp(tm
     assert prof.sezioni == {1: "SP", 2: "CE"}
     righe = sorted(prof.sezioni_righe.items(), key=lambda kv: (kv[0][0], kv[0][1]))
     assert [s for (pg, y), s in righe if pg == 1 and y > 230] == ["", ""]      # i conti d'ordine: nessuna sezione
+
+
+def test_attivo_senza_importi_apre_lo_sp_prima_di_ogni_sezione(tmp_path):
+    # 1642, struttura IV Dir. CEE di SAP: «1 ATTIVO» su una riga senza importi
+    apre = [[(50, 120, "1 ATTIVO")] + _tabella(_SCHEMA, y0=140)]
+    assert _doc_sezioni(tmp_path, apre).sezioni == {1: "SP"}
+
+
+def test_i_conti_non_assegnati_di_sap_non_sono_prospetto():
+    # 1642: i conti fuori dallo schema in coda alla struttura di bilancio, col numero di posizione davanti
+    from importers.lettore.geometria import Parola, RigaFisica
+    from importers.lettore.profilo import _titolo_parte
+    for titolo in ("2 CONTI NON ASSEGNATI", "Conti non assegnati"):
+        assert _titolo_parte(RigaFisica(1, 10.0, [Parola(10, 6, 200, 14, titolo)])) == "nota", titolo

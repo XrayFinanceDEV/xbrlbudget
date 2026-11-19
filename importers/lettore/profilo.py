@@ -304,13 +304,13 @@ def _titolo_con_importi(r: RigaFisica, colonne: list[Colonna]) -> str | None:
 
 
 def _titolo_debole(r: RigaFisica, colonne: list[Colonna]) -> str | None:
-    """«1 ATTIVO», «2 PASSIVO» con i totali accanto (1540): titolo dello stato patrimoniale solo finche' il
-    documento non ha aperto nessuna sezione. Piu' avanti «ATTIVO» con un totale e' un riepilogo in coda alle
-    contrapposte, non un titolo."""
+    """«1 ATTIVO», «2 PASSIVO» con i totali accanto (1540) o senza importi (la struttura IV Dir. CEE di SAP, 1642):
+    titolo dello stato patrimoniale solo finche' il documento non ha aperto nessuna sezione. Piu' avanti «ATTIVO»
+    con un totale e' un riepilogo in coda alle contrapposte, non un titolo."""
     parole = [p.testo for p in r.parole if _in_colonna(p, colonne) is None]
     while parole and _CODICE_IN_TESTA.fullmatch(parole[0]):
         parole = parole[1:]
-    if _ha_celle(r, colonne) and intestazione(" ".join(parole)) in (["Attivo"], ["Passivo"]):
+    if intestazione(" ".join(parole)) in (["Attivo"], ["Passivo"]):
         return "SP"
     return None
 
@@ -536,6 +536,9 @@ _TITOLO_NOTA = re.compile(
     r"|rendiconto finanziario|(?:prospetto (?:di |della )?)?movimentazion|variazioni nell|informativa\b"
     r"|informazioni (?:sull|sui\b|sul\b|sugli|relative|in calce|ex art|ai sensi)|analisi delle variazioni"
     r"|rideterminazione (?:del )?risultato"
+    # i conti fuori dallo schema in coda alla struttura di bilancio SAP (1642): a somma zero, ma con masse grandi
+    # in valore assoluto che entravano fra le foglie come massa non classificata
+    r"|(?:\d+\s+)?conti non assegnati"
     # i titoli delle tabelle della nota che le tabelle OCR stampano, e la stampa a se' dei ratei (R21: budget_210)
     r"|(?:composizione|dettaglio|movimenti|indicatori|indici|flussi finanziari)\b)")
 # «Informazioni …» senza le parole della nota («Informazioni generali sull'impresa» dei micro XBRL) e' un titolo

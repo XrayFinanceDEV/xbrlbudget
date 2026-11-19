@@ -15,6 +15,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import os
 import re
 from collections import Counter, defaultdict
 from pathlib import Path
@@ -22,7 +23,8 @@ from typing import Any, Iterable
 
 
 ROOT = Path(__file__).resolve().parents[2]
-TEST_ROOT = ROOT / "Test"
+# il corpus sta fuori dal repo: IMPORT_CORPUS_ROOT quando c'e' (PC senza il collegamento Test/), come punteggio.py
+TEST_ROOT = Path(os.environ.get("IMPORT_CORPUS_ROOT") or ROOT / "Test")
 ANALYSIS_ROOT = TEST_ROOT / "_analysis"
 CORPUS_FIXTURES_ROOT = Path(__file__).resolve().parent
 TRUTH_PATH = CORPUS_FIXTURES_ROOT / "truth.json"

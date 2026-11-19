@@ -56,3 +56,43 @@ export function indiceGuida(markdown: string): VoceIndiceGuida[] {
   });
   return voci.slice(1).filter((v) => v.testo !== "Indice");
 }
+
+// --- Ritorno dalla guida --------------------------------------------------------
+// La guida nasconde nav e stepper, e dentro l'iframe non c'è il «indietro» del
+// browser: senza un link esplicito l'utente resta chiuso nella guida. Il bottone
+// «Guida» porta con sé la pagina di partenza (`?da=`); la barra della guida la offre
+// come ritorno, accanto alla home.
+
+/** Il link al bottone «Guida» da `pathname`, che diventa il ritorno. */
+export function hrefVersoGuida(pathname: string): string {
+  if (!pathname || pathname.startsWith("/guida")) return "/guida";
+  return `/guida?da=${encodeURIComponent(pathname)}`;
+}
+
+/** La pagina a cui tornare: solo un percorso interno dell'app, mai la guida stessa
+ *  né un indirizzo esterno (`//host`, `https:`); altrimenti la home. */
+export function ritornoDallaGuida(da: string | null | undefined): string {
+  if (!da || !da.startsWith("/") || da.startsWith("//") || da.startsWith("/\\")) return "/";
+  if (da.startsWith("/guida")) return "/";
+  return da;
+}
+
+const ETICHETTE_RITORNO: Array<[string, string]> = [
+  ["/pratica", "Torna alla pratica"],
+  ["/budget", "Torna agli scenari"],
+  ["/forecast/income", "Torna al CE previsionale"],
+  ["/forecast/balance", "Torna allo SP previsionale"],
+  ["/forecast/reclassified", "Torna al riclassificato"],
+  ["/analysis", "Torna agli indici"],
+  ["/cashflow", "Torna al rendiconto"],
+  ["/report", "Torna al report"],
+  ["/import", "Torna all'import"],
+];
+
+/** L'etichetta del link di ritorno; `null` quando il ritorno è la home (c'è già il
+ *  link «Aziende & Pratiche»). */
+export function etichettaRitornoGuida(ritorno: string): string | null {
+  if (ritorno === "/") return null;
+  const trovata = ETICHETTE_RITORNO.find(([prefisso]) => ritorno === prefisso || ritorno.startsWith(prefisso + "/"));
+  return trovata ? trovata[1] : "Torna indietro";
+}

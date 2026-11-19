@@ -6,6 +6,7 @@ import { BarChart3, BookOpen, CalendarClock } from "lucide-react";
 import { ModeToggle } from "@/components/mode-toggle";
 import { Button } from "@/components/ui/button";
 import { useAuth } from "@/contexts/AuthContext";
+import { hrefVersoGuida } from "@/lib/guida";
 
 export function AppHeader() {
   const pathname = usePathname();
@@ -54,7 +55,7 @@ export function AppHeader() {
             </div>
           )}
           <Button variant="outline" size="sm" asChild>
-            <Link href="/guida" title="Guida illustrata all'applicazione">
+            <Link href={hrefVersoGuida(pathname)} title="Guida illustrata all'applicazione">
               <BookOpen className="h-4 w-4" />
               Guida
             </Link>

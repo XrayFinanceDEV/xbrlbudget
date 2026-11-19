@@ -1054,3 +1054,14 @@ def test_intero_nudo_col_meno_in_coda_in_una_colonna_a_interi(tmp_path):
         voci += [(40, 140 + 14 * k, codice), (110, 140 + 14 * k, f"conto {codice}"), (x, 140 + 14 * k, importo)]
     doc = _leggi(tmp_path, [voci])
     assert [c.valore for c in _riga(doc, "conto 80103").celle.values()] == [Decimal("-321")]
+
+
+def test_meno_attaccato_all_euro_e_il_segno_dell_importo():
+    # 1720 (cifre inventate): «−€ 74.878» con il meno sul simbolo dell'euro, staccato dalla cifra
+    from importers.lettore.geometria import Parola
+    from importers.lettore.righe import _ricuci
+    parole = [Parola(10, 0, 60, 8, "RISULTATO"), Parola(300, 0, 310, 8, "−€"),
+              Parola(312, 0, 340, 8, "12.345"), Parola(400, 0, 405, 8, "-"), Parola(420, 0, 448, 8, "6.789")]
+    stampati = {}
+    testi = [p.testo for p in _ricuci(parole, stampati)]
+    assert testi == ["RISULTATO", "-12.345", "-", "6.789"]

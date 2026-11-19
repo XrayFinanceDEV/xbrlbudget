@@ -160,6 +160,9 @@ def _normalizza(testo: str) -> str:
     return t if t != testo and leggi_importo(t) is not None else testo
 
 
+_MENO_EURO = {"\u2212\u20ac", "-\u20ac", "\u2013\u20ac"}
+
+
 def _ricuci(parole: list[Parola], stampati: dict[Parola, str]) -> list[Parola]:
     """Normalizza i token e ricuce la parentesi aperta staccata dall'importo («(» + «1.234,56)»). In
     `stampati` resta il testo come stampato di ogni parola cambiata, per `Importo.testo`."""
@@ -173,6 +176,14 @@ def _ricuci(parole: list[Parola], stampati: dict[Parola, str]) -> list[Parola]:
                 and p.testo[:1].isdigit()):
             unita = Parola(prima.x0, min(prima.y0, p.y0), p.x1, max(prima.y1, p.y1), "(" + p.testo)
             stampati[unita] = "(" + stampati.get(p, p.testo)
+            out[-1] = unita
+            continue
+        # il meno attaccato al simbolo dell'euro e staccato dalla cifra («−€ 74.878», 1720): e' il segno
+        # dell'importo che segue. Un «-» da solo resta una cella zero.
+        if (prima is not None and prima.testo in _MENO_EURO and p.x0 - prima.x1 <= _STACCO_PARENTESI
+                and p.testo[:1].isdigit() and leggi_importo("-" + p.testo) is not None):
+            unita = Parola(prima.x0, min(prima.y0, p.y0), p.x1, max(prima.y1, p.y1), "-" + p.testo)
+            stampati[unita] = prima.testo + stampati.get(p, p.testo)
             out[-1] = unita
             continue
         out.append(p)

@@ -1035,3 +1035,19 @@ def test_voce_all_unita_lontana_piu_di_un_euro_dal_conto_resta_senza_figli(tmp_p
         (50, "I Capitale", "10.000"), (90, "CAPITALE SOCIALE", "10.000,00"),
         (50, "crediti tributari", "5.000"), (90, "ERARIO C/IVA", "4.998,70"), (50, "altri", "700")]))
     assert not _riga(doc, "crediti tributari").totale
+
+
+def test_mastro_consumato_dal_totale_sopra_trova_ancora_i_suoi_conti(tmp_path):
+    # budget_1689 (cifre inventate): totali stampati prima dei figli, su tre livelli. «Crediti commerciali» chiude
+    # «Clienti» e «Portafoglio» e li consuma; «Portafoglio» non aveva ancora cercato i suoi conti, e mastro e conti
+    # restavano foglie insieme, contati due volte.
+    doc = _leggi(tmp_path, _righe(140, [("Crediti commerciali", "1.500,00"),
+                                        ("Clienti", "1.000,00"), ("Clienti Italia", "700,00"),
+                                        ("Clienti estero", "300,00"),
+                                        ("Portafoglio", "500,00"), ("Effetti all'incasso", "200,00"),
+                                        ("Effetti Italia", "200,00"), ("Ricevute bancarie", "300,00")]))
+    # «Effetti all'incasso» e' un sotto-mastro con un conto solo: una catena, che si risolve dopo i gruppi
+    portafoglio = _riga(doc, "Portafoglio")
+    assert portafoglio.totale
+    assert set(portafoglio.figli[0]) == {_riga(doc, e).id for e in ("Effetti all'incasso", "Ricevute bancarie")}
+    assert _riga(doc, "Crediti commerciali").totale

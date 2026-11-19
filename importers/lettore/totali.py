@@ -439,6 +439,31 @@ def _marca(serie: _Serie, passo: list[int], i: int, membri: list[int]) -> None:
     passo[i] = passo[membri[-1]]
 
 
+def _figli_del_consumato(serie: _Serie, passo: list[int], i: int, direzione: int) -> int:
+    """Un mastro gia' consumato come membro di un totale piu' in alto (il conto «11.07» dentro «11», il mastro
+    «71.03» dentro «71») non ha ancora cercato i propri conti: uscito dal cammino, la sua passata non arrivava piu',
+    e mastro e conti restavano foglie insieme, contati due volte (budget_1689). Li cerca fra le righe vive accanto a
+    lui nella direzione del documento, solo come gruppo (almeno due importi) e solo a somma esatta: un mastro con un
+    conto solo e' una catena, e la catena la risolve gia' la scorciatoia di `_risolvi` prima di consumarlo."""
+    n = len(serie.valori)
+    j = i + direzione
+    while 0 <= j < n and not serie.vivo[j]:
+        j += direzione
+    if not 0 <= j < n:
+        return 0
+    salvato = passo[i]
+    passo[i] = j
+    membri = _cerca_membri(serie, passo, i, 2)
+    base = serie.sottratti if serie.risultato[i] else serie.valori
+    verso = serie.verso_cercato.get(i, 1)
+    if membri is None or i in membri or verso * sum((base[m] for m in membri), Decimal(0)) != serie.bersagli[i]:
+        passo[i] = salvato
+        return 0
+    _marca(serie, passo, i, membri)
+    passo[i] = salvato      # resta fuori dal cammino: e' gia' un membro del totale sopra
+    return 1
+
+
 def _risolvi(serie: _Serie, ammessi: list[bool], direzione: int, kmin: int) -> int:
     """Una passata nella direzione data (-1: i figli stanno sopra il totale), sui soli candidati `ammessi`: come
     `import_snello/righe.py:_risolvi_totali`, compreso il membro a figlio unico risolto prima di essere consumato,
@@ -450,6 +475,9 @@ def _risolvi(serie: _Serie, ammessi: list[bool], direzione: int, kmin: int) -> i
     ordine = range(n) if direzione == -1 else range(n - 1, -1, -1)
     marcati = 0
     for i in ordine:
+        if not vivo[i] and serie.candidabile[i] and ammessi[i] and kmin >= 2 and valori[i]:
+            marcati += _figli_del_consumato(serie, passo, i, direzione)
+            continue
         # un totale a zero (a - b = 0, il costo e il suo fondo) vale con due importi veri, come ogni gruppo
         if not vivo[i] or not serie.candidabile[i] or not ammessi[i] or (not serie.bersagli[i] and kmin < 2):
             continue

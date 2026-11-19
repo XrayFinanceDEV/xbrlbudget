@@ -422,6 +422,20 @@ def test_scadenza_stampata_nelle_forme_dei_gestionali():
     assert c.scadenza_stampata("Crediti verso clienti") is None
 
 
+def test_scadenza_abbreviata_o_troncata_dalla_colonna():
+    # P1.1 di OMNI (budget_700, situazione a sezioni contrapposte): sei finanziamenti «OLTRE» finivano tutti a breve
+    assert c.scadenza_stampata("FINANZ. BANCA ALFA OLTRE ESERC. SUCC.") == "O"
+    assert c.scadenza_stampata("BANCA BETA FINANZ. OLTRE L'ESERC. SU") == "O"
+    assert c.scadenza_stampata("BANCA GAMMA C/FINANZ. OLTRE ESERC.") == "O"
+    assert c.scadenza_stampata("BANCA ALFA FINANZ.N.12345678 OLTRE") == "O"
+    assert c.scadenza_stampata("BANCA DELTA FINANZ. ENTRO ESERC. SUCC") == "E"
+    assert c.scadenza_stampata("BANCA GAMMA C/FINANZ. ENTRO ESERCIZIO") == "E"
+    assert c.scadenza_stampata("BANCA ALFA FINANZ.N.12345678 ENTRO") == "E"
+    assert c.scadenza_stampata("CENTRO DI COSTO") is None
+    assert c.scadenza_stampata("UTILE ESERCIZIO PRECEDENTE") is None
+    assert c.scadenza_stampata("OLTRE SERVIZI SRL") is None
+
+
 def test_credito_senza_scadenza_stampata_entro_e_con_oltre_oltre():
     foglie = [F("a", "Crediti v/clienti"), F("b", "Crediti diversi (OE)"), F("c", "Depositi a garanzia oltre 12 mesi"),
               F("d", "Cliente Rossi", antenati=("CREDITI V/CLIENTI >12 MESI",))]

@@ -365,6 +365,16 @@ ricostruito internamente quadrato, e `mapper.validate_balance` da solo non lo ve
 un `validation_status` `"unbalanced"` (mai `"verified"`) e un previsionale bloccato dal verdetto
 **esistente** di `check_quadratura` sul foglio persistito, non da un cancello nuovo.
 
+**Il limite di questa regola (decisione del proprietario, 2026-11-19): uno sbilancio oltre metà del
+totale attivo non si salva.** «Non ha senso importare con sbilanci così elevati»: manca metà del
+bilancio o più, e non è una correzione da Rettifiche ma una lettura fallita (budget_1786: 105 milioni
+di sbilancio su un attivo di circa 9). `pdf_importer._rifiuta_lettura_non_riuscita`, nel blocco
+finale di quadratura e quindi per ogni percorso, misura lo scarto Attivo/Passivo del foglio da salvare
+contro il totale attivo stampato (`verifica.totali_stampati`); un totale stampato sotto un quarto del
+lato più grande letto non fa da base (un totale letto male), e allora la base è quel lato. Oltre il
+50% solleva `PDFImportError` «Lettura non riuscita: …», e la pagina Import ne mostra il suggerimento
+(`importers/rifiuti_import.py`). Sotto il 50% vale quanto sopra.
+
 **Dove si legge.** Nel `validation_report["import_snello"]` del foglio: `misura` porta lo scarto
 SP/CE misurato prima del tappo (per esercizio: `corrente` e, in modo `"legge"`, `precedente`),
 `tappo` il campo/importo scelto (`None` su `"squadrato"`). Gli esiti realmente emessi sono

@@ -310,6 +310,21 @@ def classify_bilancio(file_path: Optional[str] = None, text: Optional[str] = Non
         return Classification(MACRO_A, sub, ROUTE_IVCEE, gest, conf, s,
                               "scheletro IV CEE / tassonomia, nessun elenco conti")
 
+    # ----- Contabilità semplificata: ricavi e costi, pochi conti patrimoniali -----
+    # Un elenco conti c'e' (budget_1710), ma e' il riepilogo fiscale di una contabilita'
+    # semplificata: ricavi, costi, «utile fiscale» e qualche cespite, senza cassa, crediti,
+    # debiti ne' patrimonio netto. Si rifiuta come prima; cambia solo il motivo, che diceva
+    # «né elenco conti».
+    _compatto = re.sub(r"\s+", " ", low)
+    if ("utile fiscale" in _compatto
+            and ("riepilogo dei ricavi" in _compatto or "riepilogo dei costi" in _compatto)
+            and "patrimonio netto" not in _compatto):
+        return Classification(
+            MACRO_OTHER, "contabilità semplificata", ROUTE_UNSUPPORTED, gest, "high", s,
+            "situazione di contabilità semplificata (riepilogo di ricavi e costi e pochi "
+            "conti patrimoniali): manca lo stato patrimoniale completo (cassa, crediti, "
+            "debiti, patrimonio netto)")
+
     # ----- fallback: non riconosciuto come bilancio completo -----
     return Classification(MACRO_OTHER, "non riconosciuto", ROUTE_UNSUPPORTED, gest,
                           "low", s, "nessuno scheletro di legge né elenco conti riconoscibile")

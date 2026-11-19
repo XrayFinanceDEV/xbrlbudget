@@ -1,5 +1,6 @@
-"""Un conto economico da solo si rifiuta subito, anche quando le sue voci di legge contengono
-parole patrimoniali (budget_1667). Testi inventati."""
+"""Documenti che non sono un bilancio completo si rifiutano subito e col motivo giusto: un
+conto economico da solo, anche quando le sue voci di legge contengono parole patrimoniali
+(budget_1667), e il riepilogo di una contabilità semplificata (budget_1710). Testi inventati."""
 from importers.bilancio_classifier import ROUTE_UNSUPPORTED, classify_bilancio
 
 _CE_RICLASSIFICATO = """
@@ -26,3 +27,22 @@ def test_uno_stato_patrimoniale_vero_resta_uno_stato_patrimoniale():
     c = classify_bilancio(text=testo)
 
     assert not c.subcategory.startswith("C4/")
+
+
+def test_una_contabilita_semplificata_si_rifiuta_col_suo_motivo():
+    testo = """
+    SITUAZIONE CONTABILE
+    RIEPILOGO DEI RICAVI
+    58/0005 Ricavi delle vendite 300.000,00
+    RIEPILOGO DEI COSTI
+    66/0010 Acquisti di merci 120.000,00
+    UTILE FISCALE 80.000,00
+    ALTRI CONTI
+    20/0015 Automezzi 40.000,00
+    """
+
+    c = classify_bilancio(text=testo)
+
+    assert c.route == ROUTE_UNSUPPORTED
+    assert "semplificata" in c.reason
+    assert "elenco conti" not in c.reason

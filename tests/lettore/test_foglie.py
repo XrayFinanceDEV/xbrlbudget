@@ -1159,3 +1159,13 @@ def test_il_risultato_d_esercizio_non_e_la_voce_sopra_gli_oneri(tmp_path):
     foglie = _per_etichetta(foglie_contabili(doc, colonne_utili(doc)[0]))
     assert foglie["INTERESSI BANCA ROSSI"].percorso_legale == "CE.C.17"
     assert foglie["INTERESSI BANCA ROSSI"].verso_ce == "costo"
+
+
+def test_un_mastro_di_perdite_e_costi_d_esercizio_non_e_il_risultato():
+    # budget_1645: il mastro «PERDITE E COSTI VARI D'ESERCIZIO» diventava l'ancora dell'utile, col suo importo negato
+    from importers.lettore.foglie import e_riga_del_risultato
+    assert not e_riga_del_risultato("! 990     PERDITE E COSTI VARI D'ESERCIZIO!")
+    assert not e_riga_del_risultato("PROVENTI DIVERSI DELL'ESERCIZIO E UTILE SU CAMBI")
+    assert e_riga_del_risultato("Utile d'esercizio")
+    assert e_riga_del_risultato("Perdita dell'esercizio")
+    assert e_riga_del_risultato("21) Utile (perdita) dell'esercizio")

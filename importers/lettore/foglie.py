@@ -35,7 +35,14 @@ def e_riga_del_risultato(etichetta: str) -> bool:
     """La riga del risultato d'esercizio: «Utile (perdita) dell'esercizio», o un'etichetta di sole parole del
     risultato («Utile»)."""
     n = _norm(etichetta)
+    if _VOCE_DI_COSTI_O_RICAVI.search(n):
+        return False
     return bool(_RISULTATO_ESERCIZIO.search(n) or _RISULTATO_NUDO.match(n))
+
+
+# «PERDITE E COSTI VARI D'ESERCIZIO» e' un mastro di costi, non la perdita dell'esercizio (budget_1645): la riga del
+# risultato non nomina costi, oneri, spese, ricavi o proventi
+_VOCE_DI_COSTI_O_RICAVI = re.compile(r"\b(?:costi|oneri|spese|ricavi|proventi)\b")
 
 # L'enumeratore di una voce di legge stampato come titolo: «C)», «II -», «1)», «5-bis)», «c)». Il maiuscolo A-E
 # vuole la parentesi e il romano la parentesi o il trattino, cosi' «A. Rossi s.r.l.» e «I.V.A.» non sono voci.

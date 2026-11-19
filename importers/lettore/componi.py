@@ -193,8 +193,11 @@ def _senza_testa(etichetta: str) -> str:
 
 
 def _parole(etichetta: str) -> list[str]:
-    """Le parole significative (3 lettere o piu') di un conto, senza la dicitura del fondo."""
-    return [w for w in _PAROLA.findall(_senza_testa(etichetta)) if len(w) >= 3 and w not in _PAROLE_DEL_FONDO]
+    """Le parole significative (3 lettere o piu') di un conto, senza la dicitura del fondo e senza i numeri: il codice
+    del conto stampato dentro l'etichetta («! 101012 IMPIANTI !», budget_1645) e' diverso fra fondo e cespite, e
+    impediva ogni abbinamento per etichetta."""
+    return [w for w in _PAROLA.findall(_senza_testa(etichetta))
+            if len(w) >= 3 and w not in _PAROLE_DEL_FONDO and not w.isdigit()]
 
 
 def _nomina(fondo: list[str], cespite: list[str]) -> int:
@@ -267,7 +270,15 @@ def _abbina_fondi(foglie: list[Foglia], classi: dict[str, Classe]) -> tuple[dict
         per_macro: dict[str, Decimal] = {}
         for c in stessi:
             per_macro[classi[c.id].macro] = per_macro.get(classi[c.id].macro, _ZERO) + importo_sp(c)
-        macro = max(sorted(per_macro), key=lambda m: per_macro[m])
+        # la macro del modello, se fra i cespiti della famiglia ce n'e' che contengono il fondo: «SPESE DI COSTITUZIONE
+        # E IMPIANTO» (immateriale) cade nella famiglia degli impianti per la parola IMPIANTO, e da piu' grande si
+        # prendeva il fondo degli impianti materiali (budget_1645)
+        del_modello = classi[fondo.id].macro
+        if sum((residuo[c.id] for c in stessi if classi[c.id].macro == del_modello), _ZERO) >= fondo.importo:
+            macro = del_modello
+            stessi = [c for c in stessi if classi[c.id].macro == del_modello]
+        else:
+            macro = max(sorted(per_macro), key=lambda m: per_macro[m])
         dettagli = {_campo_del_cespite(classi[c.id]) for c in stessi if classi[c.id].macro == macro}
         resta = fondo.importo
         for c in sorted(stessi, key=lambda c: -residuo[c.id]):

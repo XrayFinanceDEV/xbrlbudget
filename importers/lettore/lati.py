@@ -128,10 +128,14 @@ def assegna_lati(colonne: list[Colonna], confine: float | None) -> list[Colonna]
 
 
 def _celle(r: RigaFisica, colonne: list[Colonna]) -> list[Parola]:
-    """Le parole della riga che sono importi in una colonna."""
-    return [p for p in r.parole
-            if p.x0 > _X0_MINIMO and leggi_importo(p.testo) is not None
-            and colonna_di(p.x1, colonne) is not None]
+    """Le parole della riga che sono importi in una colonna. Una riga le cui sole «celle» sono trattini non e' una
+    riga con importi: il trattino di un'intestazione di pagina («N10010 - RAGIONE SOCIALE», budget_1645) caduto
+    sotto una colonna faceva contare l'intestazione fra le righe con importi, e le sue parole, larghe quanto la
+    pagina, chiudevano il varco fra i lati."""
+    celle = [p for p in r.parole
+             if p.x0 > _X0_MINIMO and leggi_importo(p.testo) is not None
+             and colonna_di(p.x1, colonne) is not None]
+    return celle if any(leggi_importo(p.testo).forma != "zero" for p in celle) else []
 
 
 def _centro(parole: list[Parola]) -> float:

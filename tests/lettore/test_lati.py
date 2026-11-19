@@ -221,3 +221,14 @@ def test_intestazione_su_un_altra_pagina_non_conferma(tmp_path):
     sotto = _contrapposte(codici=False, descritte_destra=2) + [(40, 300, "Attività"), (310, 300, "Passività")]
     righe, colonne = _leggi(tmp_path, sotto)
     assert confine_dei_lati(righe, colonne) is None
+
+
+def test_un_intestazione_col_trattino_non_chiude_il_varco_fra_i_lati(tmp_path):
+    # budget_1645: l'intestazione di pagina «... N10010 - RAGIONE SOCIALE», stampata a caratteri fissi, ha un trattino
+    # che cade sotto la colonna di destra; contata fra le righe con importi, la sua parola lunga attraversava il varco
+    # fra i lati e il confine non si trovava piu'.
+    testata = [(200, 120, "SITUAZIONE-CONTABILE-DAL-01/01-AL-31/08-PAGINA-1-N10010"), (560, 120, "-"),
+               (566, 120, "ROSSI")]
+    righe, colonne = _leggi(tmp_path, _contrapposte(codici=True, testata=testata))
+    confine = confine_dei_lati(righe, colonne)
+    assert confine is not None and 280 < confine < 310

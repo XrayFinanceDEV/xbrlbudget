@@ -1193,3 +1193,14 @@ def test_il_valore_della_produzione_dettagliato_resta_alle_sue_voci():
     bs, ce, diag = da_coppie([("CE.A", D("950000")), ("CE.A.1", D("900000")), ("CE.A.5", D("50000"))])
     assert ce["ce01_ricavi_vendite"] == D("900000")
     assert diag["valore_produzione_non_dettagliato"] == []
+
+
+def test_un_padre_con_le_sotto_voci_tutte_a_zero_resta():
+    # budget_1720 (cifre inventate): «D) Debiti» letto con le sotto-voci a zero; prima spariva senza dirlo
+    bs, ce, diag = da_coppie([("SPP.D", D("2000000")), ("SPP.D.4", D("0")), ("SPP.D.7", D("0"))])
+    assert bs["sp16_debiti_breve"] == D("2000000")
+
+
+def test_un_padre_con_una_sotto_voce_vera_cade_come_prima():
+    bs, ce, diag = da_coppie([("SPP.D", D("2000000")), ("SPP.D.4.E", D("1500000")), ("SPP.D.7.E", D("500000"))])
+    assert bs["sp16_debiti_breve"] == D("2000000")

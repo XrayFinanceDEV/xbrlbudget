@@ -875,7 +875,11 @@ def da_coppie(coppie):
             continue
         if p in scadenze_scartate:
             continue
+        # Il padre cade per le sue sotto-voci lette, ma solo se almeno una porta un importo: sotto-voci tutte a zero
+        # («di cui» vuoti, scadenze a zero) non lo ricompongono, e scartarlo faceva sparire la voce senza dirlo
+        # (budget_1720: «D) Debiti» letto con le sotto-voci a zero, sp16 = 0).
         if any(q != p and q.startswith(p + ".") and not e_fondo(q) and q not in scadenze_scartate
+               and any(v2 for q2, v2 in uniche if q2 == q)
                for q in tutti):
             continue
         codice = campo_di_legge(p)

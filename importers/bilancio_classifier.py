@@ -54,6 +54,18 @@ class Classification(NamedTuple):
 # ---------------------------------------------------------------------------
 # Segnali
 # ---------------------------------------------------------------------------
+# Voci di legge del conto economico (art. 2425) che contengono una parola patrimoniale: non
+# dicono che il documento abbia uno stato patrimoniale. Testo deaccentato, minuscolo, spazi
+# compressi (vedi ``sp_present`` in ``compute_signals``).
+_VOCI_CE_CON_PAROLE_PATRIMONIALI = (
+    r"svalutazion\w*\s+(?:delle\s+)?immob\w*",
+    r"ammortament\w*\s+(?:delle\s+)?immob\w*",
+    r"iscritt\w*\s+nelle\s+immobilizzazioni",
+    r"(?:compresi|iscritt\w*)\s+nell'?\s*attivo\s+circolante",
+    r"attivita'?\s+e\s+passivita'?\s+finanziari\w*",
+)
+
+
 def compute_signals(text: str, file_path: Optional[str] = None) -> Dict[str, object]:
     # Deaccentazione: i marker cercati piu' avanti sono scritti SENZA accento
     # ("passivita", "disponibilita liquide"), quindi senza questo passaggio non
@@ -104,11 +116,26 @@ def compute_signals(text: str, file_path: Optional[str] = None) -> Dict[str, obj
     # Conservativo: basta UNO qualsiasi di questi marker patrimoniali per dire "ha lo SP".
     # NB: niente "rimanenze" qui — "variazione delle rimanenze" è una voce di CONTO
     # ECONOMICO, quindi non è un marker patrimoniale affidabile (regge 196/335 solo-CE).
+    # Stessa ragione per le voci di legge del CONTO ECONOMICO che contengono una parola
+    # patrimoniale (art. 2425: B.10 «svalutazioni delle immobilizzazioni», A.4 «incrementi
+    # ... iscritti nelle immobilizzazioni», D «rettifiche di valore di attivita' e passivita'
+    # finanziarie»): si tolgono dal testo prima di cercare i marker patrimoniali. Un CE
+    # riclassificato da solo (budget_1667) passava per bilancio completo, finiva sulla rotta
+    # IV-CEE e veniva rifiutato dopo dieci minuti di letture del modello invece che subito.
+    _sp_low = re.sub(r"\s+", " ", low)
+    for _voce_ce in _VOCI_CE_CON_PAROLE_PATRIMONIALI:
+        _sp_low = re.sub(_voce_ce, " ", _sp_low)
+    _sp_nos = re.sub(r"\s+", "", _sp_low)
+
+    def has_sp(marker: str) -> bool:
+        return (marker in _sp_low) or (marker.replace(" ", "") in _sp_nos)
+
     s["sp_present"] = bool(
-        s["stato_patrimoniale"] or s["totale_attivo"] or s["immobilizzazioni"]
-        or has("patrimonio netto") or has("attivo circolante") or has("passivita")
-        or has("disponibilita liquide")
-        or has("debiti verso") or has("crediti verso") or has("capitale sociale")
+        has_sp("stato patrimoniale") or re.search(r"totale\s+attivo", _sp_low)
+        or ("totaleattivo" in _sp_nos) or ("immobilizzazioni" in _sp_nos)
+        or has_sp("patrimonio netto") or has_sp("attivo circolante") or has_sp("passivita")
+        or has_sp("disponibilita liquide")
+        or has_sp("debiti verso") or has_sp("crediti verso") or has_sp("capitale sociale")
     )
     # contenuto ECONOMICO presente (CE)
     s["ce_present"] = bool(

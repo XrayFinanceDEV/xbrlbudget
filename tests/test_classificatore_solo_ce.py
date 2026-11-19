@@ -46,3 +46,13 @@ def test_una_contabilita_semplificata_si_rifiuta_col_suo_motivo():
     assert c.route == ROUTE_UNSUPPORTED
     assert "semplificata" in c.reason
     assert "elenco conti" not in c.reason
+
+
+def test_un_elenco_di_conti_con_dare_e_avere_e_una_situazione_contabile():
+    # budget_1776/1562 (testo inventato): codici puntati alfanumerici, colonne dare/avere/saldo, nessun percorso
+    # di legge; prima finiva fra gli schemi di legge o fra i non riconosciuti
+    from importers.bilancio_classifier import ROUTE_TRIAL
+    righe = ["CONTO SALDO INIZ. Dare Avere", "1 - ATTIVITA'", "10 - Immobilizzazioni"]
+    righe += [f"10.{k:02d}.{k + 40} - CONTO {k}\n{k},00\n{k},00" for k in range(1, 40)]
+    c = classify_bilancio(text="\n".join(righe))
+    assert c.route == ROUTE_TRIAL

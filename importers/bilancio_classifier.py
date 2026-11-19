@@ -66,6 +66,9 @@ _VOCI_CE_CON_PAROLE_PATRIMONIALI = (
 )
 
 
+_MIN_CONTI_VERIFICA = 30
+
+
 def compute_signals(text: str, file_path: Optional[str] = None) -> Dict[str, object]:
     # Deaccentazione: i marker cercati piu' avanti sono scritti SENZA accento
     # ("passivita", "disponibilita liquide"), quindi senza questo passaggio non
@@ -175,6 +178,13 @@ def compute_signals(text: str, file_path: Optional[str] = None) -> Dict[str, obj
         s["is_sc"] = bool(is_situazione_contabile(text))
     except Exception:
         s["is_sc"] = False
+    # Un elenco di conti con le colonne dare/avere e nessun percorso di legge e' una situazione contabile anche
+    # quando il rilevatore dei layout non ne riconosce la forma (codici puntati alfanumerici «10.05.3K», conti a 8
+    # cifre col partitario sotto): finiva fra gli schemi di legge, letto da Qwen come uno schema (budget_1776, 13
+    # milioni di sbilancio), o rifiutato come «non riconosciuto» (budget_1562, 667).
+    s["verifica_per_conti"] = bool(
+        s["dare_avere"] and int(s["coge_codes"]) >= _MIN_CONTI_VERIFICA and int(s["cee_path"]) < 5
+        and not s["riclassificata"] and not s["dettaglio"])
 
     return s
 
@@ -278,7 +288,7 @@ def classify_bilancio(file_path: Optional[str] = None, text: Optional[str] = Non
                                   "high", s, "marker 'dettaglio' + conti CoGe + scheletro IV CEE")
 
     # ----- C: bilancio di verifica / situazione contabile -----
-    if s["pareggio"] or s["verifica"] or s["is_sc"] or s["contrapposte"]:
+    if s["pareggio"] or s["verifica"] or s["is_sc"] or s["contrapposte"] or s["verifica_per_conti"]:
         # IV CEE strutturato ma con codici conto di dettaglio (es. sottoconti DEPI
         # dentro lo schema di legge, budget_313/314): è B, NON una verifica. Vale
         # solo se NON ci sono i marker forti di verifica (pareggio/verifica/contrapposte).

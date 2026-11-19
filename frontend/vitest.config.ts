@@ -10,9 +10,10 @@ import { defineConfig } from "vitest/config";
 // che non richiede DOM.
 export default defineConfig({
   // I componenti della slice A del report finale sono JSX senza import di
-  // React (runtime automatico, come nel build Next via SWC): anche qui esbuild
-  // deve usare il runtime automatico, o «React is not defined».
-  esbuild: { jsx: "automatic" },
+  // React (runtime automatico, come nel build Next via SWC): anche qui il
+  // trasformatore deve usare il runtime automatico, o «React is not defined».
+  // Da Vitest 5 (Vite 8) il JSX lo trasforma oxc, non più esbuild.
+  oxc: { jsx: { runtime: "automatic" } },
   test: {
     environment: "node",
     include: ["lib/**/*.test.ts", "components/final-report/**/*.test.{ts,tsx}"],

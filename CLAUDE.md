@@ -42,7 +42,7 @@ nothing.
 
 **Infrannuale workflow:** import with `period_months` → rettifiche **once per year**
 (`GET`/`PUT /companies/{id}/years/{year}/adjustable|adjustments` — the partial year and its
-reference year each have their own journal and their own 20-entry cap; `period_months` omitted =
+reference year each have their own journal and their own 30-entry cap (20 until 2026-11-20); `period_months` omitted =
 full year) → scenario `scenario_type="infrannuale"` → `GET /scenarios/{id}/comparison` →
 `PUT /scenarios/{id}/assumptions` → `GET /scenarios/{id}/analysis`. Optional: the six AI comments
 (`GET|POST|PUT /scenarios/{id}/infrannuale/ai-comments`) and `POST /scenarios/{id}/promote`.
@@ -1190,7 +1190,7 @@ Projects a partial year (say 9 months) to a full 12 months, against a reference 
 Il giornale delle correzioni sul bilancio importato, step DATI › Rettifiche del percorso Pratica.
 Una tab per anno (storico + bilancio di verifica), entrambe da confermare prima di proseguire.
 Tre modi di proposta — rettifica e riclassifica in partita doppia, «Correggi Import» in partita
-singola — con tetto di 20 voci e una guardia anti-regressione lato server.
+singola — con tetto di 30 voci (20 fino al 2026-11-20) e una guardia anti-regressione lato server.
 
 Vive in `frontend/components/pratica/RettificheTab.tsx` e `frontend/hooks/use-rettifiche-year.ts`;
 la politica di partita doppia in `frontend/lib/pratica-rettifiche-rules.ts`.

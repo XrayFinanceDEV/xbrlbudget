@@ -166,7 +166,7 @@ a valle legge il giornale: l'app non ha una «versione sistemata» nascosta da q
 - Il dialogo **«Registra Rettifica»** con tre modalità — **«Rettifica (SP ↔ CE)»**,
   **«Riclassifica (stessa sezione)»**, **«Correggi Import»** — la riga modificata con il suo
   **+importo**, la **contropartita** a tendina e l'importo su di essa, e il conteggio
-  «Rettifiche registrate: N / 20».
+  «Rettifiche registrate: N / 30».
 
 ![Rettifica in compilazione](images/guida/04b-rettifica-compilazione.jpg)
 
@@ -182,7 +182,7 @@ dell'importatore.
 
 **Attenzione a**
 
-- **Massimo 20 rettifiche** per giornale: *«Massimo 20 rettifiche. Eliminane qualcuna per
+- **Massimo 30 rettifiche** per giornale: *«Massimo 30 rettifiche. Eliminane qualcuna per
   aggiungerne altre.»*
 - Il server **rifiuta una rettifica che peggiora** sbilancio, identità CE↔utile o coerenza
   aggregati/dettagli; se invece il file era già storto dall'import, la correzione passa.
@@ -777,7 +777,7 @@ driver. Le griglie CE Prev./SP Prev. restano disponibili, con gli stessi overrid
 2. **Import** con **periodo parziale = 6 mesi**: il parziale coesiste con l'eventuale annuale
    dello stesso anno, non lo sostituisce.
 3. **Rettifiche** su entrambe le schede — storico e parziale — e conferma: ciascuna ha il suo
-   giornale e il suo tetto di 20 voci.
+   giornale e il suo tetto di 30 voci.
 4. **Confronto**: semestre annualizzato contro l'ultimo anno pieno.
 5. **Proiezione**: se serve, aggiusta le righe CE; **«Genera proiezione e indicatori di
    crisi»** (un fabbisogno scoperto qui esce in diagnosi di errore: lo scenario non è
@@ -823,7 +823,7 @@ driver. Le griglie CE Prev./SP Prev. restano disponibili, con gli stessi overrid
 | *«Previsionale calcolato»* | Salvataggio e generazione riusciti | — |
 | *«Documento bloccato · Forecast precedente alle ipotesi salvate.»* | Hai cambiato le ipotesi dopo l'ultima generazione | «Rigenera previsionale» nel banner giallo |
 | *«Fidi e anticipi incompatibili con … forzato: servono … di fidi, ma il totale della voce è fissato dall'override.»* | Un override SP pretende una cassa che il piano dei fidi non può fare | togli l'override o copri il fabbisogno con un finanziamento (passo 5/6) |
-| *«Massimo 20 rettifiche. Eliminane qualcuna per aggiungerne altre.»* | Il tetto del giornale di quell'anno | elimina rettifiche obsolete o raggruppale |
+| *«Massimo 30 rettifiche. Eliminane qualcuna per aggiungerne altre.»* | Il tetto del giornale di quell'anno | elimina rettifiche obsolete o raggruppale |
 | **«n.d.»** su un indice | Denominatore non positivo, o dettaglio (crediti commerciali, debito finanziario) che l'import non ha mai classificato | integra il dettaglio in Rettifiche: non è un guasto, è il dato che manca |
 | Riga con delta pari a **2× l'importo** in Confronto/CE | una riga di costo è stata letta nella colonna dei ricavi (o viceversa) | rettifica di **direzione**, non di importo |
 | **«Pratica da riaprire»** | Il server non riesce più a ricostruire la pratica (per esempio una pratica vecchia con un budget ma senza infrannuale dietro, o azienda/anno cambiati altrove) | riapri dalla home con «Nuova pratica»: i dati salvati restano |

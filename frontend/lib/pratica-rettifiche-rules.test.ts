@@ -93,7 +93,7 @@ describe("sotto-voci delle immobilizzazioni", () => {
 });
 
 describe("contaNelTetto", () => {
-  it("la quadratura iniziale e la conferma non rubano righe alle 20 rettifiche", () => {
+  it("la quadratura iniziale e la conferma non rubano righe alle RETTIFICHE_MAX", () => {
     expect(contaNelTetto({ entry_type: undefined })).toBe(true);
     expect(contaNelTetto({ entry_type: null })).toBe(true);
     expect(contaNelTetto({ entry_type: "confirm" })).toBe(false);

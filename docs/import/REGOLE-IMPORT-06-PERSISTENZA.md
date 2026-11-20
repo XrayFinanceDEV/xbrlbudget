@@ -85,7 +85,7 @@ tributari, previdenza, altri.
 | `source_sha256` | **SHA-256 dei byte del file** |
 | `parser_version` | `semantic-v3-2026-07-20` (PDF), `xbrl-context-period-v3` (XBRL), con i suffissi di provenienza (sotto) |
 | `forecastable` | `semantic_valid` **e** il verdetto sui conti critici — vedi pagina 04 §9/§9-bis |
-| `original_bs_snapshot` / `original_is_snapshot` / `rettifiche_log` | stato pre-rettifiche e giornale (massimo 20 voci) |
+| `original_bs_snapshot` / `original_is_snapshot` / `rettifiche_log` | stato pre-rettifiche e giornale (massimo 30 voci) |
 
 Nel report di validazione ogni importo è serializzato **come stringa**: nessuna perdita di
 precisione passando da decimale a virgola mobile.

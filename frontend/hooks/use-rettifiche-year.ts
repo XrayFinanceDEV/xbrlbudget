@@ -6,6 +6,7 @@ import { getAdjustableFinancialYear, saveAdjustments } from "@/lib/api";
 import { getErrorMessage } from "@/lib/utils";
 import { reconcileSubfields } from "@/lib/pratica-reconcile";
 import { preparaConfermaRettifiche } from "@/lib/pratica-conferma-rettifiche";
+import { RETTIFICHE_MAX } from "@/lib/pratica-rettifiche-rules";
 import { formatEuroPreciso } from "@/lib/pratica-format";
 import type { AdjustableFinancialYear, RettificaEntry } from "@/types/api";
 
@@ -208,7 +209,7 @@ export function useRettificheYear(
     if (companyId === null || !data) return false;
     const prepared = preparaConfermaRettifiche(data, year, periodMonths);
     if (prepared.kind === "limit") {
-      toast.error("Massimo 20 rettifiche: eliminane una per chiudere lo scarto di quadratura");
+      toast.error(`Massimo ${RETTIFICHE_MAX} rettifiche: eliminane una per chiudere lo scarto di quadratura`);
       return false;
     }
     if (prepared.kind === "already_confirmed") {

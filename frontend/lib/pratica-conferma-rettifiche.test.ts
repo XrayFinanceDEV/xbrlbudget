@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { RettificaEntry } from "@/types/api";
 import { scartoQuadratura } from "@/lib/pratica-quadratura";
 import { preparaConfermaRettifiche } from "@/lib/pratica-conferma-rettifiche";
+import { RETTIFICHE_MAX } from "@/lib/pratica-rettifiche-rules";
 
 const marker: RettificaEntry = {
   id: "confirm-2026-6", entry_type: "confirm", edited_field: "", edited_label: "Rettifiche confermate",
@@ -41,13 +42,13 @@ describe("conferma delle rettifiche", () => {
 });
 
 describe("quadratura iniziale e tetto", () => {
-  it("lo spacchettamento dell'utile non conta fra le 20 rettifiche della chiusura automatica", () => {
+  it("lo spacchettamento dell'utile non conta fra le RETTIFICHE_MAX della chiusura automatica", () => {
     const voce = (i: number, entry_type?: string): RettificaEntry => ({
       id: `e${i}`, entry_type, edited_field: "sp09_disponibilita_liquide", edited_label: "", edit_delta: 1,
       counterpart_field: "sp16g_altri_debiti_breve", counterpart_label: "", counterpart_delta: 1,
       created_at: "2026-10-20T00:00:00Z",
     });
-    const log = [...Array.from({ length: 19 }, (_, i) => voce(i)), voce(99, "quadratura_iniziale")];
+    const log = [...Array.from({ length: RETTIFICHE_MAX - 1 }, (_, i) => voce(i)), voce(99, "quadratura_iniziale")];
     const prepared = preparaConfermaRettifiche({
       balance_sheet: { sp09_disponibilita_liquide: 1000.5, sp16_debiti_breve: 1000, sp16g_altri_debiti_breve: 1000 },
       income_statement: {},

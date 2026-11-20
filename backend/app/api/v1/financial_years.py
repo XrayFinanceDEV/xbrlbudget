@@ -349,7 +349,9 @@ def get_adjustable_financial_year(
     )
 
 
-RETTIFICHE_LOG_MAX = 20
+# Tetto del giornale di un anno (decisione del proprietario 2026-11-20: da 20 a 30). Uguale a RETTIFICHE_MAX in
+# frontend/lib/pratica-rettifiche-rules.ts: il client blocca prima di salvare, il server risponde 400 oltre.
+RETTIFICHE_LOG_MAX = 30
 
 
 def _countable_log_entries(log) -> int:

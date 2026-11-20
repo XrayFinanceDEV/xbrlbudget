@@ -347,7 +347,7 @@ trasferimento del calcolo è questa la regola e la suite attuale.
   critico). Le due sotto-tab (Storico e Bilancio di verifica) vogliono **ciascuna** la propria
   conferma: `useRettificheYear` espone `confirmed` e `confirm()`, appoggiati a un marker
   `{ entry_type: "confirm" }` nello stesso `rettifiche_log` — nessuna migrazione, idempotente,
-  escluso dal giornale, dal Riepilogo e dal tetto di 20 voci lato server.
+  escluso dal giornale, dal Riepilogo e dal tetto di 30 voci lato server.
 - **I due comportamenti di `AppContext` (§2) sono stati trovati provando in browser**, non
   progettati: sono bug reali, non raffinamenti.
 - **Lo spostamento a `/pratica` fu neutro.** Il wizard si è mosso file-per-file da

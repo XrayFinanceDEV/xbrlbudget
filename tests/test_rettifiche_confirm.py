@@ -48,7 +48,7 @@ def test_confirm_marker_round_trips():
 
 
 def test_confirm_does_not_consume_the_cap():
-    """Con 20 rettifiche + 1 conferma il log resta accettabile."""
+    """Con il tetto pieno di rettifiche + 1 conferma il log resta accettabile."""
     log = [_rettifica(i) for i in range(RETTIFICHE_LOG_MAX)] + [_confirm()]
     assert _countable_log_entries(log) == RETTIFICHE_LOG_MAX
 

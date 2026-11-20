@@ -201,7 +201,7 @@ immutabile.
 `income_statement` (post-rettifiche) e `log` da `adjustableData.rettifiche_log`: riaprendo la tab
 si rivede il giornale persistito.
 
-**Tetto di 20 voci** (`RETTIFICHE_MAX`), applicato **su entrambi i lati**: client (toast e blocco
+**Tetto di 30 voci** (`RETTIFICHE_MAX`; erano 20 fino al 2026-11-20, decisione del proprietario), applicato **su entrambi i lati**: client (toast e blocco
 prima di salvare) e server (400 su `/adjustments`). Su entrambi i lati i marker di conferma
 (`entry_type == "confirm"`) sono **esclusi dal conteggio** — sono contabilità interna, non
 rettifiche.
@@ -288,7 +288,7 @@ quindi una riga persa o aggiunta non sfugge, una sezione spostata nel JSX sì.
 | `frontend/lib/ivcee-catalog.ts` | la **tassonomia**: `labelOf`, `isDettaglio`, `COUNTERPART_OPTIONS` |
 | `frontend/lib/pratica-reconcile.ts` | `reconcileSubfields` |
 | `frontend/lib/pratica-codes.ts` | `DETAIL_PARENTS` — l'unica costante davvero condivisa con Confronto e Proiezione |
-| `backend/app/api/v1/financial_years.py` | `RETTIFICHE_LOG_MAX = 20`, `_countable_log_entries`, GET `/adjustable`, PUT `/adjustments` e la guardia anti-regressione |
+| `backend/app/api/v1/financial_years.py` | `RETTIFICHE_LOG_MAX = 30`, `_countable_log_entries`, GET `/adjustable`, PUT `/adjustments` e la guardia anti-regressione |
 | `backend/app/schemas/adjustments.py` | `RettificaEntry`, `AdjustableFinancialYear`, `AdjustmentsUpdate` |
 | `database/models.py` | `FinancialYear.rettifiche_log`, `original_bs_snapshot`, `original_is_snapshot` |
 

@@ -88,10 +88,11 @@ def test_la_quadratura_iniziale_non_conta_fra_le_20_rettifiche(verifica):
             counterpart_label="", counterpart_delta=0, created_at="2026-10-20T00:00:00Z")
 
     db, company_id = verifica
-    log = [voce(i) for i in range(20)] + [voce(99, "quadratura_iniziale"), voce(98, "confirm")]
+    tetto = financial_years.RETTIFICHE_LOG_MAX
+    log = [voce(i) for i in range(tetto)] + [voce(99, "quadratura_iniziale"), voce(98, "confirm")]
     financial_years.save_adjustments(
         company_id, 2026,
         AdjustmentsUpdate(balance_sheet={}, income_statement={}, rettifiche_log=log),
         period_months=8, user_id=UTENTE, db=db,
     )
-    assert len(financial_years.json.loads(db.query(FinancialYear).one().rettifiche_log)) == 22
+    assert len(financial_years.json.loads(db.query(FinancialYear).one().rettifiche_log)) == tetto + 2

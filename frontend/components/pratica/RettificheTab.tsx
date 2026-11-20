@@ -170,7 +170,7 @@ export function RettificheTab({
   }, [adjustableData]);
 
   // The gate's "confirm" marker lives in the same log (so the server persists
-  // it and the 20-entry cap logic can see it), but it is not a rettifica the
+  // it and the RETTIFICHE_MAX cap logic can see it), but it is not a rettifica the
   // user made — hide it from the journal panel, the Riepilogo dialog and the
   // count against RETTIFICHE_MAX.
   const visibleLog = useMemo(() => log.filter(contaNelTetto), [log]);
@@ -267,7 +267,7 @@ export function RettificheTab({
       setPendingEdits((prev) => { const u = { ...prev }; delete u[field]; return u; });
       return;
     }
-    // Enforce 20-entry cap before opening dialog
+    // Enforce the RETTIFICHE_MAX cap before opening dialog
     if (visibleLog.length >= RETTIFICHE_MAX) {
       toast.error(`Massimo ${RETTIFICHE_MAX} rettifiche. Eliminane qualcuna per aggiungerne altre.`);
       setPendingEdits((prev) => { const u = { ...prev }; delete u[field]; return u; });

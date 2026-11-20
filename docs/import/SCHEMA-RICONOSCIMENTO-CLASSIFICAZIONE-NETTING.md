@@ -191,7 +191,7 @@ severa su un bilancio da 50 M né troppo lasca su uno da 300 k.
 > totale non è un'imprecisione: è un dato falso, e va rifiutato o segnalato, mai assorbito.**
 
 L'obiettivo dichiarato — *"un bilancio decente che l'utente rifinisce in Rettifiche"* — implica
-un budget di correzioni. Le Rettifiche accettano oggi **20 voci** (`RETTIFICHE_LOG_MAX = 20`;
+un budget di correzioni. Le Rettifiche accettano oggi **30 voci** (`RETTIFICHE_LOG_MAX = 30`, erano 20 fino al 2026-11-20;
 tu ne citi 10, che è il target di usabilità ragionevole). Da qui una metrica di progetto
 concreta:
 

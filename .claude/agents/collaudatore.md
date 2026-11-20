@@ -101,7 +101,7 @@ guardare. Scegli, insisti dove senti puzza di bruciato, abbandona ciò che regge
 |---|---|
 | **Home a tendina** (`/`) | creazione azienda nei due workflow (Da bilancio · Startup), rientro su azienda esistente, rinomina, eliminazione, il menù ⋯. Dopo una creazione: **quante aziende esistono davvero?** |
 | **Wizard pratica** (`/pratica`) | ricaricare la pagina a metà percorso; avanti/indietro del browser; lo stepper; entrare e uscire da una pratica e rientrare in un'altra. |
-| **Rettifiche** | tetto di 20 voci; una rettifica che il server **rifiuta** non deve comparire nel giornale come riuscita; `Ripristina` su un import per soli aggregati; i campi aggregati non devono essere postabili. |
+| **Rettifiche** | tetto di 30 voci; una rettifica che il server **rifiuta** non deve comparire nel giornale come riuscita; `Ripristina` su un import per soli aggregati; i campi aggregati non devono essere postabili. |
 | **Confronto e Proiezione** | i sottototali si ricalcolano davvero dopo una modifica a mano? |
 | **Indicatori** | dati degenerati: ricavi a zero, patrimonio netto negativo, nessun onere finanziario. Il grafico deve **omettere** la voce, non disegnare uno zero. |
 | **Stampa** | i sei commenti AI si salvano e si rileggono; i grafici compaiono; l'impaginazione. |

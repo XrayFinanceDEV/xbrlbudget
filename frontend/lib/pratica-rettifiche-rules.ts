@@ -425,7 +425,9 @@ export interface DoubleEntryProposal {
   };
 }
 
-export const RETTIFICHE_MAX = 20;
+// Tetto del giornale di un anno (decisione del proprietario 2026-11-20: da 20 a 30). Uguale a
+// RETTIFICHE_LOG_MAX in backend/app/api/v1/financial_years.py, che risponde 400 oltre.
+export const RETTIFICHE_MAX = 30;
 
 /**
  * Le voci del giornale che sistemano la quadratura INIZIALE del bilancio

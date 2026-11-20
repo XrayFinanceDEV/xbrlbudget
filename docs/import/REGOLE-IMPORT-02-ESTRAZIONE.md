@@ -101,7 +101,11 @@ accetta anche «Stato patrimoniale attivo 1.250.311,33 1.314.938,83» (BILAQ).
    precedente dal pass a due colonne. Se il corrente single-year non quadra e quello dual sì,
    vince il dual.
 5. **Retry stocastico**: fino a 3 tentativi, si ferma appena corrente e precedente quadrano
-   entrambi; conserva comunque il miglior tentativo.
+   entrambi; conserva comunque il miglior tentativo. Si ferma anche quando **entrambe** le letture
+   del tentativo (a un anno e a due anni) danno uno SP vuoto (Attivo = Passivo = 0,
+   `check_quadratura(...).is_empty`): la riprova serve contro una lettura sbilanciata, non contro un
+   prospetto che non c'è, e altri due giri darebbero lo stesso vuoto a quattro chiamate l'uno
+   (2026-11-19, budget_1667).
 6. **Overlay finale**: se dopo 3 tentativi non quadra ancora, si sovrascrivono **solo gli
    aggregati patrimoniali** con quelli del parser deterministico, e **solo se il risultato
    quadra**. CE e dettagli tipizzati restano quelli dell'LLM.
@@ -540,6 +544,14 @@ Regole di lettura non ovvie:
   deliberatamente esclusi.
 - L'utile e la perdita dichiarati sono **in valore assoluto** (`_largest_after`): il segno non
   si legge da qui.
+- **«Totale attivo» seguito dal nome di un sotto-totale non è il totale attivo** (2026-11-19,
+  budget_1753). Il marcatore agganciava anche «Totale attivo circolante (C)»: un'occorrenza seguita
+  entro 40 caratteri da «circolante», «corrent», «immobilizzat», «fiss», «finanziari», «consolidat»,
+  «a breve/medio/lungo» non conta (`_largest_after(..., sottototali=_sottototali_di_lato)`, per
+  attivo e passivo). Sui layout con gli importi prima dell'etichetta, il primo numero dopo «Totale
+  attivo circolante» era lo scostamento percentuale della riga seguente: i due totali stampati
+  risultavano di pochi euro, «coerenti» fra loro, e ogni lettura giusta veniva misurata contro di
+  loro.
 
 ### La riconciliazione al dichiarato non muove massa
 
@@ -646,6 +658,16 @@ precisione, poi due criteri puramente deterministici. Se restano valori distinti
 
 L'XBRL ha inoltre un blocco **atomico**: se non quadra, rollback e HTTP 422 — non arriva
 nemmeno al database.
+
+**Ragione sociale e partita IVA** (2026-11-19, `importers/nome_azienda.py`, usato dai due parser
+XBRL e da `pdf_importer` quando crea l'azienda). La ragione sociale si legge **per tag esatto**,
+`DatiAnagraficiDenominazione` e in mancanza `DatiAnagraficiRagioneSociale` (`TAG_DENOMINAZIONE`),
+mai cercando il primo tag il cui nome contiene «name». Quella ricerca prendeva
+«AccantoNAMEnti…» (un importo) o «…DirezioneCoordiNAMEnto», un paragrafo HTML della nota
+integrativa di quasi 600 caratteri, e lo salvava come nome dell'azienda. Il nome esce senza tag
+HTML né entità, con gli spazi compattati, al massimo `NOME_AZIENDA_MAX` = 255 caratteri; senza tag
+di denominazione non c'è nome, mai il testo di un altro tag. Il `tax_id` oltre `TAX_ID_MAX` = 20
+caratteri si **scarta**, non si tronca: un codice troncato sembrerebbe valido.
 
 ## 9. CSV
 
@@ -763,6 +785,20 @@ stampati. Decide quale dei due modi seguenti usare.
     stesso importo: la stessa voce letta due volte). Lo stesso percorso con importi diversi sono
     voci distinte che la legenda non separa, come le sotto-lettere di B.III.2, e si sommano:
     budget_597 ne perdeva 26.268 quando si teneva la prima coppia di ogni percorso.
+  - **Il padre cade per le sotto-voci solo se almeno una porta un importo** (`conti.da_coppie`,
+    2026-11-19, budget_1720). Una voce padre letta insieme alle sue sotto-voci si scarta per non
+    contarla due volte; con le sotto-voci tutte a zero («di cui» vuoti, scadenze a zero) non c'è
+    nulla da contare due volte, e scartarla faceva sparire la voce senza alcuna diagnostica
+    («D) Debiti» a zero).
+  - **«A) Valore della produzione» senza dettaglio va in `ce01`** (`conti.da_coppie`, decisione del
+    proprietario 2026-11-19, budget_1772/1774: «ce01, ricavi delle vendite se non è dettagliato»).
+    Uno schema che stampa solo il totale di A), senza A.1-A.5, non aveva una voce di legge: la
+    lettura finiva in `non_mappati` e il CE restava coi soli costi. Ora il totale va per intero nei
+    ricavi delle vendite, si dichiara in `diag["valore_produzione_non_dettagliato"]` e nell'avviso
+    «VALORE DELLA PRODUZIONE NON DETTAGLIATO», e l'utente lo ripartisce in Rettifiche se comprende
+    variazioni delle rimanenze, incrementi o altri ricavi. È massa letta assegnata a un campo, cioè
+    un fallback dichiarato, non un plug. Con le sotto-voci lette vale la regola sopra: il padre cade
+    e contano le sotto-voci.
 - **F2-C** (elenco di conti: bilancio di verifica, situazione contabile, contrapposte, piano dei
   conti) — la struttura fisica delle righe viene da `collect_source_rows` (rotazione, righe
   fisiche, contrapposte, colonne SAP); `righe.py` (`marca_totali`, `foglie`) esclude i totali

@@ -581,9 +581,14 @@ def puntatori_morti(files, root=".", indice=None):
 
 
 RADICI_DOC = ["docs", "CLAUDE.md", ".claude/agents", ".claude/skills"]
-RADICE_MEMORIA = str(
-    Path.home() / ".claude" / "projects" / "-home-peter-DEV-budget" / "memory"
-)
+def _radice_memoria(repo: Path) -> str:
+    """La memoria di Claude Code per questo repo: ~/.claude/projects/<percorso del repo con ogni carattere non
+    alfanumerico al posto di un trattino>/memory. Derivata dal percorso e non scritta a mano: fino al 2026-11-20
+    puntava al PC precedente (-home-peter-DEV-budget), e su questo la memoria restava fuori da ogni giro."""
+    return str(Path.home() / ".claude" / "projects" / re.sub(r"[^A-Za-z0-9]", "-", str(repo)) / "memory")
+
+
+RADICE_MEMORIA = _radice_memoria(Path(__file__).resolve().parents[1])
 STATO_DEFAULT = "docs/superpowers/allineamento/STATO.json"
 
 

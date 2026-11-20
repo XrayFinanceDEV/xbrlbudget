@@ -756,6 +756,13 @@ esistente**, storico compreso, non solo su quelli generati dopo il lotto.
   bug imprevisto su qualunque rotta arriva al browser come «CORS policy», mai come l'errore reale: chi guarda la
   console per diagnosticare vede la causa sbagliata (misurato nel collaudo del lotto 2, prima di questa correzione).
   `tests/test_cors_on_500.py` lo tiene fermo.
+- **Lo schema di risposta di una lista non applica i vincoli dell'input.** SQLite non controlla `String(255)` né
+  `String(20)`, lo schema Pydantic di risposta sì: una riga sola fuori schema fa rispondere 500 all'**intera** lista.
+  Il 2026-11-19, in produzione, un nome d'azienda di quasi 600 caratteri (un paragrafo HTML preso dall'XBRL) faceva
+  fallire `GET /companies`: l'utente non vedeva più nessuna azienda, le ricreava e riceveva 400 per partita IVA già
+  usata. Per questo `CompanyInDB` (`backend/app/schemas/company.py`) non eredita da `CompanyBase`: i limiti restano
+  su `CompanyCreate`/`CompanyUpdate`, e la riga anomala resta visibile per essere rinominata. A monte la pulisce
+  `importers/nome_azienda.py` (REGOLE-IMPORT-02 §8). `tests/test_nome_azienda.py` lo tiene fermo.
 - **CE Prev., SP Prev. e Report non restano mai su uno spinner senza uscita quando la lista scenari o
   `/analysis` fallisce, e non nascondono mai dati già caricati.** Le tre pagine fanno due richieste in
   sequenza — prima `useScenarios`, poi `useAnalysis` (abilitata solo dopo che uno scenario è stato
@@ -1327,7 +1334,7 @@ Business plan e il selettore «Modello» ricompare da sé con un secondo modello
 (`narrative_missing`) sono solo informazione e non tengono più il report in bozza; →
 [docs/budget/BUSINESS-PLAN-PDF.md](docs/budget/BUSINESS-PLAN-PDF.md)) · `/import`
 (works, but unlinked from the nav — the pratica Import step is the normal way in) · `/guida` (la
-guida illustrata, bottone «Guida» nell'intestazione: rende `docs/GUIDA-ILLUSTRATA.md` letto al build,
+guida illustrata, bottone «Guida» nell'intestazione, che porta con sé la pagina di partenza (`?da=`) per la barra «Torna a …» della guida: rende `docs/GUIDA-ILLUSTRATA.md` letto al build,
 e `frontend/scripts/copia-guida.mjs` — predev/prebuild — copia `docs/images/guida/` in `public/guida/`, che è
 gitignorata. Si aggiorna la guida in `docs/`, mai in `public/`).
 

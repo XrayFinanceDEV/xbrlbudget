@@ -16,10 +16,10 @@ Rispetto ai controlli di proprietà e di limite (`validate_company_owned_by_user
 
 | route | ordine | `except HTTPException` |
 |---|---|---|
-| `/import/xbrl` | `save_upload` **poi** i controlli | ri-solleva, **senza** `mark_error` (`:211`) |
-| `/import/pdf` | `save_upload` **poi** i controlli | ri-solleva, **senza** `mark_error` (`imports.py`, route `pdf`) |
-| `/import/csv` | i controlli **poi** `save_upload` | ri-solleva, senza `mark_error` (`:326`) |
-| `/import/pdf-ocr` | i controlli **poi** `save_upload` | marca `error` e ri-solleva (`:671-673`) |
+| `/import/xbrl` | `save_upload` **poi** i controlli | ri-solleva, **senza** `mark_error` (`upload_xbrl`) |
+| `/import/pdf` | `save_upload` **poi** i controlli | ri-solleva, **senza** `mark_error` (`upload_pdf`) |
+| `/import/csv` | i controlli **poi** `save_upload` | ri-solleva, senza `mark_error` (`upload_csv`) |
+| `/import/pdf-ocr` | i controlli **poi** `save_upload` | marca `error` e ri-solleva (`upload_pdf_ocr`) |
 
 Su `xbrl` e `pdf` una richiesta respinta per proprietà o per limite aziende lascia quindi **il
 file su disco e una riga `pending` per sempre**: uno stato `pending` vecchio non significa

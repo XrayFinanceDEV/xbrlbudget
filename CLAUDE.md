@@ -249,7 +249,7 @@ ciò che non si può non sapere. Ogni voce dice la regola e **cosa si rompe** a 
   sbilanciata che diventa il generico «Balance sheet does not balance». È l'ultima risorsa **solo**
   quando il deterministico esce davvero vuoto. Ricablarlo come fallback di route C è una tentazione
   ricorrente; l'estrattore giusto per le liste CoGe è il pass CoGe dedicato.
-- **Percorso snello (default dal 2026-10-16: `IMPORT_MOTORE` assente = snello, `classico` = importatore di prima; Anthropic vietato salvo `ANTHROPIC_CONSENTITO=1`, gx10 e MinerU ammessi)**: prima i lettori deterministici (PDF reso da XBRL
+- **L'importatore PDF** (default dal 2026-10-16, rifatto a novembre con le Fasi 0-5 del lettore universale; `IMPORT_MOTORE` assente = questo importatore, `classico` = l'importatore di prima; Anthropic vietato salvo `ANTHROPIC_CONSENTITO=1`, gx10 e MinerU ammessi). Il codice che orchestra i passi sta ancora in `importers/import_snello/` (`import_snello.importa`) e la diagnostica in `validation_report["import_snello"]`: nomi storici del primo «percorso snello», che non è più l'importatore. I passi: prima i lettori deterministici (PDF reso da XBRL
   depositato, schema di legge con o senza dettaglio conti, situazione contabile), **prima** della
   struttura: se uno quadra si adotta a zero chiamate di modello. Altrimenti il modello nomina il
   percorso di legge e, sugli schemi di legge, restituisce l'importo. Il codice chiude con un tappo
@@ -268,12 +268,12 @@ ciò che non si può non sapere. Ogni voce dice la regola e **cosa si rompe** a 
   squadrato di partenza»). Un riepilogo di poche macro-voci tipo export
   xlsx non è un bilancio e si rifiuta (`PDFImportError`). Su uno schema di legge uno squadrato è un
   difetto del lettore da correggere; resta ammesso per bilanci di verifica e sezioni contrapposte.
-  Fra i lettori deterministici e il modello c'è ora il **percorso del lettore** (le foglie del lettore di righe, classe per id dal modello, mai un importo; si adotta solo attraverso lo stesso cancello `deterministico.esito`; interruttore `IMPORT_LETTORE=0`; sulle situazioni contabili prova **prima** di `situazione_contabile_parser`, che resta se il lettore non adotta: `IMPORT_LETTORE_PRIMA`, acceso dal 2026-11-11, `0` = parser prima; le regole del proprietario sulla natura dei conti stanno nelle istruzioni al modello, non in parole chiave (`importers/lettore/regole_proprietario.py`, `IMPORT_REGOLE_NEL_PROMPT`, acceso dal 2026-11-11); → `docs/import/REGOLE-IMPORT-02-ESTRAZIONE.md` §11, `REGOLE-IMPORT-04-QUADRATURE.md` §14). Il ripiego sull'importatore attuale resta solo per un'estrazione vuota, una struttura non
-  riconosciuta o un'eccezione imprevista, e col motore snello si può spegnere: `IMPORT_RIPIEGO_CLASSICO=0` (acceso per
-  default) fa uscire un documento che lo snello non adotta con un `PDFImportError` che ne dice il motivo, prima di salvare qualunque cosa;
+  Fra i lettori deterministici e il modello c'è il **percorso del lettore** (le foglie del lettore di righe, classe per id dal modello, mai un importo; si adotta solo attraverso lo stesso cancello `deterministico.esito`; interruttore `IMPORT_LETTORE=0`; sulle situazioni contabili prova **prima** di `situazione_contabile_parser`, che resta se il lettore non adotta: `IMPORT_LETTORE_PRIMA`, acceso dal 2026-11-11, `0` = parser prima; le regole del proprietario sulla natura dei conti stanno nelle istruzioni al modello, non in parole chiave (`importers/lettore/regole_proprietario.py`, `IMPORT_REGOLE_NEL_PROMPT`, acceso dal 2026-11-11); → `docs/import/REGOLE-IMPORT-02-ESTRAZIONE.md` §11, `REGOLE-IMPORT-04-QUADRATURE.md` §14). Il ripiego sull'importatore classico resta solo per un'estrazione vuota, una struttura non
+  riconosciuta o un'eccezione imprevista, e si può spegnere: `IMPORT_RIPIEGO_CLASSICO=0` (acceso per
+  default) fa uscire un documento che l'importatore non adotta con un `PDFImportError` che ne dice il motivo, prima di salvare qualunque cosa;
   acceso o spento, il motivo si dichiara sempre in `validation_report["import_snello"]["ripiego_classico"]`
   (`usato`, `motivo`). Il divieto di plug e il contratto "riferimenti, non
-  importi" valgono per l'importatore attuale.
+  importi" valgono per l'importatore classico.
 
 ### Quadratura, diagnostica e verdetti
 - **Attivo = Passivo = 0 non è una quadratura.** Un'estrazione vuota ha sbilancio zero: senza il
@@ -756,6 +756,13 @@ esistente**, storico compreso, non solo su quelli generati dopo il lotto.
   bug imprevisto su qualunque rotta arriva al browser come «CORS policy», mai come l'errore reale: chi guarda la
   console per diagnosticare vede la causa sbagliata (misurato nel collaudo del lotto 2, prima di questa correzione).
   `tests/test_cors_on_500.py` lo tiene fermo.
+- **Lo schema di risposta di una lista non applica i vincoli dell'input.** SQLite non controlla `String(255)` né
+  `String(20)`, lo schema Pydantic di risposta sì: una riga sola fuori schema fa rispondere 500 all'**intera** lista.
+  Il 2026-11-19, in produzione, un nome d'azienda di quasi 600 caratteri (un paragrafo HTML preso dall'XBRL) faceva
+  fallire `GET /companies`: l'utente non vedeva più nessuna azienda, le ricreava e riceveva 400 per partita IVA già
+  usata. Per questo `CompanyInDB` (`backend/app/schemas/company.py`) non eredita da `CompanyBase`: i limiti restano
+  su `CompanyCreate`/`CompanyUpdate`, e la riga anomala resta visibile per essere rinominata. A monte la pulisce
+  `importers/nome_azienda.py` (REGOLE-IMPORT-02 §8). `tests/test_nome_azienda.py` lo tiene fermo.
 - **CE Prev., SP Prev. e Report non restano mai su uno spinner senza uscita quando la lista scenari o
   `/analysis` fallisce, e non nascondono mai dati già caricati.** Le tre pagine fanno due richieste in
   sequenza — prima `useScenarios`, poi `useAnalysis` (abilitata solo dopo che uno scenario è stato
@@ -1327,7 +1334,7 @@ Business plan e il selettore «Modello» ricompare da sé con un secondo modello
 (`narrative_missing`) sono solo informazione e non tengono più il report in bozza; →
 [docs/budget/BUSINESS-PLAN-PDF.md](docs/budget/BUSINESS-PLAN-PDF.md)) · `/import`
 (works, but unlinked from the nav — the pratica Import step is the normal way in) · `/guida` (la
-guida illustrata, bottone «Guida» nell'intestazione: rende `docs/GUIDA-ILLUSTRATA.md` letto al build,
+guida illustrata, bottone «Guida» nell'intestazione, che porta con sé la pagina di partenza (`?da=`) per la barra «Torna a …» della guida: rende `docs/GUIDA-ILLUSTRATA.md` letto al build,
 e `frontend/scripts/copia-guida.mjs` — predev/prebuild — copia `docs/images/guida/` in `public/guida/`, che è
 gitignorata. Si aggiorna la guida in `docs/`, mai in `public/`).
 

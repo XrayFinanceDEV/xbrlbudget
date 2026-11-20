@@ -203,7 +203,7 @@ When you see "Somma voci importate: €0,00", it means:
    - Changes label to "Totale applicato a..." instead of "Aggiunto a..."
    - Uses green color (success) instead of blue (adjustment)
 
-2. **Backend**: `/backend/importers/xbrl_parser_enhanced.py`
+2. **Backend**: `/importers/xbrl_parser_enhanced.py`
    - Keeps AGGREGATE_TAGS skip logic to avoid double-counting
    - Reconciliation adds full aggregate value when detailed tags missing
 

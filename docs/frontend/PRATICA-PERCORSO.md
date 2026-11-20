@@ -205,7 +205,14 @@ troverebbe mai nulla.
 **`components/PraticaStepper.tsx`** è reso da `components/Navigation.tsx` al posto della nav
 piatta ogni volta che `pratica !== null` e il percorso non è `/` — **mai le due barre insieme**;
 la home resta la pagina di uscita, e là comanda la nav normale. Su `/guida` non compare nessuna
-delle due: la guida è una lettura a sé, con il proprio indice laterale. Due righe:
+delle due: la guida è una lettura a sé, con il proprio indice laterale. Al loro posto
+`Navigation.tsx` rende `BarraGuida`, con «Torna a …» verso la pagina di partenza e «Aziende &
+Pratiche» (2026-11-19). Senza, dentro l'iframe, dove l'indietro del browser non c'è, l'utente
+restava chiuso nella guida. Il bottone «Guida» dell'intestazione porta con sé la pagina di partenza
+come `?da=` (`hrefVersoGuida`), letta in un `useEffect` perché `/guida` è statica. Il ritorno accetta
+solo percorsi interni (`ritornoDallaGuida`: niente `//`, `/\`, indirizzi esterni né `/guida`
+stessa, altrimenti `/`), e l'etichetta dice dove si torna (`etichettaRitornoGuida`, in
+`lib/guida.ts`). Lo stepper ha due righe:
 
 1. identità della pratica (azienda e periodo), i chip di fase (`PHASE_ORDER`, stato da
    `phaseStatus`, un `Tooltip` con `gateReason` quando la fase è bloccata) e «Esci dalla pratica»;

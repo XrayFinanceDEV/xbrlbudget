@@ -375,6 +375,21 @@ lato più grande letto non fa da base (un totale letto male), e allora la base �
 50% solleva `PDFImportError` «Lettura non riuscita: …», e la pagina Import ne mostra il suggerimento
 (`importers/rifiuti_import.py`). Sotto il 50% vale quanto sopra.
 
+**Che cosa riceve l'utente quando un PDF si rifiuta** (2026-11-19, richiesta del proprietario:
+l'utente deve accorgersi del rifiuto e caricare il PDF giusto). `/import/pdf` e `/import/pdf-ocr`
+rispondono 422 con `error` (il motivo), `error_type`, e in più `categoria` e `suggerimento`
+(`_dettaglio_rifiuto` in `backend/app/api/v1/imports.py`). Categoria e suggerimento li ricava dal
+messaggio, in un punto solo, `suggerimento_rifiuto` (`importers/rifiuti_import.py`): la prima
+espressione che si riconosce vince, nell'ordine `xbrl`, `solo_conto_economico`,
+`contabilita_semplificata`, `riepilogo`, `scansione`, `lettura_incompleta`, `lettura_non_riuscita`,
+`non_bilancio`. Un messaggio che non si riconosce dà le due chiavi a `null`. `details` resta per i
+client che lo leggono già: vale il suggerimento, o «Il file non è stato importato.». Il passo
+Import della pratica (`app/pratica/page.tsx`, che legge il corpo con `rifiutoDaErrore` di
+`frontend/lib/import-rifiuto.ts`) lascia un riquadro «Il file non è stato importato» con «Che cosa
+caricare» finché non si sceglie un altro file o non si rilancia l'import. Prima il motivo passava
+in un toast di pochi secondi e non diceva mai che cosa caricare. La pagina autonoma `/import` non
+ha il riquadro.
+
 **Dove si legge.** Nel `validation_report["import_snello"]` del foglio: `misura` porta lo scarto
 SP/CE misurato prima del tappo (per esercizio: `corrente` e, in modo `"legge"`, `precedente`),
 `tappo` il campo/importo scelto (`None` su `"squadrato"`). Gli esiti realmente emessi sono

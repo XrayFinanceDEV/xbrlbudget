@@ -8,7 +8,11 @@ router **non legge importi**: guarda solo la forma del documento.
 
 ## 1. Cosa produce
 
-`classify_bilancio` restituisce sette informazioni (`bilancio_classifier.py:44-52`):
+`classify_bilancio` restituisce sette informazioni (`Classification`):
+
+> I rimandi al codice di questa pagina sono per **simbolo**, non per numero di riga: ogni commit sul
+> classificatore spostava i numeri, e il 2026-11-20 ne restavano giusti uno su diciassette. I rami di
+> `classify_bilancio` si trovano dai loro commenti (`# ----- C: …`, `# ----- A: …`).
 
 | Campo | Valori | Uso |
 |---|---|---|
@@ -20,17 +24,17 @@ router **non legge importi**: guarda solo la forma del documento.
 | `signals` | tutti i segnali calcolati | diagnostica |
 | `reason` | frase in italiano | mostrata all'utente quando il file è rifiutato |
 
-La finestra di lettura è di **14 pagine** (`:179-182`). Un documento la cui natura si rivela
+La finestra di lettura è di **14 pagine** (`doc[:14]` in `classify_bilancio`). Un documento la cui natura si rivela
 solo a pagina 15 non è classificabile correttamente: è un limite noto e accettato.
 
 A valle, `pdf_importer` non conserva la route come tale: ne deriva il solo booleano
-`is_trial_balance = (route == TRIAL_BALANCE)` (`pdf_importer.py:742`). `macro_area` e
+`is_trial_balance = (route == TRIAL_BALANCE)` (`import_pdf_balance_sheet` in `pdf_importer.py`). `macro_area` e
 `subcategory` viaggiano però fino all'esito dell'import e ai log, ed è deliberato: un formato
 mai visto si presenta come **un'area con una sottocategoria**, non come un'eccezione.
 
 ## 2. Come viene letto il testo
 
-Prima di ogni valutazione il testo è ridotto a due viste (`:57-66`):
+Prima di ogni valutazione il testo è ridotto a due viste (`low` e `nos`, in testa a `compute_signals`):
 
 - **minuscola** — la vista normale;
 - **minuscola e senza alcuno spazio** — la vista compattata.
@@ -44,7 +48,7 @@ accento (`passivita`, `disponibilita liquide`), e **il testo viene deaccentato**
 costruire le due viste: decomposizione NFKD e rimozione dei segni combinanti, la stessa regola
 del normalizzatore unico `importers/label_semantics.py`. Anche il marcatore cercato passa dalla
 stessa riduzione, quindi una grafia accentata trova quella senza accento e viceversa
-(`bilancio_classifier.py:57-79`).
+(`compute_signals` e la sua funzione interna `has`).
 
 Prima di questa correzione il difetto era vivo e non latente: su un documento che stampava
 "Passività" nessun marcatore patrimoniale scattava, `sp_present` restava falso e il file veniva
@@ -55,11 +59,19 @@ Test: `tests/test_classifier_accenti.py`.
 
 Le regole si valutano **in sequenza e la prima che scatta vince**. L'ordine *è* la gerarchia.
 
-### Regola 0 — estensione (`:170-174`)
+### Regola 0 — estensione (commento `# 0) file XBRL nativo`)
 File `.xbrl` o `.xml` → `XBRL_NATIVE`. Precede tutto: il testo non viene nemmeno estratto.
 
-### Regola 1 — solo Conto Economico (`:210-215`)
+### Regola 1 — solo Conto Economico (`# ----- Caso speciale: SOLO conto economico`)
 Se il documento ha un CE ma **nessun** marcatore patrimoniale → `UNSUPPORTED`, area `C`.
+
+**Una voce di CE non è un marcatore patrimoniale** (2026-11-19, budget_1667). Alcune voci dell'art.
+2425 contengono una parola patrimoniale: B.10 «svalutazioni delle immobilizzazioni», A.4
+«incrementi … iscritti nelle immobilizzazioni», D «rettifiche di valore di attività e passività
+finanziarie». Prima di cercare i marcatori di `sp_present` si tolgono dal testo
+(`_VOCI_CE_CON_PAROLE_PATRIMONIALI`). Senza, un CE riclassificato da solo accendeva `sp_present`,
+finiva sulla rotta IV-CEE e veniva rifiutato dopo una decina di minuti di letture del modello
+(«Stato Patrimoniale vuoto»), invece che subito come «solo conto economico».
 
 Questa regola sta prima di tutto il resto per una ragione precisa: un prospetto solo economico
 può stampare un "TOTALE A PAREGGIO" che è il pareggio **del conto economico** (cioè il totale
@@ -70,14 +82,14 @@ rifiuto onesto.
 È l'unico punto in cui `macro_area` e `route` divergono dalla mappatura dichiarata: il
 documento *è* un prospetto contabile (area C), ma non è importabile.
 
-### Regola 2 — facsimile di deposito XBRL (`:220-222`)
+### Regola 2 — facsimile di deposito XBRL (`# ----- Facsimile XBRL itcc senza elenco conti`)
 Marcatore `itcc` presente, meno di 5 codici conto, nessun "pareggio" né "bilancio di verifica"
 → **A1 / IVCEE**.
 
 Sta prima del blocco B perché un facsimile di deposito può citare "bilancio riclassificato"
-nella Nota Integrativa pur non avendo alcun elenco conti (`:217-219`).
+nella Nota Integrativa pur non avendo alcun elenco conti (commento sullo stesso ramo).
 
-### Blocco B — solo se non c'è "totale a pareggio" (`:226`)
+### Blocco B — solo se non c'è "totale a pareggio" (`# ----- B prima di C`)
 Tutte richiedono `legal_skeleton` (vedi §4). Ordine interno:
 
 | Priorità | Condizione aggiuntiva | Esito |
@@ -91,18 +103,27 @@ Tutte richiedono `legal_skeleton` (vedi §4). Ordine interno:
 `verifica` né da `contrapposte`. Un file con "bilancio di verifica" + scheletro di legge +
 marcatore AGO finisce in **B3**, non in C.
 
-### Regole 4/5 — area C (`:241`)
-Si entra in area C se c'è almeno uno fra: `pareggio`, `verifica`, `is_sc`, `contrapposte`.
+### Regole 4/5 — area C (`# ----- C: bilancio di verifica / situazione contabile`)
+Si entra in area C se c'è almeno uno fra: `pareggio`, `verifica`, `is_sc`, `contrapposte`,
+`verifica_per_conti`.
 
-**Deroga "B batte C"** (`:245-248`): se c'è lo scheletro di legge **e** almeno 2 subtotali di
-voce, **e** l'unico marcatore C è `is_sc` (cioè niente pareggio, niente verifica, niente
-contrapposte) → il file torna in **B / IVCEE**. Serve a proteggere i bilanci IV-CEE che
-contengono sottoconti dentro lo schema di legge (budget_313/314) dal finire in un parser
-trial-balance che non troverebbe nulla.
+**`verifica_per_conti`** (2026-11-19, budget_1776, 1562): colonne dare/avere (`dare_avere`),
+almeno 30 codici conto (`_MIN_CONTI_VERIFICA`), meno di 5 codici-PATH CEE, né «riclassificata» né
+«dettaglio». È l'elenco di conti che il rilevatore dei layout (`is_sc`) non riconosce: codici
+puntati alfanumerici («10.05.3K»), conti a 8 cifre col partitario sotto. Prima finiva fra gli
+schemi di legge, letto dal modello come uno schema (budget_1776 importato con milioni di
+sbilancio), o fra i non riconosciuti e rifiutato (budget_1562). Sui 327 PDF del corpus di allora
+il segnale cambiava la rotta di tre documenti.
+
+**Deroga "B batte C"**: se c'è lo scheletro di legge **e** almeno 2 subtotali di voce, **e**
+mancano i tre marcatori C forti (niente pareggio, niente verifica, niente contrapposte: entra cioè
+per `is_sc` o per `verifica_per_conti`) → il file torna in **B / IVCEE**. Serve a proteggere i
+bilanci IV-CEE che contengono sottoconti dentro lo schema di legge (budget_313/314) dal finire in
+un parser trial-balance che non troverebbe nulla.
 
 Altrimenti → **C / TRIAL_BALANCE**.
 
-### Regola 6 — area A (`:254-271`)
+### Regola 6 — area A (`# ----- A: scheletro di legge senza conti CoGe`)
 Si entra se: scheletro di legge, **oppure** marcatore `itcc`, **oppure** ("stato patrimoniale"
 e "totale attivo"). Sottocategoria per prima corrispondenza: `itcc` → A1; "abbreviat"/"2435-bis"
 → A2/abbreviato; "micro"/"2435-ter" → A2/micro; "riclassificat" → A3; altrimenti A/sintetico.
@@ -110,13 +131,20 @@ e "totale attivo"). Sottocategoria per prima corrispondenza: `itcc` → A1; "abb
 **Nota**: qui `abbreviat`/`micro` sono cercati nella sola vista **con** spazi. Un'intestazione
 lettera-spaziata non corrisponde e il file ricade su "A/sintetico IV CEE".
 
-### Regola 7 — fallback (`:274-275`)
+### Regola 6-bis — contabilità semplificata (`# ----- Contabilità semplificata`)
+«utile fiscale» e «riepilogo dei ricavi» (o «dei costi»), senza «patrimonio netto» → `OTHER` /
+`UNSUPPORTED`, sottocategoria `contabilità semplificata` (2026-11-19, budget_1710). È il
+riepilogo fiscale di una semplificata: ricavi, costi e qualche cespite, senza cassa, crediti, debiti
+né patrimonio netto. Il rifiuto c'era già, nel fallback; cambia il motivo, che prima diceva «né
+elenco conti» (falso: l'elenco c'è) e ora dice che manca lo stato patrimoniale completo.
+
+### Regola 7 — fallback (`# ----- fallback`)
 `OTHER` / `UNSUPPORTED`.
 
 ## 4. I segnali che contano davvero
 
 `legal_skeleton` è il perno: è semplicemente **"valore della produzione" E "immobilizzazioni"**
-entrambi presenti (`:88`). È precondizione di tutto il blocco B e porta d'ingresso all'area A.
+entrambi presenti (`s["legal_skeleton"]` in `compute_signals`). È precondizione di tutto il blocco B e porta d'ingresso all'area A.
 
 | Segnale | Cosa cerca | Perché conta |
 |---|---|---|
@@ -126,6 +154,7 @@ entrambi presenti (`:88`). È precondizione di tutto il blocco B e porta d'ingre
 | `cee_path` | codici tipo `B.II.1.a)` | ≥5 → B1 |
 | `contrapposte` | analisi **geometrica del file** | vedi §6 |
 | `is_sc` | firma di situazione contabile | porta d'ingresso a C, ma da sola cede alla deroga B |
+| `verifica_per_conti` | dare/avere + ≥ 30 codici conto, niente struttura di legge | porta d'ingresso a C, cede alla deroga B come `is_sc` |
 
 ### Densità di codici
 Sei famiglie di codici conto sono contate separatamente, e la loro somma (`coge_codes`) misura
@@ -145,18 +174,21 @@ Sei famiglie di codici conto sono contate separatamente, e la loro somma (`coge_
 struttura di legge, non un piano dei conti, e contarli come tali manderebbe in C i bilanci
 dettagliati di area B.
 
-### Segnali inerti
-`sit_contabile` e `dare_avere` sono calcolati ed esposti, ma **nessuna regola li legge**.
-`dare_avere` in particolare è strutturalmente inutilizzabile: cerca "dare" come sottostringa,
-che compare in qualunque infinito italiano (an**dare**, ricor**dare**), quindi è quasi sempre
-vero. Vanno considerati diagnostica storica, non discriminanti.
+### Segnali inerti, e uno che non lo è più
+`sit_contabile` è calcolato ed esposto, ma **nessuna regola lo legge**: è diagnostica storica.
+
+`dare_avere` era inerte fino al 2026-11-19 e ora lo legge `verifica_per_conti`. Da solo resta un
+segnale debole: cerca "dare" come sottostringa, che compare in qualunque infinito italiano
+(an**dare**, ricor**dare**), quindi è quasi sempre vero. Per questo `verifica_per_conti` lo vuole
+insieme ad almeno 30 codici conto e senza struttura di legge: è la densità di codici a decidere,
+non la parola.
 
 ## 5. Scansione, testo corrotto, testo buono
 
 Sono tre stati distinti e vanno tenuti separati, perché il rimedio è diverso.
 
 **Scansione — il testo non c'è.** Meno di 50 caratteri sulle prime 14 pagine
-(`pdf_importer.py:334`). Per MinerU (passo 0) è scansione anche un PDF in cui **ogni pagina è
+(`is_scanned` in `import_pdf_balance_sheet`, `pdf_importer.py`). Per MinerU (passo 0) è scansione anche un PDF in cui **ogni pagina è
 un'immagine a pagina intera con sopra il testo di un OCR** (copertura ≥ 90%, al più due font:
 NAPS2, Unicarton 31/08/2026): quel testo esiste ma è sbagliato («18.978,72» per 18.378,72, «50 +
 874 # 40») e sul percorso di testo lasciava 240 mila di sbilancio; da MinerU lo stesso file esce
@@ -232,7 +264,7 @@ reale. In produzione il file è sempre passato, quindi il problema riguarda solo
 
 ## 7. Gestionali
 
-Riconosciuti per prima corrispondenza (`:142-157`): AGO Infinity → TeamSystem (per nome) →
+Riconosciuti per prima corrispondenza (`_gestionale`): AGO Infinity → TeamSystem (per nome) →
 Genya → Cerved → itcc → Sistemi/DEPI (per densità di codici) → TeamSystem (per densità) →
 sconosciuto.
 
@@ -265,6 +297,8 @@ affatto a colonna unica.
 | `coge_codes` per il facsimile itcc | < 5 |
 | `coge_codes` per B2 | ≥ 5 |
 | `cee_path` per B1 | ≥ 5 |
+| `coge_codes` per `verifica_per_conti` (`_MIN_CONTI_VERIFICA`) | ≥ 30 |
+| `cee_path` sotto il quale vale `verifica_per_conti` | < 5 |
 | Subtotali di voce per la deroga "B batte C" | ≥ 2 |
 | `depi` / `depi2` per gestionale | ≥ 10 / ≥ 8 |
 | `teamsystem` per gestionale e sottocategoria | ≥ 5 |

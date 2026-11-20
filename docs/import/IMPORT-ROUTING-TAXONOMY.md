@@ -1,12 +1,12 @@
 # Routing import bilanci per tipologia — analisi e tassonomia
 
 > ⚠️ **Conteggi e sintesi superati (verificato il 2026-07-16; conteggi del corpus aggiornati al
-> manifest del 2026-10-19).** Il corpus è ora a **252 file fisici / 159 contenuti unici**
+> manifest del 2026-11-18).** Il corpus è ora a **311 file fisici / 308 contenuti unici**
 > (`tests/corpus/manifest.json`, chiavi `summary.physical_files` / `summary.unique_contents`, pinate
 > da `tests/test_corpus_manifest.py`). Inoltre: la sintesi del blocco B (§4) attribuisce la soglia
-> `coge_codes>=5` a tutto il blocco mentre nel codice la richiede **solo B2**; i segnali
-> `sit_contabile` e `dare_avere` sono elencati fra i discriminanti ma sono **inerti** (calcolati
-> e mai letti); le sottocategorie A4/Cerved, A5/riepiloghi AI, B4, C1b e C5 sono dichiarate ma
+> `coge_codes>=5` a tutto il blocco mentre nel codice la richiede **solo B2**; il segnale
+> `sit_contabile` è elencato fra i discriminanti ma è **inerte** (calcolato e mai letto), mentre
+> `dare_avere` dal 2026-11-19 entra nella regola 5 attraverso `verifica_per_conti`; le sottocategorie A4/Cerved, A5/riepiloghi AI, B4, C1b e C5 sono dichiarate ma
 > **il router non le produce mai**. Per le regole di routing effettive vedi
 > [REGOLE-IMPORT-01-ROUTING.md](REGOLE-IMPORT-01-ROUTING.md). Questo documento resta valido come
 > **analisi del corpus e razionale del progetto**.
@@ -157,9 +157,12 @@ Tutti robusti agli header lettera-spaziati (variante senza spazi). I principali:
       dettaglio           → "B2 dettaglio sottoconti"
 4.  legal_skeleton AND totale_voce>=2 AND NOT pareggio
       AND NOT verifica AND NOT contrapposte               → ROUTE_IVCEE / B    (IV-CEE con sottoconti, conf=med)
-5.  pareggio OR verifica OR is_sc OR contrapposte        → ROUTE_TRIAL / C    (conf high se pareggio/verifica)
+5.  pareggio OR verifica OR is_sc OR contrapposte OR verifica_per_conti
+                                                          → ROUTE_TRIAL / C    (conf high se pareggio/verifica)
 6.  legal_skeleton OR itcc OR (stato_patrimoniale AND totale_attivo)
                                                           → ROUTE_IVCEE / A
+6b. utile fiscale AND riepilogo ricavi/costi AND NOT patrimonio netto
+                                                          → ROUTE_UNSUPPORTED / contabilità semplificata
 7.  fallback                                             → ROUTE_UNSUPPORTED / OTHER
 ```
 

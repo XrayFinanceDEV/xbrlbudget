@@ -137,7 +137,7 @@ svalutazione si netta con l'ammortamento **solo se tutte** queste condizioni val
 4. ha un riferimento **positivo** a un'immobilizzazione. Così un "fondo svalutazione" nudo non
    viene mai nettato per sbaglio.
 
-### Il fondo già nettato nella voce (percorso snello, modi di legge)
+### Il fondo già nettato nella voce (lettura del modello, modi di legge)
 
 Regola introdotta il 2026-10-27 (budget_1443, Profilati Brescia). Uno schema di legge con i
 conti sotto stampa sulla didascalia il **netto** (`C.II.1 Crediti verso clienti 312.535,86`) e
@@ -270,7 +270,7 @@ asset non deve restringere l'ancora.
 
 Quando è il **documento** a stampare un fondo più grande del costo storico (budget_1452: fondi
 degli immateriali 1.086,25 su un lordo di 1.000), il clamp resta giusto e l'eccedenza resta
-sbilancio dichiarato, mai spostata altrove. Il percorso snello la dichiara in
+sbilancio dichiarato, mai spostata altrove. L'importatore la dichiara in
 `diag["immobilizzazioni_negative_tagliate"]` e l'utente legge l'avviso «FONDO OLTRE IL COSTO
 STORICO», che nomina il campo e l'eccedenza (`pdf_importer._avvisi_fondi_snello`): prima vedeva
 solo un generico «bilancio sbilanciato di 86,25».
@@ -343,7 +343,7 @@ Dai suffissi `(EE)`/`(OE)` (convenzione AGO) oppure dalle parole ENTRO/OLTRE. **
 marcatore, tutto è a breve.** Il parser a colonna unica usa l'unica regola basata sul codice del
 file: i prefissi `430`/`440`/`442` marcano il lungo termine.
 
-Sul percorso snello, in modo di legge, il modello restituisce le scadenze come percorsi `.E`/`.O`
+Nella lettura del modello, in modo di legge, il modello restituisce le scadenze come percorsi `.E`/`.O`
 accanto alla voce (`conti.da_coppie`). Tre regole, ciascuna dichiarata nel `diag` anche vuota:
 
 - **La scadenza sostituisce la voce solo se la ricompone** (entro + oltre ≈ voce, 2 € di
@@ -424,7 +424,7 @@ nessun controllo lo vede.
 Il tag `ce02_open` indica le iniziali di prodotti lette fra i costi, che riducono `ce02`. La
 regola vale nei cinque montaggi del CE di `situazione_contabile_parser`: `build_iv_cee`,
 `_hier_reconstruct`, `_be_reclassify`, `build_ce_from_vision` e il lettore per segno
-`_vseg_classify_ce`, che ora legge anche i conti di terzo livello. Vale anche nel percorso snello:
+`_vseg_classify_ce`, che ora legge anche i conti di terzo livello. Vale anche nella lettura del modello:
 `conti._rimanenze_per_natura` sovrascrive la voce scelta dal modello quando il testo del conto è
 una rimanenza (diagnostica `rimanenze_per_natura`), mentre il segno resta quello del voto di
 colonna.
@@ -490,8 +490,8 @@ Inseguire le parole file per file è la strada che il proprietario ha scartato (
 - il lettore (`_be_reclassify`, `_hier_reconstruct`) mette l'aggregato in `ce08` e dichiara il
   mastro in `_ce_da_dettagliare` con le sue foglie: si scende in un conto solo quando i suoi figli
   sommano al suo importo al centesimo, altrimenti resta foglia intera;
-- `pdf_importer`, prima di `finalize_pdf_residuals`, passa le foglie a Qwen col prompt dei conti del
-  percorso snello (`lettura.percorsi_dei_conti`), e il percorso diventa campo con
+- `pdf_importer`, prima di `finalize_pdf_residuals`, passa le foglie a Qwen col prompt dei conti
+  dell'importatore (`lettura.percorsi_dei_conti`), e il percorso diventa campo con
   `percorsi.campo_da_percorso`. Il modello vede solo descrizioni, mai importi da scrivere;
 - una foglia si accetta solo se la voce è una sotto-voce dello **stesso** aggregato: «CE.B.7» o un
   «CE.B.9» senza lettera si respingono e restano non ripartiti. L'aggregato non si tocca mai;
@@ -660,8 +660,8 @@ Test: `tests/test_fallback_bucket.py`, `tests/test_classification_fallback.py`.
   riconcilia, senza dichiarati, IVA a un lato solo).
 - `tests/test_debiti_rollup.py` — la guardia auto-validante e la non-mutazione dell'input.
 - `tests/test_rimanenze_ce.py` — rimanenze per natura (§4-bis): Unicarton, il mastro dal nome
-  sbagliato, il capo opposto, `build_iv_cee`; e le sotto-voci di B.10 (§4-ter). Il percorso snello
-  è in `tests/test_snello_conti.py`, il ripiego di B.10 in `tests/test_residual_finalization.py`.
+  sbagliato, il capo opposto, `build_iv_cee`; e le sotto-voci di B.10 (§4-ter). La lettura del
+  modello (`conti.py`) è in `tests/test_snello_conti.py`, il ripiego di B.10 in `tests/test_residual_finalization.py`.
 - `tests/test_prod_route_c.py` — ground truth campo per campo. La premessa è esplicita:
   *la quadratura da sola non basta, budget_395 quadra con residuo zero e ha `sp02`/`sp03`
   entrambi sbagliati*.

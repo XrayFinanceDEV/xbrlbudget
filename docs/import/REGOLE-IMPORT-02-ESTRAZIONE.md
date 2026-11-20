@@ -443,7 +443,7 @@ una colonna (la copia ripassata da PDF24 di Unicarton perde i ricavi), l'import 
 `Utile CE != sp13`, non la inventa.
 
 **Sugli schemi di legge scansionati niente modello** (2026-10-26, con MinerU 4). Una scansione di
-schema di legge non è a sezioni contrapposte: il percorso snello si dichiara `non_applicabile` e in
+schema di legge non è a sezioni contrapposte: l'importatore si dichiara `non_applicabile` e in
 `_llm_extract` si provano, in ordine, il lettore col percorso nell'etichetta (`estrai_da_mineru` di
 `schema_etichette_parser`, sotto) e **il lettore dello schema di legge generico sulle stesse
 tabelle** (`schema_legge_generico.estrai_da_mineru`, `_schema_generico_mineru_extract`): le celle
@@ -473,7 +473,7 @@ prima (budget_283).
 
 **Il prospetto CEE sintetico a una colonna** si legge dalle celle come dal testo
 (`prospetto_sintetico.estrai_da_mineru`, `_prospetto_sintetico_mineru_extract` dopo lo schema
-generico): stesse verifiche dello snello (`deterministico._esito`), stesso avviso «PROSPETTO
+generico): stesse verifiche dell'importatore (`deterministico._esito`), stesso avviso «PROSPETTO
 SINTETICO» (`_approssimazioni_prospetto`), `extraction_method` `prospetto_sintetico` (budget_1405).
 
 **Le contrapposte AGO** (budget_330): il titolo sta in un'altra tabella e la sezione si riconosce
@@ -599,7 +599,7 @@ Dai bilanci caricati a ottobre 2026, tutti importati «squadrati» senza un moti
 - Una pagina senza sezione eredita quella della pagina prima **solo finché la sezione non ha
   chiuso** (totali di entrambi i lati, «Totali» due volte, pareggio o quadratura): dopo è un
   allegato («Dettaglio ratei, risconti e competenze», budget_210) e resta fuori.
-- Nel percorso snello un parser standard che non ha letto nulla (`esito: "vuoto"`, colonne
+- Nell'importatore un parser standard che non ha letto nulla (`esito: "vuoto"`, colonne
   comparative viste in un bilancio di verifica: STB) non chiude più la ricerca dei lettori
   deterministici: prova la situazione contabile. Uno standard che legge e non quadra la chiude
   come prima.
@@ -686,7 +686,14 @@ semantica IV-CEE, mai per posizione di colonna**.
 
 Altrimenti: "Schema CSV non riconosciuto".
 
-## 10. Percorso snello (default; `IMPORT_MOTORE=classico` per tornare a prima)
+## 10. L'importatore PDF (default; `IMPORT_MOTORE=classico` per tornare a prima)
+
+> **Nomi.** Fino a novembre questa sezione si chiamava «Percorso snello». L'importatore è stato poi rifatto con
+> le Fasi 0-5 del lettore universale (§11), e «snello» non indica più nulla. Restano però i nomi del codice:
+> il pacchetto `importers/import_snello/` (l'orchestratore è `import_snello.importa`), la chiave
+> `validation_report["import_snello"]`, le manopole `IMPORT_SNELLO_*`, `IMPORT_MOTORE=snello`, l'eccezione
+> `SnelloNonRiuscito`. Questa pagina li cita col loro nome; nel testo, «l'importatore» è questo motore,
+> «l'importatore classico» quello di prima, che resta il ripiego.
 
 > Motori: `importers/import_snello/` (`righe.py`, `percorsi.py`, `lettura.py`, `verifica.py`,
 > `legenda.txt`), `importers/struttura_documento/mappa.py`. Spec:
@@ -737,7 +744,7 @@ debiti»).
 Lo schema di legge adottato porta con sé anche la colonna comparativa (`_con_precedente`, #60),
 con le stesse regole di adozione dell'anno corrente ma **solo con esito `"ok"`**: un tappo
 sull'anno precedente non avrebbe dove essere dichiarato. `deterministico.prior_stato` nel report
-vale `"letto"`, `"scartato"` (con `prior_rifiuto`) o `"assente"`. Prima il percorso snello
+vale `"letto"`, `"scartato"` (con `prior_rifiuto`) o `"assente"`. Prima l'importatore
 lo scartava sempre, e solo il reso XBRL portava l'anno precedente.
 
 **Schema col percorso nell'etichetta** (`importers/schema_etichette_parser.py`, 2026-10-16): la
@@ -874,7 +881,7 @@ struttura non riuscita e per un'eccezione imprevista, **a meno che** un candidat
 scartato solo dal tappo abbia letto davvero (sopra, «La lettura più vicina»: si salva quella,
 `"squadrato"`, con `ripiego_evitato` nel report). Solo in questi casi l'orchestratore
 (`importers/import_snello/__init__.py`, `importa()`) solleva `SnelloNonRiuscito` e il chiamante
-**ripiega sull'importatore attuale**, intero e invariato, che decide da sé come oggi — compreso
+**ripiega sull'importatore classico**, intero e invariato, che decide da sé come oggi — compreso
 l'import squadrato e dichiarato descritto nelle sezioni precedenti di questa pagina.
 
 **Gli esiti nel report** (`validation_report["import_snello"]`, scritto da `pdf_importer.py`) sono
@@ -883,13 +890,13 @@ un livello sopra quelli di `tappa()`:
 | Esito | Quando | Chiavi proprie |
 |---|---|---|
 | *(chiave assente)* | `IMPORT_MOTORE=classico` (o un valore diverso da `snello`) | — |
-| `"non_applicabile"` | il documento è una scansione o viene da OCR (RapidOCR locale, o MinerU senza tabelle a sezioni contrapposte): il percorso snello **non si tenta nemmeno**, un testo OCR non è mai un text layer nativo. Con le tabelle MinerU a sezioni contrapposte invece lo snello legge il loro PDF sintetico (pagina 01 §5) | `motivo`: `"scansione"` \| `"ocr"` (mai `fase`/`errore`) |
+| `"non_applicabile"` | il documento è una scansione o viene da OCR (RapidOCR locale, o MinerU senza tabelle a sezioni contrapposte): l'importatore **non si tenta nemmeno**, un testo OCR non è mai un text layer nativo. Con le tabelle MinerU a sezioni contrapposte invece l'importatore legge il loro PDF sintetico (pagina 01 §5) | `motivo`: `"scansione"` \| `"ocr"` (mai `fase`/`errore`) |
 | `"ok"` / `"tappo"` | successo dell'orchestratore | `modo`, `struttura`, `misura`, `tappo`, `letture`, `diag`, `anomalie`, `secondi`, più `precedente` (`"incluso"` \| `"escluso_oltre_soglia"` \| `"non_letto_dalla_lettura_deterministica"`) quando in modo `"legge"` c'è un anno precedente |
 | `"squadrato"` | scarto oltre il limite del tappo dopo l'unica rilettura (modo `"legge"`), direttamente (modo `"conti"`), o lettura deterministica vicina salvata al posto di quella del modello o del ripiego (Task 28, nessuna rilettura): si adotta comunque, `tappo.corrente` resta `None` e `misura` dichiara lo scarto | stesse chiavi di `"ok"`/`"tappo"`, più `confronto_letture` o `ripiego_evitato` nel caso Task 28 |
 | `"ripiego"` | fallimento — dichiarato dall'orchestratore (solo su `"vuoto"`, o su una struttura non riuscita) o un'eccezione imprevista | `fase` (`"struttura"` \| `"lettura"` \| `"conti"` \| `"verifica"` \| `"eccezione"`), `errore` (il tipo di eccezione, o `"vuoto"` quando la causa è la verifica) |
 
 Un esito `"squadrato"` produce un `validation_status` diverso da `"verified"` (lo stesso
-`"unbalanced"` di uno sbilancio letto dall'importatore attuale) e blocca il previsionale con il
+`"unbalanced"` di uno sbilancio letto dall'importatore classico) e blocca il previsionale con il
 verdetto **esistente** di `check_quadratura` sul foglio persistito — nessun nuovo cancello (→
 [REGOLE-IMPORT-04-QUADRATURE.md §12](REGOLE-IMPORT-04-QUADRATURE.md)).
 
@@ -938,7 +945,7 @@ una riga con un solo importo, ben a sinistra della colonna degli importi, si sca
 più importi, o un importo allineato agli altri con la valuta davanti («Cassa Euro 239.126,40»),
 non si tocca.
 
-**F4 — Dettagli per il budget.** `enrich_pdf_details` gira dopo un successo snello, in entrambi i
+**F4 — Dettagli per il budget.** `enrich_pdf_details` gira dopo un'adozione dell'importatore, in entrambi i
 modi, **tranne** quando ha letto il PDF reso da XBRL (`fonte: "deterministico:xbrl_reso_parser"`):
 lì i dettagli vengono già dalle tabelle di scadenza della nota integrativa. Negli altri casi: in modo `"legge"` con le pagine di dettaglio della struttura
 (`struttura.pagine_dettagli()`) e l'LLM di dettaglio **attivo**; in modo `"conti"` **senza** LLM
@@ -966,7 +973,7 @@ Ognuna ha il suo test; le regressioni sono su 208 PDF diversi (`Test/` più il l
   la decodifica guidata vLLM ometteva sp11–sp18 e pydantic li riempiva a zero; un attivo letto
   col passivo tutto a zero è una **lettura mancante** e l'importatore classico la rifiuta
   (`pdf_importer._rifiuta_passivo_non_letto`) invece di salvarla «sbilanciata».
-- **Il report dello snello porta il messaggio dell'eccezione** (`messaggio`), non solo la classe.
+- **Il report dell'importatore porta il messaggio dell'eccezione** (`messaggio`), non solo la classe.
 - **Una parentesi è un segno solo se si chiude** (`import_snello.righe._dec`): «CLIENTI
   (5.367,37» era −5.367,37 (budget_1450).
 - **Il capitale sociale nella ragione sociale non è un saldo**
@@ -1079,7 +1086,7 @@ classifica in campi `sp`/`ce`, non netta, non tappa: ciò che non sa decidere lo
 - **Verificato solo con almeno due importi non nulli** (un'uguaglianza a un solo membro resta un'ipotesi, R14)
   **e con gli stessi membri su ogni colonna** che ha un gruppo suo (R18).
 
-**Le regole riusate e da dove.** Le regole riprese dall'importatore attuale citano la funzione da cui vengono
+**Le regole riusate e da dove.** Le regole riprese dall'importatore classico citano la funzione da cui vengono
 nella docstring del modulo (`geometria.py`, `colonne.py`, `lati.py`, `totali.py`, `celle.py`) o accanto alla
 regola stessa (`righe.py` e `profilo.py`, che ne raccolgono molte: `schema_legge_generico._bordi`,
 `standard_ivcee_parser._anchors_carry_amounts`, `import_snello/righe.py:marca_totali`,
@@ -1175,7 +1182,7 @@ Le regole aggiunte con la misura sul campione:
   verdetto del profilo (R10: confine fisico **e** tipo contrapposte o verifica); su `leggi_celle` è vero ogni volta
   che ci sono colonne L e R. Sulla lettura OCR `Profilo.coppie` e `Profilo.marcatori` sono sempre vuoti.
 - **I nomi privati degli altri moduli sono copiati in `importers/lettore/_ereditati.py`** (fatto nella Fase 2): il
-  lettore non importa più nulla di privato dall'importatore attuale, e la deriva delle copie la vedono
+  lettore non importa più nulla di privato dall'importatore classico, e la deriva delle copie la vedono
   `tests/lettore/test_ereditati.py`. Resta solo il pubblico `bilancio_classifier.classify_bilancio` (`profilo.py`).
 - **MinerU numera le pagine da 0 (`page_idx`), `leggi_celle` da 1.** Passare `page_idx` tal quale sposta ogni
   blocco di una pagina (e rompe la prima); `diagnosi._leggi` somma 1. `Blocco.pagina` e il «p. N» delle frasi
@@ -1248,9 +1255,9 @@ il lettore gira sul solo PDF.
    «riusare il sistema del vecchio importatore»): un fondo ammortamento o svalutazione nella colonna del passivo, perdite
    portate a nuovo o azioni proprie in quella dell'attivo. L'enum di una foglia SP offre le macro del suo lato **più le
    sole rettifiche di quel lato** (`tavola.rettifiche_ammesse`): dal passivo `sp02.F`, `sp03.F`, `sp04.F`, `sp06.F`
-   (fondo del bene, il percorso del bene + `.F` della legenda snello, `percorsi.e_fondo`), dall'attivo `sp12g.N`,
+   (fondo del bene, il percorso del bene + `.F` della legenda, `import_snello/legenda.txt`, `percorsi.e_fondo`), dall'attivo `sp12g.N`,
    `sp12h.N` (percorsi `SPP.A.VIII`/`SPP.A.X`, `percorsi.e_netto`). Il campo viene da `percorsi.campo_da_percorso`
-   come nel percorso snello (`sp06.F` → `sp06a`). Nessun altro conto attraversa il lato; un fondo rischi, il TFR, un
+   come nella lettura del modello sugli schemi di legge (`sp06.F` → `sp06a`). Nessun altro conto attraversa il lato; un fondo rischi, il TFR, un
    fondo imposte restano passività.
 3. **Classificazione in due passi** (`classifica.py`). Passo 1: foglia → macro-voce. Il modello risponde con JSON
    guidato in cui **ogni id ha il proprio enum**, ristretto alle macro ammesse da *quel* lato e verso, più «X»
@@ -1297,11 +1304,11 @@ il lettore gira sul solo PDF.
    [REGOLE-IMPORT-04 §14](REGOLE-IMPORT-04-QUADRATURE.md).
    **Una rettifica della colonna opposta si netta** sul bene o sul netto col segno opposto a quello con cui la sua
    colonna la conta (sul dettaglio se noto, altrimenti sull'aggregato: «senza dettaglio si netta all'aggregato»):
-   attivo e passivo scendono della stessa massa e il pareggio resta. Poi le regole del percorso snello, riusate
+   attivo e passivo scendono della stessa massa e il pareggio resta. Poi le regole della lettura del modello, riusate
    tali e quali da `conti.py` (copie in `_ereditati.py` con test di deriva): un dettaglio di `sp02`/`sp03`/`sp04`
    rimasto negativo passa all'aggregato (`netta_fondi_negativi`), un aggregato ancora negativo si azzera e
    l'eccedenza si dichiara (`clamp_immobilizzazioni_negative` → `diagnostica["immobilizzazioni_negative_tagliate"]`,
-   nelle anomalie del report come per lo snello) e resta sbilancio dichiarato, mai spostata. I totali stampati sono
+   nelle anomalie del report come per la lettura del modello) e resta sbilancio dichiarato, mai spostata. I totali stampati sono
    **lordi**: la massa rettificata si dichiara in `_netted_contra` (la chiave del percorso C) e si toglie dai totali
    attivo e passivo che il cancello confronta (`percorso._stampati`), come `net_contra_accounts` chiede al chiamante;
    una macro ancorata conta le rettifiche stampate sotto di lei, non quelle portate dall'altra colonna.
@@ -1478,16 +1485,17 @@ interruttori (2026-11-11).*
 
 *Misura sul campione (78 documenti × 3 giri, `tests/corpus/punteggio.py`, giro `fase3-4de18b6`, 2026-11-09, contro `fase3-502f078` del primo innesto): dei 9 documenti il cui PDF quadra ma l'import no alla Fase 2, **7 escono quadrati in tutti i giri** (contro 2); i due fuori sono attesi (massa non classificabile; foglie davvero non in pari, attivo e passivo affiancati). Documenti salvati sbilanciati 12 → 7, nessuno nuovo. 11 documenti adottati dal lettore, nessuno instabile nell'adozione. Macro-voci esatte 78,7% → 80,6%, dettagli KPI 76,4% → 80,3%, altri dettagli 75,5% → 78,7%. Costo per import adottato: mediana 6 chiamate al modello (max 9, tetto 40 mai toccato), 66 s di lettore (max 153 s).*
 
-*Misura della Fase 4 (78 documenti × 3 giri, giro `fase4-ad2b581`, 2026-11-09, contro `fase3-4de18b6`, percorso classico acceso come ripiego): il lettore adotta **14 documenti** (prima 11), nessuno instabile nell'adozione; i documenti salvati dal modo `legge` scendono da 6 a 4 (restano 161, 1426, 1445 e 1533, i quattro aperti: massa non classificabile, gerarchia senza totali, blocchi di CE, un'eco di 1,30 € che si chiuderebbe solo con un tappo). Documenti salvati sbilanciati 7 → 5, nessuno nuovo; i bersagli restano 7/9 quadrati in tutti i giri. Macro-voci esatte 80,6%, dettagli KPI 80,3% (invariati), altri dettagli 78,7% → 79,5%. I lettori deterministici cambiano numeri solo per A.4 che passa in `ce03a` (Task 5-bis) e su due documenti che ora coincidono con la verità. Il ripiego classico serve solo a tre documenti che nessun percorso snello legge (`non_applicabile`). Costo per import adottato: mediana 6 chiamate (max 9), 64 s di lettore (max 129 s). Due documenti adottati dal lettore perdono un campo: su uno, un conto di 4.178 € classificato dal modello passa da altri debiti a ratei passivi (il lettore è identico byte per byte prima e dopo: è la variabilità del modello); su un altro, 10,57 € di B.III.2.d-bis senza un percorso di legge vanno in `sp07g`.*
+*Misura della Fase 4 (78 documenti × 3 giri, giro `fase4-ad2b581`, 2026-11-09, contro `fase3-4de18b6`, percorso classico acceso come ripiego): il lettore adotta **14 documenti** (prima 11), nessuno instabile nell'adozione; i documenti salvati dal modo `legge` scendono da 6 a 4 (restano 161, 1426, 1445 e 1533, i quattro aperti: massa non classificabile, gerarchia senza totali, blocchi di CE, un'eco di 1,30 € che si chiuderebbe solo con un tappo). Documenti salvati sbilanciati 7 → 5, nessuno nuovo; i bersagli restano 7/9 quadrati in tutti i giri. Macro-voci esatte 80,6%, dettagli KPI 80,3% (invariati), altri dettagli 78,7% → 79,5%. I lettori deterministici cambiano numeri solo per A.4 che passa in `ce03a` (Task 5-bis) e su due documenti che ora coincidono con la verità. Il ripiego classico serve solo a tre documenti che l'importatore non tenta nemmeno (`non_applicabile`). Costo per import adottato: mediana 6 chiamate (max 9), 64 s di lettore (max 129 s). Due documenti adottati dal lettore perdono un campo: su uno, un conto di 4.178 € classificato dal modello passa da altri debiti a ratei passivi (il lettore è identico byte per byte prima e dopo: è la variabilità del modello); su un altro, 10,57 € di B.III.2.d-bis senza un percorso di legge vanno in `sp07g`.*
 
 ### Il ripiego sul percorso classico si può spegnere (Fase 4, 2026-11-09)
 
 `IMPORT_RIPIEGO_CLASSICO` è **acceso per default**; `0`/`false`/`no`/`off` lo spegne
-(`pdf_importer._ripiego_classico_acceso`). Quando lo snello non adotta un documento, o non è stato tentato, il motivo
+(`pdf_importer._ripiego_classico_acceso`). Quando l'importatore non adotta un documento, o non è stato tentato, il motivo
 si dichiara sempre in `validation_report["import_snello"]["ripiego_classico"]` (`usato`, `motivo`, da
 `_motivo_ripiego_classico`), acceso o spento. Spento, il documento non passa all'importatore classico: esce con un
 `PDFImportError` («percorso classico spento (IMPORT_RIPIEGO_CLASSICO=0) e il percorso snello non ha adottato il
-documento (motivo)») prima di salvare qualunque cosa. Conta solo col motore snello: con `IMPORT_MOTORE=classico`
+documento (motivo)», testo del messaggio nel codice) prima di salvare qualunque cosa. Conta solo con l'importatore di
+default: con `IMPORT_MOTORE=classico`
 non ha effetto. È l'interruttore dei giri di misura «a classico spento»: dice quali documenti si reggono solo sul
 classico.
 

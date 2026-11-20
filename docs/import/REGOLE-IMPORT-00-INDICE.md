@@ -24,8 +24,9 @@ Ogni pagina è autonoma. L'ordine sotto è quello in cui i fatti accadono a un f
 | 05 | [Bilancio infrannuale](REGOLE-IMPORT-05-INFRANNUALE.md) | Periodi parziali, annualizzazione, roll-forward, le tre modalità del circolante, i gate del previsionale |
 | 06 | [Persistenza e round-trip](REGOLE-IMPORT-06-PERSISTENZA.md) | Cosa finisce sul DB, stati di validazione, hash, versioni, provenienza, baseline di regressione |
 
-Il percorso snello (il default dal 16/10; `IMPORT_MOTORE=classico` torna a prima; vision e lettura
-su Qwen locale, Anthropic solo con consenso) è descritto in [REGOLE-IMPORT-02-ESTRAZIONE.md](REGOLE-IMPORT-02-ESTRAZIONE.md) §10
+L'importatore PDF (il default dal 16/10, rifatto a novembre con le Fasi 0-5 del lettore universale;
+`IMPORT_MOTORE=classico` torna all'importatore classico; vision e lettura su Qwen locale, Anthropic solo con
+consenso) è descritto in [REGOLE-IMPORT-02-ESTRAZIONE.md](REGOLE-IMPORT-02-ESTRAZIONE.md) §10
 (struttura, macroconti, verifica) e in [REGOLE-IMPORT-04-QUADRATURE.md](REGOLE-IMPORT-04-QUADRATURE.md)
 §12 (soglia relativa e tappo dichiarato).
 

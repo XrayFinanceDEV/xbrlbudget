@@ -188,7 +188,7 @@ mastro di costi manca alla lettura e l'utile del CE esce più alto. `_c8_risulta
 se chiude lo SP al centesimo **e** la differenza col CE è esattamente TOTALE COSTI stampato meno
 costi letti (ricavi letti = TOTALE RICAVI stampato). Il CE non si tocca: la massa mancante si
 dichiara (`_ce_massa_non_letta`), il bilancio resta sbilanciato CE/SP con un avviso che cita i
-due totali, e l'utente inserisce i costi in Rettifiche. Nel percorso snello quella lettura resta
+due totali, e l'utente inserisce i costi in Rettifiche. Nell'importatore quella lettura resta
 in gara col modello (Task 28) anche oltre la soglia. Sullo stesso formato la firma 8-digit
 (sottoconti `NNNNNN NNN`) vince su quella AGO a blocchi quando «BILANCIO DI VERIFICA» è testo.
 
@@ -197,7 +197,7 @@ proprietario 2026-10-06). `parse_entries_verifica_ie` legge il saldo finale di o
 D/A decide il lato dello SP) e si verifica sui quattro totali di sezione e sull'utile stampati:
 se una sezione non torna, la lettura è vuota. Quando il dare stampato (attività + costi) differisce
 dall'avere (passività + ricavi), di solito per un risultato dell'anno prima non destinato, il
-parser lo dichiara (`_verifica_dare`/`_verifica_avere`) e il percorso snello adotta la lettura
+parser lo dichiara (`_verifica_dare`/`_verifica_avere`) e l'importatore adotta la lettura
 **squadrata** (`causa: documento_sbilanciato`, tipo `verifica`) senza chiamare il modello, se il suo
 scarto Attivo/Passivo è esattamente quella differenza e il CE torna.
 
@@ -329,12 +329,13 @@ validazione è **ricalcolato**.
 
 Richiede `semantic_valid` **sulla proiezione**. Non è una soglia in euro (vedi indice §5 D5).
 
-## 12. Il percorso snello: tappo di 10 € dichiarato
+## 12. L'importatore: tappo di 10 € dichiarato
 
-> Motore: `importers/import_snello/verifica.py`. Solo sotto `IMPORT_MOTORE=snello` — vedi
+> Motore: `importers/import_snello/verifica.py` (nome storico, REGOLE-IMPORT-02 §10). Solo con l'importatore di
+> default (`IMPORT_MOTORE` assente o `snello`) — vedi
 > [REGOLE-IMPORT-02-ESTRAZIONE.md §10](REGOLE-IMPORT-02-ESTRAZIONE.md).
 
-Il percorso snello non usa le tolleranze fisse di questa pagina. Il tappo e il confronto con i
+L'importatore non usa le tolleranze fisse di questa pagina. Il tappo e il confronto con i
 totali stampati dal documento tollerano **al massimo 10 €** per controllo (`verifica.limite_tappo`,
 decisione del proprietario, 2026-10-03 — prima `max(100 €, 0,1% dell'attivo)`: su tre casi
 controllati il tappo grande copriva una riga non letta o un importo inesistente; manopola
@@ -402,8 +403,8 @@ in `diag["lato_irrisolti"]`, per un conto sul lato sbagliato senza contropartita
 omissione, sempre dichiarate.
 
 **Una rilettura mirata (solo in modo `"legge"`); il ripiego resta solo per `"vuoto"` e per gli
-insuccessi a monte.** Il ripiego è l'importatore attuale, intero e invariato: da lì in avanti
-valgono **tutte** le regole di questa pagina, comprese quelle che qui sopra il percorso snello
+insuccessi a monte.** Il ripiego è l'importatore classico, intero e invariato: da lì in avanti
+valgono **tutte** le regole di questa pagina, comprese quelle che qui sopra l'importatore
 supera (nessun plug, chiusura solo diagnostica). Si ripiega solo quando l'esito resta `"vuoto"`
 dopo la rilettura (un'estrazione vuota non ha nulla di sensato da salvare), quando la struttura
 del documento non si riconosce, o su un'eccezione imprevista — mai più su `"oltre_soglia"`, che
@@ -411,15 +412,15 @@ diventa `"squadrato"` (sopra). Anche in quei tre casi non si ripiega se un candi
 deterministico, scartato solo perché oltre i 10 €, aveva letto davvero: si salva quella lettura,
 `"squadrato"`, con `ripiego_evitato` nel report (Task 28). Il ripiego si dichiara con
 `validation_report["import_snello"]["esito"] = "ripiego"` (`fase`/`errore` accanto). Un documento
-scansionato o letto da OCR non tenta nemmeno il percorso snello: `"non_applicabile"`, con
+scansionato o letto da OCR non tenta nemmeno l'importatore: `"non_applicabile"`, con
 `motivo`, deciso prima di leggere una sola riga.
 
-**La chiusura al centesimo resta la regola dell'importatore attuale.** Il limite di 10 € e il
-tappo governano solo il **percorso snello** (F3, prima del punto di convergenza): non toccano
+**La chiusura al centesimo resta la regola dell'importatore classico.** Il limite di 10 € e il
+tappo governano solo l'**importatore** (F3, prima del punto di convergenza): non toccano
 `arithmetic_balanced` (§8, **€0,01 fisso**, indipendente da qualunque tolleranza di runtime) né
 il gate contabile duro di questa pagina (§2, `quadra`), che restano quelli di sempre e continuano
 a girare sul foglio consegnato — un tappo entro 10 € non è una licenza a saltare la quadratura
-al centesimo che l'importatore attuale misura dopo.
+al centesimo che l'importatore classico misura dopo.
 
 ## 13. Blocchi che non chiudono (Fase 2)
 
@@ -463,7 +464,7 @@ compreso), pagina del totale ed etichette dei figli (al massimo 12).
 Le frasi stanno fra gli avvisi dell'import, subito dopo il motivo di sbilancio (se c'è), **solo quando
 l'import stesso dichiara che qualcosa non torna**: SP sbilanciato oltre 2 € (`_TOL_QUADRATURA`, la tolleranza dei gate dell'import: sotto non c'è avviso e quindi nemmeno
 frasi; sezione SP), utile del CE
-diverso da `sp13` (sezione CE), esito snello `squadrato` o `tappo` (SP); se c'è un motivo di sbilancio ma
+diverso da `sp13` (sezione CE), esito dell'importatore `squadrato` o `tappo` (SP); se c'è un motivo di sbilancio ma
 nessuna di queste, entrambe le sezioni. Si mostrano soltanto i blocchi di quelle sezioni, la colonna corrente prima dell'anno precedente, e mai un blocco
 con scarto fino a 1,00 € (`TOLLERANZA_ARROTONDAMENTO`, decisione del proprietario: è arrotondamento; resta in
 `validation_report`). Una colonna corrente senza data stampata non viene scartata dal filtro per anno.
@@ -567,7 +568,7 @@ può decidere.
 **Chiusura fino a 1 € per controllo, dichiarata** (le chiusure possibili sono due, utile/CE e attivo/passivo: al più 2 € in totale). Decisione del proprietario: fino a 1 € è arrotondamento, si chiude da sé, senza
 avviso all'utente. Utile stampato contro utile del CE: lo scarto va su `ce04` (utile stampato più alto) o `ce06`;
 attivo contro passivo: su `sp16g` (manca passivo) o `sp06g` (manca attivo). Ogni chiusura è registrata
-(`diagnostica["chiusure"]`) e la loro somma è `_plug_residual`. Il tappo snello fino a 10 € di §12 resta com'è e
+(`diagnostica["chiusure"]`) e la loro somma è `_plug_residual`. Il tappo dell'importatore fino a 10 € di §12 resta com'è e
 non è questo. **Oltre 1 €** nulla si muove: lo scarto si misura, le ancore che non tornano restano in
 `blocchi` e il cancello comune (`deterministico.esito`) decide l'adozione.
 
@@ -581,4 +582,4 @@ importo che nessuno ha letto, e il foglio quadra lo stesso: è il guasto che que
 
 Misura sul campione (78 documenti × 3 giri, `tests/corpus/punteggio.py`, giro `fase3-4de18b6`, 2026-11-09, contro `fase3-502f078` del primo innesto): dei 9 documenti il cui PDF quadra ma l'import no alla Fase 2, **7 escono quadrati in tutti i giri** (contro 2); i due fuori sono attesi (massa non classificabile; foglie davvero non in pari, attivo e passivo affiancati). Documenti salvati sbilanciati 12 → 7, nessuno nuovo. 11 documenti adottati dal lettore, nessuno instabile nell'adozione. Macro-voci esatte 78,7% → 80,6%, dettagli KPI 76,4% → 80,3%, altri dettagli 75,5% → 78,7%. Costo per import adottato: mediana 6 chiamate al modello (max 9, tetto 40 mai toccato), 66 s di lettore (max 153 s).
 
-*Misura della Fase 4 (78 documenti × 3 giri, giro `fase4-ad2b581`, 2026-11-09, contro `fase3-4de18b6`, percorso classico acceso come ripiego): il lettore adotta **14 documenti** (prima 11), nessuno instabile nell'adozione; i documenti salvati dal modo `legge` scendono da 6 a 4 (restano 161, 1426, 1445 e 1533, i quattro aperti: massa non classificabile, gerarchia senza totali, blocchi di CE, un'eco di 1,30 € che si chiuderebbe solo con un tappo). Documenti salvati sbilanciati 7 → 5, nessuno nuovo; i bersagli restano 7/9 quadrati in tutti i giri. Macro-voci esatte 80,6%, dettagli KPI 80,3% (invariati), altri dettagli 78,7% → 79,5%. I lettori deterministici cambiano numeri solo per A.4 che passa in `ce03a` (Task 5-bis) e su due documenti che ora coincidono con la verità. Il ripiego classico serve solo a tre documenti che nessun percorso snello legge (`non_applicabile`). Costo per import adottato: mediana 6 chiamate (max 9), 64 s di lettore (max 129 s). Due documenti adottati dal lettore perdono un campo: su uno, un conto di 4.178 € classificato dal modello passa da altri debiti a ratei passivi (il lettore è identico byte per byte prima e dopo: è la variabilità del modello); su un altro, 10,57 € di B.III.2.d-bis senza un percorso di legge vanno in `sp07g`.*
+*Misura della Fase 4 (78 documenti × 3 giri, giro `fase4-ad2b581`, 2026-11-09, contro `fase3-4de18b6`, percorso classico acceso come ripiego): il lettore adotta **14 documenti** (prima 11), nessuno instabile nell'adozione; i documenti salvati dal modo `legge` scendono da 6 a 4 (restano 161, 1426, 1445 e 1533, i quattro aperti: massa non classificabile, gerarchia senza totali, blocchi di CE, un'eco di 1,30 € che si chiuderebbe solo con un tappo). Documenti salvati sbilanciati 7 → 5, nessuno nuovo; i bersagli restano 7/9 quadrati in tutti i giri. Macro-voci esatte 80,6%, dettagli KPI 80,3% (invariati), altri dettagli 78,7% → 79,5%. I lettori deterministici cambiano numeri solo per A.4 che passa in `ce03a` (Task 5-bis) e su due documenti che ora coincidono con la verità. Il ripiego classico serve solo a tre documenti che l'importatore non tenta nemmeno (`non_applicabile`). Costo per import adottato: mediana 6 chiamate (max 9), 64 s di lettore (max 129 s). Due documenti adottati dal lettore perdono un campo: su uno, un conto di 4.178 € classificato dal modello passa da altri debiti a ratei passivi (il lettore è identico byte per byte prima e dopo: è la variabilità del modello); su un altro, 10,57 € di B.III.2.d-bis senza un percorso di legge vanno in `sp07g`.*

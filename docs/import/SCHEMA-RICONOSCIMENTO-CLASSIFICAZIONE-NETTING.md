@@ -42,7 +42,7 @@ flowchart TD
     G2 -->|quadra| DB[(salvato)]
     DB --> SEM{semantic_valid?}
     SEM -->|sì| OK[verified + forecastable]
-    SEM -->|no| RW[review_required<br/>→ Rettifiche, max 20]
+    SEM -->|no| RW[review_required<br/>→ Rettifiche, max 30]
 ```
 
 Tre fasi distinte, spesso confuse fra loro:

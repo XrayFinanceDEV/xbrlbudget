@@ -50,11 +50,14 @@ lettura dello stato patrimoniale fino a 3 volte, quindi un gx10 bloccato può te
 impegnato un import di route C a lungo prima di ripiegare sul candidato deterministico
 (misurato dal vivo: una chiamata normale impiega 15-26 s).
 
-## Percorso snello per l'import PDF (default; `IMPORT_MOTORE=classico` lo spegne)
+## L'importatore PDF (default; `IMPORT_MOTORE=classico` torna a quello di prima)
 
-`IMPORT_MOTORE` — l'assenza della variabile (default) o `snello` usano il motore di import PDF
-snello (lettori a regole, poi struttura e lettura macroconti su gx10, verifica con tappo
-dichiarato); `classico` (o un altro valore) torna all'importatore di prima. **Anthropic è
+`IMPORT_MOTORE` — l'assenza della variabile (default) o `snello` usano l'importatore PDF (lettori a
+regole e lettore universale, poi struttura e lettura macroconti su gx10, verifica con tappo
+dichiarato); `classico` (o un altro valore) torna all'importatore classico. Il valore `snello`, il
+pacchetto `importers/import_snello/` e le manopole `IMPORT_SNELLO_*` portano il nome del primo
+«percorso snello», che non è più l'importatore (rifatto a novembre con le Fasi 0-5 del lettore
+universale): sono nomi storici, vedi la nota «Nomi» di REGOLE-IMPORT-02 §10. **Anthropic è
 vietato** salvo `ANTHROPIC_CONSENTITO=1`: un server che non configura gx10
 (`PDF_LLM_PROVIDER_*`/`GX10_*`) non ripiega più su Haiku, e gli import che servirebbero al modello
 falliscono con un messaggio che lo dice. Vedi
@@ -69,7 +72,7 @@ strumento forzato). **Vale solo con `ANTHROPIC_CONSENTITO=1`.** Senza consenso (
 pagine del documento non lasciano la rete locale.
 
 `GX10_CONCORRENZA` — richieste gx10 in parallelo per processo (un solo semaforo, condiviso da
-tutte le chiamate a gx10, non solo dal percorso snello). Default **6** (decisione del
+tutte le chiamate a gx10, non solo da quelle dell'importatore). Default **6** (decisione del
 proprietario, 2026-09-26; prima 4). gx10 ha 500k token di contesto condivisi: sotto questo numero
 di richieste il prefill non rallenta, purché ciascuna resti sotto `GX10_CONTESTO_MAX`.
 
@@ -77,13 +80,13 @@ di richieste il prefill non rallenta, purché ciascuna resti sotto `GX10_CONTEST
 gx10. Default **100000**. Una chiamata che lo supererebbe solleva `ContestoEccessivo` prima
 dell'invio, invece di partire e farsi troncare.
 
-`IMPORT_SNELLO_TAPPO_MAX` — limite, in euro, del tappo della verifica F3 del percorso snello:
+`IMPORT_SNELLO_TAPPO_MAX` — limite, in euro, del tappo della verifica F3 dell'importatore:
 lo scarto massimo che si chiude su un campo dichiarato, per controllo (SP, CE, confronto con i
 totali stampati), e la tolleranza contro i totali stampati dal documento. Oltre, si salva
 `"squadrato"` con avviso. Default **10** (decisione del proprietario, 2026-10-03).
 
-`IMPORT_SNELLO_SOGLIA_MIN` — soglia minima assoluta, in euro, della tolleranza relativa del
-percorso snello (`soglia()`). Non decide il tappo: serve al cancello sulla massa non
+`IMPORT_SNELLO_SOGLIA_MIN` — soglia minima assoluta, in euro, della tolleranza relativa
+dell'importatore (`soglia()`). Non decide il tappo: serve al cancello sulla massa non
 classificata, alla lettura di riserva e alla coerenza dei totali stampati letti (REGOLE-IMPORT-04
 §12). Default **100**.
 
@@ -91,20 +94,22 @@ classificata, alla lettura di riserva e alla coerenza dei totali stampati letti 
 tolleranza. Default **0.1** (0,1%). La soglia effettiva per esercizio è
 `max(IMPORT_SNELLO_SOGLIA_MIN, IMPORT_SNELLO_SOGLIA_PCT% × totale attivo)`.
 
-Nota operativa sul percorso snello: le sue chiamate gx10 (`importers/import_snello/lettura.py`)
+Nota operativa sull'importatore: le sue chiamate gx10 (`importers/import_snello/lettura.py`)
 usano un timeout di **120 s**, più stretto del timeout generico di 900 s del pass CoGe di route C
-descritto sopra — un gx10 impantanato sul percorso snello non deve tenere impegnato l'import per
+descritto sopra — un gx10 impantanato su queste letture non deve tenere impegnato l'import per
 minuti prima di ripiegare.
 
-### Accendere il percorso snello su un server (Jenkins)
+### Dare gx10 all'importatore su un server (Jenkins)
 
 Il `Jenkinsfile` è lo stesso per staging e produzione. Le variabili proprie di un server stanno in
 una credenziale *Secret file* **`budget-env-staging`** (*Manage Jenkins › Credentials › System ›
 Global*): righe `CHIAVE=valore`, che lo stage *Generate env* accoda a `.env.docker` (togliendo gli
 `\r` di un file salvato da Windows) e di cui il log della build stampa i soli **nomi**. Il Jenkins
-che non ha la credenziale scrive il `.env.docker` di sempre e importa con l'importatore attuale.
+che non ha la credenziale scrive il `.env.docker` di sempre: importa con l'importatore di default ma senza
+gx10, quindi i passi che servirebbero al modello si saltano e si dichiarano (Anthropic è vietato senza consenso).
 
-Per accendere il percorso snello, il file contiene:
+Per dare gx10 all'importatore, il file contiene (`IMPORT_MOTORE=snello` è già il default: la riga lo rende
+esplicito e si può omettere):
 
 ```ini
 IMPORT_MOTORE=snello
@@ -119,7 +124,7 @@ GX10_CONCORRENZA=3
 `GX10_BASE_URL` senza `/v1` (lo aggiunge il codice) e senza barra finale. La chiave sta solo in
 quel file, mai nel repo né nei log. `ANTHROPIC_API_KEY` non serve più per importare: senza
 `ANTHROPIC_CONSENTITO=1` il backend la toglie dall'ambiente (`backend/app/main.py`), la struttura e
-la vision che la usavano si saltano o girano su gx10, e lo snello non ripiega su Anthropic. Serve
+la vision che la usavano si saltano o girano su gx10, e l'importatore non ripiega su Anthropic. Serve
 solo se si vuole il consenso esplicito.
 
 - **Concorrenza.** Il semaforo di `GX10_CONCORRENZA` è **per processo**, e il backend gira con
@@ -128,7 +133,7 @@ solo se si vuole il consenso esplicito.
 - **Trasporto.** Una `GX10_BASE_URL` in `http://` su rete pubblica fa viaggiare in chiaro sia la
   chiave Bearer sia il testo dei bilanci: va servita in `https://` (o dentro una VPN), e la porta
   aperta su gx10 va ristretta all'IP del server.
-- **Timeout.** Un import snello somma struttura (fino a 120 s), letture gx10 (120 s ciascuna) e
+- **Timeout.** Un import somma struttura (fino a 120 s), letture gx10 (120 s ciascuna) e
   passata di dettaglio: il `proxy_read_timeout` del vhost nginx **dell'host** va portato allo
   stesso valore del container (1200 s, `nginx/default.conf`), o l'utente riceve un 504 mentre
   l'import prosegue.
@@ -188,7 +193,7 @@ except Exception as e:
 EOF
 ```
 
-Dopo aver acceso il percorso snello e rilanciato la build, una chiamata vera con la chiave che il
+Dopo aver aggiunto le righe di gx10 alla credenziale e rilanciato la build, una chiamata vera con la chiave che il
 container ha ricevuto da Jenkins:
 
 ```bash
@@ -201,8 +206,11 @@ EOF
 ```
 
 Atteso: una parola in pochi secondi. «gx10 non raggiungibile» = rete o porta; «gx10 ha risposto
-401» = chiave sbagliata nella credenziale `budget-gx10-api-key`; «GX10_API_KEY non impostata» = la
-build non è passata dal ramo snello (variabile globale `IMPORT_MOTORE` mancante).
+401» = chiave sbagliata nella riga `GX10_API_KEY` della credenziale `budget-env-staging`; «GX10_API_KEY non
+impostata» = la riga manca, o la credenziale non c'è (il log della build stampa i nomi delle righe accodate, oppure
+«Credenziale budget-env-staging assente»). Fino al 2026-10-05 la chiave stava in una credenziale propria,
+`budget-gx10-api-key`, accesa da una variabile globale `IMPORT_MOTORE` (`ca70385`); da `591efed` tutto passa
+da `budget-env-staging`.
 
 **4. Da un'altra rete — gx10 non è aperto a tutti.**
 

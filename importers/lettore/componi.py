@@ -107,6 +107,23 @@ def e_questo_risultato(f: Foglia, risultato: Decimal, soglia: Decimal) -> bool:
     return abs(abs(f.importo) - abs(risultato)) <= soglia
 
 
+def righe_di_questo_risultato(righe: list[Foglia], risultato: Decimal, soglia: Decimal) -> list[Foglia]:
+    """Le righe che sono il risultato di questo periodo. Quelle che ne hanno l'importo a meno dell'arrotondamento lo
+    sono tutte: e' la stessa cifra stampata due volte (l'aggregato «A.IX) Utile (perdita)» e il suo dettaglio
+    «A.IX.2) Perdita d'esercizio», o il risultato ripetuto in calce). Se nessuna e' esatta, lo e' una sola: la piu'
+    vicina entro la soglia, a parita' la prima. La soglia di adozione (una quota dell'attivo) e' larga, e due righe
+    diverse - l'utile dell'esercizio e gli utili portati a nuovo, che il modello puo' dire entrambe risultato - ci
+    stanno tutte e due: contarle entrambe come risultato perde l'altra e il passivo resta corto della sua massa. Le
+    righe escluse sono conti del patrimonio netto."""
+    def distanza(f: Foglia) -> Decimal:
+        return abs(abs(f.importo) - abs(risultato))
+    esatte = [f for f in righe if distanza(f) <= TOLLERANZA_ARROTONDAMENTO]
+    if esatte:
+        return esatte
+    vicina = min((f for f in righe if e_questo_risultato(f, risultato, soglia)), key=distanza, default=None)
+    return [] if vicina is None else [vicina]
+
+
 # Saldi negativi (proprietario, regole D2/D12/D15 del 2026-10-28): un saldo negativo fra le attivita' e' un debito -
 # verso banche se e' liquidita', tributario se e' un credito tributario, altrimenti fra gli altri debiti; un debito
 # negativo e' un credito (tributario o altro). Non e' il ribaltamento per descrizione (vietato): e' aritmetica, e attivo
@@ -388,9 +405,10 @@ def componi(foglie: list[Foglia], classi: dict[str, Classe], ancore: list[Ancora
     bs, ce, tagliate = _somma(importi)
     if "sp13" in importi and righe_risultato:
         s_ris = soglia_adozione(_totali(bs)[0])
+        del_periodo = righe_di_questo_risultato(righe_risultato, importi["sp13"], s_ris)
         for f in righe_risultato:
             segno = risultato_con_segno(f)
-            if segno is None or e_questo_risultato(f, importi["sp13"], s_ris):
+            if segno is None or any(f is r for r in del_periodo):
                 continue
             _aggiungi(importi, "sp12g", segno)
             scelte.append(f"risultato di un altro esercizio negli utili portati a nuovo (sp12g): {f.id}")

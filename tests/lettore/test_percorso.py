@@ -470,3 +470,14 @@ def test_legge_voce_che_nomina_il_dettaglio_lo_prende_dal_modello(tmp_path):
     assert finto.chiamate >= 1
     assert bs["sp06a_crediti_clienti_breve"] == D("500.00") and not bs.get("sp06g_crediti_altri_breve")
     assert bs["sp16g_altri_debiti_breve"] == D("650.00") and not bs.get("sp16a_debiti_banche_breve")
+
+
+def test_guardia_un_solo_risultato_del_periodo():
+    # due righe del risultato entro la soglia (1.000 su un attivo di un milione): la guardia, come la composizione,
+    # ne conta una sola come risultato del periodo (la piu' vicina) e l'altra nel netto. Qui la guardia non sbagliava
+    # neppure prima (il candidato zero manda tutte le righe nel netto e le foglie tornano in pari): il test tiene la
+    # stessa regola della composizione, non un difetto misurato. Cifre inventate.
+    foglie = [_sp("a", 1000000, "L", "A"), _sp("p", 989500, "R", "P"),
+              _sp("u", 5000, "R", "P", "Utile dell'esercizio"),
+              _sp("v", 5500, "R", "P", "Utile esercizio precedente")]
+    assert percorso._foglie_non_in_pari(foglie, [Ancora("utile", D(5000), "Utile", ())]) is None

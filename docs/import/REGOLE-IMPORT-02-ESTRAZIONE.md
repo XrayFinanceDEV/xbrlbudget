@@ -1302,6 +1302,12 @@ il lettore gira sul solo PDF.
    destinato e va in `sp12g` (utili/perdite portati a nuovo), dichiarato in `scelte`. *Se si ignora:* togliendo
    quella riga il passivo perde un conto vero del patrimonio netto e il foglio non quadra. Dettagli in
    [REGOLE-IMPORT-04 §14](REGOLE-IMPORT-04-QUADRATURE.md).
+   **Il risultato del periodo è uno** (`componi.righe_di_questo_risultato`, 2026-11-21): le righe che ne hanno
+   l'importo a meno di un euro lo sono tutte (la stessa cifra stampata due volte, come l'aggregato «A.IX) Utile
+   (perdita)» e il suo dettaglio «A.IX.2) Perdita d'esercizio»); se nessuna è esatta lo è la sola più vicina entro
+   la soglia, e le altre vanno in `sp12g`. *Se si ignora:* la soglia di adozione è una quota dell'attivo, e
+   l'utile dell'esercizio e gli utili portati a nuovo (che il modello può dire entrambi risultato) ci stanno tutti e
+   due: contarli entrambi come risultato perde gli utili portati a nuovo e il passivo resta corto della loro massa.
    **Una rettifica della colonna opposta si netta** sul bene o sul netto col segno opposto a quello con cui la sua
    colonna la conta (sul dettaglio se noto, altrimenti sull'aggregato: «senza dettaglio si netta all'aggregato»):
    attivo e passivo scendono della stessa massa e il pareggio resta. Poi le regole della lettura del modello, riusate

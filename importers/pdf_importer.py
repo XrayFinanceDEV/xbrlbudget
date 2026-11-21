@@ -99,10 +99,13 @@ def _rifiuta_lettura_non_riuscita(file_path: str, qd) -> None:
     """Uno sbilancio oltre la meta' del totale attivo stampato (o, senza un totale stampato credibile, del lato piu'
     grande letto) e' una lettura fallita: manca meta' del bilancio o piu', e Rettifiche non e' lo strumento per
     ricostruirlo (budget_1786: 105 milioni di sbilancio su un attivo di circa 9). Si rifiuta col motivo, invece di
-    salvare numeri senza senso. Uno sbilancio piu' piccolo resta importato con l'avviso, come sempre."""
-    att, pas = abs(Decimal(qd.totale_attivo or 0)), abs(Decimal(qd.totale_passivo or 0))
+    salvare numeri senza senso. Uno sbilancio piu' piccolo resta importato con l'avviso, come sempre.
+    Lo sbilancio si misura sui totali col loro segno: un passivo letto negativo (il meno stampato davanti alle
+    passivita' e preso per un saldo) e' una lettura sbagliata, e togliergli il segno ne nasconderebbe lo sbilancio
+    vero - un attivo di 100 e un passivo di -60 non quadrano di 40 ma di 160."""
+    att, pas = Decimal(qd.totale_attivo or 0), Decimal(qd.totale_passivo or 0)
     sbilancio = abs(att - pas)
-    letto = max(att, pas)
+    letto = max(abs(att), abs(pas))
     base = letto
     try:
         from importers.import_snello.verifica import totali_stampati

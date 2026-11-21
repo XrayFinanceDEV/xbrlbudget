@@ -23,8 +23,8 @@ from importers.lettore.celle import leggi_celle
 from importers.lettore.diagnosi import TOLLERANZA_ARROTONDAMENTO
 from importers.lettore.classifica import (classifica_dettagli, classifica_macro, imposte_anticipate_oltre, rivota,
                                           scadenza_dei_crediti, scadenza_dei_debiti)
-from importers.lettore.componi import (Composizione, componi, e_questo_risultato, e_risultato, importo_sp,
-                                       lato_sp, risultato_con_segno)
+from importers.lettore.componi import (Composizione, componi, e_risultato, importo_sp, lato_sp,
+                                       righe_di_questo_risultato, risultato_con_segno)
 from importers.lettore.foglie import ancore, colonne_utili, foglie_contabili, senza_colonna
 from importers.lettore.righe import Documento, leggi_pdf
 
@@ -100,8 +100,9 @@ def _foglie_non_in_pari(foglie, ancore=()) -> str | None:
     s = soglia(attivo)
     senza_sp13 = not ce and len(utili) == 1     # ne' CE ne' utile stampato: `componi` non ha sp13 e toglie le righe
     for u in utili:
+        del_periodo = righe_di_questo_risultato(righe_risultato, u, s)
         altri = _ZERO if senza_sp13 else sum(
-            (risultato_con_segno(f) for f in righe_risultato if not e_questo_risultato(f, u, s)), _ZERO)
+            (risultato_con_segno(f) for f in righe_risultato if not any(f is r for r in del_periodo)), _ZERO)
         if abs(attivo - (passivo + altri + u)) <= s:
             return None
     return "foglie_non_in_pari"

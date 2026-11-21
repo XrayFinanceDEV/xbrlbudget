@@ -374,7 +374,10 @@ finale di quadratura e quindi per ogni percorso, misura lo scarto Attivo/Passivo
 contro il totale attivo stampato (`verifica.totali_stampati`); un totale stampato sotto un quarto del
 lato più grande letto non fa da base (un totale letto male), e allora la base è quel lato. Oltre il
 50% solleva `PDFImportError` «Lettura non riuscita: …», e la pagina Import ne mostra il suggerimento
-(`importers/rifiuti_import.py`). Sotto il 50% vale quanto sopra.
+(`importers/rifiuti_import.py`). Sotto il 50% vale quanto sopra. Lo scarto si misura sui totali **col loro
+segno** (2026-11-21): un passivo letto negativo — il meno stampato davanti alle passività preso per un saldo — è
+una lettura sbagliata, e togliergli il segno ne nascondeva lo scarto vero (un attivo di 100 e un passivo di −60
+non quadrano di 40 ma di 160).
 
 **Che cosa riceve l'utente quando un PDF si rifiuta** (2026-11-19, richiesta del proprietario:
 l'utente deve accorgersi del rifiuto e caricare il PDF giusto). `/import/pdf` e `/import/pdf-ocr`

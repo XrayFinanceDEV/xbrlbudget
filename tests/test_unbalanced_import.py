@@ -295,3 +295,18 @@ def test_un_totale_stampato_assurdo_non_fa_da_base(monkeypatch):
     monkeypatch.setattr(verifica, "totali_stampati", lambda *_a, **_k: {"totale_attivo": Decimal("11.36")})
     # base = il lato piu' grande letto (1.000.000), sbilancio 100.000: si importa
     pi._rifiuta_lettura_non_riuscita("x.pdf", SimpleNamespace(totale_attivo=Decimal("1000000"), totale_passivo=Decimal("900000")))
+
+
+def test_un_passivo_letto_negativo_non_nasconde_lo_sbilancio(monkeypatch):
+    # il meno stampato davanti alle passivita' letto come saldo: attivo 100, passivo -60. Senza segno lo sbilancio
+    # sembrava 40 (sotto la meta' dell'attivo, importato); col segno e' 160, una lettura non riuscita. Cifre inventate.
+    import pytest
+    from types import SimpleNamespace
+    from importers import pdf_importer as pi
+    from importers.import_snello import verifica
+
+    monkeypatch.setattr(verifica, "totali_stampati", lambda *_a, **_k: {})
+    with pytest.raises(pi.PDFImportError, match="Lettura non riuscita"):
+        pi._rifiuta_lettura_non_riuscita("x.pdf", SimpleNamespace(totale_attivo=Decimal("100000"), totale_passivo=Decimal("-60000")))
+    # lo stesso documento con il passivo letto col segno giusto resta uno sbilancio da Rettifiche
+    pi._rifiuta_lettura_non_riuscita("x.pdf", SimpleNamespace(totale_attivo=Decimal("100000"), totale_passivo=Decimal("60000")))

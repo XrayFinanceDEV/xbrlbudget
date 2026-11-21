@@ -381,3 +381,31 @@ def test_fondo_per_famiglia_resta_nella_macro_del_modello_se_ci_sta():
     k = componi(foglie, classi, [])
     assert k.bs["sp03_immob_materiali"] == 0 and k.bs["sp02_immob_immateriali"] == D(900)
     assert k.sbilancio == 0
+
+
+def test_un_solo_risultato_del_periodo_anche_se_due_righe_stanno_nella_soglia():
+    # la soglia di adozione (0,1% dell'attivo: 1.000 qui) e' piu' larga della distanza fra l'utile dell'esercizio
+    # (400) e gli utili portati a nuovo (600) che il modello manda anch'essi su sp13: il risultato del periodo e' la
+    # riga piu' vicina, l'altra e' un conto del netto. Contarle entrambe perdeva i 600 e il passivo restava corto.
+    # Cifre inventate.
+    foglie = [F("a", 1000000), F("p", 999000, "R"),
+              F("n", 600, "R", etichetta="Utili (perdite) portati a nuovo"),
+              F("u", 400, "R", etichetta="Utile (perdita) dell'esercizio"),
+              F("r", 400, "L", "CE", "ricavo")]
+    c = componi(foglie, {"a": C("sp06"), "p": C("sp16"), "n": C("sp13"), "r": C("ce01")}, [])
+    assert c.bs["sp13_utile_perdita"] == 400 and c.bs["sp12g_utili_perdite_portati"] == 600
+    assert c.sbilancio == 0 and c.blocchi == []
+    assert any("n" in s and "sp12g" in s for s in c.scelte)
+
+
+def test_il_risultato_stampato_due_volte_resta_uno():
+    # l'aggregato «A.IX) Utile (Perdita) dell'esercizio» col meno e il suo dettaglio «A.IX.2) (Perdita d'esercizio)»
+    # valgono entrambi il risultato: sono la stessa cifra, nessuna delle due va negli utili portati a nuovo.
+    # Cifre inventate.
+    foglie = [F("a", 1000000), F("p", 1000300, "R"),
+              F("g", -300, "R", etichetta="A.IX) Utile (Perdita) dell'esercizio"),
+              F("d", 300, "R", etichetta="A.IX.2) (Perdita d'esercizio)"),
+              F("c", 300, "L", "CE", "costo")]
+    c = componi(foglie, {"a": C("sp06"), "p": C("sp16"), "c": C("ce06")}, [])
+    assert c.bs["sp13_utile_perdita"] == -300 and c.bs.get("sp12g_utili_perdite_portati", 0) == 0
+    assert c.sbilancio == 0

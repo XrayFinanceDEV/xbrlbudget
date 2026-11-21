@@ -82,6 +82,16 @@ rifiuto onesto.
 È l'unico punto in cui `macro_area` e `route` divergono dalla mappatura dichiarata: il
 documento *è* un prospetto contabile (area C), ma non è importabile.
 
+### Regola 1-bis — movimenti senza saldo finale (`# ----- Saldo iniziale e movimenti dare/avere`)
+Una testata «saldo iniziale · dare · avere» non seguita da un saldo (`_MOVIMENTI_SENZA_SALDO`) → `OTHER` /
+`UNSUPPORTED`, sottocategoria `movimenti senza saldo finale` (decisione del proprietario, 2026-11-21, budget_1776:
+«deve essere importato un bilancio, non tabelle a caso»). La stampa elenca i movimenti del periodo; in 1776 la
+colonna del saldo finale era scivolata su pagine separate, e il lettore leggeva i movimenti in dare come valori
+(un attivo di tre volte quello vero, importato con lo sbilancio sotto la metà). Il saldo **non** si ricostruisce
+da iniziale + dare − avere: si rifiuta, e il suggerimento (`movimenti_senza_saldo` in `importers/rifiuti_import.py`)
+chiede la stampa col saldo finale accanto a ogni conto. Il saldo finale sulla stessa testata («… dare avere saldo
+finale») resta un bilancio di verifica. Sul corpus di 284 PDF la regola scatta solo su 1776.
+
 ### Regola 2 — facsimile di deposito XBRL (`# ----- Facsimile XBRL itcc senza elenco conti`)
 Marcatore `itcc` presente, meno di 5 codici conto, nessun "pareggio" né "bilancio di verifica"
 → **A1 / IVCEE**.
@@ -107,7 +117,7 @@ marcatore AGO finisce in **B3**, non in C.
 Si entra in area C se c'è almeno uno fra: `pareggio`, `verifica`, `is_sc`, `contrapposte`,
 `verifica_per_conti`.
 
-**`verifica_per_conti`** (2026-11-19, budget_1776, 1562): colonne dare/avere (`dare_avere`),
+**`verifica_per_conti`** (2026-11-19, budget_1776, 1562; 1776 dal 2026-11-21 si ferma alla regola 1-bis): colonne dare/avere (`dare_avere`),
 almeno 30 codici conto (`_MIN_CONTI_VERIFICA`), meno di 5 codici-PATH CEE, né «riclassificata» né
 «dettaglio». È l'elenco di conti che il rilevatore dei layout (`is_sc`) non riconosce: codici
 puntati alfanumerici («10.05.3K»), conti a 8 cifre col partitario sotto. Prima finiva fra gli

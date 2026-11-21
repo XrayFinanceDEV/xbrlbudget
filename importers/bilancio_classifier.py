@@ -40,6 +40,9 @@ ROUTE_TRIAL = "TRIAL_BALANCE"    # C: parser deterministico situazione contabile
 ROUTE_XBRL = "XBRL_NATIVE"       # file .xbrl/.xml: parser XBRL
 ROUTE_UNSUPPORTED = "UNSUPPORTED"  # non importabile come bilancio completo
 
+# La testata di una stampa dei movimenti: saldo iniziale, dare, avere, e dopo nessun saldo (budget_1776).
+_MOVIMENTI_SENZA_SALDO = re.compile(r"\bsaldo iniz(?:iale|\.)? dare avere\b(?! saldo)")
+
 
 class Classification(NamedTuple):
     macro_area: str
@@ -263,6 +266,18 @@ def classify_bilancio(file_path: Optional[str] = None, text: Optional[str] = Non
             "high", s,
             "documento solo Conto Economico: manca lo Stato Patrimoniale, "
             "bilancio non ricostruibile")
+
+    # ----- Saldo iniziale e movimenti dare/avere, senza il saldo finale -----
+    # Decisione del proprietario (2026-11-21, budget_1776): «deve essere importato un bilancio, non tabelle a caso».
+    # Una stampa con le colonne «saldo iniziale · dare · avere» elenca i movimenti del periodo, non i saldi: senza
+    # il saldo finale accanto (in 1776 la colonna e' scivolata su pagine separate) il lettore sceglie una colonna
+    # di movimenti e la legge come valore. Non si ricostruisce il saldo: si rifiuta, e si chiede la stampa giusta.
+    # Il saldo finale sulla stessa testata («... dare avere saldo finale») resta un bilancio di verifica buono.
+    if _MOVIMENTI_SENZA_SALDO.search(re.sub(r"\s+", " ", low)):
+        return Classification(
+            MACRO_OTHER, "movimenti senza saldo finale", ROUTE_UNSUPPORTED, gest, "high", s,
+            "stampa di saldo iniziale e movimenti dare/avere senza la colonna del saldo finale: "
+            "i movimenti del periodo non sono un bilancio")
 
     # ----- Facsimile XBRL itcc senza elenco conti → A1 -----
     # Vince su eventuali menzioni di "bilancio riclassificato" dentro la Nota

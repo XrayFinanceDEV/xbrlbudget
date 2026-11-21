@@ -27,6 +27,10 @@ _RIFIUTI: tuple[tuple[str, re.Pattern, str], ...] = (
     ("scansione", re.compile(r"scansione contabile|PDF e' un'immagine|PDF è un'immagine", re.I),
      "Il file e' una scansione che non si legge in modo affidabile. Carica il PDF esportato direttamente dal "
      "gestionale (con il testo selezionabile), non una scansione o una foto."),
+    ("movimenti_senza_saldo", re.compile(r"movimenti dare/avere senza la colonna del saldo finale", re.I),
+     "Il file elenca saldo iniziale e movimenti dare/avere, ma non il saldo finale di ogni conto (nella stampa la "
+     "colonna del saldo e' finita su pagine separate, o manca). Ristampa dal gestionale la situazione contabile o "
+     "il bilancio di verifica con il saldo finale accanto a ogni conto."),
     ("lettura_incompleta", re.compile(r"Lettura del passivo mancante", re.I),
      "E' un errore di lettura, non del file: riprova l'import."),
     ("lettura_non_riuscita", re.compile(r"Lettura non riuscita", re.I),

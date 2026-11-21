@@ -18,6 +18,9 @@ def test_i_messaggi_dei_rifiuti_hanno_la_loro_categoria():
     assert _categoria("Nessun dato estratto dal documento: lo Stato Patrimoniale risulta vuoto (Totale Attivo "
                       "pari a zero).") == "non_bilancio"
     assert _categoria("Lettura del passivo mancante: il modello ha restituito l'attivo") == "lettura_incompleta"
+    assert _categoria("Documento non importabile come bilancio completo: stampa di saldo iniziale e movimenti "
+                      "dare/avere senza la colonna del saldo finale: i movimenti del periodo non sono un "
+                      "bilancio.") == "movimenti_senza_saldo"
     assert suggerimento_rifiuto("un errore che nessuno conosce") is None
 
 

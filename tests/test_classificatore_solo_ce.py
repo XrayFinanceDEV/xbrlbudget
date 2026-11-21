@@ -49,10 +49,49 @@ def test_una_contabilita_semplificata_si_rifiuta_col_suo_motivo():
 
 
 def test_un_elenco_di_conti_con_dare_e_avere_e_una_situazione_contabile():
-    # budget_1776/1562 (testo inventato): codici puntati alfanumerici, colonne dare/avere/saldo, nessun percorso
-    # di legge; prima finiva fra gli schemi di legge o fra i non riconosciuti
+    # budget_1562 (testo inventato): codici puntati alfanumerici, colonne dare/avere/saldo, nessun percorso
+    # di legge; prima finiva fra gli schemi di legge o fra i non riconosciuti. La testata di budget_1776 (saldo
+    # iniziale, dare, avere, senza saldo finale) dal 2026-11-21 si rifiuta: test sotto.
     from importers.bilancio_classifier import ROUTE_TRIAL
-    righe = ["CONTO SALDO INIZ. Dare Avere", "1 - ATTIVITA'", "10 - Immobilizzazioni"]
+    righe = ["CONTO Dare Avere Saldo", "1 - ATTIVITA'", "10 - Immobilizzazioni"]
     righe += [f"10.{k:02d}.{k + 40} - CONTO {k}\n{k},00\n{k},00" for k in range(1, 40)]
     c = classify_bilancio(text="\n".join(righe))
     assert c.route == ROUTE_TRIAL
+
+
+_MOVIMENTI = """
+1 / 4
+CONTO
+SALDO INIZ.
+Dare
+Avere
+1 - ATTIVITA'
+0,00
+900.000,00
+700.000,00
+10 - Immobilizzazioni
+0,00
+300.000,00
+20.000,00
+2 - PASSIVITA'
+0,00
+150.000,00
+400.000,00
+"""
+
+
+def test_saldo_iniziale_e_movimenti_senza_saldo_finale_si_rifiuta():
+    # decisione del proprietario (2026-11-21, budget_1776): i movimenti del periodo non sono un bilancio, e il saldo
+    # non si ricostruisce. Testo inventato.
+    c = classify_bilancio(text=_MOVIMENTI)
+
+    assert c.route == ROUTE_UNSUPPORTED
+    assert c.subcategory == "movimenti senza saldo finale"
+
+
+def test_con_il_saldo_finale_sulla_stessa_testata_resta_una_verifica():
+    testo = _MOVIMENTI.replace("Avere\n", "Avere\nSALDO FINALE\n", 1)
+
+    c = classify_bilancio(text=testo)
+
+    assert c.subcategory != "movimenti senza saldo finale"

@@ -148,6 +148,7 @@ Tutti robusti agli header lettera-spaziati (variante senza spazi). I principali:
 ```
 0.  ext ∈ {.xbrl,.xml}                                   → ROUTE_XBRL / OTHER
 1.  ce_present AND NOT sp_present                         → ROUTE_UNSUPPORTED  (solo CE: errore onesto)
+1b. testata «saldo iniziale dare avere» senza saldo dopo  → ROUTE_UNSUPPORTED / movimenti senza saldo finale
 2.  itcc AND coge_codes<5 AND NOT pareggio AND NOT verifica
                                                           → ROUTE_IVCEE / A    (facsimile deposito XBRL→PDF)
 3.  legal_skeleton AND coge_codes>=5  (B batte C):       → ROUTE_IVCEE / B

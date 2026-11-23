@@ -95,3 +95,37 @@ def test_con_il_saldo_finale_sulla_stessa_testata_resta_una_verifica():
     c = classify_bilancio(text=testo)
 
     assert c.subcategory != "movimenti senza saldo finale"
+
+
+def test_gli_interessi_su_debiti_verso_altri_non_sono_uno_stato_patrimoniale():
+    # budget_1801 (cifre inventate): il conto di oneri finanziari diceva «debiti verso» e il CE da
+    # solo passava per bilancio completo, fino a un rifiuto tardivo come «lettura non riuscita».
+    testo = ("CONTO ECONOMICO\nCOSTI 10.000,00\n600100 Merci per la vendita 8.000,00\n"
+             "690100 Interessi e oneri su debiti verso altri 12,00\nRICAVI 12.000,00\n"
+             "UTILE CONTO ECONOMICO 2.000,00\n")
+    c = classify_bilancio(text=testo)
+    assert c.route == ROUTE_UNSUPPORTED and c.subcategory.startswith("C4/")
+
+
+def test_un_debito_verso_altri_finanziatori_resta_uno_stato_patrimoniale():
+    testo = ("CONTO ECONOMICO\nRICAVI 12.000,00\nSTATO\nDebiti verso altri finanziatori 5.000,00\n")
+    assert not classify_bilancio(text=testo).subcategory.startswith("C4/")
+
+
+_SEMPLIFICATA_PERDITA = "SITUAZIONE CONTABILE AL\n31/12/2025\nRIEPILOGO DEI RICAVI\n" + "".join(
+    f"58/05/{i:03d}\nRICAVO {i}\n1.000,00\n" for i in range(1, 8)) + "RIEPILOGO DEI COSTI\n" + "".join(
+    f"68/05/{i:03d}\nCOSTO {i}\n1.500,00\n" for i in range(1, 8)) + (
+    "PERDITA FISCALE\n3.500,00\nALTRI CONTI\nAttività'\nPassività\n18/45/090\nCREDITI DIVERSI\n9,56\n")
+
+
+def test_una_semplificata_in_perdita_con_testata_situazione_contabile_si_rifiuta_col_suo_motivo():
+    # budget_1804/1827 (cifre inventate): «perdita fiscale» invece di «utile fiscale», e la testata
+    # «SITUAZIONE CONTABILE AL» la mandava alla rotta delle verifiche prima della regola.
+    c = classify_bilancio(text=_SEMPLIFICATA_PERDITA)
+    assert c.signals["is_sc"]                     # senza la regola anticipata andava alla rotta C
+    assert c.route == ROUTE_UNSUPPORTED and c.subcategory == "contabilità semplificata"
+
+
+def test_una_situazione_con_patrimonio_netto_non_e_una_semplificata():
+    c = classify_bilancio(text=_SEMPLIFICATA_PERDITA + "PATRIMONIO NETTO\n10.000,00\n")
+    assert c.subcategory != "contabilità semplificata"

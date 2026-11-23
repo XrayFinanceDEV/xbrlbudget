@@ -457,7 +457,7 @@ def da_foglie(foglie):
             "lato_irrisolti": [], "risultato_duplicato": [], "padri_esclusi": [],
             "risultato_precedente": [], "risultato_escluso": [], "risultato_ambiguo": None,
             "riclassificati_vecchio_parser": [], "ce_segno_forzato": [], "grezzo_sp": {},
-            "rimanenze_per_natura": []}
+            "rimanenze_per_natura": [], "valore_produzione_non_dettagliato": []}
     diag["lato_corretti"] = applica_lato(foglie, diag["lato_irrisolti"])
     riclassifica_ignote(foglie, diag)
     irrisolti_ids = {r[0] for r in diag["lato_irrisolti"]}
@@ -554,6 +554,14 @@ def da_foglie(foglie):
             continue
 
         codice = campo_di_legge(f.percorso)
+        if codice is None and f.percorso == "CE.A":
+            # «A) Valore della produzione» senza A.1-A.5 (un figlio letto lo avrebbe gia' escluso
+            # come padre, sopra): la stessa regola di da_coppie (decisione del proprietario
+            # 2026-11-19), ricavi delle vendite dichiarati. Mancava su questo percorso: uno schema
+            # abbreviato letto «a conti» (budget_1774/1790) restava coi soli costi e veniva
+            # rifiutato come lettura non riuscita.
+            codice = "ce01"
+            diag["valore_produzione_non_dettagliato"].append(str(f.valore.quantize(_C)))
         if codice is None:
             diag["non_mappati"].append([f.id, f.percorso, str(f.valore.quantize(_C))])
             continue

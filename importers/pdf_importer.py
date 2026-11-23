@@ -116,11 +116,40 @@ def _rifiuta_lettura_non_riuscita(file_path: str, qd) -> None:
         pass
     if base <= 0 or sbilancio <= _SBILANCIO_MASSIMO_QUOTA * base:
         return
+    negativo = _totale_attivo_stampato_negativo(file_path)
+    if negativo is not None:
+        # budget_1810: una colonna senza saldi (conti azzerati, restano solo i fondi) stampa un totale attivo
+        # negativo. Il rifiuto e' lo stesso; il motivo dice che cosa c'e' nel documento, non uno sbilancio.
+        raise PDFImportError(
+            "Documento non importabile: il totale attivo stampato e' negativo "
+            f"(€-{_euro_it(negativo)}), quindi la colonna letta non e' uno stato patrimoniale (conti azzerati, "
+            "periodo o anno sbagliato). Il bilancio non e' stato importato.")
     raise PDFImportError(
         "Lettura non riuscita: lo stato patrimoniale letto non quadra di "
         f"€{_euro_it(sbilancio)} (attivo €{_euro_it(att)}, passivo €{_euro_it(pas)}), piu' della meta' del "
         f"totale attivo (€{_euro_it(base)}). Non e' un bilancio da correggere in Rettifiche: il documento non e' "
         "stato letto correttamente e non e' stato importato.")
+
+
+_TOTALE_ATTIVO_NEGATIVO = re.compile(
+    r"totale\s+(?:dello\s+)?(?:stato\s+patrimoniale\s*[-–]?\s*)?attiv[oita']*\s*:?\s*"
+    r"(?:-\s*(?P<pre>\d{1,3}(?:\.\d{3})*,\d{2})|(?P<post>\d{1,3}(?:\.\d{3})*,\d{2})[ \t]*-(?![ \t]*\d))",
+    re.I)
+
+
+def _totale_attivo_stampato_negativo(file_path: str) -> Decimal | None:
+    """Il valore assoluto del primo «Totale attivo» stampato col segno meno (davanti o dietro), se c'e'.
+    Serve solo a dire il motivo giusto di un rifiuto gia' deciso: non cambia mai un esito."""
+    try:
+        import fitz
+        with fitz.open(file_path) as doc:
+            testo = "\n".join(p.get_text() for p in doc)
+    except Exception:
+        return None
+    m = _TOTALE_ATTIVO_NEGATIVO.search(testo)
+    if not m:
+        return None
+    return Decimal((m.group("pre") or m.group("post")).replace(".", "").replace(",", "."))
 
 
 def _rifiuta_passivo_non_letto(bs) -> None:

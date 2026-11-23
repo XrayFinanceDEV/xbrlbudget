@@ -66,6 +66,9 @@ _VOCI_CE_CON_PAROLE_PATRIMONIALI = (
     r"iscritt\w*\s+nelle\s+immobilizzazioni",
     r"(?:compresi|iscritt\w*)\s+nell'?\s*attivo\s+circolante",
     r"attivita'?\s+e\s+passivita'?\s+finanziari\w*",
+    # un conto di oneri finanziari, non un debito: «Interessi e oneri su debiti verso altri»
+    # (budget_1801, solo conto economico, passava per bilancio completo)
+    r"(?:interessi|oneri)[\w\s']{0,30}?\bsu\s+debiti\s+verso",
 )
 
 
@@ -279,6 +282,22 @@ def classify_bilancio(file_path: Optional[str] = None, text: Optional[str] = Non
             "stampa di saldo iniziale e movimenti dare/avere senza la colonna del saldo finale: "
             "i movimenti del periodo non sono un bilancio")
 
+    # ----- Contabilità semplificata: ricavi e costi, pochi conti patrimoniali -----
+    # Un elenco conti c'e' (budget_1710), ma e' il riepilogo fiscale di una contabilita'
+    # semplificata: ricavi, costi, «utile fiscale» (o «perdita fiscale») e qualche cespite, senza
+    # cassa, crediti, debiti ne' patrimonio netto. Si rifiuta col suo motivo. Sta prima della rotta C:
+    # la testata «SITUAZIONE CONTABILE AL» la mandava al lettore delle verifiche, che rifiutava piu'
+    # tardi con uno sbilancio pari al risultato (budget_1804/1827, «lettura non riuscita»).
+    _compatto = re.sub(r"\s+", " ", low)
+    if (re.search(r"\b(?:utile|perdita) fiscale\b", _compatto)
+            and ("riepilogo dei ricavi" in _compatto or "riepilogo dei costi" in _compatto)
+            and "patrimonio netto" not in _compatto):
+        return Classification(
+            MACRO_OTHER, "contabilità semplificata", ROUTE_UNSUPPORTED, gest, "high", s,
+            "situazione di contabilità semplificata (riepilogo di ricavi e costi e pochi "
+            "conti patrimoniali): manca lo stato patrimoniale completo (cassa, crediti, "
+            "debiti, patrimonio netto)")
+
     # ----- Facsimile XBRL itcc senza elenco conti → A1 -----
     # Vince su eventuali menzioni di "bilancio riclassificato" dentro la Nota
     # Integrativa: un facsimile di deposito non ha mai un elenco di conti CoGe.
@@ -334,21 +353,6 @@ def classify_bilancio(file_path: Optional[str] = None, text: Optional[str] = Non
             conf = "med" if s["legal_skeleton"] else "low"
         return Classification(MACRO_A, sub, ROUTE_IVCEE, gest, conf, s,
                               "scheletro IV CEE / tassonomia, nessun elenco conti")
-
-    # ----- Contabilità semplificata: ricavi e costi, pochi conti patrimoniali -----
-    # Un elenco conti c'e' (budget_1710), ma e' il riepilogo fiscale di una contabilita'
-    # semplificata: ricavi, costi, «utile fiscale» e qualche cespite, senza cassa, crediti,
-    # debiti ne' patrimonio netto. Si rifiuta come prima; cambia solo il motivo, che diceva
-    # «né elenco conti».
-    _compatto = re.sub(r"\s+", " ", low)
-    if ("utile fiscale" in _compatto
-            and ("riepilogo dei ricavi" in _compatto or "riepilogo dei costi" in _compatto)
-            and "patrimonio netto" not in _compatto):
-        return Classification(
-            MACRO_OTHER, "contabilità semplificata", ROUTE_UNSUPPORTED, gest, "high", s,
-            "situazione di contabilità semplificata (riepilogo di ricavi e costi e pochi "
-            "conti patrimoniali): manca lo stato patrimoniale completo (cassa, crediti, "
-            "debiti, patrimonio netto)")
 
     # ----- fallback: non riconosciuto come bilancio completo -----
     return Classification(MACRO_OTHER, "non riconosciuto", ROUTE_UNSUPPORTED, gest,

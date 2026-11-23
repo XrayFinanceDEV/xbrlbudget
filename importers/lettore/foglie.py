@@ -514,6 +514,10 @@ def _verso_ce(r: Riga, campo: str | None) -> str | None:
 
 def gettoni_di_legge(r_etichetta: str, codice: str = "") -> tuple[str, ...]:
     """I livelli di legge che una riga stampa nel proprio codice o nella propria etichetta."""
+    puntato = _gettoni_del_codice_puntato(codice) or _gettoni_del_codice_puntato(
+        (r_etichetta.split() or [""])[0])
+    if puntato:
+        return puntato
     if codice and _CODICE_DI_LEGGE.match(codice):
         t = _percorso_etichetta(codice + ") x")
         if t:
@@ -537,6 +541,38 @@ def gettoni_di_legge(r_etichetta: str, codice: str = "") -> tuple[str, ...]:
     if m["arabo"]:
         return (m["arabo"] + (f"-{m['suffisso'].lower()}" if m["suffisso"] else ""),)
     return (m["minuscola"],)
+
+
+# Il codice puntato del «prospetto di bilancio» di certi gestionali (budget_1764): sezione (1 attivo, 2 passivo,
+# 3 conto economico), lettera della voce, poi i livelli in cifre («1.B.2.1 Terreni e fabbricati» = B.II.1,
+# «2.D.4 Debiti verso banche» = D.4, «3.B.9.a Salari e stipendi» = B.9.a, «1.C.2.5quater» = C.II.5-quater). La prima
+# cifra e' un romano solo dove la legge ha il romano (attivo B e C, passivo A). Quello che non si traduce in un
+# livello di legge si lascia: un percorso che non esiste lo scarta `percorso_valido`, e la foglia va al modello.
+_CODICE_PUNTATO = re.compile(r"^([123])\.([A-E])((?:\.[0-9a-z]+)*)$")
+_ROMANI = ("I", "II", "III", "IV", "V", "VI", "VII", "VIII", "IX", "X")
+_CON_ROMANO = {("1", "B"), ("1", "C"), ("2", "A")}
+_ARABO_CON_SUFFISSO = re.compile(r"^(\d{1,2})(bis|ter|quater)?$")
+
+
+def _gettoni_del_codice_puntato(codice: str) -> tuple[str, ...]:
+    m = _CODICE_PUNTATO.match(codice or "")
+    if not m:
+        return ()
+    sezione, lettera = m.group(1), m.group(2)
+    resto = [x for x in m.group(3).split(".") if x]
+    out = [lettera]
+    if resto and (sezione, lettera) in _CON_ROMANO:
+        if not resto[0].isdigit() or not 1 <= int(resto[0]) <= len(_ROMANI):
+            return tuple(out)
+        out.append(_ROMANI[int(resto.pop(0)) - 1])
+    if resto:
+        a = _ARABO_CON_SUFFISSO.match(resto.pop(0))
+        if not a:
+            return tuple(out)
+        out.append(a.group(1) + (f"-{a.group(2)}" if a.group(2) else ""))
+    if resto and re.fullmatch(r"[a-e]", resto[0]):
+        out.append(resto[0])
+    return tuple(out)
 
 
 # Il codice della struttura di legge che certi gestionali stampano davanti alla voce: sezione (A attivo, P passivo,
@@ -626,7 +662,18 @@ def _e_controllo(r: Riga) -> bool:
         return False        # «C) Proventi e oneri finanziari - 17) Interessi»: la voce 17, non un risultato (F11)
     if r.sezione == "":     # sezione non riconosciuta (il conto economico oltre la pagina): solo il lessico di legge
         return bool(_RISULTATO_DI_LEGGE.search(n) or _CONTROLLO.search(n) and "utile" not in n and "perdit" not in n)
-    return r.sezione == "CE" and bool(_CONTROLLO.search(n) or _risultato(r))
+    # su uno schema `_risultato` scarta ogni riga con «utile», «perdita», «differenza»: un conto del piano dei conti
+    # (col suo codice) non e' mai la riga del risultato, e lo scarta solo il lessico di controllo per intero
+    # (budget_1764: «Risarcim.danni perdita prodotti/sinistri», un ricavo perso e l'utile che non tornava)
+    conto = _codice_di_un_conto(r.codice) and not gettoni_di_legge(r.etichetta, r.codice)   # «4308 C) Proventi…» e' la voce
+    return r.sezione == "CE" and bool(_CONTROLLO.search(n) or (_risultato(r) and not conto))
+
+
+def _codice_di_un_conto(codice: str) -> bool:
+    """Il codice di un conto del piano dei conti (cifre, punti, barre: «53.01.15», «6800010», «15/0005/1711»), non
+    quello di una voce di legge o di una struttura di legge."""
+    c = (codice or "").strip()
+    return (bool(re.fullmatch(r"[\d./\- ]*\d[\d./\- ]*", c)) and not _CODICE_PUNTATO.match(c))
 
 
 _GENERALE_ABBREVIATO = re.compile(r"^tot(?:ale)?\.?\s+(attivo|passivo)$")

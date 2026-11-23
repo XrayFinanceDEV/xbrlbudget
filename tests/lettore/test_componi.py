@@ -409,3 +409,23 @@ def test_il_risultato_stampato_due_volte_resta_uno():
     c = componi(foglie, {"a": C("sp06"), "p": C("sp16"), "c": C("ce06")}, [])
     assert c.bs["sp13_utile_perdita"] == -300 and c.bs.get("sp12g_utili_perdite_portati", 0) == 0
     assert c.sbilancio == 0
+
+
+def test_il_totale_che_somma_le_sue_sotto_voci_controlla_la_macro():
+    # 1764 (cifre inventate): «1.C.4 Disponibilita'» 1.600 = «1.C.4.1 Depositi» 1.200 + «1.C.4.3 Cassa» 400, tutte sp09;
+    # l'ultima stampata (la cassa) faceva da controllo di tutte le liquidita'
+    foglie = [F("d", 1200), F("c", 400), F("p", 1600, "R")]
+    classi = {"d": C("sp09"), "c": C("sp09"), "p": C("sp16")}
+    ancore = [Ancora("sp09", D(1600), "tot", ("d", "c")), Ancora("sp09", D(1200), "dep", ("d",)),
+              Ancora("sp09", D(400), "cassa", ("c",))]
+    c = componi(foglie, classi, ancore)
+    assert c.scarti["sp09"] == 0 and "sp09" not in c.blocchi
+
+
+def test_due_totali_della_stessa_macro_che_non_si_sommano_restano_nell_ordine_stampato():
+    # oneri finanziari e imposte stampati col segno opposto in due righe: non sono padre e figlio
+    foglie = [F("i", 300, "L", "CE", "costo"), F("a", 1000), F("p", 700, "R")]
+    classi = {"i": C("ce15"), "a": C("sp06"), "p": C("sp16")}
+    ancore = [Ancora("ce15", D(300), "tot", ("i",)), Ancora("ce15", D(-300), "c", ("i",))]
+    c = componi(foglie, classi, ancore)
+    assert c.scarti["ce15"] == D(-600)

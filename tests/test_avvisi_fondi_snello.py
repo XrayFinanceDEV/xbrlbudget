@@ -1,4 +1,4 @@
-"""Gli avvisi sui fondi dichiarati dal percorso snello (lotto week-43).
+"""Gli avvisi sui fondi dichiarati dall'importatore (lotto week-43).
 
 budget_1452 (1STOP): i fondi ammortamento degli immateriali (1.086,25) superano il costo storico
 (1.000). Il clamp a zero e' giusto, ma l'utente vedeva solo un generico «bilancio sbilanciato di

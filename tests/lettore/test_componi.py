@@ -178,7 +178,7 @@ def test_fondo_nel_dettaglio_del_bene():
 
 
 def test_fondo_oltre_il_cespite_azzerato_e_dichiarato_come_conti():
-    # stessa regola del percorso snello: dettaglio negativo all'aggregato, aggregato negativo a zero, dichiarato
+    # stessa regola dell'importatore: dettaglio negativo all'aggregato, aggregato negativo a zero, dichiarato
     foglie = [F("i", 300, etichetta="Impianti"), F("c", 700, etichetta="Cassa"),
               F("f", 500, "R", etichetta="Fondo amm. impianti"), F("d", 500, "R", etichetta="Debiti")]
     classi = {"i": C("sp03", "sp03b"), "c": C("sp09"), "f": R("sp03", "SPA.B.II.F", "sp03b"), "d": C("sp16")}

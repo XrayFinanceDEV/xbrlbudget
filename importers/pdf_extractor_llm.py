@@ -648,7 +648,7 @@ def reading_order_text(page: fitz.Page, forza_ordinamento: bool = False) -> str:
     blocco) non lo supera, e la pagina resta "non scomposta" anche se quella riga sola lo e'.
     Passando ``forza_ordinamento=True`` si tenta SEMPRE l'ordinamento per coordinate, con la
     stessa guardia di sicurezza sotto (mai se cambia le parole): usato solo dal chiamante che
-    lo richiede esplicitamente (``totali_stampati``, il percorso snello) - ogni altro
+    lo richiede esplicitamente (``totali_stampati``, l'importatore) - ogni altro
     chiamante (default ``False``) resta sul comportamento di sempre, byte-identico."""
     raw = page.get_text()
     if not forza_ordinamento and not _stream_order_is_scrambled(page):

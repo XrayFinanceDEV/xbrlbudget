@@ -569,7 +569,7 @@ def test_prova_standard_ivcee_tenta_anche_la_colonna_singola(tmp_path):
     """Task 23: prima, un documento senza due colonne affiancate non veniva
     nemmeno passato a ``extract_standard_ivcee_balances``/``_income`` — il
     ramo compatto del modulo (mastri piatti a colonna singola, budget_289/352)
-    non veniva mai raggiunto dal percorso snello per NESSUN file. Ora il gate
+    non veniva mai raggiunto dall'importatore per NESSUN file. Ora il gate
     lo tenta comunque, e un documento che quadra si adotta a zero chiamate."""
     from tests.test_standard_ivcee_parser import _write_flat_mastri_pdf
 

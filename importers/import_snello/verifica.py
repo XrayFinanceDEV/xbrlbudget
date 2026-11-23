@@ -1,4 +1,4 @@
-"""Verifica del percorso snello: stesse formule dell'app (campi di quadratura, risultato CE canonico),
+"""Verifica dell'importatore: stesse formule dell'app (campi di quadratura, risultato CE canonico),
 soglia relativa, tappo dichiarato (max 10 euro, 2026-10-03) su altri crediti, altri debiti, servizi (decisione del
 proprietario, 2026-09-26). Oltre soglia non si tocca nulla: decide il chiamante."""
 from __future__ import annotations
@@ -29,7 +29,7 @@ def soglia_tappo() -> Decimal:
 
 def limite_tappo(s: Decimal) -> Decimal:
     """Il limite di scarto interno (SP e CE) per un tappo, sotto la soglia relativa ``s``: l'unico
-    posto dove si decide (``tappa`` e il percorso snello lo usano entrambi)."""
+    posto dove si decide (``tappa`` e l'importatore lo usano entrambi)."""
     return min(s, soglia_tappo())
 
 

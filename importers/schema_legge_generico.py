@@ -1512,7 +1512,7 @@ def _segni_come_contributo(righe: list[reso._Riga]) -> Optional[list[reso._Riga]
 
 # Documento a importi interi: ogni voce e' gia' arrotondata all'euro, e il totale stampato e'
 # l'arrotondamento della somma vera, non la somma degli arrotondati. Lo scarto resta sotto il
-# tappo dichiarato del percorso snello (10 euro), che poi lo misura e lo dichiara.
+# tappo dichiarato dell'importatore (10 euro), che poi lo misura e lo dichiara.
 _TOLLERANZA_INTERI = Decimal("5")
 
 

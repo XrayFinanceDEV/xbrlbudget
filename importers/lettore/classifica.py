@@ -124,7 +124,7 @@ def _rettifiche(f: Foglia) -> tuple[str, ...]:
 
 def _classe(codice: str | None, fonte: str, voti: tuple[str, ...] = ()) -> Classe:
     """La classe di una risposta valida: una macro-voce, oppure una rettifica (campo dal percorso di legge, come
-    nel percorso snello: macro del bene o del netto, dettaglio se il percorso lo dice)."""
+    nell'importatore: macro del bene o del netto, dettaglio se il percorso lo dice)."""
     if codice is None:
         return Classe(None, None, fonte, voti)
     if codice in tavola.RETTIFICHE:

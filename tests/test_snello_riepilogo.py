@@ -129,7 +129,7 @@ def test_innesto_rifiuta_con_messaggio_e_non_salva_nulla(tmp_path, monkeypatch):
     monkeypatch.setenv("ANTHROPIC_API_KEY", "chiave-finta")   # nessuna chiamata: serve solo a passare il controllo iniziale
 
     def _vietata(*a, **k):
-        raise AssertionError("il percorso snello non deve partire su un riepilogo")
+        raise AssertionError("l'importatore non deve partire su un riepilogo")
     monkeypatch.setattr(import_snello, "importa", _vietata)
     session_factory = _db_in_memoria(monkeypatch)
 
@@ -153,7 +153,7 @@ def test_senza_interruttore_il_riconoscitore_non_gira(tmp_path, monkeypatch):
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
 
     def _vietato(*a, **k):
-        raise AssertionError("il riconoscitore dei riepiloghi gira solo col percorso snello")
+        raise AssertionError("il riconoscitore dei riepiloghi gira solo con l'importatore")
     monkeypatch.setattr(RIEP, "riconosci_riepilogo", _vietato)
     _db_in_memoria(monkeypatch)
 

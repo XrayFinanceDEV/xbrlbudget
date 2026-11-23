@@ -60,7 +60,7 @@ def _avviso_risultato_ricostruito(importo) -> str:
 
 
 def _avvisi_fondi_snello(diag: dict) -> list[str]:
-    """Gli avvisi sui fondi che il percorso snello ha dichiarato nel suo diag."""
+    """Gli avvisi sui fondi che l'importatore ha dichiarato nel suo diag."""
     avvisi = []
     gia_nettati = diag.get('fondi_gia_nettati')
     if gia_nettati:
@@ -240,8 +240,8 @@ def _avviso_risultato_anno_prima_conti(bs: Dict[str, Any]) -> str:
 
 
 def _snello_squadrato_reason(report: Dict[str, Any]) -> str:
-    """Avviso per un risultato del percorso snello con esito 'squadrato' (Task 17): lo
-    scarto e' quello MISURATO dal percorso snello stesso (``report['misura']['corrente']``),
+    """Avviso per un risultato dell'importatore con esito 'squadrato' (Task 17): lo
+    scarto e' quello MISURATO dall'importatore stesso (``report['misura']['corrente']``),
     mai ricalcolato qui — puo' venire dall'attivo/passivo del foglio ricostruito, dal
     confronto CE/SP, o dal confronto coi totali stampati dal documento (quest'ultimo non
     e' visto da ``mapper.validate_balance``, che guarda solo gli aggregati del foglio)."""
@@ -315,7 +315,7 @@ def _snello_squadrato_reason(report: Dict[str, Any]) -> str:
                    "puoi inserirlo in Rettifiche."
                    if report.get("precedente") == "non_letto_dalla_lettura_deterministica" else "")
     return (
-        f"{_UNBALANCED_WARNING_PREFIX}: il percorso snello resta oltre soglia dopo "
+        f"{_UNBALANCED_WARNING_PREFIX}: l'importatore resta oltre soglia dopo "
         f"l'unica rilettura (scarto Attivo/Passivo {_fmt('scarto_sp')}, scarto CE/SP "
         f"{_fmt('scarto_ce')}, scarto sui totali stampati dal documento "
         f"{_fmt('scarto_stampati')}). {_UNBALANCED_WARNING_SUFFIX}{_precedente}"
@@ -851,7 +851,7 @@ def _motivo_ripiego_classico(snello_report: Optional[dict]) -> str:
 
 
 def _motore_snello() -> bool:
-    """Il percorso snello e' il motore di default (decisione del proprietario, 2026-10-16:
+    """L'importatore e' il motore di default (decisione del proprietario, 2026-10-16:
     "devono essere tutti su snello"): lettori a regole prima di qualunque modello, poi gx10.
     ``IMPORT_MOTORE=classico`` (o qualunque valore diverso da "snello") torna all'importatore
     di prima; la variabile assente vale "snello"."""
@@ -861,7 +861,7 @@ def _motore_snello() -> bool:
 def _xbrl_reso_extract(file_path: str):
     """(bs, ce, prior_bs, prior_ce) del PDF reso da un XBRL depositato, oppure None.
 
-    Lo stesso lettore che il percorso snello prova per primo (``xbrl_reso_parser``: ogni totale
+    Lo stesso lettore che l'importatore prova per primo (``xbrl_reso_parser``: ogni totale
     stampato riprodotto al centesimo, nessuna tolleranza), qui anche per il percorso di sempre:
     senza, un micro reso da XBRL (SGH 31/12/2025) finiva al modello, sei minuti e il passivo
     perso. Si adotta solo il candidato che il lettore dichiara ``adottabile`` e che passa gli
@@ -951,7 +951,7 @@ def _schema_generico_mineru_extract(extraction_context: Any):
 def _prospetto_sintetico_mineru_extract(extraction_context: Any):
     """(bs, ce, None, None) del prospetto CEE sintetico a una colonna di una scansione, dalle
     tabelle MinerU (``prospetto_sintetico.estrai_da_mineru``, budget_1405), oppure None. Le
-    stesse verifiche del percorso snello (``deterministico._esito``: ogni totale stampato, la
+    stesse verifiche dell'importatore (``deterministico._esito``: ogni totale stampato, la
     massa non classificata) e gli stessi cancelli degli altri lettori. Le approssimazioni
     (il totale di una voce senza dettaglio nel suo sotto-campo convenzionale) restano
     dichiarate in ``_approssimazioni_prospetto``, come le dichiara lo snello."""
@@ -1014,7 +1014,7 @@ def _dettagli_gia_letti(snello_report: Optional[dict], mineru_tabelle: bool,
                         da_mineru: bool, bs: dict) -> Optional[str]:
     """Il motivo per non rifare la ricerca dei dettagli, o None se va fatta.
 
-    - Reso XBRL adottato dal percorso snello (Task 25): i dettagli sono gia' quelli del
+    - Reso XBRL adottato dall'importatore (Task 25): i dettagli sono gia' quelli del
       prospetto e delle tabelle di nota, riconciliati al centesimo o dichiarati.
     - Situazione contabile dalle tabelle MinerU: ogni sottoconto e' gia' una cella letta; sulla
       scansione la ricerca non ha testo e finiva su Qwen (6 minuti su Unicarton, per nessuna
@@ -1495,14 +1495,14 @@ def import_pdf_balance_sheet(
         # il ripiego dichiarato, mai silenzioso (validation_report["import_snello"]
         # lo dice sempre: con il motore classico contiene il solo "ripiego_classico"). Scansioni e testo da
         # OCR (is_scanned/_ocr_source) non hanno mai una struttura testuale
-        # affidabile da analizzare: il percorso snello non si tenta nemmeno, e lo
+        # affidabile da analizzare: l'importatore non parte nemmeno, e lo
         # dichiara con esito "non_applicabile" invece di un ripiego silenzioso.
         # Un'istanza XBRL nativa non arriva qui: la rotta ROUTE_XBRL solleva sopra.
         _snello = None
         _snello_report = None
         # Scansione letta da MinerU (decisione del proprietario, 2026-10-14): se le sue tabelle
         # hanno la forma di una situazione a sezioni contrapposte se ne stampa un PDF sintetico,
-        # un PDF di testo con la geometria pulita. Lo legge il percorso snello come qualunque
+        # un PDF di testo con la geometria pulita. Lo legge l'importatore come qualunque
         # altro PDF di testo (stessi lettori deterministici, stesso tappo, stessa rilettura);
         # la route C sotto lo riusa se lo snello non adotta. Il divieto per le scansioni era
         # nato con l'OCR di prima, che dava solo testo libero.
@@ -1523,7 +1523,7 @@ def import_pdf_balance_sheet(
             else:
                 from importers import import_snello
                 # Decisione del proprietario, 2026-10-03: un riepilogo a sole macro-voci non e'
-                # un bilancio e non si importa - ne' dal percorso snello ne' dal ripiego di
+                # un bilancio e non si importa - ne' dall'importatore ne' dal ripiego di
                 # oggi. Riconosciuto dal testo, PRIMA della struttura (nessuna chiamata modello);
                 # stessa uscita degli altri documenti rifiutati (PDFImportError, nulla salvato).
                 from importers.import_snello import riepilogo as _riepilogo
@@ -1584,7 +1584,7 @@ def import_pdf_balance_sheet(
                 except import_snello.SnelloNonRiuscito as exc:
                     _snello = None
                     _snello_report = exc.report
-                except Exception as exc:  # il percorso snello e' un'economia: senza, l'import di oggi
+                except Exception as exc:  # l'importatore e' un'economia: senza, l'import di oggi
                     _snello = None
                     logger.warning("Import snello non riuscito (%s): importatore attuale", type(exc).__name__)
                     _snello_report = {"esito": "ripiego", "fase": "eccezione", "errore": type(exc).__name__}
@@ -1599,7 +1599,7 @@ def import_pdf_balance_sheet(
             if _motore_snello() and not _ripiego_classico_acceso():
                 raise PDFImportError(
                     "Import non riuscito: percorso classico spento (IMPORT_RIPIEGO_CLASSICO=0) "
-                    f"e il percorso snello non ha adottato il documento ({_ripiego_classico['motivo']}).")
+                    f"e l'importatore non ha adottato il documento ({_ripiego_classico['motivo']}).")
         if _snello_report is not None:
             _snello_report["ripiego_classico"] = _ripiego_classico
         _snello_report_dichiarato = (
@@ -2480,7 +2480,7 @@ def import_pdf_balance_sheet(
         # mapper.validate_balance non vede (guarda solo gli aggregati del foglio, non i
         # totali stampati): l'avviso va dichiarato qui, esplicitamente, prima di quel
         # controllo — non e' un nuovo cancello di quadratura, e' la stessa diagnostica
-        # gia' misurata dal percorso snello.
+        # gia' misurata dall'importatore.
         if unbalanced_reason is None and _snello is not None and _snello.report.get("esito") == "squadrato":
             unbalanced_reason = _snello_squadrato_reason(_snello.report)
             logger.warning(unbalanced_reason)
@@ -2638,7 +2638,7 @@ def import_pdf_balance_sheet(
             _pos = 1 if unbalanced_reason else 0
             warnings[_pos:_pos] = _lettore_frasi
         if _snello is not None:
-            # Percorso snello (Task 25 fix round 1): lo stesso avviso arriva da piu' fonti
+            # Importatore (Task 25 fix round 1): lo stesso avviso arriva da piu' fonti
             # (validate_hierarchy e la quadratura unificata); ogni avviso distinto esce una
             # volta sola. Il percorso di produzione (_snello None) non cambia.
             warnings = list(dict.fromkeys(warnings))

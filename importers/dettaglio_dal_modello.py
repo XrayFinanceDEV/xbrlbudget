@@ -11,7 +11,7 @@ il modello, sulle sole descrizioni.
 Il parser dichiara in ``_ce_da_dettagliare`` ogni mastro che non sa ripartire, con le sue
 foglie (``albero``): si scende nei conti solo dove i figli sommano al padre al centesimo, la
 stessa regola di sempre ("la profondita' propone, il totale decide"). Qui le foglie vanno a
-Qwen con il prompt dei conti del percorso snello (``lettura.percorsi_dei_conti``) e il
+Qwen con il prompt dei conti dell'importatore (``lettura.percorsi_dei_conti``) e il
 percorso si traduce con ``percorsi.campo_da_percorso``. Una foglia si accetta solo se la voce
 e' una sotto-voce dello STESSO aggregato: il modello non porta massa fuori dal personale, non
 inventa importi e non tocca l'aggregato. Cio' che non spiega resta a

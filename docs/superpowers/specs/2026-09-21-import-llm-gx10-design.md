@@ -170,3 +170,6 @@ dirotta ogni client su gx10, `temperature=0`:
 ## Lavoro
 
 Codice su un branch dedicato (`feat/import-llm-gx10`); questa spec su `main`.
+
+> **Superato (2026-11-23):** l'indirizzo `kpsfinanciallab.w3pro.it:18443` non si usa più. L'indirizzo con cui un server
+> raggiunge gx10 sta nella credenziale Jenkins `budget-env-staging`: `docs/deployment/PRODUCTION_CONFIG.md`.

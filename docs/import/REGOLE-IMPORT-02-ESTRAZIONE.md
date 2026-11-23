@@ -1499,7 +1499,7 @@ interruttori (2026-11-11).*
 (`pdf_importer._ripiego_classico_acceso`). Quando l'importatore non adotta un documento, o non è stato tentato, il motivo
 si dichiara sempre in `validation_report["import_snello"]["ripiego_classico"]` (`usato`, `motivo`, da
 `_motivo_ripiego_classico`), acceso o spento. Spento, il documento non passa all'importatore classico: esce con un
-`PDFImportError` («percorso classico spento (IMPORT_RIPIEGO_CLASSICO=0) e il percorso snello non ha adottato il
+`PDFImportError` («percorso classico spento (IMPORT_RIPIEGO_CLASSICO=0) e l'importatore non ha adottato il
 documento (motivo)», testo del messaggio nel codice) prima di salvare qualunque cosa. Conta solo con l'importatore di
 default: con `IMPORT_MOTORE=classico`
 non ha effetto. È l'interruttore dei giri di misura «a classico spento»: dice quali documenti si reggono solo sul

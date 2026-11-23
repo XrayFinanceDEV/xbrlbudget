@@ -393,7 +393,7 @@ def _tentativo_classico(file_path: str, ocr_text: str | None = None) -> dict:
 def _prova_fonti(file_path: str) -> dict | None:
     """Le prove incrociate sui totali stampati del vecchio importatore che non chiamano alcun
     modello (``extract_deterministic_source_candidates``: percorsi di legge, subtotali di legge,
-    mastri fisici AGO). Prima di questo il percorso snello non le provava, e un documento che il
+    mastri fisici AGO). Prima di questo l'importatore non le provava, e un documento che il
     vecchio importatore leggeva a zero chiamate andava al modello. Stesse regole di adozione."""
     from importers.source_reconciliation import extract_deterministic_source_candidates
 

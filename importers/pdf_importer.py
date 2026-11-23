@@ -95,14 +95,18 @@ _SBILANCIO_MASSIMO_QUOTA = Decimal("0.5")
 _QUOTA_MINIMA_TOTALE_STAMPATO = Decimal("0.25")
 
 
-def _rifiuta_lettura_non_riuscita(file_path: str, qd) -> None:
+def _rifiuta_lettura_non_riuscita(file_path: str, qd, income_data=None) -> str | None:
     """Uno sbilancio oltre la meta' del totale attivo stampato (o, senza un totale stampato credibile, del lato piu'
     grande letto) e' una lettura fallita: manca meta' del bilancio o piu', e Rettifiche non e' lo strumento per
     ricostruirlo (budget_1786: 105 milioni di sbilancio su un attivo di circa 9). Si rifiuta col motivo, invece di
     salvare numeri senza senso. Uno sbilancio piu' piccolo resta importato con l'avviso, come sempre.
     Lo sbilancio si misura sui totali col loro segno: un passivo letto negativo (il meno stampato davanti alle
     passivita' e preso per un saldo) e' una lettura sbagliata, e togliergli il segno ne nasconderebbe lo sbilancio
-    vero - un attivo di 100 e un passivo di -60 non quadrano di 40 ma di 160."""
+    vero - un attivo di 100 e un passivo di -60 non quadrano di 40 ma di 160.
+
+    Eccezione (proprietario, 2026-11-23): se il documento stampa un totale dei costi della produzione piu' alto
+    delle voci lette e quella differenza riporta lo sbilancio sotto la soglia, non si rifiuta: restituisce l'avviso
+    da mostrare all'utente (None quando non c'e' nulla da dire)."""
     att, pas = Decimal(qd.totale_attivo or 0), Decimal(qd.totale_passivo or 0)
     sbilancio = abs(att - pas)
     letto = max(abs(att), abs(pas))
@@ -114,8 +118,22 @@ def _rifiuta_lettura_non_riuscita(file_path: str, qd) -> None:
             base = Decimal(stampato)
     except Exception:
         pass
+    nascosti = _costi_produzione_non_mostrati(file_path, income_data) if income_data else None
+    avviso = None
+    # l'avviso solo se quei costi spiegano lo sbilancio (aggiungerli lo riduce), mai su un divario estraneo
+    if nascosti is not None and abs(att - pas + nascosti[2]) < sbilancio:
+        stampato, letto, differenza = nascosti
+        avviso = ("COSTI DELLA PRODUZIONE NON DETTAGLIATI: il documento stampa un totale dei costi della produzione "
+                  f"(B) di €{_euro_it(stampato)}, ma le voci lette sommano €{_euro_it(letto)}: "
+                  f"€{_euro_it(differenza)} di costi non hanno una riga nel documento (o non sono stati letti) e "
+                  "lo sbilancio ne deriva. Inserire quei costi nelle loro voci in Rettifiche.")
     if base <= 0 or sbilancio <= _SBILANCIO_MASSIMO_QUOTA * base:
-        return
+        return avviso
+    if avviso is not None and abs(att - pas + nascosti[2]) <= _SBILANCIO_MASSIMO_QUOTA * base:
+        # Decisione del proprietario (2026-11-23, «per ora importiamo con eccezione»): lo sbilancio e' spiegato
+        # da costi che il documento mette nel totale di B senza stamparne le righe (budget_1790). Si importa con
+        # lo sbilancio dichiarato e l'avviso coi numeri stampati, mai un tappo: la ripartizione e' dell'utente.
+        return avviso
     negativo = _totale_attivo_stampato_negativo(file_path)
     if negativo is not None:
         # budget_1810: una colonna senza saldi (conti azzerati, restano solo i fondi) stampa un totale attivo
@@ -150,6 +168,40 @@ def _totale_attivo_stampato_negativo(file_path: str) -> Decimal | None:
     if not m:
         return None
     return Decimal((m.group("pre") or m.group("post")).replace(".", "").replace(",", "."))
+
+
+_TOTALE_COSTI_PRODUZIONE = re.compile(
+    r"totale\s+costi\s+della\s+produzione\s*(?:\(\s*b\s*\))?\s*:?\s*(?P<v>\d{1,3}(?:\.\d{3})*(?:,\d{2})?)(?![\d,])",
+    re.I)
+_CAMPI_COSTI_PRODUZIONE = ("ce05", "ce06", "ce07", "ce08", "ce09", "ce10", "ce11", "ce12")
+
+
+def _costi_produzione_non_mostrati(file_path: str, income_data) -> tuple[Decimal, Decimal, Decimal] | None:
+    """(totale B stampato, somma delle voci B lette, differenza) quando il documento stampa un totale dei costi della
+    produzione piu' alto delle voci lette; altrimenti None. Lo schema «BILANCIO PER FORMULA» (budget_1772/1774/1790)
+    stampa il totale di B ma solo tre delle sue righe: le altre sono nel totale e non compaiono."""
+    try:
+        import fitz
+        with fitz.open(file_path) as doc:
+            testo = "\n".join(p.get_text() for p in doc)
+    except Exception:
+        return None
+    m = _TOTALE_COSTI_PRODUZIONE.search(testo)
+    if not m:
+        return None
+    stampato = Decimal(m.group("v").replace(".", "").replace(",", "."))
+    letto = Decimal(0)
+    for pref in _CAMPI_COSTI_PRODUZIONE:
+        aggregato = [k for k in (income_data or {}) if k.split("_")[0] == pref]
+        if aggregato:
+            letto += sum((Decimal(income_data[k] or 0) for k in aggregato), Decimal(0))
+        else:
+            letto += sum((Decimal(v or 0) for k, v in (income_data or {}).items()
+                          if re.fullmatch(pref + r"[a-z]", k.split("_")[0])), Decimal(0))
+    differenza = stampato - letto
+    if differenza <= 0:
+        return None
+    return stampato, letto, differenza
 
 
 def _rifiuta_passivo_non_letto(bs) -> None:
@@ -2591,7 +2643,9 @@ def import_pdf_balance_sheet(
                         "Importazione non salvata: nessun dato contabile "
                         f"estratto dal documento ({reason})"
                     )
-                _rifiuta_lettura_non_riuscita(file_path, _qd)
+                _eccezione = _rifiuta_lettura_non_riuscita(file_path, _qd, income_data)
+                if _eccezione and _eccezione not in sc_quadratura_warnings:
+                    sc_quadratura_warnings.append(_eccezione)
                 # Sbilancio, mismatch CE/SP o plug mascherato: importabile e
                 # correggibile in Rettifiche. Allinea finalmente il codice a
                 # quanto CLAUDE.md gia' afferma per la rotta C ("Trial-balance

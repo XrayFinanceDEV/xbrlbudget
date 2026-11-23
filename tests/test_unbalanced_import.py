@@ -310,3 +310,61 @@ def test_un_passivo_letto_negativo_non_nasconde_lo_sbilancio(monkeypatch):
         pi._rifiuta_lettura_non_riuscita("x.pdf", SimpleNamespace(totale_attivo=Decimal("100000"), totale_passivo=Decimal("-60000")))
     # lo stesso documento con il passivo letto col segno giusto resta uno sbilancio da Rettifiche
     pi._rifiuta_lettura_non_riuscita("x.pdf", SimpleNamespace(totale_attivo=Decimal("100000"), totale_passivo=Decimal("60000")))
+
+
+def _pdf_con_testo(tmp_path, testo):
+    import fitz
+    pdf = tmp_path / "doc.pdf"
+    doc = fitz.open()
+    doc.new_page().insert_text((50, 72), testo)
+    doc.save(pdf)
+    return str(pdf)
+
+
+def test_costi_della_produzione_senza_righe_importano_con_eccezione(tmp_path, monkeypatch):
+    # Decisione del proprietario (2026-11-23), budget_1790 (cifre inventate): il totale di B stampato comprende
+    # righe che il documento non mostra; lo sbilancio e' quella differenza. Si importa con l'avviso, mai un tappo.
+    from types import SimpleNamespace
+    from importers import pdf_importer as pi
+    from importers.import_snello import verifica
+
+    monkeypatch.setattr(verifica, "totali_stampati", lambda *_a, **_k: {"totale_attivo": Decimal("100000")})
+    pdf = _pdf_con_testo(tmp_path, "Totale Costi della produzione (B)\n500.000\nDifferenza (A - B)\n30.000")
+    ce = {"ce01_ricavi_vendite": Decimal("530000"), "ce05_materie_prime": Decimal("250000"),
+          "ce06_servizi": Decimal("50000"), "ce07_godimento_beni": Decimal("20000")}   # B letto 320.000
+    qd = SimpleNamespace(totale_attivo=Decimal("100000"), totale_passivo=Decimal("280100"))
+    avviso = pi._rifiuta_lettura_non_riuscita(pdf, qd, ce)
+    assert avviso.startswith("COSTI DELLA PRODUZIONE NON DETTAGLIATI")
+    assert "500.000" in avviso and "320.000" in avviso and "180.000" in avviso
+
+    # sotto la soglia l'avviso c'e' lo stesso: lo sbilancio e' spiegato dagli stessi costi
+    ce_quasi = dict(ce, ce08_costi_personale=Decimal("140000"))            # B letto 460.000, 40.000 senza riga
+    qd_piccolo = SimpleNamespace(totale_attivo=Decimal("100000"), totale_passivo=Decimal("140000"))
+    assert pi._rifiuta_lettura_non_riuscita(pdf, qd_piccolo, ce_quasi).startswith("COSTI DELLA PRODUZIONE")
+
+
+def test_costi_non_mostrati_che_non_spiegano_lo_sbilancio_restano_un_rifiuto(tmp_path, monkeypatch):
+    import pytest
+    from types import SimpleNamespace
+    from importers import pdf_importer as pi
+    from importers.import_snello import verifica
+
+    monkeypatch.setattr(verifica, "totali_stampati", lambda *_a, **_k: {"totale_attivo": Decimal("100000")})
+    pdf = _pdf_con_testo(tmp_path, "Totale Costi della produzione (B)\n330.000")
+    ce = {"ce05_materie_prime": Decimal("320000")}                        # 10.000 non mostrati
+    qd = SimpleNamespace(totale_attivo=Decimal("100000"), totale_passivo=Decimal("280000"))
+    with pytest.raises(pi.PDFImportError, match="Lettura non riuscita"):
+        pi._rifiuta_lettura_non_riuscita(pdf, qd, ce)
+
+
+def test_costi_non_mostrati_che_peggiorano_lo_sbilancio_non_danno_l_avviso(tmp_path, monkeypatch):
+    from types import SimpleNamespace
+    from importers import pdf_importer as pi
+    from importers.import_snello import verifica
+
+    monkeypatch.setattr(verifica, "totali_stampati", lambda *_a, **_k: {"totale_attivo": Decimal("100000")})
+    pdf = _pdf_con_testo(tmp_path, "Totale Costi della produzione (B)\n350.000")
+    ce = {"ce05_materie_prime": Decimal("320000")}
+    # passivo letto sotto l'attivo: altri costi abbasserebbero ancora l'utile e il passivo, peggiorando il divario
+    qd = SimpleNamespace(totale_attivo=Decimal("100000"), totale_passivo=Decimal("90000"))
+    assert pi._rifiuta_lettura_non_riuscita(pdf, qd, ce) is None

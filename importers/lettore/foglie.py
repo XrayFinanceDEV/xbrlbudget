@@ -644,6 +644,26 @@ def _antenati_verificati(r: Riga, per_id: dict[str, Riga]) -> tuple[str, ...]:
 
 _DI_CUI = re.compile(r"^[-\u2013\s]*\(?di cui\b")
 
+# «*** TOTALE COSTI», «*** TOTALE RICAVI»: il totale stampato che chiude un blocco del conto economico a colonna unica
+_TOTALE_DEL_VERSO = re.compile(r"\btotale\s+(costi|ricavi)\b")
+
+
+def _verso_dal_totale(r: Riga, per_id: dict[str, Riga]) -> str | None:
+    """Il verso di un conto del CE a colonna unica dal totale stampato che chiude il suo blocco: risalendo i padri, il
+    primo «totale costi» o «totale ricavi», raggiunto con un legame verificato dalla somma. E' la stessa regola delle
+    contrapposte, dove il lato lo decide la colonna e non la descrizione: un conto di costo stampato fra i ricavi
+    (un costo con saldo avere, «Acqua» sotto «TOTALE RICAVI», 1705) e' nella somma dei ricavi, e contarlo fra i
+    costi spostava l'utile del doppio del suo importo. None se nessun totale cosi' chiude la riga."""
+    corrente, visti = r, set()
+    while corrente.padre and corrente.padre in per_id and corrente.padre not in visti:
+        visti.add(corrente.padre)
+        padre = per_id[corrente.padre]
+        m = _TOTALE_DEL_VERSO.search(_norm(padre.etichetta))
+        if m:
+            return ("costo" if m.group(1) == "costi" else "ricavo") if corrente.padre_verificato else None
+        corrente = padre
+    return None
+
 
 # Una voce di legge stampata sulla riga della sua lettera madre («C) Proventi e oneri finanziari - 17) Interessi»,
 # Fase 5, F11: 1434, 1433): l'enumeratore arabo dopo la lettera dice che la riga e' la voce, non il sottototale.
@@ -964,7 +984,7 @@ def _foglie_grezze(doc: Documento, colonna: int) -> list[Foglia]:
         verso = _verso_ce(r, campo)
         if verso is None and r.sezione == "CE" and r.lato == "U":
             cella = _cella(doc, r, col)
-            verso = {"D": "costo", "A": "ricavo"}.get(cella.marcatore or "")
+            verso = {"D": "costo", "A": "ricavo"}.get(cella.marcatore or "") or _verso_dal_totale(r, per_id)
         v = _importo(doc, r, colonna, per_id, lato_sp, verso)
         if v is None or v == _ZERO:
             continue

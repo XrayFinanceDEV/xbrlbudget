@@ -1199,3 +1199,18 @@ def test_un_conto_del_ce_con_perdita_o_utile_nel_nome_non_e_il_risultato():
     assert _e_controllo(replace(conto, codice="4308", etichetta="C) Proventi e oneri finanziari"))
     assert _e_controllo(replace(conto, codice="", etichetta="Differenza tra valore e costi della produzione"))
     assert _e_controllo(replace(conto, codice="53.01.99", etichetta="Totale proventi diversi"))
+
+
+def test_verso_dal_totale_stampato_del_blocco_su_colonna_unica(tmp_path):
+    # Situazione economica a colonna unica: un conto di costo con saldo avere stampato fra i ricavi («Acqua» sotto
+    # «TOTALE RICAVI», 1705) e' un ricavo: il totale stampato lo somma li'. Cifre inventate.
+    voci = [(50, 100, "CONTO ECONOMICO")] + _righe(140, [
+        ("Materie prime", "1.100,00"), ("Servizi vari", "2.300,00"), ("Personale", "3.050,00"),
+        ("TOTALE COSTI", "6.450,00"),
+        ("Vendite prodotti", "9.000,00"), ("Fitti attivi", "500,00"), ("Acqua", "40,00"),
+        ("TOTALE RICAVI", "9.540,00")])
+    doc = _doc(tmp_path, voci)
+    foglie = _per_etichetta(f for f in foglie_contabili(doc, 0) if f.sezione == "CE")
+    assert {foglie[e].verso_ce for e in ("Materie prime", "Servizi vari", "Personale")} == {"costo"}
+    assert {foglie[e].verso_ce for e in ("Vendite prodotti", "Fitti attivi", "Acqua")} == {"ricavo"}
+    assert foglie["Acqua"].importo == Decimal("40.00")

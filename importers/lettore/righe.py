@@ -214,18 +214,20 @@ def _celle_del_lato(parole: list[Parola], colonne: list[Colonna], lato: str, pag
                     intere: frozenset[int] = frozenset(),
                     marcatori: frozenset[int] = frozenset(),
                     negativi: frozenset[str] = frozenset(),
-                    segni_colonna: frozenset[tuple[int, float]] = frozenset()) -> tuple[dict[int, Importo], list[Parola]]:
+                    segni_colonna: frozenset[tuple[int, float]] = frozenset(),
+                    senza_migliaia: frozenset[int] = frozenset()) -> tuple[dict[int, Importo], list[Parola]]:
     """(celle per colonna, parole dell'etichetta). Un importo e' una cella solo nella sua colonna e sul suo
     lato; fuori colonna, seguito da una durata («12 mesi») o dentro una frase dopo una valuta («euro 516,46
     di valore unitario», o in un'anagrafica col capitale sociale) torna nell'etichetta. Un anno nudo su una
     riga senza altri importi resta testo. Due importi nella stessa colonna: la cella non si legge. La valuta
     davanti a una cella, o in coda all'etichetta, si toglie. In una colonna di `marcatori` il D/A dopo l'importo ne
     e' il segno e lascia l'etichetta."""
-    trovati = [_in_colonna(p, colonne, intere) for p in parole]
+    trovati = [_in_colonna(p, colonne, intere, senza_migliaia) for p in parole]
     for i, p in enumerate(parole[:-1]):
         # l'importo seguito da un rimando di nota («46.078 (1)») sta nella colonna dove il rimando la chiude
         if trovati[i] is None and _rimando_di_nota(parole, i + 1):
-            trovati[i] = _in_colonna(Parola(p.x0, p.y0, parole[i + 1].x1, p.y1, p.testo), colonne, intere)
+            trovati[i] = _in_colonna(Parola(p.x0, p.y0, parole[i + 1].x1, p.y1, p.testo), colonne, intere,
+                                     senza_migliaia)
     # un importo solo sulla riga, fuori dalla tolleranza di ogni colonna ma vicino a una sola di esse, e' una cella
     # di quella colonna: un importo riscritto a mano in un altro carattere (1772) finiva nell'etichetta, e la voce
     # restava senza importo
@@ -280,6 +282,9 @@ def _celle_del_lato(parole: list[Parola], colonne: list[Colonna], lato: str, pag
             testo.append(i)
             continue
         imp, c = trovato
+        # la cella della gemella e' una cella della sua colonna, stampata a un'altra x (`lati.confini_per_pagina`)
+        if c.gemella_di is not None:
+            c = next(k for k in colonne if k.indice == c.gemella_di)
         sedi.setdefault(c.indice, []).append(p)
         stampato = stampati.get(p, p.testo)
         if i - 1 in meno_davanti:
@@ -584,6 +589,7 @@ class _Lettura:
     marcatori: frozenset[int] = frozenset()
     sezioni_lati: dict[tuple[int, float, str], str] = field(default_factory=dict)
     segni_colonna: frozenset[tuple[int, float]] = frozenset()
+    senza_migliaia: frozenset[int] = frozenset()
 
 
 def _pezzi_della_riga(r: RigaFisica, sezione: str, lettura: _Lettura, forme: list[FormaCodice],
@@ -599,7 +605,8 @@ def _pezzi_della_riga(r: RigaFisica, sezione: str, lettura: _Lettura, forme: lis
         if not parole:
             continue
         celle, testo = _celle_del_lato(parole, lettura.colonne, lato, r.pagina, avvisi, stampati, lettura.intere,
-                                       lettura.marcatori, lettura.negativi, lettura.segni_colonna)
+                                       lettura.marcatori, lettura.negativi, lettura.segni_colonna,
+                                       lettura.senza_migliaia)
         _segni_fuori_profilo(celle, lettura.colonne, lettura.negativi, r.pagina, avvisi)
         # i filetti verticali in testa e in coda al lato («| 303.01000 RISERVE DI RIVALUTAZIONE |», budget_375) non
         # sono testo della riga: nascondono il codice e, da soli, fanno una riga vuota
@@ -681,8 +688,10 @@ def _letture(righe: list[RigaFisica], profilo: Profilo, colonne_tabelle: list[li
             colonne = profilo.colonne
             intere = profilo.intere if profilo.intere is not None else \
                 frozenset(i for i, d in profilo.decimali.items() if d is False)
-            lettura = _Lettura(parte, None, colonne, profilo.confine, intere, profilo.negativi,
-                               profilo.marcatori, profilo.sezioni_lati, profilo.segni_colonna)
+            confine = profilo.confine_di(righe[0].pagina) if righe else profilo.confine
+            lettura = _Lettura(parte, None, colonne, confine, intere, profilo.negativi,
+                               profilo.marcatori, profilo.sezioni_lati, profilo.segni_colonna,
+                               profilo.senza_migliaia)
         else:
             colonne = colonne_tabelle[tabella] if tabella is not None else []
             # gli interi in colonna dove gli importi della tabella non hanno decimali («(311)», budget_255 p26), o

@@ -65,6 +65,9 @@ class Colonna:
     inizio: date | None
     mesi: int | None             # da inizio..fine, o da gennaio se l'inizio non e' stampato
     corrente: bool               # la colonna-esercizio piu' recente
+    # La stessa colonna stampata a un'altra x su altre pagine (`lati.confini_per_pagina`, ruolo "gemella"): le sue
+    # celle si leggono come celle della colonna `gemella_di`
+    gemella_di: int | None = None
 
 
 def colonna_di(x_destra: float, colonne: list[Colonna]) -> Colonna | None:

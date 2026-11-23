@@ -25,7 +25,7 @@ from importers.lettore._ereditati import (
 from importers.lettore.colonne import Colonna, _e_riga_testata, colonna_di, colonne_documento, completa_periodi
 from importers.lettore.geometria import Parola, RigaFisica
 from importers.lettore.importi import Importo, leggi_importo
-from importers.lettore.lati import assegna_lati, confine_ammesso
+from importers.lettore.lati import assegna_lati, confine_ammesso, confini_per_pagina
 
 _X0_MINIMO = 150.0          # come `colonne._in_colonna`
 _ALTEZZA_PAGINA = 842.0     # A4 verticale, se chi chiama non da' l'altezza della pagina
@@ -122,6 +122,16 @@ class Profilo:
     # intero nudo letto come importo in una colonna che stampa anche i centesimi sposterebbe quei conteggi su ogni
     # documento; a 1540 bastano le celle (le coppie le trova gia').
     intere: frozenset[int] | None = None
+    # pagina -> x del confine, dove il confine cambia da una pagina all'altra (`lati.confini_per_pagina`); `confine`
+    # resta quello della prima pagina, e dice che il documento ha due lati
+    confini: dict[int, float] = field(default_factory=dict)
+    # le colonne che non stampano mai il punto delle migliaia («123456,7», un export da foglio di calcolo): li' un
+    # intero nudo di qualunque lunghezza («4821») e' un importo (`_colonne_senza_migliaia`)
+    senza_migliaia: frozenset[int] = frozenset()
+
+    def confine_di(self, pagina: int) -> float | None:
+        """Il confine fra i lati sulla pagina."""
+        return self.confini.get(pagina, self.confine)
 
 
 @dataclass(frozen=True)
@@ -144,21 +154,24 @@ def _norm(testo: str) -> str:
     return re.sub(r"\s+", " ", testo).strip().casefold()
 
 
-def _in_colonna(p: Parola, colonne: list[Colonna], intere: frozenset[int] = frozenset()
-                ) -> tuple[Importo, Colonna] | None:
+def _in_colonna(p: Parola, colonne: list[Colonna], intere: frozenset[int] = frozenset(),
+                senza_migliaia: frozenset[int] = frozenset()) -> tuple[Importo, Colonna] | None:
     """L'importo e la sua colonna. Un intero nudo («0», «-1», «(646)» dei prospetti resi da XBRL, decisione R6
-    rivista) conta solo in una colonna di `intere`; fuori resta testo."""
+    rivista) conta solo in una colonna di `intere`, fino a tre cifre, o di `senza_migliaia`, di qualunque
+    lunghezza ma non zero; fuori resta testo."""
     if p.x0 <= _X0_MINIMO:
         return None
     imp = leggi_importo(p.testo)
     if imp is not None:
         c = colonna_di(p.x1, colonne)
         return (imp, c) if c is not None else None
-    # una colonna che stampa le migliaia col punto non stampa «1904217»: solo fino a tre cifre
-    if not intere or not _INTERO.match(p.testo) or len(p.testo.strip("()-")) > 3:
+    if not (intere or senza_migliaia) or not _INTERO.match(p.testo):
         return None
     c = colonna_di(p.x1, colonne)
-    if c is None or c.indice not in intere:
+    # una colonna che stampa le migliaia col punto non stampa «1904217»: solo fino a tre cifre
+    # lo zero nudo resta delle sole `intere`: «Attivita' 0» e' un titolo, non una voce a zero (COLOMBO)
+    if c is None or not ((c.indice in senza_migliaia and p.testo.strip("()-") != "0")
+                         or (c.indice in intere and len(p.testo.strip("()-")) <= 3)):
         return None
     v = Decimal(p.testo.strip("()-"))
     v = -v if p.testo.startswith(("(", "-")) or p.testo.endswith("-") else v
@@ -217,6 +230,24 @@ def _colonne_intere_di_fatto(righe: list[RigaFisica], colonne: list[Colonna]) ->
             if trovato is not None and trovato[0].forma != "zero":
                 conti[trovato[1].indice]["," in p.testo] += 1
     return frozenset(i for i, (senza, con) in conti.items() if intera_di_fatto(senza, con))
+
+
+# Le colonne senza punto delle migliaia: almeno tanti importi da mille in su, e nessuno col punto.
+_MIN_IMPORTI_SENZA_MIGLIAIA = 10
+
+
+def _colonne_senza_migliaia(righe: list[RigaFisica], colonne: list[Colonna]) -> frozenset[int]:
+    """Le colonne i cui importi da mille in su non hanno mai il punto delle migliaia («123456,7», «2345678,91»: un
+    export da foglio di calcolo stampato in PDF, 1714), su almeno `_MIN_IMPORTI_SENZA_MIGLIAIA` importi. Li' la
+    cifra intera stampata senza centesimi («4821», «12000») e' un importo come le altre: il foglio toglie gli zeri
+    dei decimali, non il punto. Dove il punto c'e', un intero lungo resta un codice o un anno (`_in_colonna`)."""
+    conti: dict[int, list[int]] = {c.indice: [0, 0] for c in colonne}
+    for r in righe:
+        for p in r.parole:
+            trovato = _in_colonna(p, colonne)
+            if trovato is not None and abs(trovato[0].valore) >= 1000:
+                conti[trovato[1].indice]["." in p.testo] += 1
+    return frozenset(i for i, (senza, con) in conti.items() if con == 0 and senza >= _MIN_IMPORTI_SENZA_MIGLIAIA)
 
 
 def intera_di_fatto(senza: int, con: int) -> bool:
@@ -447,13 +478,15 @@ def _sezioni_dalle_chiusure(pagine: list[list[RigaFisica]], colonne: list[Colonn
 
 
 def _sezioni_dei_lati(pagine: list[list[RigaFisica]], colonne: list[Colonna],
-                      confine: float) -> dict[tuple[int, float, str], str]:
+                      confine: float, confini: dict[int, float] | None = None
+                      ) -> dict[tuple[int, float, str], str]:
     """Due tabelle affiancate (1426: lo stato patrimoniale a sinistra, «CE - Schema Ridotto» a destra): in una
     pagina dove ogni meta' stampa il suo titolo, ciascuna ha la sua sezione. Con un titolo in una meta' sola il
     titolo vale per tutta la riga, come per un documento a una tabella (1430: i costi a sinistra e i ricavi a
     destra del conto economico)."""
     def meta(r: RigaFisica, lato: str) -> RigaFisica:
-        return RigaFisica(r.pagina, r.y, [p for p in r.parole if ((p.x0 + p.x1) / 2 < confine) == (lato == "L")])
+        x = (confini or {}).get(r.pagina, confine)
+        return RigaFisica(r.pagina, r.y, [p for p in r.parole if ((p.x0 + p.x1) / 2 < x) == (lato == "L")])
 
     per_lato = {lato: _sezioni([[meta(r, lato) for r in rr] for rr in pagine], colonne, []) for lato in ("L", "R")}
     out: dict[tuple[int, float, str], str] = {}
@@ -819,8 +852,9 @@ def _sagoma(token: str) -> str:
     return re.sub(r"[A-Za-z]", "A", re.sub(r"\d", "9", token))
 
 
-def _gruppi(r: RigaFisica, confine: float | None) -> dict[str, list[Parola]]:
+def _gruppi(r: RigaFisica, confine: float | None, confini: dict[int, float] | None = None) -> dict[str, list[Parola]]:
     """Le parole della riga per lato, come le divide `righe._pezzi_della_riga`."""
+    confine = (confini or {}).get(r.pagina, confine)
     if confine is None:
         return {"U": list(r.parole)}
     return {"L": [p for p in r.parole if (p.x0 + p.x1) / 2 < confine],
@@ -873,10 +907,11 @@ def senza_filetti(parole: list[Parola]) -> list[Parola]:
     return parole[i:j]
 
 
-def _candidati(righe: list[RigaFisica], colonne: list[Colonna], confine: float | None) -> list[_Candidato]:
+def _candidati(righe: list[RigaFisica], colonne: list[Colonna], confine: float | None,
+               confini: dict[int, float] | None = None) -> list[_Candidato]:
     out = []
     for r in righe:
-        for lato, parole in _gruppi(r, confine).items():
+        for lato, parole in _gruppi(r, confine, confini).items():
             celle = [p for p in parole if (t := _in_colonna(p, colonne)) is not None
                      and (confine is None or t[1].lato == lato)]
             testo = senza_filetti([p for p in parole if p not in celle])
@@ -1195,7 +1230,18 @@ def profilo_documento(righe: list[RigaFisica], *, altezze: dict[int, float] | No
 
     tipo_parole, voci, quota, perche_parole = _parole_del_tipo(prospetto, colonne)
     confine = confine_ammesso(prospetto, colonne)
-    assegna_lati(colonne, confine)
+    per_pagina = confini_per_pagina(prospetto, colonne) if confine is None else None
+    confini: dict[int, float] = {}
+    if per_pagina is not None:
+        confini = per_pagina.confini
+        confine = confini[min(confini)]
+        for gemella, di in per_pagina.gemelle.items():
+            colonne[gemella].ruolo, colonne[gemella].gemella_di = "gemella", di
+        avvisi.append("confine fra i lati diverso da pagina a pagina ("
+                      + ", ".join(f"p{n} x={x:.1f}" for n, x in sorted(confini.items())) + ")"
+                      + "".join(f"; la colonna {g + 1} e' la colonna {d + 1} spostata"
+                                for g, d in sorted(per_pagina.gemelle.items())))
+    assegna_lati(colonne, confine, per_pagina.lati if per_pagina is not None else None)
     # i titoli del documento stanno anche fuori dal prospetto e nei margini ripetuti; mai nella nota
     completa_periodi(colonne, [r for rr in pagine_tutte for r in rr if parti[id(r)] == "prospetto"],
                      [r for rr in pagine_tutte for r in rr if parti[id(r)] != "nota"], avvisi)
@@ -1203,7 +1249,8 @@ def profilo_documento(righe: list[RigaFisica], *, altezze: dict[int, float] | No
     if tipo_parole is not None:
         tipo, perche = tipo_parole, "parole"
     elif confine is not None:
-        tipo, perche = "contrapposte", f"geometria: due lati simmetrici, confine a x={confine:.1f}"
+        tipo, perche = "contrapposte", (f"geometria: due lati simmetrici, confine a x={confine:.1f}" if not confini
+                                        else "geometria: due lati simmetrici, confine per pagina")
     elif ruoli & _RUOLI_VERIFICA:
         tipo, perche = "verifica", "colonne " + "/".join(sorted(ruoli & _RUOLI_VERIFICA))
     elif quota >= _QUOTA_CODICI:
@@ -1223,10 +1270,12 @@ def profilo_documento(righe: list[RigaFisica], *, altezze: dict[int, float] | No
 
     per_riga = _sezioni(pagine, colonne, avvisi)
     sezioni_righe = {(r.pagina, r.y): s for rr, ss in zip(pagine, per_riga) for r, s in zip(rr, ss)}
-    sezioni_lati = _sezioni_dei_lati(pagine, colonne, confine) if confine is not None and not contrapposto else {}
+    sezioni_lati = _sezioni_dei_lati(pagine, colonne, confine, confini) if confine is not None and not contrapposto \
+        else {}
     segni_colonna = _segni_in_colonna(prospetto, colonne, intere)
     return Profilo(tipo, tipo_perche, colonne, confine, _negativi(prospetto, colonne, intere, segni_colonna), decimali,
-                   _forme(_candidati(prospetto, colonne, confine)), _sezioni_pagina(pagine, per_riga),
+                   _forme(_candidati(prospetto, colonne, confine, confini)), _sezioni_pagina(pagine, per_riga),
                    frozenset(margini), avvisi, contrapposto, parti_pagina, bande, tabelle, scartate, sezioni_righe,
                    parti_righe, _colonne_a_marcatore(prospetto, colonne, intere), _coppie(prospetto, colonne, intere),
-                   sezioni_lati, segni_colonna, _colonne_intere_di_fatto(prospetto, colonne))
+                   sezioni_lati, segni_colonna, _colonne_intere_di_fatto(prospetto, colonne), confini,
+                   _colonne_senza_migliaia(prospetto, colonne))

@@ -38,7 +38,12 @@ TITOLI_TABELLE_NOTA = re.compile(
     r"|suddivisione dei (?:crediti|debiti) per area geografica"
     r"|debiti assistiti da garanzie reali"
     r"|finanziamenti effettuati da soci"
-    r"|analisi delle variazioni delle rimanenze", re.I)
+    r"|analisi delle variazioni delle rimanenze"
+    r"|(?:crediti|debiti)\s*-\s*suddivisione per scadenza", re.I)
+# La tabella di nota per scadenza, «Debiti - suddivisione per scadenza al …» (budget_1712, 1713: valore, entro, oltre
+# per natura): un titolo che nessun prospetto stampa, e che si cerca anche in un estratto senza il titolo «Nota
+# integrativa» (le pagine del bilancio abbreviato stampate senza la nota attorno).
+TITOLO_SCADENZA = re.compile(r"(?:crediti|debiti)\s*-\s*suddivisione per scadenza", re.I)
 
 
 @dataclass
@@ -304,11 +309,11 @@ def pagine_tabelle_nota(pdf: str) -> list[int]:
     with fitz.open(pdf) as doc:
         pagine = list(doc)
         inizio = next((i for i, p in enumerate(pagine) if NOTA_INTEGRATIVA.search(_testo_di_testa(p))), None)
-        if inizio is None:
-            return []
-        for i in range(inizio, len(pagine)):
+        # senza il titolo della nota vale solo la tabella per scadenza, che un prospetto non stampa mai
+        titoli = TITOLI_TABELLE_NOTA if inizio is not None else TITOLO_SCADENZA
+        for i in range(inizio or 0, len(pagine)):
             testo = " ".join(pagine[i].get_text().split())
-            if TITOLI_TABELLE_NOTA.search(testo) and _importi_pagina(pagine[i]) >= MIN_IMPORTI:
+            if titoli.search(testo) and _importi_pagina(pagine[i]) >= MIN_IMPORTI:
                 out.add(i + 1)
                 if i + 1 < len(pagine) and _importi_pagina(pagine[i + 1]) >= MIN_IMPORTI:
                     out.add(i + 2)

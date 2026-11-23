@@ -661,3 +661,48 @@ def test_medio_lungo_termine_su_mastro_o_conto_di_debito_e_una_scadenza_stampata
 def test_il_nome_della_politica_non_cita_piu_il_lungo_dei_finanziamenti():
     _, report = de.reclassify_ledger_maturities({DEBT: D('10')}, [ledger_row('a', '10', '31', 'Mutuo', 'R')])
     assert report['policy'] == 'default-short-v2'
+
+
+def _pdf_debiti_per_scadenza(path, testata):
+    """Un estratto di bilancio abbreviato: lo SP con i soli debiti entro/oltre, e senza il titolo «Nota integrativa»
+    la tabella «Debiti - suddivisione per scadenza» (budget_1712). Cifre inventate."""
+    with fitz.open() as doc:
+        sp = doc.new_page()
+        for y, (testo, importo) in enumerate([("Stato patrimoniale", ""), ("D) Debiti", ""),
+                                              ("esigibili entro l'esercizio successivo", "13.000"),
+                                              ("esigibili oltre l'esercizio successivo", "7.000"),
+                                              ("Totale debiti", "20.000"), ("Totale passivo", "20.000")]):
+            sp.insert_text((40, 60 + 16 * y), testo)
+            if importo:
+                sp.insert_text((420, 60 + 16 * y), importo)
+        nota = doc.new_page()
+        nota.insert_text((40, 60), "Debiti - suddivisione per scadenza al 31-12-2025")
+        for x, parola in zip((300, 390, 480), testata):
+            nota.insert_text((x, 80), parola)
+        for y, (voce, *importi) in enumerate([("Debiti verso banche", "9.000", "2.000", "7.000"),
+                                               ("Debiti verso fornitori", "8.000", "8.000", "0"),
+                                               ("Debiti tributari", "3.000", "3.000", "0"),
+                                               ("Totale debiti", "20.000", "13.000", "7.000")]):
+            nota.insert_text((40, 100 + 16 * y), voce)
+            for x, importo in zip((330, 420, 510), importi):
+                nota.insert_text((x, 100 + 16 * y), importo)
+        doc.save(path)
+    return str(path)
+
+
+def test_tabella_per_scadenza_della_nota_dettaglia_i_debiti(tmp_path):
+    from importers.struttura_documento.analisi import pagine_tabelle_nota
+    path = _pdf_debiti_per_scadenza(tmp_path / "abbreviato.pdf",
+                                    ("Valore al 31-12-2025", "Entro l'esercizio", "Oltre l'esercizio"))
+    assert pagine_tabelle_nota(path) == [2]
+    bs = {"sp16_debiti_breve": D("13000"), "sp17_debiti_lungo": D("7000")}
+    out, _, _ = de.enrich_pdf_details(path, dict(bs), None, pagine={1, 2}, usa_llm=False)
+    assert out["sp16a_debiti_banche_breve"] == D("2000") and out["sp17a_debiti_banche_lungo"] == D("7000")
+    assert out["sp16d_debiti_fornitori_breve"] == D("8000") and out["sp16e_debiti_tributari_breve"] == D("3000")
+    assert out["sp16_debiti_breve"] == D("13000") and out["sp17_debiti_lungo"] == D("7000")
+
+
+def test_testata_con_fondo_e_netto_non_e_la_tabella_per_scadenza():
+    tokens = "Esigibili entro l'esercizio Esigibili oltre l'esercizio Valore nominale Fondo svalutazione Valore netto"
+    assert not de._testata_per_scadenza(tokens.split())
+    assert de._testata_per_scadenza("Valore al 31-12-2025 Entro l'esercizio Oltre l'esercizio".split())

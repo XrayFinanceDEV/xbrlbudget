@@ -537,3 +537,20 @@ def test_una_situazione_a_sezioni_contrapposte_resta_in_modo_conti(tmp_path, mon
         "importers.situazione_contabile_parser.is_contrapposte_file", lambda pdf: True)
     mappe = [_p(1, "prospetto_sp", "riclassificato_con_codici_ivcee", ["saldo_corrente"], ["x"])]
     assert modo_da_mappe(mappe, pdf=str(tmp_path / "qualsiasi.pdf")) == "conti"
+
+
+def test_senza_pagine_ce_dalla_vision_il_titolo_stampato_apre_il_ce():
+    """budget_1772 (cifre inventate): schema abbreviato su due pagine, la seconda con la coda del passivo
+    e tutto il CE; la vision le dava entrambe al solo SP e i ricavi non li leggeva nessuno."""
+    from importers.struttura_documento.analisi import _ce_dal_titolo
+    testi = {1: "STATO PATRIMONIALE ATTIVO\n" + "x 1.000\n" * 6,
+             2: "Totale Debiti (D)\n5.000\nCONTO ECONOMICO\nA) Valore della produzione\n"
+                "B) Costi della produzione\n2.000\n1.800\n1.060\nTotale Costi della produzione (B)\n4.860"}
+    assert _ce_dal_titolo([1, 2], [], testi) == [2]
+
+
+def test_il_titolo_senza_importi_sotto_o_un_ce_gia_trovato_non_cambiano_nulla():
+    from importers.struttura_documento.analisi import _ce_dal_titolo
+    testi = {1: "Stato patrimoniale\n" + "x 1.000\n" * 6 + "Conto economico\nsegue in allegato"}
+    assert _ce_dal_titolo([1], [], testi) == []
+    assert _ce_dal_titolo([1], [3], {1: testi[1] + "\n1.000\n2.000\n3.000"}) == [3]

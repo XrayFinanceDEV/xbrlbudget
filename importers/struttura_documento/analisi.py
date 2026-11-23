@@ -449,6 +449,22 @@ def _pagine_di_apertura(pagine_sp: list[int], pagine_ce: list[int],
     return sp, ce
 
 
+def _ce_dal_titolo(pagine_sp: list[int], pagine_ce: list[int],
+                   testi: dict[int, str]) -> list[int]:
+    """Nessuna pagina del CE dalla vision, ma una pagina dello SP porta il titolo «Conto economico» su una riga
+    sua con importi sotto: il CE si apre li', e quella pagina e le seguenti dello SP sono anche pagine del CE
+    (budget_1772: schema abbreviato su due pagine, la seconda con la coda del passivo e tutto il CE, data dalla
+    vision al solo SP; i ricavi non li leggeva nessuno). Con un CE gia' trovato decide la vision."""
+    if pagine_ce or not pagine_sp:
+        return pagine_ce
+    for n in sorted(pagine_sp):
+        sotto = _APRE_CE.split(testi.get(n, ""), maxsplit=1)
+        if (_TITOLO_CE.search(testi.get(n, "")) and len(sotto) == 2
+                and len(_IMPORTO.findall(sotto[1])) >= _MIN_IMPORTI_PAGINA):
+            return [p for p in sorted(pagine_sp) if p >= n]
+    return pagine_ce
+
+
 def analizza_struttura(pdf: str, *, mappa_pagina_fn=None, route_hint: str | None = None) -> Struttura:
     inizio = time.monotonic()
     if e_xbrl_di_legge(pdf):
@@ -460,6 +476,11 @@ def analizza_struttura(pdf: str, *, mappa_pagina_fn=None, route_hint: str | None
     route = ROUTE_IVCEE if fonte == "xbrl_titoli" else route_da_mappe(mappe)
     pagine_sp = [m["pagina"] for m in mappe if m.get("tipo_pagina") in TIPI_SP]
     pagine_ce = [m["pagina"] for m in mappe if m.get("tipo_pagina") in TIPI_CE]
+    if pagine_sp and not pagine_ce:
+        import fitz
+        with fitz.open(pdf) as doc:
+            testi = {n: doc[n - 1].get_text() for n in range(1, doc.page_count + 1)}
+        pagine_ce = _ce_dal_titolo(pagine_sp, pagine_ce, testi)
     if pagine_sp and pagine_ce:
         import fitz
         with fitz.open(pdf) as doc:

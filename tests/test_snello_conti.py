@@ -1226,3 +1226,22 @@ def test_il_valore_della_produzione_letto_a_conti_coi_figli_resta_padre_escluso(
     assert ce["ce01_ricavi_vendite"] == D("900.00")
     assert diag["valore_produzione_non_dettagliato"] == []
     assert ["1", "CE.A", "950.00"] in diag["padri_esclusi"]
+
+
+def test_la_voce_a_esclusa_come_totale_senza_sotto_voci_torna_ai_ricavi():
+    # budget_1772 (cifre inventate): il modello esclude «A) Valore della produzione» come totale ('X')
+    foglie = [_f(1, "T", "900", "X", testo="A) Valore della produzione", sezione="ce"),
+              _f(2, "T", "600", "CE.B.6", sezione="ce"), _f(3, "T", "1500", "X", testo="Totale Costi della produzione (B)")]
+    bs, ce, diag = da_foglie(foglie)
+    assert ce["ce01_ricavi_vendite"] == D("900.00")
+    assert diag["valore_produzione_da_escluso"] == [["1", "900.00"]]
+    assert diag["escluse"] == [["3", "X", "1500.00"]]
+
+
+def test_la_voce_a_esclusa_con_le_sotto_voci_lette_resta_esclusa():
+    foglie = [_f(1, "T", "950", "X", testo="A) Valore della produzione", sezione="ce"),
+              _f(2, "T", "900", "CE.A.1", sezione="ce"), _f(3, "T", "50", "CE.A.5", sezione="ce")]
+    bs, ce, diag = da_foglie(foglie)
+    assert ce["ce01_ricavi_vendite"] == D("900.00")
+    assert diag["valore_produzione_da_escluso"] == []
+    assert ["1", "X", "950.00"] in diag["escluse"]

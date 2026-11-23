@@ -6,9 +6,11 @@ Il deploy reale è Jenkins + Docker + nginx (`Jenkinsfile`, `docker-compose.yml`
 `NEXT_PUBLIC_API_URL=""` e `frontend/lib/api.ts` cade sul ramo `/api/v1`.
 
 Il vecchio percorso Netlify — frontend su Netlify, backend su
-`kpsfinanciallab.w3pro.it:8001` — non esiste più: quell'host e quella porta non
-rispondono. Chi copiava `.env.example` o seguiva le guide configurava un backend
-morto. Questo test è la rete che impedisce a quelle stringhe di rientrare, e tiene
+`kpsfinanciallab.w3pro.it:8001` — non esiste più: quella porta non risponde. Chi
+copiava `.env.example` o seguiva le guide configurava un backend morto. L'host invece
+è tornato in uso, per altro: dal 2026-11 è il dominio con cui i VPS raggiungono gx10
+(`GX10_BASE_URL` in `docs/deployment/PRODUCTION_CONFIG.md`), quindi si vieta l'host
+sulla porta 8001, non l'host. Questo test è la rete che impedisce a quelle stringhe di rientrare, e tiene
 le affermazioni della guida corrente ancorate ai file che descrive (issue #20).
 """
 
@@ -26,7 +28,7 @@ ENV_FILES = (
     ROOT / "frontend" / ".env.example",
 )
 
-DEAD_HOST = "kpsfinanciallab.w3pro.it"
+DEAD_BACKEND = "kpsfinanciallab.w3pro.it:8001"
 DEAD_PORT = ":8001"
 NOT_CURRENT_MARKER = "NON CORRENTE"
 
@@ -37,9 +39,9 @@ def _cluster_files() -> list[Path]:
 
 @pytest.mark.parametrize("path", _cluster_files(), ids=lambda p: p.name)
 def test_nessun_riferimento_al_backend_dismesso(path: Path) -> None:
-    """Né l'host `*.w3pro.it` né la porta 8001 sopravvivono in configurazione o guide."""
+    """Né il backend `*.w3pro.it:8001` né la porta 8001 sopravvivono in configurazione o guide."""
     text = path.read_text(encoding="utf-8")
-    assert DEAD_HOST not in text, f"{path.relative_to(ROOT)} cita ancora l'host dismesso"
+    assert DEAD_BACKEND not in text, f"{path.relative_to(ROOT)} cita ancora il backend dismesso"
     assert DEAD_PORT not in text, f"{path.relative_to(ROOT)} cita ancora la porta 8001"
 
 

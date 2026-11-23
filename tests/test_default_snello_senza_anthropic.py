@@ -1,4 +1,4 @@
-"""Default di produzione (decisione del proprietario, 2026-10-16): percorso snello per tutti,
+"""Default di produzione (decisione del proprietario, 2026-10-16): importatore per tutti,
 nessun servizio Anthropic se non chiesto esplicitamente con ANTHROPIC_CONSENTITO=1."""
 import pytest
 

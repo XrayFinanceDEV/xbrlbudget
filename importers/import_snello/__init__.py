@@ -45,7 +45,7 @@ def _messaggio(e: Exception) -> str:
 
 
 class SnelloNonRiuscito(Exception):
-    """Il percorso snello non e' arrivato a un risultato utilizzabile: ``report`` dichiara fase ed
+    """L'importatore non e' arrivato a un risultato utilizzabile: ``report`` dichiara fase ed
     errore, mai un dato inventato al loro posto."""
 
     def __init__(self, report: dict, struttura=None):

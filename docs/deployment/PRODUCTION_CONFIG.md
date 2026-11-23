@@ -116,12 +116,13 @@ IMPORT_MOTORE=snello
 PDF_LLM_PROVIDER_COGE=gx10
 PDF_LLM_PROVIDER_IVCEE=gx10
 PDF_LLM_PROVIDER_DETTAGLI=gx10
-GX10_BASE_URL=https://kpsfinanciallab.w3pro.it:18443
+GX10_BASE_URL=https://<IP_PUBBLICO>:<PORTA_ESTERNA>
 GX10_API_KEY=<la chiave Bearer di vLLM su gx10>
 GX10_CONCORRENZA=3
 ```
 
-`GX10_BASE_URL` senza `/v1` (lo aggiunge il codice) e senza barra finale. La chiave sta solo in
+`GX10_BASE_URL` è l'indirizzo con cui quel server raggiunge gx10 (vedi «Verificare che gx10 sia pronto»
+qui sotto), senza `/v1` (lo aggiunge il codice) e senza barra finale. La chiave sta solo in
 quel file, mai nel repo né nei log. `ANTHROPIC_API_KEY` non serve più per importare: senza
 `ANTHROPIC_CONSENTITO=1` il backend la toglie dall'ambiente (`backend/app/main.py`), la struttura e
 la vision che la usavano si saltano o girano su gx10, e l'importatore non ripiega su Anthropic. Serve

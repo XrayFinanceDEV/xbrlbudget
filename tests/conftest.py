@@ -1,6 +1,6 @@
 """Impostazioni comuni della suite.
 
-Dal 2026-10-16 i default di produzione sono il percorso snello (``IMPORT_MOTORE`` assente =
+Dal 2026-10-16 i default di produzione sono l'importatore (``IMPORT_MOTORE`` assente =
 snello) e nessun servizio Anthropic (``ANTHROPIC_CONSENTITO`` assente = vietato, tutto su gx10).
 La suite e' stata scritta sui default di prima e simula il client Anthropic e l'importatore
 classico: qui li si richiama esplicitamente, test per test, cosi' ogni test continua a

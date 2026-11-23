@@ -1,4 +1,4 @@
-"""Le sole chiamate a Qwen del percorso snello. Risposte corte, mai un elenco di codici da cui scegliere."""
+"""Le sole chiamate a Qwen dell'importatore. Risposte corte, mai un elenco di codici da cui scegliere."""
 from __future__ import annotations
 
 import base64

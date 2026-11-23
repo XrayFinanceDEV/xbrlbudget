@@ -1,4 +1,4 @@
-"""Task 7 (Fase 3): il percorso del lettore nel percorso snello, dopo i lettori noti e prima del modello.
+"""Task 7 (Fase 3): il percorso del lettore nell'importatore, dopo i lettori noti e prima del modello.
 
 Qwen e' sempre finto; i PDF sono sintetici in tmp_path; `_importa_modello` e `deterministico.tentativo` sono
 sostituiti dove serve (nessuna rete, nessuna struttura vision)."""
@@ -201,7 +201,7 @@ def test_report_senza_etichette_ne_importi(tmp_path, monkeypatch):
 
 
 def test_fondo_oltre_il_cespite_nelle_anomalie(tmp_path, monkeypatch):
-    # l'eccedenza tagliata dal lettore arriva nelle anomalie come per il percorso snello (`conti.py`)
+    # l'eccedenza tagliata dal lettore arriva nelle anomalie come per l'importatore (`conti.py`)
     _nessun_lettore_noto(monkeypatch)
     vero = percorso.importa_col_lettore
 

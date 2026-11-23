@@ -153,7 +153,7 @@ def test_l_import_di_una_scansione_legge_le_tabelle_e_non_chiama_il_modello(tmp_
 
 
 def test_con_lo_snello_acceso_la_scansione_passa_dal_percorso_snello(tmp_path, monkeypatch):
-    """Il PDF sintetico delle tabelle MinerU e' un PDF di testo: lo legge il percorso snello
+    """Il PDF sintetico delle tabelle MinerU e' un PDF di testo: lo legge l'importatore
     come ogni altro (stessi lettori deterministici, nessun modello se quadra), invece di
     ripiegare sempre sull'importatore vecchio come quando l'OCR dava solo testo."""
     from sqlalchemy import create_engine

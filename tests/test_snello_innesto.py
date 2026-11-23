@@ -1,4 +1,4 @@
-"""Innesto del percorso snello in pdf_importer.py, dietro IMPORT_MOTORE=snello.
+"""Innesto dell'importatore in pdf_importer.py, dietro IMPORT_MOTORE=snello.
 
 Impianto identico a tests/test_provenienza_llm.py e tests/test_coge_provider.py: DB SQLite
 in memoria agganciato a pdf_importer.SessionLocal, fixture PDF di route C (RIGHE_PAREGGIO)
@@ -282,7 +282,7 @@ def test_modo_legge_passa_le_pagine_dei_dettagli_e_llm_attivo(tmp_path, monkeypa
 
 def test_ocr_source_non_tenta_il_percorso_snello(tmp_path, monkeypatch):
     """Testo da MinerU OCR (route /import/pdf-ocr): la struttura testuale non e'
-    affidabile, il percorso snello non si tenta nemmeno. Fixture route A/B che il
+    affidabile, l'importatore non parte nemmeno. Fixture route A/B che il
     parser deterministico standard_ivcee_parser legge e quadra da solo (come
     tests/test_provenienza_llm.py: nessuna chiave Anthropic necessaria), cosi' il
     resto dell'import puo' completarsi e il validation_report persistito e' leggibile."""
@@ -322,7 +322,7 @@ def test_ocr_source_non_tenta_il_percorso_snello(tmp_path, monkeypatch):
 
 
 def test_scansione_non_tenta_il_percorso_snello(tmp_path, monkeypatch):
-    """PDF scansionato (nessun testo estraibile nativo): il percorso snello non si tenta,
+    """PDF scansionato (nessun testo estraibile nativo): l'importatore non parte,
     esattamente come per una fonte OCR MinerU. Il testo OCR di instradamento e l'estrazione
     deterministica sono sostituiti con finte: la scansione reale (RapidOCR) non serve a
     isolare SOLO il comportamento del cancello is_scanned."""
@@ -412,7 +412,7 @@ def test_interruttore_non_snello_e_byte_identico_a_oggi(tmp_path, monkeypatch, v
 
 def test_successo_snello_non_rilegge_la_fonte_con_ledger_evidence(tmp_path, monkeypatch):
     # Banco del 2026-09-27: dopo un import snello quadrato in 27 s, extract_source_candidates
-    # (ledger_evidence su gx10) ne spendeva altri 560 per una prova che il percorso snello ha
+    # (ledger_evidence su gx10) ne spendeva altri 560 per una prova che l'importatore ha
     # gia' fatto. Con un risultato snello adottato la lettura delle fonti non parte.
     monkeypatch.setenv("IMPORT_MOTORE", "snello")
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
@@ -438,7 +438,7 @@ def test_successo_snello_non_rilegge_la_fonte_con_ledger_evidence(tmp_path, monk
 
 def _risultato_squadrato(scarto=D("300")):
     """Un esito 'squadrato' con un vero sbilancio attivo/passivo persistito (Task 17): nessun
-    tappo, la diagnostica dichiara lo scarto misurato dal percorso snello."""
+    tappo, la diagnostica dichiara lo scarto misurato dall'importatore."""
     bs = {"sp09_disponibilita_liquide": D("1000"), "sp11_capitale": D("1000") - scarto,
           "_plug_residual": D("0"), "_unclassified_mass": D("0")}
     ce = {}
@@ -458,7 +458,7 @@ def _risultato_squadrato_scarto_stampati():
     """Un esito 'squadrato' dove il foglio ricostruito QUADRA da solo (attivo=passivo, CE=sp13):
     lo scarto sta solo nel confronto coi totali STAMPATI dal documento (scarto_stampati). Un
     mapper.validate_balance ordinario passerebbe qui senza dire nulla - e' esattamente il caso
-    per cui l'avviso va dichiarato esplicitamente dal percorso snello (Task 17)."""
+    per cui l'avviso va dichiarato esplicitamente dall'importatore (Task 17)."""
     bs = {"sp09_disponibilita_liquide": D("1000"), "sp11_capitale": D("1000"),
           "_plug_residual": D("0"), "_unclassified_mass": D("0")}
     ce = {}
@@ -533,7 +533,7 @@ def test_squadrato_sui_soli_totali_stampati_dichiara_comunque_l_avviso(tmp_path,
 
 def test_avvisi_del_percorso_snello_senza_duplicati(tmp_path, monkeypatch):
     """Task 25 fix round 1, addizione B(b): lo stesso avviso (p.es. BILANCIO NON QUADRATO) arriva
-    da piu' fonti (validate_hierarchy e la quadratura unificata): sul percorso snello ogni avviso
+    da piu' fonti (validate_hierarchy e la quadratura unificata): sull'importatore ogni avviso
     distinto esce una volta sola."""
     monkeypatch.setenv("IMPORT_MOTORE", "snello")
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)

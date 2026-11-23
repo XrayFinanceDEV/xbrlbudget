@@ -1,4 +1,4 @@
-"""Scadenze entro/oltre nel modo "legge" del percorso snello (spike Qwen diretto, 2026-10-03).
+"""Scadenze entro/oltre nel modo "legge" dell'importatore (spike Qwen diretto, 2026-10-03).
 
 budget_597 stampa «4) debiti verso banche / esigibili entro 580.481 / esigibili oltre 641.999»:
 il prompt diceva di usare '.E'/'.O' solo per voci SENZA numero arabo, e Qwen restituiva il

@@ -897,7 +897,7 @@ def tipo_rifiuto(errore) -> dict:
 
 
 def chiamate_del_giro(g: dict) -> int | None:
-    """Chiamate al modello dichiarate dal percorso snello: letture di Qwen più quelle del percorso del lettore.
+    """Chiamate al modello dichiarate dall'importatore: letture di Qwen più quelle del percorso del lettore.
     None quando il giro non le dichiara (ripiego classico, rifiuto prima del percorso)."""
     s = _sn(g) or {}
     v = [_num(s.get("letture_chiamate")), _num(_lp(g).get("chiamate")), _num(_lp(g).get("chiamate_dettagli"))]
@@ -1011,7 +1011,7 @@ def scrivi_rapporto_corpus(cartella: Path, documenti: list[dict], sin: dict, met
          f"| Instabili fra i giri (esito, fonte, quadratura o campi del corrente) | {t['instabili']} |",
          f"| Secondi per import: mediana / somma delle mediane | {f(t['secondi_mediana'])} / {f(t['secondi_somma'])} |",
          f"| Chiamate al modello dichiarate: mediana per documento | {f(t['chiamate_mediana'])} |", "",
-         "Le chiamate sono quelle dichiarate dal percorso snello (letture di Qwen e percorso del lettore); "
+         "Le chiamate sono quelle dichiarate dall'importatore (letture di Qwen e percorso del lettore); "
          "il ripiego classico non le dichiara.", ""]
     for asse, titolo in (("lotto", "Per lotto"), ("route_expected", "Per rotta attesa (manifesto)")):
         r += [f"## {titolo}", "", "| Gruppo | Doc | Importati | Misti | Rif. attesi | Rif. errore | Rif. servizio | "

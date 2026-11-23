@@ -308,7 +308,7 @@ def _abbina_fondi(foglie: list[Foglia], classi: dict[str, Classe]) -> tuple[dict
 
 def _somma(importi: dict[str, Decimal]) -> tuple[dict, dict, list]:
     """bs, ce e le immobilizzazioni tagliate: un fondo piu' fine del lordo si netta all'aggregato, un fondo oltre
-    il cespite azzera l'aggregato e si dichiara - le regole del percorso snello (`conti.py`), mai una seconda."""
+    il cespite azzera l'aggregato e si dichiara - le regole dell'importatore (`conti.py`), mai una seconda."""
     bs, ce = percorsi.completa(netta_fondi_negativi(importi))
     return bs, ce, clamp_immobilizzazioni_negative(bs)
 

@@ -48,8 +48,8 @@ PORT=9090
                     // Variabili proprie di un server (es. lo staging): una credenziale "Secret
                     // file" 'budget-env-staging', righe KEY=VALORE, accodata a .env.docker.
                     // Questo Jenkinsfile lo usano staging E produzione: il Jenkins che non ha la
-                    // credenziale usa il .env.docker di sempre. Il percorso snello (IMPORT_MOTORE=
-                    // snello, PDF_LLM_PROVIDER_*=gx10, GX10_BASE_URL, GX10_API_KEY,
+                    // credenziale usa il .env.docker di sempre. gx10 per l'importatore
+                    // (PDF_LLM_PROVIDER_*=gx10, MINERU_*, GX10_BASE_URL, GX10_API_KEY,
                     // GX10_CONCORRENZA) si accende da li': docs/deployment/PRODUCTION_CONFIG.md.
                     try {
                         withCredentials([file(credentialsId: 'budget-env-staging', variable: 'BUDGET_ENV_EXTRA')]) {

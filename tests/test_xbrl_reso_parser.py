@@ -947,3 +947,61 @@ def test_il_totale_delle_rimanenze_si_controlla_ancora_senza_la_c_i_bis(tmp_path
                       "Totale rimanenze\n101\n100")
     r = X.estrai(_abbreviato(tmp_path, sp=sp))
     assert r["adottabile"] is False
+
+
+def _garanzie(ipoteche_banche="600", ipoteche_fornitori="-"):
+    """La tabella «Debiti assistiti da garanzie reali» per natura, come la rende la tassonomia: due
+    righe d'intestazione, il totale di ogni natura nell'ultima colonna, nessuna scadenza."""
+    return [(11, [
+        ["", "Debiti assistiti da garanzie reali", None, "Debiti non assistiti da\ngaranzie reali",
+         "Totale"],
+        [None, "Debiti assistiti da\nipoteche", "Totale debiti assistiti da\ngaranzie reali", None,
+         None],
+        ["Debiti verso banche", ipoteche_banche, ipoteche_banche, "-", "1.000"],
+        ["Debiti verso fornitori", ipoteche_fornitori, ipoteche_fornitori, "-", "700"],
+        ["Debiti tributari", "-", "-", "200", "200"],
+        ["Altri debiti", "-", "-", "100", "100"],
+        ["Totale debiti", "600", "600", "1.400", "2.000"],
+    ])]
+
+
+def test_garanzie_per_natura_a_breve_e_l_oltre_al_debito_ipotecario():
+    """budget_1798: lo schema stampa solo entro e oltre, la nota solo il totale per natura. Ogni
+    natura va a breve (nessuna scadenza stampata), e l'oltre stampato resta oltre sulla sola natura
+    il cui debito ipotecario lo eguaglia al centesimo. Cifre inventate."""
+    importi = {"sp16": D("1400"), "sp17": D("600")}
+    t = X.raccogli_tabelle(_garanzie())
+    r = X._applica_garanzie(importi, t["debiti_garanzie"])
+    assert r["applicata"] and r["oltre_a"] == "a"
+    assert importi["sp16a"] == D("400") and importi["sp17a"] == D("600")
+    assert (importi["sp16d"], importi["sp16e"], importi["sp16g"]) == (D("700"), D("200"), D("100"))
+    assert importi["sp17d"] == importi["sp17e"] == importi["sp17g"] == D("0")
+    assert importi["sp16"] == importi["sp17"] == D("0")
+
+
+@pytest.mark.parametrize("ipoteche_banche, ipoteche_fornitori", [
+    ("500", "-"),        # l'ipotecario non eguaglia l'oltre
+    ("300", "300"),      # due nature con ipoteca: l'oltre non e' di una sola
+    ("-", "-"),          # nessuna ipoteca
+])
+def test_l_oltre_non_attribuibile_lascia_i_debiti_aggregati(ipoteche_banche, ipoteche_fornitori):
+    importi = {"sp16": D("1400"), "sp17": D("600")}
+    t = X.raccogli_tabelle(_garanzie(ipoteche_banche, ipoteche_fornitori))
+    r = X._applica_garanzie(importi, t["debiti_garanzie"])
+    assert not r["applicata"] and r["motivo"] == "oltre_non_attribuibile"
+    assert importi == {"sp16": D("1400"), "sp17": D("600")}
+
+
+def test_senza_oltre_tutte_le_nature_a_breve():
+    importi = {"sp16": D("2000")}
+    t = X.raccogli_tabelle(_garanzie())
+    assert X._applica_garanzie(importi, t["debiti_garanzie"])["applicata"]
+    assert importi["sp16a"] == D("1000") and importi["sp17a"] == D("0")
+
+
+def test_garanzie_che_non_riconciliano_col_prospetto_non_si_applicano():
+    importi = {"sp16": D("1300"), "sp17": D("600")}
+    t = X.raccogli_tabelle(_garanzie())
+    r = X._applica_garanzie(importi, t["debiti_garanzie"])
+    assert r["motivo"] == "non_riconcilia_col_prospetto"
+    assert importi == {"sp16": D("1300"), "sp17": D("600")}

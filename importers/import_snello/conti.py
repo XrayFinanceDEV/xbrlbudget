@@ -416,6 +416,10 @@ def _rimanenze_per_natura(f, codice: str, diag: dict) -> str:
     return nuovo
 
 
+# la didascalia di legge della voce A del CE, col solo totale (mai «Totale valore della produzione», ne' A.1-A.5)
+_VALORE_PRODUZIONE = re.compile(r"^\s*A\s*\)\s*valore\s+della\s+produzione\b", re.I)
+
+
 def da_foglie(foglie):
     """Percorsi di legge -> campi, con una regola in piu' per il risultato d'esercizio (modo
     "conti", Task 14 2026-09-26): il corrente non entra MAI dalle righe stampate, sp13 e'
@@ -457,7 +461,8 @@ def da_foglie(foglie):
             "lato_irrisolti": [], "risultato_duplicato": [], "padri_esclusi": [],
             "risultato_precedente": [], "risultato_escluso": [], "risultato_ambiguo": None,
             "riclassificati_vecchio_parser": [], "ce_segno_forzato": [], "grezzo_sp": {},
-            "rimanenze_per_natura": []}
+            "rimanenze_per_natura": [], "valore_produzione_non_dettagliato": [],
+            "valore_produzione_da_escluso": []}
     diag["lato_corretti"] = applica_lato(foglie, diag["lato_irrisolti"])
     riclassifica_ignote(foglie, diag)
     irrisolti_ids = {r[0] for r in diag["lato_irrisolti"]}
@@ -505,6 +510,14 @@ def da_foglie(foglie):
         if f.percorso and e_risultato(f.percorso):
             diag["risultato_stampato"] = str(abs(f.valore).quantize(_C))
             continue
+        if (f.percorso == "X" and _VALORE_PRODUZIONE.match(f.testo or "")
+                and not any(q.startswith("CE.A.") for q in tutti_percorsi)):
+            # budget_1772: «A) Valore della produzione 4.9xx.xxx», unica riga di A, escluso dal modello come
+            # totale (sugli stessi schemi 1774/1790 lo stesso modello la chiama CE.A). La didascalia di legge
+            # col suo importo e senza sotto-voci lette e' la voce A: si tratta come CE.A, e la regola qui
+            # sotto la mette nei ricavi delle vendite dichiarandola.
+            diag["valore_produzione_da_escluso"].append([f.id, str(f.valore.quantize(_C))])
+            f.percorso = "CE.A"
         if f.percorso == "X":
             diag["escluse"].append([f.id, f.percorso, str(f.valore.quantize(_C))])
             continue
@@ -554,6 +567,14 @@ def da_foglie(foglie):
             continue
 
         codice = campo_di_legge(f.percorso)
+        if codice is None and f.percorso == "CE.A":
+            # «A) Valore della produzione» senza A.1-A.5 (un figlio letto lo avrebbe gia' escluso
+            # come padre, sopra): la stessa regola di da_coppie (decisione del proprietario
+            # 2026-11-19), ricavi delle vendite dichiarati. Mancava su questo percorso: uno schema
+            # abbreviato letto «a conti» (budget_1774/1790) restava coi soli costi e veniva
+            # rifiutato come lettura non riuscita.
+            codice = "ce01"
+            diag["valore_produzione_non_dettagliato"].append(str(f.valore.quantize(_C)))
         if codice is None:
             diag["non_mappati"].append([f.id, f.percorso, str(f.valore.quantize(_C))])
             continue

@@ -67,3 +67,21 @@ def test_servizi_abbreviati():
     assert classify_costi("COMP.PROF.CONSUL.AMM.VA/FISC.")[0] == "ce06"
     assert classify_costi("VIAGGI/TRASP./PARCHEG.DIV.")[0] == "ce06"
     assert classify_costi("SPESE RISTORANTI/PERNOTT. 75%")[0] == "ce06"
+
+
+def test_mastro_tributari_e_previdenza_si_legge_dai_conti():
+    """budget_1784: il mastro "DEB.TRIB.-ISTIT.PREV.SOCIALE_D12_D13" nomina due voci di legge, e
+    da specifico finiva tutto nei debiti previdenziali, IVA compresa. Si scende nei conti: IVA e
+    ritenute nei tributari, i contributi nella previdenza. Cifre inventate."""
+    assert classify_passivo("DEB.TRIB.-ISTIT.PREV.SOCIALE_D12_D13") == ("sp16g", False)
+    passivo = [
+        ("415", "DEB.TRIB.-ISTIT.PREV.SOCIALE_D12_D13", D("1000.00")),
+        ("41500012", "IVA SU VENDITE", D("600.00")),
+        ("41500020", "ERARIO C/RITENUTE EFFETTUATE", D("150.00")),
+        ("41500030", "INPS C/CONTRIBUTI", D("250.00")),
+    ]
+    assert _tags(_be_reclassify(passivo, classify_passivo)) == {
+        "sp16e": D("750.00"), "sp16f": D("250.00")}
+    # una voce sola resta specifica come prima
+    assert classify_passivo("DEBITI TRIBUTARI") == ("sp16e", True)
+    assert classify_passivo("DEBITI V/ISTITUTI DI PREVIDENZA") == ("sp16f", True)

@@ -9,6 +9,7 @@ documento accetta il confine solo con i due lati simmetrici (`confine_ammesso`).
 from __future__ import annotations
 
 import statistics
+from dataclasses import dataclass
 import unicodedata
 
 from importers.lettore.colonne import Colonna, _corrente, colonna_di
@@ -72,6 +73,104 @@ def confine_ammesso(righe: list[RigaFisica], colonne: list[Colonna]) -> float | 
     return x if x is not None and lati_simmetrici(righe, colonne, x) else None
 
 
+@dataclass(frozen=True)
+class ConfiniPerPagina:
+    confini: dict[int, float]       # pagina -> x del confine
+    lati: dict[int, str]            # indice di colonna -> "L" | "R"
+    gemelle: dict[int, int]         # indice di colonna -> indice della colonna di cui e' la gemella
+
+
+# Due confini di pagina piu' vicini di cosi' sono lo stesso confine: il documento ne avrebbe uno solo.
+_SCARTO_CONFINI = 5.0
+
+
+def confini_per_pagina(righe: list[RigaFisica], colonne: list[Colonna]) -> ConfiniPerPagina | None:
+    """Le sezioni contrapposte il cui confine si sposta da una pagina all'altra: un export da foglio di calcolo
+    stampato in PDF (1714) mette l'importo di sinistra a una x sulle pagine dello stato patrimoniale e a un'altra su
+    quelle del conto economico, e i codici di destra cominciano subito dopo. Nessun varco vale per tutto il
+    documento, ma ogni pagina ha il suo.
+
+    Su ogni pagina il confine si cerca fra le sole colonne con celle li' (`confine_dei_lati`, lati simmetrici). Si
+    accetta solo se: ogni pagina con celle in due colonne ha il suo confine; i confini non sono tutti lo stesso (allora
+    il documento ne avrebbe uno solo, e se non l'ha trovato non e' per la pagina); ogni colonna cade sempre sullo
+    stesso lato. Una pagina con le celle di una colonna sola (i ricavi finiti, a destra solo «0») prende il confine
+    della pagina piu' vicina, prima o dopo, che lascia ogni sua cella sul lato della sua colonna.
+
+    Due colonne di valori dello stesso lato, con lo stesso ruolo e lo stesso periodo, che non hanno mai celle sulla
+    stessa pagina sono una colonna sola stampata a due x: la seconda e' la gemella della prima, e le sue celle si
+    leggono nella prima (altrimenti una sembrerebbe l'esercizio precedente dell'altra)."""
+    per_pagina: dict[int, list[RigaFisica]] = {}
+    for r in righe:
+        per_pagina.setdefault(r.pagina, []).append(r)
+    celle_pagina: dict[int, dict[int, int]] = {}
+    for n, rr in per_pagina.items():
+        conti: dict[int, int] = {}
+        for r in rr:
+            for p in _celle(r, colonne):
+                if leggi_importo(p.testo).forma != "zero":
+                    i = colonna_di(p.x1, colonne).indice
+                    conti[i] = conti.get(i, 0) + 1
+        celle_pagina[n] = {i: k for i, k in conti.items() if k >= _MIN_RIGHE_PAGINA}
+    per_indice = {c.indice: c for c in colonne}
+
+    confini: dict[int, float] = {}
+    for n, usate in celle_pagina.items():
+        if len(usate) < 2:
+            continue
+        sue = [per_indice[i] for i in sorted(usate)]
+        x = confine_dei_lati(per_pagina[n], sue)
+        if x is None or not lati_simmetrici(per_pagina[n], sue, x):
+            return None
+        confini[n] = x
+    if len(confini) < 2 or max(confini.values()) - min(confini.values()) <= _SCARTO_CONFINI:
+        return None
+    lati: dict[int, str] = {}
+    for n, x in confini.items():
+        for i in celle_pagina[n]:
+            lato = "L" if per_indice[i].x_destra < x else "R"
+            if lati.setdefault(i, lato) != lato:
+                return None
+    for n, usate in celle_pagina.items():
+        if n in confini or not usate:
+            continue
+        vicine = sorted(confini, key=lambda m: (abs(m - n), m > n))
+        x = next((confini[m] for m in vicine if all(
+            i in lati and ("L" if per_indice[i].x_destra < confini[m] else "R") == lati[i] for i in usate)), None)
+        if x is None:
+            return None
+        confini[n] = x
+    if any(n not in confini for n, usate in celle_pagina.items() if usate):
+        return None
+    return ConfiniPerPagina(confini, lati, _gemelle(colonne, lati, celle_pagina))
+
+
+def _gemelle(colonne: list[Colonna], lati: dict[int, str], celle_pagina: dict[int, dict[int, int]]
+             ) -> dict[int, int]:
+    """Gemella -> colonna (vedi `confini_per_pagina`): a ogni lato la colonna di valori con piu' celle tiene il
+    proprio indice, e ogni altra dello stesso ruolo e periodo, mai sulla stessa pagina di una gia' tenuta, ne diventa
+    la gemella."""
+    pagine: dict[int, set[int]] = {}
+    for n, usate in celle_pagina.items():
+        for i in usate:
+            pagine.setdefault(i, set()).add(n)
+    totali = {i: sum(u.get(i, 0) for u in celle_pagina.values()) for i in pagine}
+    out: dict[int, int] = {}
+    for lato in ("L", "R"):
+        valori = sorted((c for c in colonne if lati.get(c.indice) == lato and c.indice in pagine
+                         and c.ruolo in _GRUPPO_RUOLO and _GRUPPO_RUOLO[c.ruolo] == "valori"),
+                        key=lambda c: (-totali[c.indice], c.x_destra))
+        tenute: list[tuple[Colonna, set[int]]] = []
+        for c in valori:
+            gemella_di = next((t for t, viste in tenute if t.ruolo == c.ruolo and (t.fine, t.mesi) == (c.fine, c.mesi)
+                               and not viste & pagine[c.indice]), None)
+            if gemella_di is None:
+                tenute.append((c, set(pagine[c.indice])))
+                continue
+            out[c.indice] = gemella_di.indice
+            next(v for t, v in tenute if t is gemella_di).update(pagine[c.indice])
+    return out
+
+
 def lati_simmetrici(righe: list[RigaFisica], colonne: list[Colonna], confine: float) -> bool:
     """Le sezioni contrapposte ripetono la stessa tabella sui due lati: tante colonne di valori a sinistra quante
     a destra, e dare/avere, differenza o percentuale su entrambi o su nessuno. Un lato con colonne che l'altro
@@ -93,6 +192,7 @@ def lati_simmetrici(righe: list[RigaFisica], colonne: list[Colonna], confine: fl
                 for c in lato:
                     pagina[k][1][c.indice] = pagina[k][1].get(c.indice, 0) + 1
     simmetriche = asimmetriche = 0
+    per_indice = {c.indice: c for c in colonne}
     for lati in per_pagina.values():
         if min(n for n, _ in lati) < _MIN_RIGHE_PAGINA:
             continue
@@ -100,7 +200,7 @@ def lati_simmetrici(righe: list[RigaFisica], colonne: list[Colonna], confine: fl
         for n, conteggi in lati:
             g: dict[str, int] = {}
             for i, k in conteggi.items():
-                if k >= _QUOTA_RIGHE_PAGINA * n and (ruolo := _GRUPPO_RUOLO.get(colonne[i].ruolo)) is not None:
+                if k >= _QUOTA_RIGHE_PAGINA * n and (ruolo := _GRUPPO_RUOLO.get(per_indice[i].ruolo)) is not None:
                     g[ruolo] = g.get(ruolo, 0) + 1
             gruppi.append(g)
         if gruppi[0].get("valori") and gruppi[0] == gruppi[1]:
@@ -110,15 +210,18 @@ def lati_simmetrici(righe: list[RigaFisica], colonne: list[Colonna], confine: fl
     return simmetriche > asimmetriche
 
 
-def assegna_lati(colonne: list[Colonna], confine: float | None) -> list[Colonna]:
+def assegna_lati(colonne: list[Colonna], confine: float | None,
+                 lati: dict[int, str] | None = None) -> list[Colonna]:
     """Lato "L" a sinistra del confine, "R" a destra; tutte "U" senza confine. Modifica le colonne e
-    restituisce la stessa lista.
+    restituisce la stessa lista. `lati` (indice -> lato) vale al posto del confine dove il confine cambia da una
+    pagina all'altra (`confini_per_pagina`).
 
     Con un confine la colonna corrente si sceglie per lato, con la regola di `colonne._corrente`: sulle
     contrapposte la stessa data sta sopra entrambi i lati, e scelta sul documento non ne vincerebbe nessuna.
     Senza confine resta quella del documento."""
     for c in colonne:
-        c.lato = "U" if confine is None else ("L" if c.x_destra < confine else "R")
+        c.lato = "U" if confine is None else (
+            (lati or {}).get(c.indice) or ("L" if c.x_destra < confine else "R"))
     if confine is not None:
         for c in colonne:
             c.corrente = False

@@ -1,7 +1,8 @@
 """I parser di layout di route C sono congelati (dal 2026-11).
 
 Criterio meccanico: e' un «parser di layout» ogni funzione di LIVELLO MODULO di
-`importers/situazione_contabile_parser.py`, senza underscore iniziale, il cui nome comincia
+`importers/situazione_contabile_parser.py` o di un modulo del pacchetto `importers/situazione_contabile/`
+(dove il codice sta dal 2026-11-24; la facciata lo ri-esporta), senza underscore iniziale, il cui nome comincia
 per `parse_` o `extract_` e che restituisce un'estrazione completa (voci o bilancio) da un
 formato di gestionale: `parse_entries*`, `parse_bilancio_verifica_segno`,
 `extract_contrapposte_best_effort`. Sono ESCLUSI: il dispatcher
@@ -17,17 +18,26 @@ from importers import situazione_contabile_parser as scp
 DISPATCHER = {"extract_situazione_contabile"}
 
 
+def _sorgenti():
+    pacchetto = os.path.join(os.path.dirname(scp.__file__), "situazione_contabile")
+    return [scp.__file__] + sorted(
+        os.path.join(pacchetto, f) for f in os.listdir(pacchetto) if f.endswith(".py"))
+
+
 def _parser_di_layout_nel_modulo():
-    with open(scp.__file__, encoding="utf-8") as f:
-        albero = ast.parse(f.read())
-    return {
-        n.name
-        for n in albero.body
-        if isinstance(n, ast.FunctionDef)
-        and not n.name.startswith("_")
-        and n.name.startswith(("parse_", "extract_"))
-        and n.name not in DISPATCHER
-    }
+    trovati = set()
+    for sorgente in _sorgenti():
+        with open(sorgente, encoding="utf-8") as f:
+            albero = ast.parse(f.read())
+        trovati |= {
+            n.name
+            for n in albero.body
+            if isinstance(n, ast.FunctionDef)
+            and not n.name.startswith("_")
+            and n.name.startswith(("parse_", "extract_"))
+            and n.name not in DISPATCHER
+        }
+    return trovati
 
 
 def test_nessun_parser_di_layout_nuovo():
@@ -35,7 +45,7 @@ def test_nessun_parser_di_layout_nuovo():
     congelati = set(scp.PARSER_DI_LAYOUT)
     nuovi = sorted(trovati - congelati)
     assert not nuovi, (
-        f"Parser di layout nuovo in situazione_contabile_parser.py: {nuovi}. "
+        f"Parser di layout nuovo in situazione_contabile_parser.py o nel pacchetto situazione_contabile: {nuovi}. "
         "I parser per singolo gestionale sono congelati dal 2026-11 (solo correzioni di errori): "
         "un layout nuovo va nel percorso generico, in importers/lettore. "
         "Vedi CLAUDE.md, «Invarianti e trappole > Estrazione e classificazione»."

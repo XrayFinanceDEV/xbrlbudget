@@ -38,7 +38,12 @@ TITOLI_TABELLE_NOTA = re.compile(
     r"|suddivisione dei (?:crediti|debiti) per area geografica"
     r"|debiti assistiti da garanzie reali"
     r"|finanziamenti effettuati da soci"
-    r"|analisi delle variazioni delle rimanenze", re.I)
+    r"|analisi delle variazioni delle rimanenze"
+    r"|(?:crediti|debiti)\s*-\s*suddivisione per scadenza", re.I)
+# La tabella di nota per scadenza, «Debiti - suddivisione per scadenza al …» (budget_1712, 1713: valore, entro, oltre
+# per natura): un titolo che nessun prospetto stampa, e che si cerca anche in un estratto senza il titolo «Nota
+# integrativa» (le pagine del bilancio abbreviato stampate senza la nota attorno).
+TITOLO_SCADENZA = re.compile(r"(?:crediti|debiti)\s*-\s*suddivisione per scadenza", re.I)
 
 
 @dataclass
@@ -304,11 +309,11 @@ def pagine_tabelle_nota(pdf: str) -> list[int]:
     with fitz.open(pdf) as doc:
         pagine = list(doc)
         inizio = next((i for i, p in enumerate(pagine) if NOTA_INTEGRATIVA.search(_testo_di_testa(p))), None)
-        if inizio is None:
-            return []
-        for i in range(inizio, len(pagine)):
+        # senza il titolo della nota vale solo la tabella per scadenza, che un prospetto non stampa mai
+        titoli = TITOLI_TABELLE_NOTA if inizio is not None else TITOLO_SCADENZA
+        for i in range(inizio or 0, len(pagine)):
             testo = " ".join(pagine[i].get_text().split())
-            if TITOLI_TABELLE_NOTA.search(testo) and _importi_pagina(pagine[i]) >= MIN_IMPORTI:
+            if titoli.search(testo) and _importi_pagina(pagine[i]) >= MIN_IMPORTI:
                 out.add(i + 1)
                 if i + 1 < len(pagine) and _importi_pagina(pagine[i + 1]) >= MIN_IMPORTI:
                     out.add(i + 2)
@@ -449,6 +454,22 @@ def _pagine_di_apertura(pagine_sp: list[int], pagine_ce: list[int],
     return sp, ce
 
 
+def _ce_dal_titolo(pagine_sp: list[int], pagine_ce: list[int],
+                   testi: dict[int, str]) -> list[int]:
+    """Nessuna pagina del CE dalla vision, ma una pagina dello SP porta il titolo «Conto economico» su una riga
+    sua con importi sotto: il CE si apre li', e quella pagina e le seguenti dello SP sono anche pagine del CE
+    (budget_1772: schema abbreviato su due pagine, la seconda con la coda del passivo e tutto il CE, data dalla
+    vision al solo SP; i ricavi non li leggeva nessuno). Con un CE gia' trovato decide la vision."""
+    if pagine_ce or not pagine_sp:
+        return pagine_ce
+    for n in sorted(pagine_sp):
+        sotto = _APRE_CE.split(testi.get(n, ""), maxsplit=1)
+        if (_TITOLO_CE.search(testi.get(n, "")) and len(sotto) == 2
+                and len(_IMPORTO.findall(sotto[1])) >= _MIN_IMPORTI_PAGINA):
+            return [p for p in sorted(pagine_sp) if p >= n]
+    return pagine_ce
+
+
 def analizza_struttura(pdf: str, *, mappa_pagina_fn=None, route_hint: str | None = None) -> Struttura:
     inizio = time.monotonic()
     if e_xbrl_di_legge(pdf):
@@ -460,6 +481,11 @@ def analizza_struttura(pdf: str, *, mappa_pagina_fn=None, route_hint: str | None
     route = ROUTE_IVCEE if fonte == "xbrl_titoli" else route_da_mappe(mappe)
     pagine_sp = [m["pagina"] for m in mappe if m.get("tipo_pagina") in TIPI_SP]
     pagine_ce = [m["pagina"] for m in mappe if m.get("tipo_pagina") in TIPI_CE]
+    if pagine_sp and not pagine_ce:
+        import fitz
+        with fitz.open(pdf) as doc:
+            testi = {n: doc[n - 1].get_text() for n in range(1, doc.page_count + 1)}
+        pagine_ce = _ce_dal_titolo(pagine_sp, pagine_ce, testi)
     if pagine_sp and pagine_ce:
         import fitz
         with fitz.open(pdf) as doc:

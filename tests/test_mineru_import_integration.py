@@ -95,9 +95,12 @@ def test_route_c_deterministic_parser_receives_mineru_text_override(tmp_path, mo
     document.save(pdf_path)
     document.close()
 
+    from importers.situazione_contabile import dispatcher
+
     seen = []
-    monkeypatch.setattr(parser, "parse_entries", lambda text: seen.append(text) or [])
-    monkeypatch.setattr(parser, "build_iv_cee", lambda entries, default_ce=False: ({}, {}))
+    # si sostituiscono nel modulo dove extract_situazione_contabile le cerca, non nella facciata
+    monkeypatch.setattr(dispatcher, "parse_entries", lambda text: seen.append(text) or [])
+    monkeypatch.setattr(dispatcher, "build_iv_cee", lambda entries, default_ce=False: ({}, {}))
 
     result = parser.extract_situazione_contabile(
         str(pdf_path),

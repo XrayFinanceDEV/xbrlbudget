@@ -327,6 +327,32 @@ def _aggiungi(importi: dict[str, Decimal], campo: str, valore: Decimal) -> None:
     importi[campo] = importi.get(campo, _ZERO) + valore
 
 
+def _ancora_della_macro_per_ultima(ancore: list[Ancora]) -> list[Ancora]:
+    """Lo scarto e' per chiave e l'ultima ancora della chiave vince. Con piu' totali stampati della stessa macro
+    (budget_1764: «1.C.4 Disponibilita' liquide» e le sue «1.C.4.1 Depositi», «1.C.4.3 Cassa», tutte sp09) la cassa da
+    sola faceva da controllo di tutte le liquidita'. Il totale che contiene gli altri va per ultimo, ed e' lui il
+    controllo della macro, solo se la prova e' aritmetica: le sue sotto-voci dirette si dividono le sue foglie senza
+    sovrapporsi e sommano al suo importo entro 1 euro (per esempio 1.600 = 1.200 + 400). Altrimenti l'ordine resta quello
+    stampato: due totali della stessa macro col segno opposto (oneri finanziari, imposte) non sono padre e figlio."""
+    per_chiave: dict[str, list[Ancora]] = {}
+    for a in ancore:
+        per_chiave.setdefault(a.chiave, []).append(a)
+    ultime: list[Ancora] = []
+    for lista in per_chiave.values():
+        if len(lista) < 2:
+            continue
+        padre = max(lista, key=lambda a: len(a.foglie))
+        altre = [a for a in lista if a is not padre]
+        # le sotto-voci dirette: quelle non contenute in un'altra sotto-voce
+        figli = [a for a in altre if not any(b is not a and set(a.foglie) < set(b.foglie) for b in altre)]
+        foglie_figli = [f for a in figli for f in a.foglie]
+        if (padre.foglie and len(foglie_figli) == len(set(foglie_figli)) and set(foglie_figli) == set(padre.foglie)
+                and all(set(a.foglie) <= set(padre.foglie) for a in altre)
+                and abs(sum((a.importo for a in figli), Decimal(0)) - padre.importo) <= Decimal(1)):
+            ultime.append(padre)    # la prova e' aritmetica: le sotto-voci si dividono le sue foglie e sommano a lui
+    return [a for a in ancore if not any(a is u for u in ultime)] + ultime
+
+
 def componi(foglie: list[Foglia], classi: dict[str, Classe], ancore: list[Ancora]) -> Composizione:
     importi: dict[str, Decimal] = {}
     senza_classe = _ZERO
@@ -426,7 +452,7 @@ def componi(foglie: list[Foglia], classi: dict[str, Classe], ancore: list[Ancora
 
     spostati = -sum(spostate.values(), _ZERO)     # positivo: attivo e passivo composti ne salgono entrambi
     scarti: dict[str, Decimal] = {}
-    for a in ancore:
+    for a in _ancora_della_macro_per_ultima(ancore):
         if a.chiave == "attivo":
             composto = att + rettifiche - spostati   # il totale stampato e' lordo delle rettifiche e conta i
         elif a.chiave == "passivo":                  # saldi negativi sul loro lato

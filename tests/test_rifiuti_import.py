@@ -53,3 +53,21 @@ def test_il_422_di_un_pdf_rifiutato_porta_il_suggerimento():
 def test_la_lettura_non_riuscita_ha_il_suo_suggerimento():
     assert _categoria("Lettura non riuscita: lo stato patrimoniale letto non quadra di €40.000,00") \
         == "lettura_non_riuscita"
+
+
+def test_un_totale_attivo_stampato_negativo_ha_il_suo_motivo(tmp_path):
+    # budget_1810 (cifre inventate): una colonna coi conti azzerati stampa un totale attivo negativo
+    from decimal import Decimal
+    from types import SimpleNamespace
+    import fitz
+    import pytest
+    import importers.pdf_importer as pi
+    pdf = tmp_path / "attivo_negativo.pdf"
+    doc = fitz.open()
+    doc.new_page().insert_text((50, 72), "TOTALE STATO PATRIMONIALE - ATTIVO\n12.345,67-\n98.765,43")
+    doc.save(pdf)
+    with pytest.raises(pi.PDFImportError) as e:
+        pi._rifiuta_lettura_non_riuscita(str(pdf), SimpleNamespace(totale_attivo=Decimal("890"),
+                                                                   totale_passivo=Decimal("-12345.67")))
+    assert "12.345,67" in str(e.value)
+    assert _categoria(str(e.value)) == "attivo_negativo"

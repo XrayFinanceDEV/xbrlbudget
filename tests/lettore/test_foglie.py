@@ -1131,6 +1131,22 @@ def test_codice_di_struttura_del_gestionale_porta_la_voce():
     assert gettoni_di_legge("B IMMOBILIZZAZIONI", "15/0005/1711") == ()
 
 
+def test_codice_puntato_del_prospetto_porta_la_voce():
+    # 1764/1540/1331: «1.B.2.1 Terreni e fabbricati», «2.D.4 Debiti verso banche», «3.B.9.a Salari e stipendi»
+    from importers.lettore.foglie import gettoni_di_legge
+    assert gettoni_di_legge("1.B.2.1 Terreni e fabbricati") == ("B", "II", "1")
+    assert gettoni_di_legge("1.C.2.5quater Crediti verso altri") == ("C", "II", "5-quater")
+    assert gettoni_di_legge("2.A.9 Utile (perdita) dell'esercizio") == ("A", "IX")
+    assert gettoni_di_legge("2.D.4 Debiti verso banche") == ("D", "4")
+    assert gettoni_di_legge("3.A.5.2 Ricavi e proventi diversi") == ("A", "5")      # sotto-numero non di legge
+    assert gettoni_di_legge("3.B.9.a Salari e stipendi") == ("B", "9", "a")
+    assert gettoni_di_legge("Partecipazioni in altre imprese", "1.B.3.1.dbis") == ("B", "III", "1")
+    # i codici dei conti non sono codici di legge
+    assert gettoni_di_legge("Terreni edificabili", "05.01.01") == ()
+    assert gettoni_di_legge("Clienti", "11.03.01") == ()
+    assert gettoni_di_legge("1 ATTIVO") == ()
+
+
 def test_un_totale_col_codice_di_un_conto_non_chiude_la_voce_di_legge():
     from importers.lettore.foglie import _codice_di_conto
     assert _codice_di_conto("15/0005/1711")
@@ -1169,3 +1185,32 @@ def test_un_mastro_di_perdite_e_costi_d_esercizio_non_e_il_risultato():
     assert e_riga_del_risultato("Utile d'esercizio")
     assert e_riga_del_risultato("Perdita dell'esercizio")
     assert e_riga_del_risultato("21) Utile (perdita) dell'esercizio")
+
+
+def test_un_conto_del_ce_con_perdita_o_utile_nel_nome_non_e_il_risultato():
+    from dataclasses import replace
+    # 1764 (cifre inventate): «53.01.15 Risarcim.danni perdita prodotti» e' un ricavo, non la riga del risultato
+    from importers.lettore.foglie import _e_controllo
+    conto = Riga(id="p1r1U", pagina=1, y=1.0, lato="U", sezione="CE", codice="53.01.15",
+                 etichetta="Risarcim.danni perdita prodotti/sinistri", celle={0: leggi_importo("1.234,00")})
+    assert not _e_controllo(conto)
+    assert not _e_controllo(replace(conto, codice="4210", etichetta="Utile su cambi"))
+    # la voce di legge col suo codice d'impaginazione resta un controllo, e senza codice la parola basta come prima
+    assert _e_controllo(replace(conto, codice="4308", etichetta="C) Proventi e oneri finanziari"))
+    assert _e_controllo(replace(conto, codice="", etichetta="Differenza tra valore e costi della produzione"))
+    assert _e_controllo(replace(conto, codice="53.01.99", etichetta="Totale proventi diversi"))
+
+
+def test_verso_dal_totale_stampato_del_blocco_su_colonna_unica(tmp_path):
+    # Situazione economica a colonna unica: un conto di costo con saldo avere stampato fra i ricavi («Acqua» sotto
+    # «TOTALE RICAVI», 1705) e' un ricavo: il totale stampato lo somma li'. Cifre inventate.
+    voci = [(50, 100, "CONTO ECONOMICO")] + _righe(140, [
+        ("Materie prime", "1.100,00"), ("Servizi vari", "2.300,00"), ("Personale", "3.050,00"),
+        ("TOTALE COSTI", "6.450,00"),
+        ("Vendite prodotti", "9.000,00"), ("Fitti attivi", "500,00"), ("Acqua", "40,00"),
+        ("TOTALE RICAVI", "9.540,00")])
+    doc = _doc(tmp_path, voci)
+    foglie = _per_etichetta(f for f in foglie_contabili(doc, 0) if f.sezione == "CE")
+    assert {foglie[e].verso_ce for e in ("Materie prime", "Servizi vari", "Personale")} == {"costo"}
+    assert {foglie[e].verso_ce for e in ("Vendite prodotti", "Fitti attivi", "Acqua")} == {"ricavo"}
+    assert foglie["Acqua"].importo == Decimal("40.00")

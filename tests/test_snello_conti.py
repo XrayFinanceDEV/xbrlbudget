@@ -1204,3 +1204,44 @@ def test_un_padre_con_le_sotto_voci_tutte_a_zero_resta():
 def test_un_padre_con_una_sotto_voce_vera_cade_come_prima():
     bs, ce, diag = da_coppie([("SPP.D", D("2000000")), ("SPP.D.4.E", D("1500000")), ("SPP.D.7.E", D("500000"))])
     assert bs["sp16_debiti_breve"] == D("2000000")
+
+
+def test_il_valore_della_produzione_senza_dettaglio_va_nei_ricavi_anche_letto_a_conti():
+    # budget_1774/1790 (cifre inventate): lo schema abbreviato letto «a conti» stampa solo
+    # «A) Valore della produzione»; prima finiva in non_mappati e il CE restava coi soli costi.
+    foglie = [_f(1, "T", "800", "SPA.B.II.2"), _f(2, "T", "200", "SPA.C.IV.1"),
+              _f(3, "T", "-700", "SPP.A.I"), _f(4, "T", "-300", "SPP.D.7"),
+              _f(5, "T", "900", "CE.A", sezione="ce"), _f(6, "T", "600", "CE.B.6", sezione="ce"),
+              _f(7, "T", "300", "CE.B.7", sezione="ce")]
+    bs, ce, diag = da_foglie(foglie)
+    assert ce["ce01_ricavi_vendite"] == D("900.00")
+    assert diag["valore_produzione_non_dettagliato"] == ["900.00"]
+    assert not diag["non_mappati"]
+
+
+def test_il_valore_della_produzione_letto_a_conti_coi_figli_resta_padre_escluso():
+    foglie = [_f(1, "T", "950", "CE.A", sezione="ce"), _f(2, "T", "900", "CE.A.1", sezione="ce"),
+              _f(3, "T", "50", "CE.A.5", sezione="ce"), _f(4, "T", "400", "CE.B.7", sezione="ce")]
+    bs, ce, diag = da_foglie(foglie)
+    assert ce["ce01_ricavi_vendite"] == D("900.00")
+    assert diag["valore_produzione_non_dettagliato"] == []
+    assert ["1", "CE.A", "950.00"] in diag["padri_esclusi"]
+
+
+def test_la_voce_a_esclusa_come_totale_senza_sotto_voci_torna_ai_ricavi():
+    # budget_1772 (cifre inventate): il modello esclude «A) Valore della produzione» come totale ('X')
+    foglie = [_f(1, "T", "900", "X", testo="A) Valore della produzione", sezione="ce"),
+              _f(2, "T", "600", "CE.B.6", sezione="ce"), _f(3, "T", "1500", "X", testo="Totale Costi della produzione (B)")]
+    bs, ce, diag = da_foglie(foglie)
+    assert ce["ce01_ricavi_vendite"] == D("900.00")
+    assert diag["valore_produzione_da_escluso"] == [["1", "900.00"]]
+    assert diag["escluse"] == [["3", "X", "1500.00"]]
+
+
+def test_la_voce_a_esclusa_con_le_sotto_voci_lette_resta_esclusa():
+    foglie = [_f(1, "T", "950", "X", testo="A) Valore della produzione", sezione="ce"),
+              _f(2, "T", "900", "CE.A.1", sezione="ce"), _f(3, "T", "50", "CE.A.5", sezione="ce")]
+    bs, ce, diag = da_foglie(foglie)
+    assert ce["ce01_ricavi_vendite"] == D("900.00")
+    assert diag["valore_produzione_da_escluso"] == []
+    assert ["1", "X", "950.00"] in diag["escluse"]

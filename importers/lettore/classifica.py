@@ -429,7 +429,8 @@ def classifica_dettagli(foglie: list[Foglia], classi: dict[str, Classe], *, chia
 # dall'etichetta e da una corsa all'altra cambia idea (un «FINANZIAMENTI PASSIVI» va oltre in una corsa e no
 # nell'altra): la scadenza la decide il testo, non lui.
 # «ESERC.» abbreviato e «L'ESERC. SU» troncato dalla colonna (budget_700, P1.1 di OMNI): «OLTRE ESERC. SUCC.» era muto
-_PERIODO = r"(?:I\s*)?(?:12\s*M|L\W?\s*(?:ANNO|ESERC)|ES(?:ERC(?:IZIO)?)?\.?\s*SUCC|ESERC(?:IZIO)?\b)"
+# «MUTUO IPOT.123 ES.OLTRE ES» (1705): «ES» in coda e' l'esercizio, troncato
+_PERIODO = r"(?:I\s*)?(?:12\s*M|L\W?\s*(?:ANNO|ESERC)|ES(?:ERC(?:IZIO)?)?\.?\s*SUCC|ESERC(?:IZIO)?\b|ES\W*$)"
 # «(OE)»/«(EE)»: le sigle «oltre/entro l'esercizio» dei gestionali, come le legge `detail_enrichment._ledger_maturity`
 # Fase 5, Task 6: anche «TERMIN» troncato dalla colonna, «MEDIO LUNGO» senza barra, «>12 mesi» / «<12 mesi»
 _OLTRE = re.compile(rf"\bOLTRE\s*{_PERIODO}|\bLUNGO\s+TERMIN|\bM(?:EDIO)?\s*/\s*L(?:UNGO)?\b|\bA\s+LUNGO\b"

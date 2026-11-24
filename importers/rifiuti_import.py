@@ -31,6 +31,9 @@ _RIFIUTI: tuple[tuple[str, re.Pattern, str], ...] = (
      "Il file elenca saldo iniziale e movimenti dare/avere, ma non il saldo finale di ogni conto (nella stampa la "
      "colonna del saldo e' finita su pagine separate, o manca). Ristampa dal gestionale la situazione contabile o "
      "il bilancio di verifica con il saldo finale accanto a ogni conto."),
+    ("attivo_negativo", re.compile(r"totale attivo stampato e' negativo", re.I),
+     "Nella colonna del periodo i conti sono a zero o con il segno sbagliato. Controlla la data e l'esercizio "
+     "della stampa, e ristampa dal gestionale la situazione del periodo giusto, con i saldi di tutti i conti."),
     ("lettura_incompleta", re.compile(r"Lettura del passivo mancante", re.I),
      "E' un errore di lettura, non del file: riprova l'import."),
     ("lettura_non_riuscita", re.compile(r"Lettura non riuscita", re.I),

@@ -536,3 +536,12 @@ def test_regole_accese_per_default(monkeypatch):
     finto = _Sistema("ce12")
     c.classifica_macro([_costo()], chiama_json=finto)
     assert finto.sistemi[0] == rp.prompt_macro(c.PROMPT_MACRO)
+
+
+def test_scadenza_con_l_esercizio_troncato_in_coda():
+    # «MUTUO IPOT.123 ES.OLTRE ES» (1705): «ES» in coda e' l'esercizio
+    assert c.scadenza_stampata("MUTUO IPOT.123 ES.OLTRE ES") == "O"
+    assert c.scadenza_stampata("FIN.BANCA ALFA OLTRE ES.") == "O"
+    assert c.scadenza_stampata("MUTUO IPOT.123 ES.ENTRO ES") == "E"
+    assert c.scadenza_stampata("FORNITORI ESTERI ES") is None
+    assert c.scadenza_stampata("OLTRE ESPOSIZIONE") is None

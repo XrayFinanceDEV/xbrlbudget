@@ -135,6 +135,39 @@ def _chiude_sezione(full_rows) -> bool:
     return False
 
 
+# «Valore al 31-12-2024 | Entro l'esercizio | Oltre l'esercizio» (budget_1712, 1713): la testata della tabella di nota
+# per scadenza senza le colonne di movimento. «Di cui oltre cinque anni» e' una parte dell'oltre, non un'altra scadenza.
+_INIZI_SCADENZA = {"valore": "closing", "totale": "closing", "entro": "short", "oltre": "long"}
+_OLTRE_CINQUE = re.compile(r"cinque|5\s*anni", re.I)
+
+
+# Le colonne di una tabella che porta anche il fondo e il netto («entro | oltre | valore nominale | fondo svalutazione |
+# valore netto», 287, 1529, 1844): non e' la forma a tre colonne, e il fondo non e' un valore di chiusura.
+_ALTRE_COLONNE = {"nominale", "lordo", "netto", "fondo", "fondi", "svalutazione", "svalutazioni"}
+
+
+def _testata_per_scadenza(tokens: list[str]) -> bool:
+    """Una riga senza importi con le tre colonne «valore (o totale) | entro | oltre», una parola ciascuna e
+    nient'altro che le divida: la testata per scadenza."""
+    parole = [t.lower().strip(".,:;'()") for t in tokens]
+    inizi = [p for p in parole if p in _INIZI_SCADENZA]
+    return (sorted(_INIZI_SCADENZA[p] for p in inizi) == ["closing", "long", "short"]
+            and not _ALTRE_COLONNE & set(parole)
+            and not any(_amount(t) is not None for t in tokens))
+
+
+def _colonne_per_scadenza(tokens: list[str], line) -> list[tuple[float, str]]:
+    """(x del centro, tipo) di ogni colonna della testata per scadenza: dalla parola che la apre alla prossima."""
+    inizi = [i for i, t in enumerate(tokens) if t.lower().strip(".,:;'") in _INIZI_SCADENZA]
+    out = []
+    for j, inizio in enumerate(inizi):
+        fine = inizi[j + 1] if j + 1 < len(inizi) else len(tokens)
+        etichetta = " ".join(tokens[inizio:fine])
+        tipo = "" if _OLTRE_CINQUE.search(etichetta) else _INIZI_SCADENZA[tokens[inizio].lower().strip(".,:;'")]
+        out.append(((float(line[inizio][0]) + float(line[fine - 1][2])) / 2, tipo))
+    return out
+
+
 def collect_source_rows(file_path: str, ocr_text: str | None = None) -> list[SourceRow]:
     """Read ALL pages, including notes, preserving rows, sides and numeric cells.
 
@@ -431,6 +464,8 @@ def collect_source_rows(file_path: str, ocr_text: str | None = None) -> list[Sou
                             kind = next((k for word, k in (("inizio", "opening"), ("variazione", "movement"),
                                         ("fine", "closing"), ("entro", "short"), ("oltre", "long")) if word in label), "")
                             headings.append(((float(line[start][0]) + float(line[end - 1][2])) / 2, kind))
+                    elif _testata_per_scadenza(tokens):
+                        headings = _colonne_per_scadenza(tokens, line)
                     values, xs, kinds = [], [], []
                     for i, (token, word) in enumerate(zip(tokens, line)):
                         if i < code_tokens:

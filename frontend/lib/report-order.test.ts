@@ -4,7 +4,6 @@ import { join } from "node:path";
 import { REPORT_SECTIONS } from "@/components/report/report-types";
 
 const page = readFileSync(join(__dirname, "..", "app", "report", "page.tsx"), "utf-8");
-const dossier = readFileSync(join(__dirname, "..", "components", "final-report", "Dossier.tsx"), "utf-8");
 const CANONICAL_IDS = [
   "scope", "executive-summary", "sources", "adjustments", "closing", "assumptions",
   "income-forecast", "balance-forecast", "cashflow-sustainability", "indicators-risks",
@@ -16,15 +15,12 @@ describe("ordine del report finale", () => {
     expect(REPORT_SECTIONS.map((section) => section.id)).toEqual(CANONICAL_IDS);
   });
 
-  it("renders every stable anchor in exactly the TOC order", () => {
-    const positions = REPORT_SECTIONS.map((section) => {
-      const marker = section.id === "appendices" ? "<DossierContent report={model}" : `<section id=\"${section.id}\"`;
-      const position = page.indexOf(marker);
-      expect(position, `missing anchor ${section.id}`).toBeGreaterThan(-1);
-      return position;
-    });
-    expect(positions).toEqual([...positions].sort((a, b) => a - b));
-    expect(dossier).toContain('<section id="appendices"');
+  it("la pagina Report non rende più la vista web del dossier (tolta il 2026-11-24)", () => {
+    expect(page).not.toContain("Vista web del dossier");
+    expect(page).not.toContain("<DossierContent");
+    for (const section of REPORT_SECTIONS) {
+      expect(page, `anchor ${section.id} ancora in pagina`).not.toContain(`<section id="${section.id}"`);
+    }
   });
 
   it("loads the versioned editorial session and has explicit stale regeneration", () => {

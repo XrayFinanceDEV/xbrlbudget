@@ -239,7 +239,10 @@ ciò che non si può non sapere. Ogni voce dice la regola e **cosa si rompe** a 
 - **I parser per singolo layout di gestionale di `situazione_contabile_parser.py` sono congelati (dal 2026-11): solo
   correzioni di errori; un layout nuovo va nel lettore (`importers/lettore`), mai in un tredicesimo parser.** Sono i
   dodici di `PARSER_DI_LAYOUT` (AGO, DEPI, 8 cifre, verifica I/E, mastri, sub-mastro, SEZBIL, TeamSystem, colonna
-  singola, verifica per segno, best-effort, generico). Ogni parser in più è un altro insieme di regole di classificazione e
+  singola, verifica per segno, best-effort, generico). Dal 2026-11-24 il codice sta nel pacchetto
+  `importers/situazione_contabile/` (un modulo per formato, le regole a parole chiave in `regole.py`) e
+  `situazione_contabile_parser.py` è la facciata che ri-esporta ogni nome: si importa da lì, ma un `monkeypatch`
+  va sul modulo del pacchetto dove il chiamante cerca la funzione, altrimenti non sostituisce nulla. Ogni parser in più è un altro insieme di regole di classificazione e
   di quadratura da tenere allineato a mano con le altre: diverge in silenzio, e il file che lo ha motivato quadra mentre
   quelli di un altro gestionale cambiano senza che nessun cancello se ne accorga.
   `tests/test_parser_layout_congelati.py` fallisce se ne compare uno nuovo; non si aggiunge il nome alla tupla per

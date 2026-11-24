@@ -387,6 +387,7 @@ def test_contra_rows_text_mode_classifies_fondi_by_nature():
 # ---------------------------------------------------------------- net_contra_accounts
 
 import importers.situazione_contabile_parser as scp
+import importers.situazione_contabile.contra as contra  # il modulo dove net_contra_accounts cerca _contra_rows
 
 
 def _gross_winner_bs():
@@ -425,7 +426,7 @@ def _fields(bs):
 
 
 def _patch_scan(monkeypatch, attivo, passivo, from_ocr=False):
-    monkeypatch.setattr(scp, "_contra_rows",
+    monkeypatch.setattr(contra, "_contra_rows",
                         lambda fp, text=None: (attivo, passivo, from_ocr))
 
 
@@ -712,7 +713,7 @@ def test_apply_phase_failure_rolls_back_and_is_reported_unreliable(monkeypatch):
     def _boom(bs, amount):
         raise RuntimeError("boom")
 
-    monkeypatch.setattr(scp, "_reduce_debts", _boom)
+    monkeypatch.setattr(contra, "_reduce_debts", _boom)
 
     bs = _gross_winner_bs()
     before = dict(bs)
@@ -798,7 +799,7 @@ def test_contra_scan_mass_falls_back_to_history_without_a_declared_total(monkeyp
 def test_contra_scan_mass_is_zero_when_the_document_has_no_scannable_rows(monkeypatch):
     from importers.situazione_contabile_parser import contra_scan_mass
 
-    monkeypatch.setattr(scp, "_contra_rows", lambda fp, text=None: None)
+    monkeypatch.setattr(contra, "_contra_rows", lambda fp, text=None: None)
     assert contra_scan_mass("x.pdf", declared=_DISJOINT_DECLARED) == (D("0"), D("0"))
 
 

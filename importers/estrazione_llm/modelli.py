@@ -169,7 +169,8 @@ class TwoYearIncomeStatementExtraction(pydantic.BaseModel):
 # (sp12_riserve, ce08_costi_personale), so the sub-fields come back 0 and, worse, a
 # NEGATIVE reserve line (VIII - utili (perdite) portati a nuovo) is dropped from the
 # aggregate — which inflates equity and gets masked into cash by the balance reconcile
-# (and _validate_equity refuses the correct fix because it yields "negative reserves").
+# (and the old _validate_equity, removed 2026-11-24, refused the correct fix because it yielded
+# "negative reserves").
 # These helpers read the explicit lines deterministically and, gated on the printed
 # control total (anti-masking), fill the sub-fields and fix the aggregate. Text-path
 # only (the lines are unambiguous in PyMuPDF text); the vision path keeps LLM behaviour.

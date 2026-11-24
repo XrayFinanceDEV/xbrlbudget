@@ -333,9 +333,18 @@ Primo match vince, e l'ordine non è negoziabile:
 | 2 | **altri finanziatori**, soci c/finanziamento, factor | altri finanziatori | **prima delle banche**: la regola generica "FINANZ" ruberebbe "FINANZIATORI" e "SOCI C/FINANZIAMENTO", che sono D.5 e non D.4 |
 | 3 | banche, mutui, c/c, scoperti, SBF, anticipi su fatture | banche | include il debito bancario a breve anche quando il nome non porta "BANC" |
 | 4 | fornitori, fatture da ricevere | fornitori | — |
-| 5 | tributari, erario, IVA, F24, ritenute | tributari | — |
+| 5 | tributari, erario, IVA, imposte, F24, ritenute, IRES/IRAP/IRPEF (parola intera) | tributari | — |
 | 6 | previdenza, INPS, INAIL | previdenza | — |
 | 7 | *(default)* | altri | acconti, clienti c/, conti terzi |
+
+Due regole accanto alla tabella (2026-11-24, `43192ef`):
+
+- **Un mastro che nomina tributari *e* previdenza** («DEB.TRIB.-ISTIT.PREV.SOCIALE», budget_1784) non è di nessuna
+  delle due voci: si scende nei conti (`classify_passivo`, `_tributari_e_previdenza`), e l'IVA va nei tributari invece di
+  finire coi contributi. Senza conti che lo dividano resta in `sp16g`.
+- **L'imposta sostitutiva sul TFR è un debito tributario, non il fondo** (`_SP_PASSIVO_RULES`: «ERARI…TFR» e
+  «SOST…TFR» vanno su `sp16` prima della regola che manda il TFR in `sp15`). Dentro un mastro tributari-previdenza
+  «ERARIO C/IMP.SOST.TFR» finiva nel fondo TFR (budget_210, 1757).
 
 ### Entro / oltre
 

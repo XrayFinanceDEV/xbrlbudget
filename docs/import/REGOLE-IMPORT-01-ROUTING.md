@@ -68,8 +68,9 @@ Se il documento ha un CE ma **nessun** marcatore patrimoniale → `UNSUPPORTED`,
 **Una voce di CE non è un marcatore patrimoniale** (2026-11-19, budget_1667). Alcune voci dell'art.
 2425 contengono una parola patrimoniale: B.10 «svalutazioni delle immobilizzazioni», A.4
 «incrementi … iscritti nelle immobilizzazioni», D «rettifiche di valore di attività e passività
-finanziarie». Prima di cercare i marcatori di `sp_present` si tolgono dal testo
-(`_VOCI_CE_CON_PAROLE_PATRIMONIALI`). Senza, un CE riclassificato da solo accendeva `sp_present`,
+finanziarie». Lo stesso per un conto di oneri finanziari come «interessi e oneri su debiti verso altri»
+(2026-11-23, budget_1801: un conto economico da solo passava per bilancio completo). Prima di cercare i
+marcatori di `sp_present` si tolgono dal testo (`_VOCI_CE_CON_PAROLE_PATRIMONIALI`). Senza, un CE riclassificato da solo accendeva `sp_present`,
 finiva sulla rotta IV-CEE e veniva rifiutato dopo una decina di minuti di letture del modello
 («Stato Patrimoniale vuoto»), invece che subito come «solo conto economico».
 
@@ -91,6 +92,18 @@ colonna del saldo finale era scivolata su pagine separate, e il lettore leggeva 
 da iniziale + dare − avere: si rifiuta, e il suggerimento (`movimenti_senza_saldo` in `importers/rifiuti_import.py`)
 chiede la stampa col saldo finale accanto a ogni conto. Il saldo finale sulla stessa testata («… dare avere saldo
 finale») resta un bilancio di verifica. Sul corpus di 284 PDF la regola scatta solo su 1776.
+
+### Regola 1-ter — contabilità semplificata (`# ----- Contabilità semplificata`)
+«utile fiscale» o «perdita fiscale», più «riepilogo dei ricavi» (o «dei costi»), senza «patrimonio netto» →
+`OTHER` / `UNSUPPORTED`, sottocategoria `contabilità semplificata` (2026-11-19, budget_1710). È il
+riepilogo fiscale di una semplificata: ricavi, costi e qualche cespite, senza cassa, crediti, debiti
+né patrimonio netto. Il rifiuto c'era già, nel fallback; cambia il motivo, che prima diceva «né
+elenco conti» (falso: l'elenco c'è) e ora dice che manca lo stato patrimoniale completo.
+
+Dal 2026-11-23 la regola riconosce anche la semplificata in perdita e sta **prima** del facsimile XBRL e delle
+aree B e C (era fra l'area A e il fallback). Una semplificata con la testata «SITUAZIONE CONTABILE AL» andava
+in area C, al lettore delle verifiche, che la rifiutava solo dopo un paio di minuti come «lettura non riuscita»,
+con uno sbilancio pari al risultato (budget_1804/1827).
 
 ### Regola 2 — facsimile di deposito XBRL (`# ----- Facsimile XBRL itcc senza elenco conti`)
 Marcatore `itcc` presente, meno di 5 codici conto, nessun "pareggio" né "bilancio di verifica"
@@ -140,13 +153,6 @@ e "totale attivo"). Sottocategoria per prima corrispondenza: `itcc` → A1; "abb
 
 **Nota**: qui `abbreviat`/`micro` sono cercati nella sola vista **con** spazi. Un'intestazione
 lettera-spaziata non corrisponde e il file ricade su "A/sintetico IV CEE".
-
-### Regola 6-bis — contabilità semplificata (`# ----- Contabilità semplificata`)
-«utile fiscale» e «riepilogo dei ricavi» (o «dei costi»), senza «patrimonio netto» → `OTHER` /
-`UNSUPPORTED`, sottocategoria `contabilità semplificata` (2026-11-19, budget_1710). È il
-riepilogo fiscale di una semplificata: ricavi, costi e qualche cespite, senza cassa, crediti, debiti
-né patrimonio netto. Il rifiuto c'era già, nel fallback; cambia il motivo, che prima diceva «né
-elenco conti» (falso: l'elenco c'è) e ora dice che manca lo stato patrimoniale completo.
 
 ### Regola 7 — fallback (`# ----- fallback`)
 `OTHER` / `UNSUPPORTED`.
@@ -256,7 +262,7 @@ un bilancio, scrive una copia del PDF col testo decodificato e l'import legge qu
 
 ## 6. Il segnale `contrapposte` dipende dal file, non dal testo
 
-È l'unico segnale che richiede il file su disco. Due vie (`situazione_contabile_parser.py:2685`):
+È l'unico segnale che richiede il file su disco. Due vie (`is_contrapposte_file`, `importers/situazione_contabile/best_effort.py`, chiamata da `compute_signals`):
 
 1. **Testuale rapida**: sulle prime 3 pagine, se compare "SEZIONI CONTRAPPOSTE" o "BILANCIO DI
    VERIFICA" o "TOTALE A PAREGGIO" → vero.

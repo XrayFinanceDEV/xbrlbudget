@@ -258,7 +258,8 @@ disattivati in tre punti: selezione dei candidati, ancoraggio del risultato, arb
 | `draft` | anno creato a mano |
 
 `forecastable` **non** è più uguale a `semantic_valid` (aggiornato 2026-08-14). Sul percorso PDF è
-`semantic_valid` **e** il verdetto sui conti critici (§9-bis): `pdf_importer.py:1534`. Resta vero
+`semantic_valid` **e** il verdetto sui conti critici (§9-bis): `import_pdf_balance_sheet` in `pdf_importer.py`,
+lo stato in `_resolve_validation_status` (`importers/import_pdf/verdetti.py`). Resta vero
 che un bilancio non semanticamente valido non alimenta mai il previsionale — è solo che ora non
 basta. L'anno **precedente** fa eccezione e usa il solo `semantic_valid`. L'XBRL rafforza il
 criterio da un'altra parte, aggiungendo l'assenza di conflitti aggregato/dettaglio e di breakdown
@@ -379,14 +380,28 @@ segno** (2026-11-21): un passivo letto negativo — il meno stampato davanti all
 una lettura sbagliata, e togliergli il segno ne nascondeva lo scarto vero (un attivo di 100 e un passivo di −60
 non quadrano di 40 ma di 160).
 
+**L'eccezione dei costi della produzione non mostrati** (decisione del proprietario, 2026-11-23: «per ora
+importiamo con eccezione»). Lo schema «BILANCIO PER FORMULA» stampa il totale dei costi della produzione (B) ma
+solo alcune delle sue righe: gli altri costi sono nel totale e non compaiono, l'utile letto è più alto e lo
+sbilancio supera metà dell'attivo (budget_1790). `_costi_produzione_non_mostrati` confronta il totale B stampato
+con la somma delle voci B lette. Quando la differenza riduce lo sbilancio, l'import porta l'avviso «COSTI DELLA
+PRODUZIONE NON DETTAGLIATI» con i tre numeri (stampato, letto, differenza). Se poi lo sbilancio, tolta quella
+differenza, sta sotto il 50%, la lettura non si rifiuta: si importa con lo sbilancio dichiarato. L'avviso compare
+anche sotto la soglia, purché quei costi spieghino lo sbilancio (budget_1774); mai su un divario che non
+c'entra. Nessun tappo: la ripartizione dei costi la fa l'utente in Rettifiche.
+
+**Un totale attivo stampato negativo** (2026-11-23, budget_1810) è rifiutato come prima, ma col suo motivo:
+«il totale attivo stampato è negativo … la colonna letta non è uno stato patrimoniale»
+(`_totale_attivo_stampato_negativo`). Serve solo a dire il motivo giusto, non cambia mai un esito.
+
 **Che cosa riceve l'utente quando un PDF si rifiuta** (2026-11-19, richiesta del proprietario:
 l'utente deve accorgersi del rifiuto e caricare il PDF giusto). `/import/pdf` e `/import/pdf-ocr`
 rispondono 422 con `error` (il motivo), `error_type`, e in più `categoria` e `suggerimento`
 (`_dettaglio_rifiuto` in `backend/app/api/v1/imports.py`). Categoria e suggerimento li ricava dal
 messaggio, in un punto solo, `suggerimento_rifiuto` (`importers/rifiuti_import.py`): la prima
 espressione che si riconosce vince, nell'ordine `xbrl`, `solo_conto_economico`,
-`contabilita_semplificata`, `riepilogo`, `scansione`, `lettura_incompleta`, `lettura_non_riuscita`,
-`non_bilancio`. Un messaggio che non si riconosce dà le due chiavi a `null`. `details` resta per i
+`contabilita_semplificata`, `riepilogo`, `scansione`, `movimenti_senza_saldo`, `attivo_negativo`,
+`lettura_incompleta`, `lettura_non_riuscita`, `non_bilancio`. Un messaggio che non si riconosce dà le due chiavi a `null`. `details` resta per i
 client che lo leggono già: vale il suggerimento, o «Il file non è stato importato.». Il passo
 Import della pratica (`app/pratica/page.tsx`, che legge il corpo con `rifiutoDaErrore` di
 `frontend/lib/import-rifiuto.ts`) lascia un riquadro «Il file non è stato importato» con «Che cosa

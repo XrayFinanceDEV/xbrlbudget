@@ -711,7 +711,7 @@ traduce nel campo `sp`/`ce` con una tabella fissa.
 
 **F0 — Prima i lettori deterministici, prima della struttura** (`importers/import_snello/deterministico.py`,
 `tentativo()`). Prima di qualunque chiamata di modello si prova, nell'ordine: il PDF reso dall'XBRL
-depositato (`importers/xbrl_reso_parser.py`: prospetti e tabelle di scadenza della nota integrativa,
+depositato (`importers/xbrl_reso_parser.py`: prospetti, tabelle di scadenza e tabella delle garanzie reali della nota integrativa,
 ogni totale stampato riprodotto al centesimo, letto anche per posizione quando il testo a blocchi
 non chiude), lo schema di legge col percorso come codice di riga («1.B.2», «3.B.9.a»; `importers/schema_codici_parser.py`: legge la sola colonna «Totali», una voce conta solo se nessuna voce sotto di lei ha un campo, anno precedente compreso), lo schema di legge col percorso nell'etichetta (`schema_etichette_parser`, sotto), lo schema di legge IV-CEE (`standard_ivcee_parser`), lo schema di legge con dettaglio
 conti (`extract_ivcee_didascalie`), la situazione contabile. Un candidato si adotta solo se quadra
@@ -797,8 +797,9 @@ stampati. Decide quale dei due modi seguenti usare.
     contarla due volte; con le sotto-voci tutte a zero («di cui» vuoti, scadenze a zero) non c'è
     nulla da contare due volte, e scartarla faceva sparire la voce senza alcuna diagnostica
     («D) Debiti» a zero).
-  - **«A) Valore della produzione» senza dettaglio va in `ce01`** (`conti.da_coppie`, decisione del
-    proprietario 2026-11-19, budget_1772/1774: «ce01, ricavi delle vendite se non è dettagliato»).
+  - **«A) Valore della produzione» senza dettaglio va in `ce01`** (`conti.da_coppie`, e dal 2026-11-23 anche
+    sul percorso a conti, `conti.da_foglie`, budget_1774/1790; decisione del proprietario 2026-11-19,
+    budget_1772/1774: «ce01, ricavi delle vendite se non è dettagliato»).
     Uno schema che stampa solo il totale di A), senza A.1-A.5, non aveva una voce di legge: la
     lettura finiva in `non_mappati` e il CE restava coi soli costi. Ora il totale va per intero nei
     ricavi delle vendite, si dichiara in `diag["valore_produzione_non_dettagliato"]` e nell'avviso
@@ -806,6 +807,15 @@ stampati. Decide quale dei due modi seguenti usare.
     variazioni delle rimanenze, incrementi o altri ricavi. È massa letta assegnata a un campo, cioè
     un fallback dichiarato, non un plug. Con le sotto-voci lette vale la regola sopra: il padre cade
     e contano le sotto-voci.
+  - **La stessa didascalia esclusa dal modello come totale torna voce A** (`conti.da_foglie`, 2026-11-23,
+    budget_1772). Quando il modello marca «A) Valore della produzione» come totale (`X`) e nessuna sotto-voce
+    A.x è stata letta, la riga è la voce A e segue la regola sopra; si dichiara in
+    `diag["valore_produzione_da_escluso"]`. Con sotto-voci lette resta esclusa.
+  - **Un CE stampato sotto il passivo si apre dal suo titolo** (`struttura_documento.analisi._ce_dal_titolo`,
+    2026-11-23, budget_1772). Se la vision non dà alcuna pagina al CE ma una pagina dello SP porta il titolo
+    «Conto economico» su una riga sua con importi sotto, il CE parte da lì: quella pagina e le seguenti dello SP
+    sono anche pagine del CE. Senza, su uno schema abbreviato di due pagine i ricavi non li leggeva nessuno.
+    Con un CE già trovato decide la vision.
 - **F2-C** (elenco di conti: bilancio di verifica, situazione contabile, contrapposte, piano dei
   conti) — la struttura fisica delle righe viene da `collect_source_rows` (rotazione, righe
   fisiche, contrapposte, colonne SAP); `righe.py` (`marca_totali`, `foglie`) esclude i totali
@@ -952,6 +962,23 @@ lì i dettagli vengono già dalle tabelle di scadenza della nota integrativa. Ne
 (`usa_llm=False`), perché i dettagli sono già usciti dalle foglie classificate in F2-C. La sua
 riclassificazione deterministica di maturità (entro/oltre l'esercizio) può spostare massa fra il
 lato breve e il lato lungo dello stesso aggregato — non tocca mai i totali.
+
+Due tabelle della nota dettagliano i debiti di uno schema abbreviato, che stampa solo entro e oltre:
+
+- **«Debiti - suddivisione per scadenza»** (2026-11-23, budget_1712/1713). `struttura_documento.analisi` riconosce
+  il titolo «(Crediti|Debiti) - suddivisione per scadenza» come tabella di nota, anche in un estratto senza il
+  titolo «Nota integrativa», e la pagina entra nella ricerca dei dettagli. In `detail_enrichment` la testata a tre
+  colonne «valore | entro | oltre» lega le celle a chiusura, breve e lungo, e `note_details` propone la natura di
+  ogni riga col suo importo stampato. La forma con fondo e netto («entro | oltre | nominale | fondo | netto») resta
+  fuori: il fondo non è un valore di chiusura. Prima i debiti restavano tutti negli altri debiti.
+- **«Debiti assistiti da garanzie reali»**, sul PDF reso da XBRL (`xbrl_reso_parser._tabella_garanzie`,
+  `_applica_garanzie`; 2026-11-24, budget_1798). La tabella dà il totale per natura, senza scadenza. Ogni natura
+  va a breve (CLAUDE.md, «Debito senza scadenza dichiarata → a breve»). L'oltre stampato resta oltre, e si
+  attribuisce a una natura solo quando coincide al centesimo con il debito ipotecario dell'unica natura che ne ha
+  (decisione del proprietario, 2026-11-24). È tutto o niente: il prospetto deve avere solo gli aggregati dei
+  debiti, ogni riga deve avere una natura nota, e le nature devono sommare al totale della tabella e a
+  entro + oltre. Altrimenti la tabella non si applica e lo dichiara (`oltre_non_attribuibile` quando è l'oltre a
+  non trovare una natura). Una tabella di scadenza per natura, quando c'è, vince.
 
 ### Regole del lotto week-43 (2026-10-27) sulla lettura
 
@@ -1248,7 +1275,11 @@ il lettore gira sul solo PDF.
    (F3-1): positivo = saldo naturale; un fondo rettificativo stampato col meno resta negativo.
 2. **Il lato lo decide la colonna.** Una foglia dell'attivo cade solo su `sp01`-`sp10`, una del passivo su
    `sp11`-`sp18`; nel CE il verso (costo/ricavo) viene dal lato sulle contrapposte, dalla sezione di legge
-   dell'antenato o dal segno D/A (F3-2), `None` se ignoto. Su uno schema a colonna unica il lato SP viene dalla
+   dell'antenato o dal segno D/A (F3-2); su un CE a colonna unica in cui nessuno dei tre decide, dal «totale costi»
+   o «totale ricavi» stampato che chiude il blocco, raggiunto risalendo i padri con un legame verificato dalla somma
+   (`foglie._verso_dal_totale`, 2026-11-23, budget_1705: un costo con saldo avere stampato fra i ricavi è nella
+   somma dei ricavi, e contarlo fra i costi spostava l'utile del doppio del suo importo); `None` se ignoto. Su uno
+   schema a colonna unica il lato SP viene dalla
    sezione di legge dell'antenato o dalla pagina (F3-7). *Se si ignora:* una foglia dell'attivo finita su un campo del
    passivo sposta il pareggio senza che nessuno la veda.
    **L'unica eccezione sono le rettifiche stampate nella colonna opposta** (decisione del proprietario, 2026-11-09:
@@ -1340,7 +1371,8 @@ il lettore gira sul solo PDF.
    - **La scadenza dei debiti la decide il testo** (`classifica.scadenza_dei_debiti`, prima del passo 2): un debito
      del modello va su `sp17` solo con una prova stampata nel conto o nel mastro («oltre 12 mesi/l'esercizio», «lungo
      termine», «medio/lungo», «m/l», le sigle «(OE)»/«(EE)» dei gestionali; anche abbreviate o troncate dalla colonna,
-     «OLTRE ESERC. SUCC.», «OLTRE L'ESERC. SU», un «OLTRE»/«ENTRO» come ultima parola del conto — budget_700, P1.1 di
+     «OLTRE ESERC. SUCC.», «OLTRE L'ESERC. SU», «OLTRE ES»/«OLTRE ES.» con l'esercizio troncato in coda (2026-11-23,
+     budget_1705), un «OLTRE»/«ENTRO» come ultima parola del conto — budget_700, P1.1 di
      OMNI, 2026-11-19: sei finanziamenti «OLTRE» finivano tutti a breve), altrimenti su `sp16` (CLAUDE.md, «Debito senza scadenza dichiarata → a breve»;
      il mastro «medio/lungo» è una scadenza dichiarata, gli interessi sotto di lui restano entro). Il dettaglio passa
      alla stessa lettera. Le classi `legale` portano già la loro scadenza. `diagnostica["scadenze"]`.
@@ -1512,6 +1544,6 @@ Con il percorso generico del lettore, i parser per singolo layout di gestionale 
 nuovo si insegna al lettore (`importers/lettore`). L'elenco è `PARSER_DI_LAYOUT` (dodici nomi: i `parse_entries*`
 per AGO, DEPI, 8 cifre, verifica I/E, mastri, sub-mastro, SEZBIL, TeamSystem, colonna singola e il generico,
 più `parse_bilancio_verifica_segno` e `extract_contrapposte_best_effort`).
-`tests/test_parser_layout_congelati.py` ricava i parser dal modulo (funzioni pubbliche di livello modulo
+`tests/test_parser_layout_congelati.py` ricava i parser dalla facciata e dai moduli del pacchetto `importers/situazione_contabile/` (funzioni pubbliche di livello modulo
 `parse_*`/`extract_*`, dispatcher `extract_situazione_contabile` escluso) e fallisce se ne trova uno fuori
 dall'elenco. La regola e il danno a violarla stanno in CLAUDE.md, «Invarianti e trappole › Estrazione e classificazione».

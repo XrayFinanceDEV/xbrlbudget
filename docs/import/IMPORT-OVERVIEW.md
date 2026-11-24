@@ -306,13 +306,13 @@ chiamanti dal 2026-07-16 — «diagnosi oneste al posto dei plug» — e sono st
 `_extract_with_llm_vision` con gli stessi prompt CoGe. Single-year (i trial balance sono
 raramente comparativi): `prior_bs_data`/`prior_ce_data` restano `None`.
 
-#### Il quinto validatore: `_validate_equity` (e il suo stato reale)
+#### Il quinto validatore: `_validate_equity` (tolto il 2026-11-24)
 
-Accanto ai quattro sopra esiste un validatore del **patrimonio netto**
-(`pdf_extractor_llm.py:4584`): confronta `sp11 + sp12 + sp13` con `totale_passivo` meno le
-passività, e quando le due grandezze divergono oltre €1 correggerebbe le **riserve** (`sp12`), il
-solo campo del PN che può assorbire uno scarto di composizione. Il rubinetto ha tre guardie
-anti-masking, e sono la parte che vale la pena conoscere:
+Accanto ai quattro sopra c'era un validatore del **patrimonio netto**: confrontava
+`sp11 + sp12 + sp13` con `totale_passivo` meno le passività, e quando le due grandezze divergevano
+oltre €1 correggeva le **riserve** (`sp12`), il solo campo del PN che può assorbire uno scarto di
+composizione. Non aveva chiamanti ed è stato tolto con gli altri il 2026-11-24. Le sue tre guardie
+anti-masking restano da conoscere, perché spiegano una scelta ancora in vigore:
 
 1. **Mai riserve negative.** Se la correzione porterebbe `sp12` sotto zero, non si applica: un
    totale riserve negativo non esiste, quindi lo scarto sta altrove.
@@ -328,9 +328,8 @@ anti-masking, e sono la parte che vale la pena conoscere:
    prospetto sui totali dichiarati (budget_297, PN negativo con riserve estratte a 1.152.513
    invece di 152.023). Uno squilibrio strutturale non qualifica e continua a emergere.
 
-> ⚠️ **Oggi questa funzione non gira su nessun percorso.** Nel codice il nome compare tre volte: la
-> definizione e **due commenti** che la descrivono come attiva (`:2357`, `:2589`). Nessuna riga la
-> chiama. Le sue guardie restano un pezzo di progettazione valido — e la #1 spiega perché il
+> ⚠️ **Questa funzione non esiste più.** Non girava su nessun percorso da prima di essere tolta
+> (2026-11-24). Le sue guardie restano un pezzo di progettazione valido — e la #1 spiega perché il
 > reconciler deterministico del PN esiste (vedi `IMPORT-ROUTING-TAXONOMY.md` §6) — ma non
 > descrivono un controllo in funzione. Vedi `REGOLE-IMPORT-00-INDICE.md` §6.
 

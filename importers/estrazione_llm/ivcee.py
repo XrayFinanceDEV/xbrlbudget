@@ -85,9 +85,9 @@ def extract_pdf_with_llm(
     if not force_llm and is_situazione_contabile(sample_text):
         logger.info("Situazione contabile (trial balance) format detected, using deterministic parser")
         balance_sheet_data, income_data = extract_situazione_contabile(file_path)
-        # Skip LLM validators (_validate_crediti/_validate_debiti/_validate_equity)
-        # as they rely on full column names and are designed to fix LLM errors.
-        # The deterministic parser produces correct values directly.
+        # The deterministic parser produces correct values directly: none of the LLM post-processing
+        # below applies (the old LLM validators, _validate_crediti/_debiti/_equity, were removed
+        # on 2026-11-24, they had no callers).
         return balance_sheet_data, income_data
 
     # Step 1: Check if PDF is image-based (no extractable text). Vision has no

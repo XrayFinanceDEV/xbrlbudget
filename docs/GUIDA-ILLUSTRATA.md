@@ -703,7 +703,7 @@ piano: un 5 anni ne conta una in più dello stesso 3 anni.
 **Attenzione a.** Finché un controllo bloccante non si risolve il pulsante resta «Scarica
 bozza»: la bozza ha gli stessi numeri, ma il documento dice di essere bozza.
 
-**Formule** → [Le formule dei report › Il Business plan](#il-business-plan)
+**Formule** → [Le formule dei report › Il Business plan](#il-business-plan) · [Il break even point](#il-break-even-point)
 
 **Approfondisci** → [BUSINESS-PLAN-PDF.md](budget/BUSINESS-PLAN-PDF.md)
 
@@ -957,22 +957,8 @@ viene annualizzato.
 | Costi operativi (prima di ammortamenti) | totale costi della produzione − ammortamenti e svalutazioni |
 | Incidenze | voce ÷ ricavi delle vendite × 100 |
 
-**Costi fissi e variabili, break even point (sezione 4)**
-
-| Voce | Formula |
-|---|---|
-| **Costi variabili** | quota variabile del consumo di materie (acquisti + variazione delle rimanenze di materie) + quota variabile dei servizi |
-| **Costi fissi** | quota fissa di materie e servizi + godimento di beni di terzi + personale + oneri diversi di gestione + accantonamenti − altri ricavi − variazioni delle rimanenze di prodotti − variazioni dei lavori in corso − incrementi di immobilizzazioni per lavori interni |
-| **Margine di contribuzione** | ricavi delle vendite − costi variabili |
-| **Break even point** | costi fissi ÷ (margine di contribuzione ÷ ricavi delle vendite) |
-| **Margine di sicurezza** | (ricavi delle vendite − break even point) ÷ ricavi delle vendite × 100; è negativo quando i ricavi stanno sotto il pareggio |
-
-Le quote fisse e variabili sono quelle del passo 3 del wizard. Gli anni di piano le leggono dal
-motore. La colonna di partenza applica le stesse regole con le quote del **primo** anno di
-piano, così le colonne restano confrontabili. Senza ipotesi salvate, si usa il 60% fisso e il
-40% variabile. Il calcolo è costruito perché valga sempre (ricavi − break even point) ×
-margine di contribuzione ÷ ricavi = EBITDA. Se materie o servizi sono stati forzati a mano, la
-divisione fra fisso e variabile non esiste più e la sezione mostra «n.d.».
+**Costi fissi e variabili, break even point (sezione 4)** → ha una sottosezione propria:
+[Il break even point](#il-break-even-point), qui sotto.
 
 **Flussi di cassa (sezione 5 e Allegato C)** — rendiconto con il metodo indiretto:
 
@@ -1080,6 +1066,106 @@ annualizzate:
 ROE, ROI, ROS ed EBITDA margin non si ripetono nell'Allegato E: sono già nell'Allegato D.
 Lo Z-Score di Altman e il rating FGPMI non sono nel report: si consultano in Indici (§ 14).
 
+## Il break even point
+
+Il **break even point** (punto di pareggio) è il fatturato al quale l'**EBITDA vale zero**: i
+ricavi delle vendite bastano a coprire i costi variabili e i costi fissi, e non avanza nulla. Il
+**margine di sicurezza** dice di quanto possono scendere i ricavi, con gli stessi costi fissi e
+la stessa incidenza dei costi variabili, prima di arrivare a quel punto.
+
+Si calcola **solo nel Business plan**: il report infrannuale non ha né il break even point né il
+margine di sicurezza.
+
+**Il pareggio è sull'EBITDA, non sull'utile.** Ammortamenti, oneri finanziari e imposte stanno
+fuori dal calcolo. Al fatturato di pareggio l'EBITDA è zero, ma l'utile è negativo di
+ammortamenti, interessi e imposte. Per un pareggio sull'utile netto servirebbe un fatturato più
+alto.
+
+**Dove compare nel Business plan**
+
+- **Copertina**: il riquadro «Break even point» dell'ultimo anno di piano, col suo margine di
+  sicurezza.
+- **Sintesi (sezione 1)**:
+  - il punto chiave «Sopra il break even point» o «Sotto il break even point», secondo il margine
+    di sicurezza dell'ultimo anno;
+  - le righe «Break even point» e «Margine di sicurezza» del cruscotto;
+  - fra i punti di debolezza, «Punto di partenza sotto il break even point» quando la colonna di
+    partenza (C o F) ha un margine di sicurezza negativo. In quel caso fra le azioni prioritarie
+    compare anche «Superare stabilmente il break even point».
+- **Sezione 4 «Costi fissi e variabili · break even point»**:
+  - quattro riquadri: costi fissi, margine di contribuzione, break even point e margine di
+    sicurezza dell'ultimo anno, ognuno confrontato con la colonna di partenza;
+  - il grafico e la tabella anno per anno.
+
+**Le formule**
+
+| Voce | Formula |
+|---|---|
+| **Costi variabili** | quota variabile del consumo di materie + quota variabile dei servizi |
+| **Costi fissi** | quota fissa del consumo di materie + quota fissa dei servizi + godimento di beni di terzi + personale + oneri diversi di gestione + accantonamenti − altri ricavi − variazione delle rimanenze di prodotti − variazione dei lavori in corso su ordinazione − incrementi di immobilizzazioni per lavori interni |
+| **Margine di contribuzione** | ricavi delle vendite − costi variabili (in euro) |
+| **Margine di contribuzione %** | margine di contribuzione ÷ ricavi delle vendite |
+| **Break even point** | costi fissi ÷ margine di contribuzione % |
+| **Margine di sicurezza** | (ricavi delle vendite − break even point) ÷ ricavi delle vendite × 100 |
+
+Il **consumo di materie** è la somma di acquisti e variazione delle rimanenze di materie: si
+divide in fisso e variabile il consumo, non gli acquisti. Personale, godimento di beni di terzi,
+oneri diversi e accantonamenti sono **interamente fissi**.
+
+Gli altri ricavi, le variazioni delle rimanenze di prodotti e dei lavori in corso e gli
+incrementi per lavori interni **riducono** i costi fissi: senza, il pareggio non tornerebbe
+sull'EBITDA, che li comprende. Per lo stesso motivo i costi fissi del report possono essere più
+bassi della somma delle sole voci di costo.
+
+**Da dove vengono le quote fisse e variabili**
+
+- **Anni di piano (P)**: dal motore. Al passo 3 del wizard scegli la **% fissa** di materie e di
+  servizi. Poi la parte variabile cresce coi ricavi, più lo scostamento che hai indicato. La parte
+  fissa cresce con la sua percentuale, di solito l'inflazione.
+- **Colonna di partenza (C o F)**: le stesse formule, con le % fisse del **primo** anno di piano,
+  così le colonne restano confrontabili.
+- **Senza ipotesi di piano salvate**: 40% fisso e 60% variabile, solo su materie e servizi.
+
+**Esempio (numeri inventati).**
+
+| Voce | € |
+|---|---|
+| Ricavi delle vendite | 1.000.000 |
+| Altri ricavi | 20.000 |
+| Consumo di materie, quota fissa 40% | 400.000 → 160.000 fissi · 240.000 variabili |
+| Servizi, quota fissa 40% | 200.000 → 80.000 fissi · 120.000 variabili |
+| Godimento di beni di terzi | 30.000 |
+| Personale | 250.000 |
+| Oneri diversi di gestione | 10.000 |
+
+- **Costi variabili** = 240.000 + 120.000 = **360.000**.
+- **Margine di contribuzione** = 1.000.000 − 360.000 = **640.000**, cioè il **64%** dei ricavi.
+- **Costi fissi** = 160.000 + 80.000 + 30.000 + 250.000 + 10.000 − 20.000 = **510.000**.
+- **Break even point** = 510.000 ÷ 0,64 = **796.875**.
+- **Margine di sicurezza** = (1.000.000 − 796.875) ÷ 1.000.000 = **20,31%**: i ricavi possono
+  scendere di 203.125 € prima che l'EBITDA vada a zero.
+
+**La verifica.** L'EBITDA è 1.020.000 di valore della produzione meno 890.000 di costi operativi,
+cioè 130.000. Lo stesso numero esce dal pareggio: (1.000.000 − 796.875) × 64% = 130.000. Con
+queste formule (ricavi − break even point) × margine di contribuzione % è **sempre** uguale
+all'EBITDA. Se nel tuo report non torna, una delle voci è «n.d.».
+
+**La leva del passo 3.** Una % fissa più alta sposta costi dai variabili ai fissi. Sale il
+margine di contribuzione %, e insieme salgono i costi fissi. L'EBITDA non cambia, ma cambia il
+pareggio. Con molti costi fissi l'impresa guadagna di più quando i ricavi crescono, ma perde
+anche di più quando calano. Quale % è giusta lo decide chi conosce l'impresa: il report applica
+quella scelta.
+
+**Quando compare «n.d.»**
+
+- **Materie o servizi forzati a mano in CE Prev.** In quell'anno la divisione fra fisso e
+  variabile non esiste più, e tutta la riga del pareggio è «n.d.».
+- **Ricavi a zero, o costi variabili pari o superiori ai ricavi.** Il margine di contribuzione non
+  è positivo e il pareggio non esiste. Costi fissi e variabili restano scritti; break even point e
+  margine di sicurezza sono «n.d.».
+- **Scenario generato da una versione precedente del motore.** Il report è comunque in bozza
+  «da rigenerare»: rigenera il previsionale.
+
 ## Le differenze fra i due report
 
 Questi indicatori portano lo stesso nome nei due documenti ma si calcolano in modo diverso:
@@ -1116,7 +1202,7 @@ confrontare i due, guarda le formule qui sopra.
 | **PFN** | Posizione finanziaria netta = debiti finanziari − liquidità. Il perimetro dei debiti finanziari cambia fra i due report: vedi [Le formule dei report](#le-differenze-fra-i-due-report). |
 | **CCN** | Capitale circolante netto = attivo corrente − passivo corrente. |
 | **DSCR** | Nel Business plan: (MOL − imposte) ÷ (oneri finanziari + quota capitale delle rate dei piani). Nel report infrannuale: (MOL − imposte) ÷ oneri finanziari. |
-| **Break even point** | Il fatturato di pareggio, calcolato dalle quote fisse/variabili dei costi di piano. |
+| **Break even point** | Il fatturato al quale l'EBITDA vale zero, calcolato dalle quote fisse/variabili dei costi di piano; solo nel Business plan → [Il break even point](#il-break-even-point). |
 | **Infrannuale** | Periodo parziale (1-11 mesi) proiettato a 12 contro l'ultimo anno pieno. |
 | **Riclassificato** | Lo SP per aree omogenee con i relativi indici. |
 | **Quadratura** | Attivo = passivo (tolleranza 0,01 €) e CE coerente con l'utile in SP. |

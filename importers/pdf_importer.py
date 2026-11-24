@@ -62,6 +62,361 @@ del _nome, _modulo
 
 _PDF_PARSER_VERSION = "macro-fallback-v8-2026-09-21"
 
+
+def _estrazione_col_modello(file_path, extraction_context, period_months, api_key, mapper, is_scanned,
+                            is_trial_balance, _ocr_source, sc_quadratura_warnings, _macro_report):
+    """IV CEE extraction via LLM. Returns ((bs, ce, prior_bs, prior_ce), macro_report).
+
+    Era la chiusura ``_llm_extract`` di ``import_pdf_balance_sheet``, spostata qui senza cambiare il codice:
+    gli argomenti sono le variabili che leggeva dalla funzione esterna, e ``_macro_report``, che riassegnava
+    con ``nonlocal``, torna insieme al risultato. ``sc_quadratura_warnings`` si estende sul posto come prima."""
+    # "Situazione contabile riclassificata dettagliata" (BILAQ, detail_riclass,
+    # Santini): lo schema di legge col percorso nell'etichetta, letto per percorso e
+    # verificato su ogni totale stampato, dalle tabelle MinerU di una scansione o dal
+    # testo del PDF. Prima di qualunque modello: su questa famiglia il modello prendeva
+    # sotto-righe per totali ("B.6.2) Materie prime" per B.6), contava due volte i
+    # crediti oltre 12 mesi e perdeva i debiti verso il gruppo. Si adotta solo se
+    # passa gli stessi cancelli degli altri lettori deterministici.
+    if extraction_context is None:
+        try:
+            adottato = _xbrl_reso_extract(file_path)
+        except Exception as reso_err:
+            adottato = None
+            logger.info("PDF reso da XBRL non letto (%s: %s)", type(reso_err).__name__, reso_err)
+        if adottato is not None:
+            return (adottato), _macro_report
+    try:
+        adottato = _schema_etichette_extract(file_path, extraction_context)
+    except Exception as etichette_err:
+        adottato = None
+        logger.info("Schema con percorso nell'etichetta non letto (%s: %s)",
+                    type(etichette_err).__name__, etichette_err)
+    if adottato is not None:
+        return (adottato), _macro_report
+    if extraction_context is not None:
+        for lettore in (_schema_generico_mineru_extract, _prospetto_sintetico_mineru_extract):
+            try:
+                adottato = lettore(extraction_context)
+            except Exception as lettore_err:
+                adottato = None
+                logger.info("%s non letto (%s: %s)", lettore.__name__,
+                            type(lettore_err).__name__, lettore_err)
+            if adottato is not None:
+                return (adottato), _macro_report
+    # /import/pdf-ocr supplies structured MinerU table rows.  Build an
+    # evidence-only IV-CEE candidate from those rows before touching the
+    # original PDF.  It is accepted only through the same structural and
+    # accounting gates as every other extractor; an incomplete or
+    # ambiguous OCR mapping simply declines and the established source
+    # parser / LLM fallbacks continue.
+    if extraction_context is not None:
+        try:
+            from importers.iv_cee_hierarchy import check_quadratura
+            from importers.mineru_adapter import extract_ivcee_candidate
+
+            mineru_candidate = extract_ivcee_candidate(extraction_context)
+            if mineru_candidate is not None:
+                mineru_q = check_quadratura(
+                    mineru_candidate.current_bs,
+                    mineru_candidate.current_ce,
+                    tol=Decimal("2"),
+                )
+                if mapper.validate_balance(mineru_candidate.current_bs) and mineru_q.quadra:
+                    prior_ok = False
+                    if mineru_candidate.prior_bs and mineru_candidate.prior_ce is not None:
+                        prior_q = check_quadratura(
+                            mineru_candidate.prior_bs,
+                            mineru_candidate.prior_ce,
+                            tol=Decimal("2"),
+                        )
+                        prior_ok = (
+                            mapper.validate_balance(mineru_candidate.prior_bs)
+                            and prior_q.quadra
+                        )
+                    logger.info(
+                        "Using source-validated MinerU IV-CEE tables "
+                        "(fields=%d unresolved=%d prior_valid=%s)",
+                        mineru_candidate.source_detail_fields,
+                        len(mineru_candidate.unresolved_rows),
+                        prior_ok,
+                    )
+                    return ((
+                        mineru_candidate.current_bs,
+                        mineru_candidate.current_ce,
+                        mineru_candidate.prior_bs if prior_ok else None,
+                        mineru_candidate.prior_ce if prior_ok else None,
+                    )), _macro_report
+                logger.info(
+                    "Structured MinerU IV-CEE candidate declined by accounting gates: %s",
+                    "; ".join(mineru_q.warnings) or "structural balance mismatch",
+                )
+        except Exception as mineru_err:
+            logger.info(
+                "Structured MinerU IV-CEE extraction declined (%s: %s)",
+                type(mineru_err).__name__,
+                mineru_err,
+            )
+
+    # A regular comparative legal IV-CEE export has enough independent
+    # source controls to be read deterministically: each section exposes
+    # its own subtotal and both sides close to printed totals. Prefer that
+    # evidence-backed path before requiring an API call. It returns data
+    # only when SP, CE and CE↔SP all cross-foot; incomplete/ambiguous
+    # layouts decline and continue through the established LLM route.
+    # The deterministic source path also supports clean infrannual
+    # monocolumn statements. A prior-year column is optional, never required.
+    try:
+        from importers.iv_cee_hierarchy import check_quadratura
+        from importers.standard_ivcee_parser import (
+            extract_standard_ivcee_balances,
+            extract_standard_ivcee_income,
+        )
+
+        source_bs, source_prior_bs = extract_standard_ivcee_balances(
+            file_path
+        )
+        source_ce, source_prior_ce = extract_standard_ivcee_income(
+            file_path
+        )
+        if source_bs is not None and source_ce is not None:
+            source_q = check_quadratura(
+                source_bs, source_ce, tol=Decimal("2")
+            )
+            if mapper.validate_balance(source_bs) and source_q.quadra:
+                prior_ok = False
+                if source_prior_bs is not None and source_prior_ce is not None:
+                    prior_q = check_quadratura(
+                        source_prior_bs,
+                        source_prior_ce,
+                        tol=Decimal("2"),
+                    )
+                    prior_ok = (
+                        mapper.validate_balance(source_prior_bs)
+                        and prior_q.quadra
+                    )
+                logger.info(
+                    "Using deterministic source-validated IV-CEE "
+                    "extraction (prior_valid=%s)",
+                    prior_ok,
+                )
+                return ((
+                    source_bs,
+                    source_ce,
+                    source_prior_bs if prior_ok else None,
+                    source_prior_ce if prior_ok else None,
+                )), _macro_report
+    except Exception as source_err:
+        logger.info(
+            "Deterministic legal IV-CEE extraction declined (%s: %s)",
+            type(source_err).__name__,
+            source_err,
+        )
+
+    if not _ivcee_attivo(api_key):
+        raise PDFImportError(_modello_non_disponibile(
+            "ANTHROPIC_API_KEY is required for PDF import"))
+    if not is_trial_balance and not is_scanned and not _ocr_source:
+        # Prefer source-verified macros, but incomplete coverage must not
+        # prevent importing. The existing extractor recovers the base;
+        # finalization assigns unexplained detail to residual accounts.
+        from importers.macro_analysis import analyze_pdf_macros, MacroAnalysisError
+        from importers.standard_ivcee_parser import has_comparative_ivcee_columns
+        try:
+            bs, ce, prior_bs, prior_ce, _macro_report = analyze_pdf_macros(
+                file_path,
+                include_prior=not period_months and has_comparative_ivcee_columns(file_path),
+            )
+        except MacroAnalysisError as exc:
+            warning = (
+                'MACROVOCI DA VERIFICARE: lettura incompleta; importazione '
+                'proseguita con estrazione alternativa e conti residuali. '
+                'Verificare le voci segnalate in Rettifiche.'
+            )
+            _macro_report = {**exc.report, 'fallback_used': True,
+                             'warnings': [*exc.report.get('warnings', []), warning]}
+            sc_quadratura_warnings.append(warning)
+            logger.warning('%s Diagnosi: %s', warning, exc.report.get('errors', []))
+        else:
+            return (bs, ce, prior_bs, prior_ce), _macro_report
+    logger.info("Using LLM extraction (ANTHROPIC_API_KEY found)")
+    from importers.pdf_extractor_llm import (
+        extract_pdf_with_llm, extract_pdf_both_years_with_llm,
+    )
+    # A prior year is optional. Use the dual prompt only when the source
+    # physically proves two date columns; a monocolumn partial statement
+    # must use the single-year extractor and return no fabricated prior.
+    from importers.standard_ivcee_parser import has_comparative_ivcee_columns
+
+    if period_months and not has_comparative_ivcee_columns(file_path):
+        logger.info(
+            f"Single-year infrannual extraction (period_months={period_months}; "
+            "no prior column detected)"
+        )
+        bs, ce = extract_pdf_with_llm(file_path, force_llm=True)
+        _rifiuta_passivo_non_letto(bs)
+        return (bs, ce, None, None), _macro_report
+
+    # Da qui in giu' passano SIA il budget annuale SIA l'infrannuale comparato
+    # (#50). L'infrannuale comparato tornava direttamente dal prompt a due anni,
+    # cioe' senza la mitigazione descritta qui sotto: dopo #27 quei file hanno
+    # cominciato ad arrivarci, e una riga di CE persa sull'anno corrente usciva
+    # dove prima usciva intera. Un percorso solo, perche' un secondo percorso
+    # ri-diverge alla prima modifica del primo.
+    #
+    # Take the CURRENT year from the proven single-year extractor
+    # (the both-years prompt occasionally drops a current-year line — budget_227), then
+    # run a dual pass purely to capture the PRIOR (comparative) column. This way a
+    # comparative bilancio imports BOTH years and the user is never asked to re-upload a
+    # year already in the PDF, WITHOUT degrading current-year quality. The dual pass
+    # returns empty prior dicts on monocolumn PDFs (no fabricated prior). The extra
+    # Haiku calls are cheap and PDF import is infrequent.
+    # force_llm=True: this helper is only reached for IV-CEE PDFs or as the
+    # explicit fallback after the deterministic parser returned empty; in the
+    # latter case the document was (mis-)detected as a trial balance, so without
+    # force_llm the single-year extractor would re-route back to that same empty
+    # deterministic parser (budget_313/314).
+    from importers.iv_cee_hierarchy import rollup_debiti_aggregates
+
+    def _balances(d):
+        return bool(d) and mapper.validate_balance(rollup_debiti_aggregates(d))
+
+    _letture_sp: list = []   # le letture SP dell'ultimo tentativo (un anno, due anni)
+
+    def _attempt():
+        """One extraction pass: single-year current + dual pass for the prior,
+        falling back to the dual-pass current when the single-year one does not
+        balance (dense 4-column layouts trip the single-year prompt) or when it
+        turns out to have read the COMPARATIVE column instead of the current one
+        (infrannuale: the two columns are not homogeneous, 9 months against 12)."""
+        bs, ce = extract_pdf_with_llm(file_path, force_llm=True)
+        prior_bs = prior_ce = None
+        read_comparative = False
+        _letture_sp.clear()
+        _letture_sp.append(bs)
+        try:
+            dual_bs, dual_ce, prior_bs, prior_ce = extract_pdf_both_years_with_llm(file_path)
+            _letture_sp.append(dual_bs)
+            if _single_year_read_prior_column(bs, dual_bs, prior_bs):
+                # Quadrerebbe lo stesso: e' l'anno sbagliato, non un foglio rotto.
+                read_comparative = True
+                logger.warning(
+                    "Single-year current extraction coincides with the "
+                    "comparative column: it read the wrong column; using the "
+                    "dual-pass current year"
+                )
+                bs, ce = dual_bs, dual_ce
+            elif not _balances(bs) and _balances(dual_bs):
+                logger.info(
+                    "Single-year current extraction is unbalanced; using the "
+                    "dual-pass current year (it balances)"
+                )
+                bs, ce = dual_bs, dual_ce
+        except Exception as prior_err:
+            logger.warning(
+                f"Prior-year dual extraction failed ({type(prior_err).__name__}: "
+                f"{prior_err}); importing current year only"
+            )
+        # Dichiarata SEMPRE, anche a zero: a valle una chiave assente vale zero,
+        # quindi tacere equivarrebbe a dichiararsi puliti.
+        if bs is not None:
+            bs["_single_year_read_comparative"] = (
+                Decimal("1") if read_comparative else Decimal("0")
+            )
+        return bs, ce, prior_bs, prior_ce
+
+    # The Haiku extractor is stochastic on this schema: a dense 4-column bilancio
+    # (2025/2024/DIFFERENZA/SCOST.%) misreads a debiti line on a minority of runs,
+    # unbalancing the year. Retry until BOTH the current and any prior year balance
+    # (keeping the best attempt so far), which turns an ~80%/pass success into
+    # near-certainty. Bounded and only re-runs while a year still fails; PDF import
+    # is infrequent so the extra Haiku calls are acceptable.
+    best = None
+    for attempt in range(3):
+        bs, ce, prior_bs_data, prior_ce_data = _attempt()
+        current_ok = _balances(bs)
+        prior_ok = _balances(prior_bs_data) or not prior_bs_data
+        if best is None or (current_ok and not _balances(best[0])):
+            best = (bs, ce, prior_bs_data, prior_ce_data)
+        if current_ok and prior_ok:
+            best = (bs, ce, prior_bs_data, prior_ce_data)
+            break
+        # La riprova serve contro una lettura sbilanciata, non contro un prospetto che
+        # non c'e': se il tentativo ha letto uno SP vuoto (Attivo = Passivo = 0, sia la
+        # lettura a un anno sia quella a due) altri due giri danno lo stesso vuoto, a
+        # quattro chiamate l'uno (budget_1667: dieci minuti prima dello stesso rifiuto).
+        try:
+            from importers.iv_cee_hierarchy import check_quadratura
+            _sp_vuoto = len(_letture_sp) == 2 and all(
+                (not letto) or check_quadratura(letto).is_empty for letto in _letture_sp)
+        except Exception:
+            _sp_vuoto = False
+        if _sp_vuoto:
+            logger.info(
+                f"Extraction attempt {attempt + 1}: empty balance sheet; "
+                "not retrying (nothing to re-read)"
+            )
+            break
+        logger.info(
+            f"Extraction attempt {attempt + 1}: current_balances={current_ok}, "
+            f"prior_balances={prior_ok}; retrying" if attempt < 2 else
+            f"Extraction attempt {attempt + 1}: current_balances={current_ok}, "
+            f"prior_balances={prior_ok}; keeping best attempt"
+        )
+
+    # Clean comparative legal IV-CEE exports expose every aggregate and
+    # both side totals at fixed source coordinates.  If all stochastic
+    # attempts are still unbalanced, overlay those printed aggregates only
+    # when their independent section cross-foots reconcile exactly.  This
+    # is a source-backed fallback, not a plug: an incomplete/ambiguous PDF
+    # makes the deterministic parser return None and leaves ``best`` alone.
+    if best is not None and not _balances(best[0]):
+        try:
+            from importers.standard_ivcee_parser import (
+                extract_standard_ivcee_balances,
+                extract_standard_ivcee_income,
+                overlay_standard_ivcee_balance,
+            )
+
+            source_current, source_prior = extract_standard_ivcee_balances(
+                file_path
+            )
+            source_current_ce, source_prior_ce = extract_standard_ivcee_income(
+                file_path
+            )
+            source_bs = overlay_standard_ivcee_balance(best[0], source_current)
+            source_prior_bs = overlay_standard_ivcee_balance(
+                best[2] or {}, source_prior
+            )
+            if source_current is not None and _balances(source_bs):
+                logger.warning(
+                    "LLM IV-CEE current extraction unbalanced; using "
+                    "source-validated legal subtotals"
+                )
+                # Keep the independently extracted CE and every typed
+                # detail field; overwrite only the fully cross-footed legal
+                # SP aggregates/totals returned by the source parser.
+                source_ce = dict(best[1])
+                if source_current_ce is not None:
+                    source_ce.update(source_current_ce)
+                source_prior_income = dict(best[3] or {})
+                if source_prior_ce is not None:
+                    source_prior_income.update(source_prior_ce)
+                best = (
+                    source_bs,
+                    source_ce,
+                    source_prior_bs if source_prior is not None else best[2],
+                    source_prior_income if source_prior_ce is not None else best[3],
+                )
+        except Exception as source_err:
+            logger.info(
+                "Deterministic legal IV-CEE fallback declined (%s: %s)",
+                type(source_err).__name__, source_err,
+            )
+    if best is not None:
+        _rifiuta_passivo_non_letto(best[0])
+    return (best), _macro_report
+
+
 def import_pdf_balance_sheet(
     file_path: str,
     company_id: Optional[int] = None,
@@ -382,351 +737,10 @@ def import_pdf_balance_sheet(
         def _llm_extract():
             """IV CEE extraction via LLM. Returns (bs, ce, prior_bs, prior_ce)."""
             nonlocal _macro_report
-            # "Situazione contabile riclassificata dettagliata" (BILAQ, detail_riclass,
-            # Santini): lo schema di legge col percorso nell'etichetta, letto per percorso e
-            # verificato su ogni totale stampato, dalle tabelle MinerU di una scansione o dal
-            # testo del PDF. Prima di qualunque modello: su questa famiglia il modello prendeva
-            # sotto-righe per totali ("B.6.2) Materie prime" per B.6), contava due volte i
-            # crediti oltre 12 mesi e perdeva i debiti verso il gruppo. Si adotta solo se
-            # passa gli stessi cancelli degli altri lettori deterministici.
-            if extraction_context is None:
-                try:
-                    adottato = _xbrl_reso_extract(file_path)
-                except Exception as reso_err:
-                    adottato = None
-                    logger.info("PDF reso da XBRL non letto (%s: %s)", type(reso_err).__name__, reso_err)
-                if adottato is not None:
-                    return adottato
-            try:
-                adottato = _schema_etichette_extract(file_path, extraction_context)
-            except Exception as etichette_err:
-                adottato = None
-                logger.info("Schema con percorso nell'etichetta non letto (%s: %s)",
-                            type(etichette_err).__name__, etichette_err)
-            if adottato is not None:
-                return adottato
-            if extraction_context is not None:
-                for lettore in (_schema_generico_mineru_extract, _prospetto_sintetico_mineru_extract):
-                    try:
-                        adottato = lettore(extraction_context)
-                    except Exception as lettore_err:
-                        adottato = None
-                        logger.info("%s non letto (%s: %s)", lettore.__name__,
-                                    type(lettore_err).__name__, lettore_err)
-                    if adottato is not None:
-                        return adottato
-            # /import/pdf-ocr supplies structured MinerU table rows.  Build an
-            # evidence-only IV-CEE candidate from those rows before touching the
-            # original PDF.  It is accepted only through the same structural and
-            # accounting gates as every other extractor; an incomplete or
-            # ambiguous OCR mapping simply declines and the established source
-            # parser / LLM fallbacks continue.
-            if extraction_context is not None:
-                try:
-                    from importers.iv_cee_hierarchy import check_quadratura
-                    from importers.mineru_adapter import extract_ivcee_candidate
-
-                    mineru_candidate = extract_ivcee_candidate(extraction_context)
-                    if mineru_candidate is not None:
-                        mineru_q = check_quadratura(
-                            mineru_candidate.current_bs,
-                            mineru_candidate.current_ce,
-                            tol=Decimal("2"),
-                        )
-                        if mapper.validate_balance(mineru_candidate.current_bs) and mineru_q.quadra:
-                            prior_ok = False
-                            if mineru_candidate.prior_bs and mineru_candidate.prior_ce is not None:
-                                prior_q = check_quadratura(
-                                    mineru_candidate.prior_bs,
-                                    mineru_candidate.prior_ce,
-                                    tol=Decimal("2"),
-                                )
-                                prior_ok = (
-                                    mapper.validate_balance(mineru_candidate.prior_bs)
-                                    and prior_q.quadra
-                                )
-                            logger.info(
-                                "Using source-validated MinerU IV-CEE tables "
-                                "(fields=%d unresolved=%d prior_valid=%s)",
-                                mineru_candidate.source_detail_fields,
-                                len(mineru_candidate.unresolved_rows),
-                                prior_ok,
-                            )
-                            return (
-                                mineru_candidate.current_bs,
-                                mineru_candidate.current_ce,
-                                mineru_candidate.prior_bs if prior_ok else None,
-                                mineru_candidate.prior_ce if prior_ok else None,
-                            )
-                        logger.info(
-                            "Structured MinerU IV-CEE candidate declined by accounting gates: %s",
-                            "; ".join(mineru_q.warnings) or "structural balance mismatch",
-                        )
-                except Exception as mineru_err:
-                    logger.info(
-                        "Structured MinerU IV-CEE extraction declined (%s: %s)",
-                        type(mineru_err).__name__,
-                        mineru_err,
-                    )
-
-            # A regular comparative legal IV-CEE export has enough independent
-            # source controls to be read deterministically: each section exposes
-            # its own subtotal and both sides close to printed totals. Prefer that
-            # evidence-backed path before requiring an API call. It returns data
-            # only when SP, CE and CE↔SP all cross-foot; incomplete/ambiguous
-            # layouts decline and continue through the established LLM route.
-            # The deterministic source path also supports clean infrannual
-            # monocolumn statements. A prior-year column is optional, never required.
-            try:
-                from importers.iv_cee_hierarchy import check_quadratura
-                from importers.standard_ivcee_parser import (
-                    extract_standard_ivcee_balances,
-                    extract_standard_ivcee_income,
-                )
-
-                source_bs, source_prior_bs = extract_standard_ivcee_balances(
-                    file_path
-                )
-                source_ce, source_prior_ce = extract_standard_ivcee_income(
-                    file_path
-                )
-                if source_bs is not None and source_ce is not None:
-                    source_q = check_quadratura(
-                        source_bs, source_ce, tol=Decimal("2")
-                    )
-                    if mapper.validate_balance(source_bs) and source_q.quadra:
-                        prior_ok = False
-                        if source_prior_bs is not None and source_prior_ce is not None:
-                            prior_q = check_quadratura(
-                                source_prior_bs,
-                                source_prior_ce,
-                                tol=Decimal("2"),
-                            )
-                            prior_ok = (
-                                mapper.validate_balance(source_prior_bs)
-                                and prior_q.quadra
-                            )
-                        logger.info(
-                            "Using deterministic source-validated IV-CEE "
-                            "extraction (prior_valid=%s)",
-                            prior_ok,
-                        )
-                        return (
-                            source_bs,
-                            source_ce,
-                            source_prior_bs if prior_ok else None,
-                            source_prior_ce if prior_ok else None,
-                        )
-            except Exception as source_err:
-                logger.info(
-                    "Deterministic legal IV-CEE extraction declined (%s: %s)",
-                    type(source_err).__name__,
-                    source_err,
-                )
-
-            if not _ivcee_attivo(api_key):
-                raise PDFImportError(_modello_non_disponibile(
-                    "ANTHROPIC_API_KEY is required for PDF import"))
-            if not is_trial_balance and not is_scanned and not _ocr_source:
-                # Prefer source-verified macros, but incomplete coverage must not
-                # prevent importing. The existing extractor recovers the base;
-                # finalization assigns unexplained detail to residual accounts.
-                from importers.macro_analysis import analyze_pdf_macros, MacroAnalysisError
-                from importers.standard_ivcee_parser import has_comparative_ivcee_columns
-                try:
-                    bs, ce, prior_bs, prior_ce, _macro_report = analyze_pdf_macros(
-                        file_path,
-                        include_prior=not period_months and has_comparative_ivcee_columns(file_path),
-                    )
-                except MacroAnalysisError as exc:
-                    warning = (
-                        'MACROVOCI DA VERIFICARE: lettura incompleta; importazione '
-                        'proseguita con estrazione alternativa e conti residuali. '
-                        'Verificare le voci segnalate in Rettifiche.'
-                    )
-                    _macro_report = {**exc.report, 'fallback_used': True,
-                                     'warnings': [*exc.report.get('warnings', []), warning]}
-                    sc_quadratura_warnings.append(warning)
-                    logger.warning('%s Diagnosi: %s', warning, exc.report.get('errors', []))
-                else:
-                    return bs, ce, prior_bs, prior_ce
-            logger.info("Using LLM extraction (ANTHROPIC_API_KEY found)")
-            from importers.pdf_extractor_llm import (
-                extract_pdf_with_llm, extract_pdf_both_years_with_llm,
-            )
-            # A prior year is optional. Use the dual prompt only when the source
-            # physically proves two date columns; a monocolumn partial statement
-            # must use the single-year extractor and return no fabricated prior.
-            from importers.standard_ivcee_parser import has_comparative_ivcee_columns
-
-            if period_months and not has_comparative_ivcee_columns(file_path):
-                logger.info(
-                    f"Single-year infrannual extraction (period_months={period_months}; "
-                    "no prior column detected)"
-                )
-                bs, ce = extract_pdf_with_llm(file_path, force_llm=True)
-                _rifiuta_passivo_non_letto(bs)
-                return bs, ce, None, None
-
-            # Da qui in giu' passano SIA il budget annuale SIA l'infrannuale comparato
-            # (#50). L'infrannuale comparato tornava direttamente dal prompt a due anni,
-            # cioe' senza la mitigazione descritta qui sotto: dopo #27 quei file hanno
-            # cominciato ad arrivarci, e una riga di CE persa sull'anno corrente usciva
-            # dove prima usciva intera. Un percorso solo, perche' un secondo percorso
-            # ri-diverge alla prima modifica del primo.
-            #
-            # Take the CURRENT year from the proven single-year extractor
-            # (the both-years prompt occasionally drops a current-year line — budget_227), then
-            # run a dual pass purely to capture the PRIOR (comparative) column. This way a
-            # comparative bilancio imports BOTH years and the user is never asked to re-upload a
-            # year already in the PDF, WITHOUT degrading current-year quality. The dual pass
-            # returns empty prior dicts on monocolumn PDFs (no fabricated prior). The extra
-            # Haiku calls are cheap and PDF import is infrequent.
-            # force_llm=True: this helper is only reached for IV-CEE PDFs or as the
-            # explicit fallback after the deterministic parser returned empty; in the
-            # latter case the document was (mis-)detected as a trial balance, so without
-            # force_llm the single-year extractor would re-route back to that same empty
-            # deterministic parser (budget_313/314).
-            from importers.iv_cee_hierarchy import rollup_debiti_aggregates
-
-            def _balances(d):
-                return bool(d) and mapper.validate_balance(rollup_debiti_aggregates(d))
-
-            _letture_sp: list = []   # le letture SP dell'ultimo tentativo (un anno, due anni)
-
-            def _attempt():
-                """One extraction pass: single-year current + dual pass for the prior,
-                falling back to the dual-pass current when the single-year one does not
-                balance (dense 4-column layouts trip the single-year prompt) or when it
-                turns out to have read the COMPARATIVE column instead of the current one
-                (infrannuale: the two columns are not homogeneous, 9 months against 12)."""
-                bs, ce = extract_pdf_with_llm(file_path, force_llm=True)
-                prior_bs = prior_ce = None
-                read_comparative = False
-                _letture_sp.clear()
-                _letture_sp.append(bs)
-                try:
-                    dual_bs, dual_ce, prior_bs, prior_ce = extract_pdf_both_years_with_llm(file_path)
-                    _letture_sp.append(dual_bs)
-                    if _single_year_read_prior_column(bs, dual_bs, prior_bs):
-                        # Quadrerebbe lo stesso: e' l'anno sbagliato, non un foglio rotto.
-                        read_comparative = True
-                        logger.warning(
-                            "Single-year current extraction coincides with the "
-                            "comparative column: it read the wrong column; using the "
-                            "dual-pass current year"
-                        )
-                        bs, ce = dual_bs, dual_ce
-                    elif not _balances(bs) and _balances(dual_bs):
-                        logger.info(
-                            "Single-year current extraction is unbalanced; using the "
-                            "dual-pass current year (it balances)"
-                        )
-                        bs, ce = dual_bs, dual_ce
-                except Exception as prior_err:
-                    logger.warning(
-                        f"Prior-year dual extraction failed ({type(prior_err).__name__}: "
-                        f"{prior_err}); importing current year only"
-                    )
-                # Dichiarata SEMPRE, anche a zero: a valle una chiave assente vale zero,
-                # quindi tacere equivarrebbe a dichiararsi puliti.
-                if bs is not None:
-                    bs["_single_year_read_comparative"] = (
-                        Decimal("1") if read_comparative else Decimal("0")
-                    )
-                return bs, ce, prior_bs, prior_ce
-
-            # The Haiku extractor is stochastic on this schema: a dense 4-column bilancio
-            # (2025/2024/DIFFERENZA/SCOST.%) misreads a debiti line on a minority of runs,
-            # unbalancing the year. Retry until BOTH the current and any prior year balance
-            # (keeping the best attempt so far), which turns an ~80%/pass success into
-            # near-certainty. Bounded and only re-runs while a year still fails; PDF import
-            # is infrequent so the extra Haiku calls are acceptable.
-            best = None
-            for attempt in range(3):
-                bs, ce, prior_bs_data, prior_ce_data = _attempt()
-                current_ok = _balances(bs)
-                prior_ok = _balances(prior_bs_data) or not prior_bs_data
-                if best is None or (current_ok and not _balances(best[0])):
-                    best = (bs, ce, prior_bs_data, prior_ce_data)
-                if current_ok and prior_ok:
-                    best = (bs, ce, prior_bs_data, prior_ce_data)
-                    break
-                # La riprova serve contro una lettura sbilanciata, non contro un prospetto che
-                # non c'e': se il tentativo ha letto uno SP vuoto (Attivo = Passivo = 0, sia la
-                # lettura a un anno sia quella a due) altri due giri danno lo stesso vuoto, a
-                # quattro chiamate l'uno (budget_1667: dieci minuti prima dello stesso rifiuto).
-                try:
-                    from importers.iv_cee_hierarchy import check_quadratura
-                    _sp_vuoto = len(_letture_sp) == 2 and all(
-                        (not letto) or check_quadratura(letto).is_empty for letto in _letture_sp)
-                except Exception:
-                    _sp_vuoto = False
-                if _sp_vuoto:
-                    logger.info(
-                        f"Extraction attempt {attempt + 1}: empty balance sheet; "
-                        "not retrying (nothing to re-read)"
-                    )
-                    break
-                logger.info(
-                    f"Extraction attempt {attempt + 1}: current_balances={current_ok}, "
-                    f"prior_balances={prior_ok}; retrying" if attempt < 2 else
-                    f"Extraction attempt {attempt + 1}: current_balances={current_ok}, "
-                    f"prior_balances={prior_ok}; keeping best attempt"
-                )
-
-            # Clean comparative legal IV-CEE exports expose every aggregate and
-            # both side totals at fixed source coordinates.  If all stochastic
-            # attempts are still unbalanced, overlay those printed aggregates only
-            # when their independent section cross-foots reconcile exactly.  This
-            # is a source-backed fallback, not a plug: an incomplete/ambiguous PDF
-            # makes the deterministic parser return None and leaves ``best`` alone.
-            if best is not None and not _balances(best[0]):
-                try:
-                    from importers.standard_ivcee_parser import (
-                        extract_standard_ivcee_balances,
-                        extract_standard_ivcee_income,
-                        overlay_standard_ivcee_balance,
-                    )
-
-                    source_current, source_prior = extract_standard_ivcee_balances(
-                        file_path
-                    )
-                    source_current_ce, source_prior_ce = extract_standard_ivcee_income(
-                        file_path
-                    )
-                    source_bs = overlay_standard_ivcee_balance(best[0], source_current)
-                    source_prior_bs = overlay_standard_ivcee_balance(
-                        best[2] or {}, source_prior
-                    )
-                    if source_current is not None and _balances(source_bs):
-                        logger.warning(
-                            "LLM IV-CEE current extraction unbalanced; using "
-                            "source-validated legal subtotals"
-                        )
-                        # Keep the independently extracted CE and every typed
-                        # detail field; overwrite only the fully cross-footed legal
-                        # SP aggregates/totals returned by the source parser.
-                        source_ce = dict(best[1])
-                        if source_current_ce is not None:
-                            source_ce.update(source_current_ce)
-                        source_prior_income = dict(best[3] or {})
-                        if source_prior_ce is not None:
-                            source_prior_income.update(source_prior_ce)
-                        best = (
-                            source_bs,
-                            source_ce,
-                            source_prior_bs if source_prior is not None else best[2],
-                            source_prior_income if source_prior_ce is not None else best[3],
-                        )
-                except Exception as source_err:
-                    logger.info(
-                        "Deterministic legal IV-CEE fallback declined (%s: %s)",
-                        type(source_err).__name__, source_err,
-                    )
-            if best is not None:
-                _rifiuta_passivo_non_letto(best[0])
-            return best
+            esito, _macro_report = _estrazione_col_modello(
+                file_path, extraction_context, period_months, api_key, mapper, is_scanned,
+                is_trial_balance, _ocr_source, sc_quadratura_warnings, _macro_report)
+            return esito
 
         sc_quadratura_warnings = []
         # Corrupted (not merely absent) text layer — broken ToUnicode font map

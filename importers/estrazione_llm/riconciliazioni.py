@@ -171,7 +171,7 @@ def _normalize_ce_signs(income_data: Dict[str, Decimal]) -> Dict[str, Decimal]:
             flipped.append('ce10_var_rimanenze_mat_prime')
         # ce20 (imposte) is effectively always an expense in these layouts; flip the
         # parenthesised (negative) presentation to positive, leave an already-positive
-        # value alone (its own cross-check in _validate_ce_imposte guards edge cases).
+        # value alone.
         ce20 = income_data.get('ce20_imposte', Decimal('0'))
         if ce20 < 0:
             income_data['ce20_imposte'] = abs(ce20)

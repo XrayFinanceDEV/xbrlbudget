@@ -149,6 +149,8 @@ Tutti robusti agli header lettera-spaziati (variante senza spazi). I principali:
 0.  ext ∈ {.xbrl,.xml}                                   → ROUTE_XBRL / OTHER
 1.  ce_present AND NOT sp_present                         → ROUTE_UNSUPPORTED  (solo CE: errore onesto)
 1b. testata «saldo iniziale dare avere» senza saldo dopo  → ROUTE_UNSUPPORTED / movimenti senza saldo finale
+1c. utile o perdita fiscale AND riepilogo ricavi/costi AND NOT patrimonio netto
+                                                          → ROUTE_UNSUPPORTED / contabilità semplificata
 2.  itcc AND coge_codes<5 AND NOT pareggio AND NOT verifica
                                                           → ROUTE_IVCEE / A    (facsimile deposito XBRL→PDF)
 3.  legal_skeleton AND coge_codes>=5  (B batte C):       → ROUTE_IVCEE / B
@@ -162,8 +164,6 @@ Tutti robusti agli header lettera-spaziati (variante senza spazi). I principali:
                                                           → ROUTE_TRIAL / C    (conf high se pareggio/verifica)
 6.  legal_skeleton OR itcc OR (stato_patrimoniale AND totale_attivo)
                                                           → ROUTE_IVCEE / A
-6b. utile fiscale AND riepilogo ricavi/costi AND NOT patrimonio netto
-                                                          → ROUTE_UNSUPPORTED / contabilità semplificata
 7.  fallback                                             → ROUTE_UNSUPPORTED / OTHER
 ```
 
@@ -318,9 +318,10 @@ risulta troppo alto e il ribilancio lo **maschera gonfiando la liquidità** (es.
   > Il validatore *rifiuta* proprio questa correzione, perché la sua prima guardia vieta le
   > riserve negative (`IMPORT-OVERVIEW.md` §5) ed è esattamente una riserva negativa il numero
   > giusto nel caso LIO. Solo il passaggio deterministico, **ancorato alle righe stampate** invece
-  > che al pareggio, arriva al valore vero. Il commento a `pdf_extractor_llm.py:2357` lo dice
-  > esplicitamente. Chi in futuro pensasse di cancellare uno dei due come duplicato deve partire
-  > da qui (tanto più che `_validate_equity` oggi non è nemmeno agganciato a un percorso).
+  > che al pareggio, arriva al valore vero. Il commento sopra gli aiutanti del PN
+  > (`importers/estrazione_llm/modelli.py`) lo dice esplicitamente. Il validatore, che non aveva
+  > chiamanti, è stato tolto il 2026-11-24: chi in futuro pensasse di togliere anche il passaggio
+  > deterministico perché «fa la stessa cosa» deve partire da qui.
 - `_reconcile_personale_detail` legge **B.9 a/b/c/e → ce08b** salari / **ce08c** oneri /
   **ce08a** TFR / **ce08d** altri, gated su "Totale costi per il personale". Gotcha: la riga
   CE "c) trattamento di fine rapporto" va distinta dalla riga SP "C) Trattamento di fine

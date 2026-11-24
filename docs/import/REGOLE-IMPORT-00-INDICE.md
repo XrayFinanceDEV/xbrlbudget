@@ -97,7 +97,7 @@ fonte autorevole**; queste voci sono da correggere nei documenti citati.
 | # | Il documento dice | Il codice fa | Dove |
 |---|---|---|---|
 | D1 | Il residuo viene "tamponato in sp09/sp16" | **Nessun plug viene applicato.** Il residuo è solo *misurato* e dichiarato | `CLAUDE.md`. **I messaggi utente sono stati corretti il 2026-07-16**: ora dicono "non classificato", vedi sotto |
-| D2 | `SC_PLUG_REJECT_PCT` (20%) è una soglia di rifiuto | Non rifiuta nulla: scala solo la severità del testo del warning fra "parziale" e "prevalentemente stimata" | `pdf_importer.py:194`, `:788-797` |
+| D2 | `SC_PLUG_REJECT_PCT` (20%) è una soglia di rifiuto | Non rifiuta nulla: scala solo la severità del testo del warning fra "parziale" e "prevalentemente stimata" | `SC_PLUG_REJECT_PCT` in `importers/import_pdf/estrattori.py`, usata in `import_pdf_balance_sheet` (`pdf_importer.py`) |
 | D3 | `enforce_ce_sp_identity` riallinea il CE (plug in `ce04`/`ce12`, spostamento in riserve con cap 10%) | È **puramente diagnostico**: espone `_ce_sp_difference` e non muta né CE né SP. Corretto nelle descrizioni operative di `IMPORT-OVERVIEW.md` e `IMPORT-BALANCING-SCHEME.md` il 2026-09-26 | `iv_cee_hierarchy.py:734` |
 | D4 | `reconcile_ivcee_balance` tampona la differenza (`cap_frac=0.05`) | Ritorna una copia invariata e riporta la differenza. `cap_frac` è tenuto solo per compatibilità di firma. Corretto nelle descrizioni operative il 2026-09-26 | `iv_cee_hierarchy.py:625` |
 | D5 | Il gate di promozione è "€5" | Prima di scrivere servono una proiezione non obsoleta e il gate `semantic_valid` completo, non una soglia in euro; dopo la copia il gate semantico viene ripetuto | `forecast_freshness.py`; `promote_service.py` |
@@ -123,16 +123,17 @@ la sede dell'import**: una regola nuova si scrive qui, non là.
 Da non documentare come funzionalità:
 
 - `is_contrapposte_depi` / `parse_entries_contrapposte_depi`
-  (`situazione_contabile_parser.py:1652`, `:1690`) — i DEPI a sezioni contrapposte sono
-  esplicitamente **rifiutati** da `is_situazione_contabile` (`:76-77`) e deferiti all'LLM. Il
-  codice si autodichiara inutilizzato (`:1655-1658`).
+  (`importers/situazione_contabile/contrapposte_8cifre.py`) — i DEPI a sezioni contrapposte sono
+  esplicitamente **rifiutati** da `is_situazione_contabile` (`situazione_contabile/dispatcher.py`,
+  `_is_contrapposte_layout`) e deferiti all'LLM. Il codice si autodichiara inutilizzato (docstring di
+  `is_contrapposte_depi`), e nessuna riga lo chiama.
 - `xbrl_parser.py` (legacy) — riduce ogni contesto al solo anno, quindi collassa annuale e
   infrannuale dello stesso anno. Il parser di produzione è `xbrl_parser_enhanced.py`.
-- `_validate_equity` (`pdf_extractor_llm.py:3693`) — **definita e mai chiamata**: le uniche altre
-  occorrenze del nome sono due commenti (`:2357`, `:2589`) che la descrivono come attiva. Le sue
-  guardie anti-masking sono documentate in [IMPORT-OVERVIEW](IMPORT-OVERVIEW.md) §5 perché
-  spiegano una decisione ancora viva (perché il reconciler deterministico del PN esiste), ma **non
-  vanno raccontate come un controllo in funzione**. Rilevato il 2026-08-14.
+- `_validate_equity` — definita e mai chiamata (rilevato il 2026-08-14), **tolta il 2026-11-24** con gli
+  altri validatori senza chiamanti di `pdf_extractor_llm.py`. Le sue guardie anti-masking restano
+  documentate in [IMPORT-OVERVIEW](IMPORT-OVERVIEW.md) §5 perché spiegano una decisione ancora viva
+  (perché il reconciler deterministico del PN esiste), ma **non vanno raccontate come un controllo in
+  funzione**.
 - `tests/test_hierarchical_import.py` — il nome inganna: è un diagnostico manuale **XBRL**,
   interamente skippato (`pytestmark = pytest.mark.skip`). Non copre la gerarchia dotted. Il
   riferimento corretto è `tests/test_prod_route_c.py`.

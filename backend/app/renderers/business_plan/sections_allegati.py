@@ -72,6 +72,4 @@ def allegato_e(data: BusinessPlanData, pages: dict) -> list:
     s = layout.section_head("ALLEGATO E", "Indici analitici",
                             "Quadro completo degli indici. ROE, ROI, ROS ed EBITDA margin sono nell'Allegato D.")
     rows = [(r.label, [fmt.value(v, r.unit) for v in r.values], "") for r in data.indicators_analytical]
-    return s + [layout.fin_table(headers(data), rows, first="Indicatore"), Spacer(0, 5),
-                layout.note("Lo Z-Score di Altman, il rating FGPMI e l'EMScore sono disponibili per ogni anno di piano "
-                            "nel modello previsionale e non sono riportati in questo prospetto.")]
+    return s + [layout.fin_table(headers(data), rows, first="Indicatore")]

@@ -89,8 +89,8 @@ invece sulla sola fase PREVISIONALE.
 **Partita IVA** e **Settore\*** a tendina, e il pulsante **«Crea»**; subito dopo l'app chiede il
 tipo di pratica. Il settore è a tendina: le sei descrizioni sono lunghe (per esempio «1. Industria, Alberghi (Proprietari),
 Agricoltura, Pesca») e se l'azienda è mista fa fede il settore del fatturato principale. Il
-settore non è un'etichetta: sceglie il modello Altman (settore 1 a 5 componenti, settori 2-6 a
-4) e le soglie FGPMI.
+settore non è solo un'etichetta: per immobiliare ed edilizia (settori 5 e 6) il motore accetta
+un magazzino che ruota in più di un anno, perché lì è normale.
 
 > La home non ha barra di ricerca né ordinamento: le aziende sono solo schede in elenco.
 
@@ -115,9 +115,6 @@ essere sull'azienda giusta e correggi quello che l'import ha letto male.
 
 **Come si fa.** 1) correggi nome o partita IVA se l'import le ha sbagliate; 2) imposta il
 settore giusto (se non sai quale, scegli quello del fatturato principale); 3) «Salva e prosegui».
-
-**Esempio.** L'azienda di prova è classificata **industria** (settore 1): il suo rating userà le soglie
-FGPMI del settore 1 e il modello Altman a 5 componenti.
 
 **Approfondisci** → [PRATICA-PERCORSO.md](frontend/PRATICA-PERCORSO.md)
 
@@ -1118,7 +1115,6 @@ annualizzate:
 | Ricavi / Costo personale, Ricavi / Costo materie | ricavi delle vendite ÷ costo del personale (÷ materie prime) |
 
 ROE, ROI, ROS ed EBITDA margin non si ripetono nell'Allegato E: sono già nell'Allegato D.
-Lo Z-Score di Altman e il rating FGPMI non sono nel Business plan.
 
 ## Il break even point
 

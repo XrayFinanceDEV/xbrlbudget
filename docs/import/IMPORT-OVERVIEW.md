@@ -298,9 +298,10 @@ ancorare) e fa due pass Haiku con prompt CoGe-specifici:
   positivi.
 
 Output sugli stessi schemi `BalanceSheetExtraction`/`IncomeStatementExtraction`, poi
-post-processing: `_normalize_ce_signs`, `_validate_crediti`/`_validate_debiti`
-(breakdown→aggregato), `_validate_ce10_against_bs`/`_validate_ce_imposte`, e infine
-**`_balance_trial_via_result`** che impone il pareggio derivando `sp13 = totale_attivo −
+post-processing: `_normalize_ce_signs` e poi
+**`_balance_trial_via_result`** (i validatori `_validate_crediti`/`_validate_debiti`/
+`_validate_ce10_against_bs`/`_validate_ce_imposte`, che correggevano gli importi, non hanno
+chiamanti dal 2026-07-16 — «diagnosi oneste al posto dei plug» — e sono stati tolti il 2026-11-24) che impone il pareggio derivando `sp13 = totale_attivo −
 (passivo + PN escluso risultato)` e ricalcola i totali. Trial balance scansionati →
 `_extract_with_llm_vision` con gli stessi prompt CoGe. Single-year (i trial balance sono
 raramente comparativi): `prior_bs_data`/`prior_ce_data` restano `None`.

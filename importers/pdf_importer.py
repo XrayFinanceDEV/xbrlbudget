@@ -3,1390 +3,418 @@ PDF Balance Sheet Importer for Italian IV CEE format.
 
 Uses PyMuPDF and a configurable LLM provider for text extraction.
 Vision OCR still requires ANTHROPIC_API_KEY.
+
+Dal 2026-11-24 gli aiutanti stanno nel pacchetto importers/import_pdf; qui resta
+import_pdf_balance_sheet, che li cerca fra i nomi di questo modulo: un monkeypatch su
+importers.pdf_importer continua a valere per le sue chiamate. Il modulo ri-esporta ogni nome del
+pacchetto, privati compresi.
 """
 
-import os
-import re
-import json
-import hashlib
+from importlib import import_module
 import logging
-from typing import Dict, Any, List, NamedTuple, Optional, Tuple
-from decimal import Decimal
+import hashlib
+import json
+import os
 from datetime import datetime
-
-from database.db import SessionLocal
-from database.models import Company, FinancialYear, BalanceSheet, IncomeStatement
-from importers.pdf_mapper import IVCEEMapper
-from importers.nome_azienda import nome_azienda_pulito
+from decimal import Decimal
+from typing import Any, Dict, Optional
 from config import Sector
+from database.db import SessionLocal
+from database.models import Company, FinancialYear
+from importers.nome_azienda import nome_azienda_pulito
+from importers.pdf_mapper import IVCEEMapper
+from importers.import_pdf.verdetti import (
+    PDFImportError, _TOL_QUADRATURA, _UNBALANCED_WARNING_PREFIX, _UNBALANCED_WARNING_SUFFIX,
+    _avvisi_fondi_snello, _avviso_comparato_non_letto, _avviso_risultato_anno_prima_conti,
+    _avviso_risultato_in_apertura, _avviso_risultato_ricostruito, _classify_balance_failure,
+    _declared_totals_contradiction, _it_amount, _resolve_validation_status, _rifiuta_lettura_non_riuscita,
+    _rifiuta_passivo_non_letto, _should_import_prior, _single_year_read_prior_column,
+    _snello_squadrato_reason, _validation_report_payload,
+)
+from importers.import_pdf.estrattori import (
+    SC_PLUG_REJECT_PCT, _coge_attivo, _dettagli_gia_letti, _extract_route_c_last_resort, _ivcee_attivo,
+    _map_sc_keys, _modello_non_disponibile, _motivo_ripiego_classico, _motore_snello,
+    _prospetto_sintetico_mineru_extract, _ripiego_classico_acceso, _schema_etichette_extract,
+    _schema_generico_mineru_extract, _xbrl_reso_extract,
+)
+from importers.import_pdf.riscatto_vision import (
+    _apply_vision_rescue,
+)
+from importers.import_pdf.persistenza import (
+    _create_balance_sheet, _create_income_statement, _lettore_diagnosi_import,
+)
 
-logger = logging.getLogger(__name__)
+logger = logging.getLogger("importers.pdf_importer")
+
+_MODULI = (
+    "riassunti",
+    "verdetti",
+    "estrattori",
+    "riscatto_vision",
+    "persistenza",
+)
+
+for _nome in _MODULI:
+    _modulo = import_module(f"importers.import_pdf.{_nome}")
+    globals().update({_k: _v for _k, _v in vars(_modulo).items() if not _k.startswith("__")})
+del _nome, _modulo
+
 
 _PDF_PARSER_VERSION = "macro-fallback-v8-2026-09-21"
 
 
-def _validation_report_payload(q, reliability=None) -> Dict[str, Any]:
-    """JSON-safe persisted form of the immutable accounting validation."""
-    payload = {
-        "arithmetic_balanced": abs(q.sbilancio) <= Decimal("0.01"),
-        "income_result_consistent": q.utile_match,
-        "hierarchy_consistent": q.hierarchy_consistent,
-        "semantic_valid": q.semantic_valid,
-        "masked": q.masked,
-        "is_empty": q.is_empty,
-        "totale_attivo": str(q.totale_attivo),
-        "totale_passivo": str(q.totale_passivo),
-        "sbilancio": str(q.sbilancio),
-        "utile_ce": None if q.utile_ce is None else str(q.utile_ce),
-        "sp13": str(q.sp13),
-        "plug_residual": str(q.plug_residual),
-        "hierarchy_differences": {
-            key: str(value) for key, value in q.hierarchy_differences.items()
-        },
-        "warnings": list(q.warnings),
-    }
-    if reliability is not None:
-        payload["critical_accounts"] = reliability.to_dict()
-    return payload
+def _estrazione_col_modello(file_path, extraction_context, period_months, api_key, mapper, is_scanned,
+                            is_trial_balance, _ocr_source, sc_quadratura_warnings, _macro_report):
+    """IV CEE extraction via LLM. Returns ((bs, ce, prior_bs, prior_ce), macro_report).
 
-
-def _avviso_risultato_ricostruito(importo) -> str:
-    return (
-        "RISULTATO ESERCIZIO PRECEDENTE RICOSTRUITO DAI TOTALI: il documento stampa la "
-        "didascalia del risultato dell'esercizio precedente ma l'importo non e' leggibile; "
-        f"€{_euro_it(Decimal(str(importo)))} e' stato ricostruito come differenza dei totali "
-        "dello Stato Patrimoniale meno l'utile del Conto Economico (verificato dai suoi "
-        "totali) e messo negli utili portati a nuovo. Verificarlo in Rettifiche.")
-
-
-def _avvisi_fondi_snello(diag: dict) -> list[str]:
-    """Gli avvisi sui fondi che l'importatore ha dichiarato nel suo diag."""
-    avvisi = []
-    gia_nettati = diag.get('fondi_gia_nettati')
-    if gia_nettati:
-        # la voce stampava gia' il netto: il fondo letto a parte non si sottrae una seconda volta
-        avvisi.append(
-            'FONDO GIA\' NETTATO: la voce stampa gia\' il valore al netto del fondo, che non e\' '
-            'stato sottratto una seconda volta ('
-            + ', '.join(f'{q[:-2]} {v}' for q, v in gia_nettati) + ').')
-    non_dettagliato = diag.get('valore_produzione_non_dettagliato')
-    if non_dettagliato:
-        # decisione del proprietario 2026-11-19: la voce A senza dettaglio va nei ricavi delle vendite
-        avvisi.append(
-            'VALORE DELLA PRODUZIONE NON DETTAGLIATO: il documento stampa solo il totale di A) '
-            '(' + ', '.join(non_dettagliato) + '), messo per intero nei ricavi delle vendite (ce01). '
-            'Se comprende variazioni delle rimanenze, incrementi o altri ricavi, ripartirlo in Rettifiche.')
-    tagliate = diag.get('immobilizzazioni_negative_tagliate')
-    if tagliate:
-        # budget_1452: i fondi degli immateriali (1.086,25) superano il costo storico (1.000)
-        avvisi.append(
-            'FONDO OLTRE IL COSTO STORICO: il fondo ammortamento supera il valore lordo del '
-            'cespite (' + ', '.join(f'{campo} eccedenza {v}' for campo, v in tagliate)
-            + '). E\' un errore del documento: l\'immobilizzazione netta e\' stata portata a '
-            'zero e l\'eccedenza resta come sbilancio dichiarato - correggere in Rettifiche.')
-    return avvisi
-
-
-# Decisione del proprietario (2026-11-19): uno sbilancio oltre meta' del totale attivo non e' un bilancio da
-# rettificare, e' una lettura non riuscita («non ha senso importare con sbilanci cosi' elevati»).
-_SBILANCIO_MASSIMO_QUOTA = Decimal("0.5")
-# Un totale attivo stampato sotto un quarto del lato piu' grande letto non fa da base: e' un totale letto male
-# (budget_1753, prima della correzione dei sotto-totali: 11,36 € contro milioni).
-_QUOTA_MINIMA_TOTALE_STAMPATO = Decimal("0.25")
-
-
-def _rifiuta_lettura_non_riuscita(file_path: str, qd, income_data=None) -> str | None:
-    """Uno sbilancio oltre la meta' del totale attivo stampato (o, senza un totale stampato credibile, del lato piu'
-    grande letto) e' una lettura fallita: manca meta' del bilancio o piu', e Rettifiche non e' lo strumento per
-    ricostruirlo (budget_1786: 105 milioni di sbilancio su un attivo di circa 9). Si rifiuta col motivo, invece di
-    salvare numeri senza senso. Uno sbilancio piu' piccolo resta importato con l'avviso, come sempre.
-    Lo sbilancio si misura sui totali col loro segno: un passivo letto negativo (il meno stampato davanti alle
-    passivita' e preso per un saldo) e' una lettura sbagliata, e togliergli il segno ne nasconderebbe lo sbilancio
-    vero - un attivo di 100 e un passivo di -60 non quadrano di 40 ma di 160.
-
-    Eccezione (proprietario, 2026-11-23): se il documento stampa un totale dei costi della produzione piu' alto
-    delle voci lette e quella differenza riporta lo sbilancio sotto la soglia, non si rifiuta: restituisce l'avviso
-    da mostrare all'utente (None quando non c'e' nulla da dire)."""
-    att, pas = Decimal(qd.totale_attivo or 0), Decimal(qd.totale_passivo or 0)
-    sbilancio = abs(att - pas)
-    letto = max(abs(att), abs(pas))
-    base = letto
-    try:
-        from importers.import_snello.verifica import totali_stampati
-        stampato = totali_stampati(file_path).get("totale_attivo")
-        if stampato is not None and Decimal(stampato) >= _QUOTA_MINIMA_TOTALE_STAMPATO * letto:
-            base = Decimal(stampato)
-    except Exception:
-        pass
-    nascosti = _costi_produzione_non_mostrati(file_path, income_data) if income_data else None
-    avviso = None
-    # l'avviso solo se quei costi spiegano lo sbilancio (aggiungerli lo riduce), mai su un divario estraneo
-    if nascosti is not None and abs(att - pas + nascosti[2]) < sbilancio:
-        stampato, letto, differenza = nascosti
-        avviso = ("COSTI DELLA PRODUZIONE NON DETTAGLIATI: il documento stampa un totale dei costi della produzione "
-                  f"(B) di €{_euro_it(stampato)}, ma le voci lette sommano €{_euro_it(letto)}: "
-                  f"€{_euro_it(differenza)} di costi non hanno una riga nel documento (o non sono stati letti) e "
-                  "lo sbilancio ne deriva. Inserire quei costi nelle loro voci in Rettifiche.")
-    if base <= 0 or sbilancio <= _SBILANCIO_MASSIMO_QUOTA * base:
-        return avviso
-    if avviso is not None and abs(att - pas + nascosti[2]) <= _SBILANCIO_MASSIMO_QUOTA * base:
-        # Decisione del proprietario (2026-11-23, «per ora importiamo con eccezione»): lo sbilancio e' spiegato
-        # da costi che il documento mette nel totale di B senza stamparne le righe (budget_1790). Si importa con
-        # lo sbilancio dichiarato e l'avviso coi numeri stampati, mai un tappo: la ripartizione e' dell'utente.
-        return avviso
-    negativo = _totale_attivo_stampato_negativo(file_path)
-    if negativo is not None:
-        # budget_1810: una colonna senza saldi (conti azzerati, restano solo i fondi) stampa un totale attivo
-        # negativo. Il rifiuto e' lo stesso; il motivo dice che cosa c'e' nel documento, non uno sbilancio.
-        raise PDFImportError(
-            "Documento non importabile: il totale attivo stampato e' negativo "
-            f"(€-{_euro_it(negativo)}), quindi la colonna letta non e' uno stato patrimoniale (conti azzerati, "
-            "periodo o anno sbagliato). Il bilancio non e' stato importato.")
-    raise PDFImportError(
-        "Lettura non riuscita: lo stato patrimoniale letto non quadra di "
-        f"€{_euro_it(sbilancio)} (attivo €{_euro_it(att)}, passivo €{_euro_it(pas)}), piu' della meta' del "
-        f"totale attivo (€{_euro_it(base)}). Non e' un bilancio da correggere in Rettifiche: il documento non e' "
-        "stato letto correttamente e non e' stato importato.")
-
-
-_TOTALE_ATTIVO_NEGATIVO = re.compile(
-    r"totale\s+(?:dello\s+)?(?:stato\s+patrimoniale\s*[-–]?\s*)?attiv[oita']*\s*:?\s*"
-    r"(?:-\s*(?P<pre>\d{1,3}(?:\.\d{3})*,\d{2})|(?P<post>\d{1,3}(?:\.\d{3})*,\d{2})[ \t]*-(?![ \t]*\d))",
-    re.I)
-
-
-def _totale_attivo_stampato_negativo(file_path: str) -> Decimal | None:
-    """Il valore assoluto del primo «Totale attivo» stampato col segno meno (davanti o dietro), se c'e'.
-    Serve solo a dire il motivo giusto di un rifiuto gia' deciso: non cambia mai un esito."""
-    try:
-        import fitz
-        with fitz.open(file_path) as doc:
-            testo = "\n".join(p.get_text() for p in doc)
-    except Exception:
-        return None
-    m = _TOTALE_ATTIVO_NEGATIVO.search(testo)
-    if not m:
-        return None
-    return Decimal((m.group("pre") or m.group("post")).replace(".", "").replace(",", "."))
-
-
-_TOTALE_COSTI_PRODUZIONE = re.compile(
-    r"totale\s+costi\s+della\s+produzione\s*(?:\(\s*b\s*\))?\s*:?\s*(?P<v>\d{1,3}(?:\.\d{3})*(?:,\d{2})?)(?![\d,])",
-    re.I)
-_CAMPI_COSTI_PRODUZIONE = ("ce05", "ce06", "ce07", "ce08", "ce09", "ce10", "ce11", "ce12")
-
-
-def _costi_produzione_non_mostrati(file_path: str, income_data) -> tuple[Decimal, Decimal, Decimal] | None:
-    """(totale B stampato, somma delle voci B lette, differenza) quando il documento stampa un totale dei costi della
-    produzione piu' alto delle voci lette; altrimenti None. Lo schema «BILANCIO PER FORMULA» (budget_1772/1774/1790)
-    stampa il totale di B ma solo tre delle sue righe: le altre sono nel totale e non compaiono."""
-    try:
-        import fitz
-        with fitz.open(file_path) as doc:
-            testo = "\n".join(p.get_text() for p in doc)
-    except Exception:
-        return None
-    m = _TOTALE_COSTI_PRODUZIONE.search(testo)
-    if not m:
-        return None
-    stampato = Decimal(m.group("v").replace(".", "").replace(",", "."))
-    letto = Decimal(0)
-    for pref in _CAMPI_COSTI_PRODUZIONE:
-        aggregato = [k for k in (income_data or {}) if k.split("_")[0] == pref]
-        if aggregato:
-            letto += sum((Decimal(income_data[k] or 0) for k in aggregato), Decimal(0))
-        else:
-            letto += sum((Decimal(v or 0) for k, v in (income_data or {}).items()
-                          if re.fullmatch(pref + r"[a-z]", k.split("_")[0])), Decimal(0))
-    differenza = stampato - letto
-    if differenza <= 0:
-        return None
-    return stampato, letto, differenza
-
-
-def _rifiuta_passivo_non_letto(bs) -> None:
-    """Un attivo letto con il passivo tutto a zero non e' un bilancio sbilanciato: e' una lettura
-    mancante (budget_1423/1418, vLLM che ometteva sp11-sp18 e pydantic che li riempiva a zero).
-    Salvarlo come "squadrato" consegnerebbe all'utente un passivo inventato a zero."""
-    if not bs:
-        return
-    from importers.iv_cee_hierarchy import _ATTIVO_FIELDS, _PASSIVO_FIELDS
-    attivo = sum((abs(Decimal(bs.get(k, 0) or 0)) for k in _ATTIVO_FIELDS), Decimal(0))
-    passivo = sum((abs(Decimal(bs.get(k, 0) or 0)) for k in _PASSIVO_FIELDS), Decimal(0))
-    if attivo > 0 and passivo == 0:
-        raise PDFImportError(
-            "Lettura del passivo mancante: il modello ha restituito l'attivo "
-            f"(€{_euro_it(attivo)}) ma nessuna voce del passivo. Il bilancio non e' stato "
-            "importato; riprovare l'import.")
-
-
-class PDFImportError(Exception):
-    """Exception raised when PDF import fails."""
-    pass
-
-
-_UNBALANCED_WARNING_PREFIX = "BILANCIO SBILANCIATO"
-# Sbilancio che una scansione letta dall'OCR puo' avere ed essere importata con avviso:
-# oltre, l'OCR ha perso colonne o totali (decisione del proprietario, 2026-10-14).
-_SCANSIONE_SBILANCIO_AMMESSO = Decimal("0.05")
-_UNBALANCED_WARNING_SUFFIX = (
-    "Il bilancio è stato importato così com'è: correggilo in Rettifiche "
-    "prima di calcolare la proiezione."
-)
-
-
-class BalanceFailureVerdict(NamedTuple):
-    """Esito della diagnosi su un bilancio che non supera ``validate_balance``.
-
-    Esattamente uno dei due campi e' valorizzato. ``hard_error`` significa che
-    non c'e' nulla che l'utente possa correggere in Rettifiche (estrazione
-    vuota, documento che non e' uno schema IV-CEE, totali letti dall'OCR e
-    quindi inaffidabili di per se'). ``warning`` significa che il bilancio e'
-    leggibile ma non quadra: si importa e si corregge a mano.
-    """
-    hard_error: Optional[str]
-    warning: Optional[str]
-
-
-def _it_amount(value: Decimal) -> str:
-    """Formattazione italiana: 1.234.567,89."""
-    return f"{value:,.2f}".replace(',', '#').replace('.', ',').replace('#', '.')
-
-
-def _declared_totals_contradiction(file_path: str, text: Optional[str]) -> Optional[str]:
-    """Diagnosi pura: il documento sorgente contraddice se stesso, Attivo dichiarato !=
-    Passivo dichiarato (oltre 2 euro). Legge solo i totali che il documento stampa
-    (``_declared_control_totals``), non tocca alcun valore contabile e non impedisce
-    l'estrazione: e' il chiamante che decide come proseguire (Task 17, decisione del
-    proprietario 2026-09-27 — «se il bilancio non e' quadrato deve essere comunque
-    importato con avviso»: questi documenti non si scartano piu' prima di scegliere un
-    estrattore, si importano con questo avviso). None quando i totali dichiarati
-    mancano, non sono leggibili o coincidono.
-    """
-    try:
-        from importers.pdf_extractor_llm import _declared_control_totals
-        source_controls = _declared_control_totals(file_path, text=text)
-    except Exception as source_control_error:
-        # Controllo best-effort: totali non leggibili non bloccano ne' dichiarano nulla.
-        logger.info(
-            "IV-CEE source preflight unavailable (%s: %s)",
-            type(source_control_error).__name__, source_control_error,
-        )
-        return None
-    source_attivo = source_controls.get("attivo")
-    source_passivo = source_controls.get("passivo")
-    if source_attivo is None or source_passivo is None:
-        return None
-    source_difference = abs(source_attivo - source_passivo)
-    if source_difference <= Decimal("2"):
-        return None
-    return (
-        f"{_UNBALANCED_WARNING_PREFIX}: il bilancio sorgente non quadra prima "
-        f"dell'importazione: Totale Attivo €{_euro_it(source_attivo)} != Totale "
-        f"Passivo €{_euro_it(source_passivo)} (scarto €{_euro_it(source_difference)}). "
-        f"{_UNBALANCED_WARNING_SUFFIX}"
-    )
-
-
-def _avviso_risultato_in_apertura(bs: Dict[str, Any]) -> str:
-    """Verifica progressiva il cui saldo d'apertura non riapre il risultato dell'anno prima
-    (budget_680): l'importo e' messo negli utili (perdite) portati a nuovo e si dichiara."""
-    v = Decimal(str(bs['_risultato_anno_prima_apertura']))
-    voce = "perdita" if v < 0 else "utile"
-    def e(k):
+    Era la chiusura ``_llm_extract`` di ``import_pdf_balance_sheet``, spostata qui senza cambiare il codice:
+    gli argomenti sono le variabili che leggeva dalla funzione esterna, e ``_macro_report``, che riassegnava
+    con ``nonlocal``, torna insieme al risultato. ``sc_quadratura_warnings`` si estende sul posto come prima."""
+    # "Situazione contabile riclassificata dettagliata" (BILAQ, detail_riclass,
+    # Santini): lo schema di legge col percorso nell'etichetta, letto per percorso e
+    # verificato su ogni totale stampato, dalle tabelle MinerU di una scansione o dal
+    # testo del PDF. Prima di qualunque modello: su questa famiglia il modello prendeva
+    # sotto-righe per totali ("B.6.2) Materie prime" per B.6), contava due volte i
+    # crediti oltre 12 mesi e perdeva i debiti verso il gruppo. Si adotta solo se
+    # passa gli stessi cancelli degli altri lettori deterministici.
+    if extraction_context is None:
         try:
-            return f"€{_euro_it(Decimal(str(bs[k])))}"
-        except Exception:
-            return "n/d"
-    return (f"RISULTATO DELL'ANNO PRIMA NON DESTINATO: nella colonna d'apertura del bilancio di "
-            f"verifica attività ({e('_apertura_attivo')}) e passività ({e('_apertura_passivo')}) "
-            f"differiscono di €{_euro_it(abs(v))}, la stessa cifra che sbilancia il saldo finale: "
-            f"è la {voce} dell'anno prima non riaperta. È stata messa negli utili (perdite) portati "
-            f"a nuovo — verificare in Rettifiche")
-
-
-def _avviso_risultato_anno_prima_conti(bs: Dict[str, Any]) -> str:
-    """Un conto "utile (perdita) d'esercizio" fra i conti del patrimonio, diverso dal risultato
-    del periodo (COLOMBO 2026): e' il risultato dell'anno prima non ancora destinato."""
-    v = Decimal(str(bs['_risultato_anno_prima_conti']))
-    voce = "perdita" if v < 0 else "utile"
+            adottato = _xbrl_reso_extract(file_path)
+        except Exception as reso_err:
+            adottato = None
+            logger.info("PDF reso da XBRL non letto (%s: %s)", type(reso_err).__name__, reso_err)
+        if adottato is not None:
+            return (adottato), _macro_report
     try:
-        periodo = f"€{_euro_it(Decimal(str(bs.get('sp13_utile_perdita', bs.get('sp13', 0)))))}"
-    except Exception:
-        periodo = "n/d"
-    return (f"RISULTATO DELL'ANNO PRIMA NON DESTINATO: il conto {voce} d'esercizio di "
-            f"€{_euro_it(abs(v))} fra i conti del patrimonio non è il risultato del periodo "
-            f"({periodo}): è il risultato dell'anno prima non ancora destinato, ed è stato messo "
-            f"negli utili (perdite) portati a nuovo — verificare in Rettifiche")
-
-
-def _snello_squadrato_reason(report: Dict[str, Any]) -> str:
-    """Avviso per un risultato dell'importatore con esito 'squadrato' (Task 17): lo
-    scarto e' quello MISURATO dall'importatore stesso (``report['misura']['corrente']``),
-    mai ricalcolato qui — puo' venire dall'attivo/passivo del foglio ricostruito, dal
-    confronto CE/SP, o dal confronto coi totali stampati dal documento (quest'ultimo non
-    e' visto da ``mapper.validate_balance``, che guarda solo gli aggregati del foglio)."""
-    misura = (report.get("misura") or {}).get("corrente") or {}
-
-    def _fmt(chiave: str) -> str:
-        valore = misura.get(chiave)
-        if valore is None:
-            return "n/d"
-        try:
-            return f"€{_euro_it(Decimal(str(valore)))}"
-        except Exception:
-            return str(valore)
-
-    if report.get("causa") == "ce_non_letto":
-        c = report.get("ce_non_letto") or {}
-        try:
-            massa, ris, tot, letti = (f"€{_euro_it(Decimal(str(c[k])))}" for k in
-                                      ("massa", "risultato", "totale_costi", "costi_letti"))
-        except Exception:
-            massa = ris = tot = letti = "n/d"
-        return (
-            f"{_UNBALANCED_WARNING_PREFIX}: nel conto economico mancano {massa} di costi che il "
-            f"PDF disegna come grafica e non come testo (TOTALE COSTI stampato {tot}, conti "
-            f"letti {letti}). Lo Stato Patrimoniale quadra con il risultato stampato dal "
-            f"documento ({ris}). Inserisci i costi mancanti in Rettifiche prima di calcolare "
-            f"la proiezione.")
-    if report.get("causa") == "documento_sbilanciato":
-        # Nessuna rilettura e' avvenuta: il documento si contraddice da solo e le voci lette lo
-        # riproducono (Task 25 round 2: i totali; Task 27: il risultato SP/CE). Una frase per
-        # contraddizione; un rapporto senza ``contraddizioni`` e' quello dei totali, come prima.
-        tipi = report.get("contraddizioni") or [{"tipo": "totali"}]
-        frasi = []
-        for c in tipi:
-            if c.get("tipo") == "verifica":
-                try:
-                    dare, avere, diff = (f"€{_euro_it(abs(Decimal(str(c[k]))))}"
-                                         for k in ("dare", "avere", "differenza"))
-                except Exception:
-                    dare = avere = diff = "n/d"
-                frasi.append(
-                    f"i totali stampati dal bilancio di verifica non pareggiano: dare {dare} "
-                    f"(attività e costi), avere {avere} (passività e ricavi), differenza {diff}, "
-                    f"e le voci lette li riproducono (spesso è il risultato dell'anno prima non "
-                    f"ancora destinato).")
-                continue
-            if c.get("tipo") == "risultato":
-                try:
-                    sp, ce, diff = (f"€{_euro_it(Decimal(str(c[k])))}" for k in ("sp", "ce", "differenza"))
-                except Exception:
-                    sp = ce = diff = "n/d"
-                frasi.append(
-                    f"il risultato dell'esercizio stampato nello Stato Patrimoniale ({sp}) e quello "
-                    f"stampato nel Conto Economico ({ce}) differiscono di {diff}, e le voci lette "
-                    f"li riproducono.")
-            else:
-                try:
-                    scarto = f"€{_euro_it(abs(Decimal(str(misura.get('scarto_sp')))))}"
-                except Exception:
-                    scarto = "n/d"
-                frasi.append(
-                    f"il Totale Attivo e il Totale Passivo stampati dal documento differiscono di "
-                    f"{scarto}, e le voci lette li riproducono.")
-        solo_totali = all(c.get("tipo") != "risultato" for c in tipi)
-        chiusura = ("Il bilancio è stato importato così com'è: correggilo in Rettifiche oppure "
-                    "carica una versione quadrata del bilancio." if solo_totali else
-                    "Il bilancio è stato importato così com'è (bilancio squadrato di partenza): "
-                    "correggilo in Rettifiche oppure carica una versione coerente del bilancio.")
-        return f"{_UNBALANCED_WARNING_PREFIX}: {' '.join(frasi)} {chiusura}"
-    _precedente = (" L'anno precedente (colonna comparativa) non è stato importato: "
-                   "puoi inserirlo in Rettifiche."
-                   if report.get("precedente") == "non_letto_dalla_lettura_deterministica" else "")
-    return (
-        f"{_UNBALANCED_WARNING_PREFIX}: l'importatore resta oltre soglia dopo "
-        f"l'unica rilettura (scarto Attivo/Passivo {_fmt('scarto_sp')}, scarto CE/SP "
-        f"{_fmt('scarto_ce')}, scarto sui totali stampati dal documento "
-        f"{_fmt('scarto_stampati')}). {_UNBALANCED_WARNING_SUFFIX}{_precedente}"
-    )
-
-
-def _classify_balance_failure(
-    balance_sheet_data: Dict[str, Decimal],
-    *,
-    is_scanned: bool,
-    ocr_source: bool,
-    is_trial_balance: bool,
-    sample_text: str,
-    file_path: str,
-    ocr_text: Optional[str],
-    cifre_da_vision: bool = False,
-) -> BalanceFailureVerdict:
-    """Decide se un fallimento di ``validate_balance`` blocca o solo avvisa.
-
-    L'ordine conta: le diagnosi irrecuperabili girano per prime, cosi' un
-    documento che non e' importabile non viene salvato come "sbilanciato".
-    """
-    # 1. Testo OCR: i totali stessi possono essere letti male, quindi non si puo'
-    #    dichiarare sbilanciato il documento sorgente. Non quando le cifre le ha lette la
-    #    vision dalle immagini: allora e' uno sbilancio di lettura come su un PDF di
-    #    testo, si importa con l'avviso e l'utente lo corregge in Rettifiche (ERREGI).
-    if (is_scanned or ocr_source) and cifre_da_vision and \
-            balance_sheet_data.get('totale_attivo', Decimal('0')) != Decimal('0'):
-        from importers.iv_cee_hierarchy import check_quadratura, eur_it
-        _q = check_quadratura(balance_sheet_data)
-        return BalanceFailureVerdict(
-            None,
-            f"{_UNBALANCED_WARNING_PREFIX}: le cifre sono lette dalle immagini della "
-            f"scansione e lo Stato Patrimoniale non quadra (attivo {eur_it(_q.totale_attivo)}, "
-            f"passivo {eur_it(_q.totale_passivo)}). {_UNBALANCED_WARNING_SUFFIX}",
-        )
-    if (is_scanned or ocr_source) and \
-            balance_sheet_data.get('totale_attivo', Decimal('0')) != Decimal('0'):
-        # Uno sbilancio piccolo su una scansione letta dall'OCR (MinerU o locale) si
-        # importa con l'avviso: si blocca il previsionale, mai il salvataggio (decisione
-        # del proprietario, 2026-10-14). Oltre la soglia l'OCR ha perso colonne o totali
-        # e il file non si dichiara sbilanciato.
-        from importers.iv_cee_hierarchy import check_quadratura, eur_it
-        _q = check_quadratura(balance_sheet_data)
-        _ta = Decimal(str(balance_sheet_data.get('totale_attivo') or 0))
-        _tp = Decimal(str(balance_sheet_data.get('totale_passivo') or 0))
-        # lo scarto peggiore fra aggregati e totali dichiarati
-        _scarto = max(abs(_q.sbilancio), abs(_ta - _tp),
-                      abs(_q.totale_attivo - _ta), abs(_q.totale_passivo - _tp))
-        _base = max(abs(_q.totale_attivo), abs(_q.totale_passivo), abs(_ta), abs(_tp))
-        if _base > 0 and _scarto <= _base * _SCANSIONE_SBILANCIO_AMMESSO:
-            # attivo e passivo degli aggregati, cioe' di cio' che si salva: i totali
-            # dichiarati dal lettore possono pareggiare fra loro mentre gli aggregati no, e
-            # l'avviso citava "attivo X, passivo X" accanto a uno scarto (budget_689)
-            return BalanceFailureVerdict(
-                None,
-                f"{_UNBALANCED_WARNING_PREFIX}: scansione letta dall'OCR, lo Stato "
-                f"Patrimoniale non quadra di {eur_it(_scarto)} (attivo "
-                f"{eur_it(_q.totale_attivo or _ta)}, passivo {eur_it(_q.totale_passivo or _tp)}): "
-                "verificare le righe lette. "
-                f"{_UNBALANCED_WARNING_SUFFIX}",
-            )
-    if is_scanned or ocr_source:
-        return BalanceFailureVerdict(
-            "Il documento è una scansione contabile, ma l'OCR non ha "
-            "ricostruito in modo affidabile colonne, gerarchie e totali. "
-            "Il file sorgente non viene dichiarato sbilanciato: serve una "
-            "lettura OCR strutturata oppure un PDF con testo selezionabile.",
-            None,
-        )
-
-    # 2. Estrazione vuota: non c'e' niente da rettificare.
-    if balance_sheet_data.get('totale_attivo', Decimal('0')) == Decimal('0'):
-        return BalanceFailureVerdict(
-            "Nessun dato estratto dal documento: lo Stato Patrimoniale "
-            "risulta vuoto (Totale Attivo pari a zero). Verificare che il "
-            "file contenga un prospetto leggibile.",
-            None,
-        )
-
-    # 3. Riepilogo aggregato: manca lo schema IV-CEE, non la quadratura.
-    if not is_trial_balance and _is_aggregated_summary(sample_text):
-        contradiction = _summary_internal_contradiction(sample_text)
-        if contradiction:
-            # Task 17 (decisione del proprietario, 2026-09-27): un documento internamente
-            # incoerente con i propri totali stampati non e' piu' un errore duro — si
-            # importa comunque, con questo stesso testo diagnostico come avviso, e
-            # l'utente lo corregge in Rettifiche.
-            return BalanceFailureVerdict(
-                None,
-                f"{_UNBALANCED_WARNING_PREFIX}: {contradiction} {_UNBALANCED_WARNING_SUFFIX}",
-            )
-        return BalanceFailureVerdict(
-            "Formato non supportato: il documento è un riepilogo aggregato per "
-            "macro-voci, non uno schema di bilancio IV-CEE (art. 2424/2425) "
-            "importabile. Carica il prospetto di Stato Patrimoniale e Conto "
-            "Economico completo.",
-            None,
-        )
-
-    # 4. Tutto il resto e' uno sbilancio correggibile. Il messaggio d'errore
-    #    che prima bloccava e' la migliore diagnosi disponibile: diventa il
-    #    testo dell'avviso, cosi' l'utente sa cosa cercare in Rettifiche.
-    try:
-        from importers.pdf_extractor_llm import _declared_control_totals
-        controls = _declared_control_totals(file_path, text=ocr_text)
-        source_attivo = controls.get('attivo')
-        source_passivo = controls.get('passivo')
-    except Exception:
-        source_attivo = source_passivo = None
-
-    if source_attivo is not None and source_passivo is not None:
-        # In a two-sided ledger, the liabilities footer often EXCLUDES the
-        # profit printed immediately below. That is not a source imbalance.
-        printed_profit = controls.get('utile') or -(controls.get('perdita') or Decimal('0'))
-        if not printed_profit and controls.get('pareggio') == source_attivo:
-            # Some ledgers label profit "ECCEDENZA (UTILE)". Reuse the
-            # independently cross-footed source controls, without another LLM.
-            from importers.ledger_evidence import prepare_ledger
-            from importers.detail_enrichment import collect_source_rows
+        adottato = _schema_etichette_extract(file_path, extraction_context)
+    except Exception as etichette_err:
+        adottato = None
+        logger.info("Schema con percorso nell'etichetta non letto (%s: %s)",
+                    type(etichette_err).__name__, etichette_err)
+    if adottato is not None:
+        return (adottato), _macro_report
+    if extraction_context is not None:
+        for lettore in (_schema_generico_mineru_extract, _prospetto_sintetico_mineru_extract):
             try:
-                _, source_audit = prepare_ledger(collect_source_rows(file_path))
-            except (OSError, ValueError, RuntimeError):
-                source_audit = {}
-            if source_audit.get('status') == 'ready':
-                printed_profit = Decimal(source_audit['controls']['bs_profit'])
-        if (printed_profit and abs(source_attivo-source_passivo-printed_profit)<=Decimal('.01')
-                and controls.get('pareggio') == source_attivo):
-            source_passivo += printed_profit
-        difference = abs(source_attivo - source_passivo)
-        if difference > Decimal('2'):
-            detail = (
-                "il bilancio sorgente non quadra già nel documento: Totale "
-                f"Attivo €{_it_amount(source_attivo)} != Totale Passivo "
-                f"€{_it_amount(source_passivo)} (scarto €{_it_amount(difference)})"
+                adottato = lettore(extraction_context)
+            except Exception as lettore_err:
+                adottato = None
+                logger.info("%s non letto (%s: %s)", lettore.__name__,
+                            type(lettore_err).__name__, lettore_err)
+            if adottato is not None:
+                return (adottato), _macro_report
+    # /import/pdf-ocr supplies structured MinerU table rows.  Build an
+    # evidence-only IV-CEE candidate from those rows before touching the
+    # original PDF.  It is accepted only through the same structural and
+    # accounting gates as every other extractor; an incomplete or
+    # ambiguous OCR mapping simply declines and the established source
+    # parser / LLM fallbacks continue.
+    if extraction_context is not None:
+        try:
+            from importers.iv_cee_hierarchy import check_quadratura
+            from importers.mineru_adapter import extract_ivcee_candidate
+
+            mineru_candidate = extract_ivcee_candidate(extraction_context)
+            if mineru_candidate is not None:
+                mineru_q = check_quadratura(
+                    mineru_candidate.current_bs,
+                    mineru_candidate.current_ce,
+                    tol=Decimal("2"),
+                )
+                if mapper.validate_balance(mineru_candidate.current_bs) and mineru_q.quadra:
+                    prior_ok = False
+                    if mineru_candidate.prior_bs and mineru_candidate.prior_ce is not None:
+                        prior_q = check_quadratura(
+                            mineru_candidate.prior_bs,
+                            mineru_candidate.prior_ce,
+                            tol=Decimal("2"),
+                        )
+                        prior_ok = (
+                            mapper.validate_balance(mineru_candidate.prior_bs)
+                            and prior_q.quadra
+                        )
+                    logger.info(
+                        "Using source-validated MinerU IV-CEE tables "
+                        "(fields=%d unresolved=%d prior_valid=%s)",
+                        mineru_candidate.source_detail_fields,
+                        len(mineru_candidate.unresolved_rows),
+                        prior_ok,
+                    )
+                    return ((
+                        mineru_candidate.current_bs,
+                        mineru_candidate.current_ce,
+                        mineru_candidate.prior_bs if prior_ok else None,
+                        mineru_candidate.prior_ce if prior_ok else None,
+                    )), _macro_report
+                logger.info(
+                    "Structured MinerU IV-CEE candidate declined by accounting gates: %s",
+                    "; ".join(mineru_q.warnings) or "structural balance mismatch",
+                )
+        except Exception as mineru_err:
+            logger.info(
+                "Structured MinerU IV-CEE extraction declined (%s: %s)",
+                type(mineru_err).__name__,
+                mineru_err,
             )
+
+    # A regular comparative legal IV-CEE export has enough independent
+    # source controls to be read deterministically: each section exposes
+    # its own subtotal and both sides close to printed totals. Prefer that
+    # evidence-backed path before requiring an API call. It returns data
+    # only when SP, CE and CE↔SP all cross-foot; incomplete/ambiguous
+    # layouts decline and continue through the established LLM route.
+    # The deterministic source path also supports clean infrannual
+    # monocolumn statements. A prior-year column is optional, never required.
+    try:
+        from importers.iv_cee_hierarchy import check_quadratura
+        from importers.standard_ivcee_parser import (
+            extract_standard_ivcee_balances,
+            extract_standard_ivcee_income,
+        )
+
+        source_bs, source_prior_bs = extract_standard_ivcee_balances(
+            file_path
+        )
+        source_ce, source_prior_ce = extract_standard_ivcee_income(
+            file_path
+        )
+        if source_bs is not None and source_ce is not None:
+            source_q = check_quadratura(
+                source_bs, source_ce, tol=Decimal("2")
+            )
+            if mapper.validate_balance(source_bs) and source_q.quadra:
+                prior_ok = False
+                if source_prior_bs is not None and source_prior_ce is not None:
+                    prior_q = check_quadratura(
+                        source_prior_bs,
+                        source_prior_ce,
+                        tol=Decimal("2"),
+                    )
+                    prior_ok = (
+                        mapper.validate_balance(source_prior_bs)
+                        and prior_q.quadra
+                    )
+                logger.info(
+                    "Using deterministic source-validated IV-CEE "
+                    "extraction (prior_valid=%s)",
+                    prior_ok,
+                )
+                return ((
+                    source_bs,
+                    source_ce,
+                    source_prior_bs if prior_ok else None,
+                    source_prior_ce if prior_ok else None,
+                )), _macro_report
+    except Exception as source_err:
+        logger.info(
+            "Deterministic legal IV-CEE extraction declined (%s: %s)",
+            type(source_err).__name__,
+            source_err,
+        )
+
+    if not _ivcee_attivo(api_key):
+        raise PDFImportError(_modello_non_disponibile(
+            "ANTHROPIC_API_KEY is required for PDF import"))
+    if not is_trial_balance and not is_scanned and not _ocr_source:
+        # Prefer source-verified macros, but incomplete coverage must not
+        # prevent importing. The existing extractor recovers the base;
+        # finalization assigns unexplained detail to residual accounts.
+        from importers.macro_analysis import analyze_pdf_macros, MacroAnalysisError
+        from importers.standard_ivcee_parser import has_comparative_ivcee_columns
+        try:
+            bs, ce, prior_bs, prior_ce, _macro_report = analyze_pdf_macros(
+                file_path,
+                include_prior=not period_months and has_comparative_ivcee_columns(file_path),
+            )
+        except MacroAnalysisError as exc:
+            warning = (
+                'MACROVOCI DA VERIFICARE: lettura incompleta; importazione '
+                'proseguita con estrazione alternativa e conti residuali. '
+                'Verificare le voci segnalate in Rettifiche.'
+            )
+            _macro_report = {**exc.report, 'fallback_used': True,
+                             'warnings': [*exc.report.get('warnings', []), warning]}
+            sc_quadratura_warnings.append(warning)
+            logger.warning('%s Diagnosi: %s', warning, exc.report.get('errors', []))
         else:
-            detail = (
-                "i totali Attivo e Passivo stampati coincidono, ma le "
-                "componenti patrimoniali estratte non li ricostruiscono"
+            return (bs, ce, prior_bs, prior_ce), _macro_report
+    logger.info("Using LLM extraction (ANTHROPIC_API_KEY found)")
+    from importers.pdf_extractor_llm import (
+        extract_pdf_with_llm, extract_pdf_both_years_with_llm,
+    )
+    # A prior year is optional. Use the dual prompt only when the source
+    # physically proves two date columns; a monocolumn partial statement
+    # must use the single-year extractor and return no fabricated prior.
+    from importers.standard_ivcee_parser import has_comparative_ivcee_columns
+
+    if period_months and not has_comparative_ivcee_columns(file_path):
+        logger.info(
+            f"Single-year infrannual extraction (period_months={period_months}; "
+            "no prior column detected)"
+        )
+        bs, ce = extract_pdf_with_llm(file_path, force_llm=True)
+        _rifiuta_passivo_non_letto(bs)
+        return (bs, ce, None, None), _macro_report
+
+    # Da qui in giu' passano SIA il budget annuale SIA l'infrannuale comparato
+    # (#50). L'infrannuale comparato tornava direttamente dal prompt a due anni,
+    # cioe' senza la mitigazione descritta qui sotto: dopo #27 quei file hanno
+    # cominciato ad arrivarci, e una riga di CE persa sull'anno corrente usciva
+    # dove prima usciva intera. Un percorso solo, perche' un secondo percorso
+    # ri-diverge alla prima modifica del primo.
+    #
+    # Take the CURRENT year from the proven single-year extractor
+    # (the both-years prompt occasionally drops a current-year line — budget_227), then
+    # run a dual pass purely to capture the PRIOR (comparative) column. This way a
+    # comparative bilancio imports BOTH years and the user is never asked to re-upload a
+    # year already in the PDF, WITHOUT degrading current-year quality. The dual pass
+    # returns empty prior dicts on monocolumn PDFs (no fabricated prior). The extra
+    # Haiku calls are cheap and PDF import is infrequent.
+    # force_llm=True: this helper is only reached for IV-CEE PDFs or as the
+    # explicit fallback after the deterministic parser returned empty; in the
+    # latter case the document was (mis-)detected as a trial balance, so without
+    # force_llm the single-year extractor would re-route back to that same empty
+    # deterministic parser (budget_313/314).
+    from importers.iv_cee_hierarchy import rollup_debiti_aggregates
+
+    def _balances(d):
+        return bool(d) and mapper.validate_balance(rollup_debiti_aggregates(d))
+
+    _letture_sp: list = []   # le letture SP dell'ultimo tentativo (un anno, due anni)
+
+    def _attempt():
+        """One extraction pass: single-year current + dual pass for the prior,
+        falling back to the dual-pass current when the single-year one does not
+        balance (dense 4-column layouts trip the single-year prompt) or when it
+        turns out to have read the COMPARATIVE column instead of the current one
+        (infrannuale: the two columns are not homogeneous, 9 months against 12)."""
+        bs, ce = extract_pdf_with_llm(file_path, force_llm=True)
+        prior_bs = prior_ce = None
+        read_comparative = False
+        _letture_sp.clear()
+        _letture_sp.append(bs)
+        try:
+            dual_bs, dual_ce, prior_bs, prior_ce = extract_pdf_both_years_with_llm(file_path)
+            _letture_sp.append(dual_bs)
+            if _single_year_read_prior_column(bs, dual_bs, prior_bs):
+                # Quadrerebbe lo stesso: e' l'anno sbagliato, non un foglio rotto.
+                read_comparative = True
+                logger.warning(
+                    "Single-year current extraction coincides with the "
+                    "comparative column: it read the wrong column; using the "
+                    "dual-pass current year"
+                )
+                bs, ce = dual_bs, dual_ce
+            elif not _balances(bs) and _balances(dual_bs):
+                logger.info(
+                    "Single-year current extraction is unbalanced; using the "
+                    "dual-pass current year (it balances)"
+                )
+                bs, ce = dual_bs, dual_ce
+        except Exception as prior_err:
+            logger.warning(
+                f"Prior-year dual extraction failed ({type(prior_err).__name__}: "
+                f"{prior_err}); importing current year only"
             )
-    else:
-        detail = (
-            "il bilancio non quadra oppure il documento non contiene "
-            "dettaglio sufficiente per ricostruire Attivo, Passivo e "
-            "Patrimonio netto"
+        # Dichiarata SEMPRE, anche a zero: a valle una chiave assente vale zero,
+        # quindi tacere equivarrebbe a dichiararsi puliti.
+        if bs is not None:
+            bs["_single_year_read_comparative"] = (
+                Decimal("1") if read_comparative else Decimal("0")
+            )
+        return bs, ce, prior_bs, prior_ce
+
+    # The Haiku extractor is stochastic on this schema: a dense 4-column bilancio
+    # (2025/2024/DIFFERENZA/SCOST.%) misreads a debiti line on a minority of runs,
+    # unbalancing the year. Retry until BOTH the current and any prior year balance
+    # (keeping the best attempt so far), which turns an ~80%/pass success into
+    # near-certainty. Bounded and only re-runs while a year still fails; PDF import
+    # is infrequent so the extra Haiku calls are acceptable.
+    best = None
+    for attempt in range(3):
+        bs, ce, prior_bs_data, prior_ce_data = _attempt()
+        current_ok = _balances(bs)
+        prior_ok = _balances(prior_bs_data) or not prior_bs_data
+        if best is None or (current_ok and not _balances(best[0])):
+            best = (bs, ce, prior_bs_data, prior_ce_data)
+        if current_ok and prior_ok:
+            best = (bs, ce, prior_bs_data, prior_ce_data)
+            break
+        # La riprova serve contro una lettura sbilanciata, non contro un prospetto che
+        # non c'e': se il tentativo ha letto uno SP vuoto (Attivo = Passivo = 0, sia la
+        # lettura a un anno sia quella a due) altri due giri danno lo stesso vuoto, a
+        # quattro chiamate l'uno (budget_1667: dieci minuti prima dello stesso rifiuto).
+        try:
+            from importers.iv_cee_hierarchy import check_quadratura
+            _sp_vuoto = len(_letture_sp) == 2 and all(
+                (not letto) or check_quadratura(letto).is_empty for letto in _letture_sp)
+        except Exception:
+            _sp_vuoto = False
+        if _sp_vuoto:
+            logger.info(
+                f"Extraction attempt {attempt + 1}: empty balance sheet; "
+                "not retrying (nothing to re-read)"
+            )
+            break
+        logger.info(
+            f"Extraction attempt {attempt + 1}: current_balances={current_ok}, "
+            f"prior_balances={prior_ok}; retrying" if attempt < 2 else
+            f"Extraction attempt {attempt + 1}: current_balances={current_ok}, "
+            f"prior_balances={prior_ok}; keeping best attempt"
         )
 
-    return BalanceFailureVerdict(
-        None,
-        f"{_UNBALANCED_WARNING_PREFIX}: {detail}. {_UNBALANCED_WARNING_SUFFIX}",
-    )
+    # Clean comparative legal IV-CEE exports expose every aggregate and
+    # both side totals at fixed source coordinates.  If all stochastic
+    # attempts are still unbalanced, overlay those printed aggregates only
+    # when their independent section cross-foots reconcile exactly.  This
+    # is a source-backed fallback, not a plug: an incomplete/ambiguous PDF
+    # makes the deterministic parser return None and leaves ``best`` alone.
+    if best is not None and not _balances(best[0]):
+        try:
+            from importers.standard_ivcee_parser import (
+                extract_standard_ivcee_balances,
+                extract_standard_ivcee_income,
+                overlay_standard_ivcee_balance,
+            )
 
-
-# Sbilancio che i gate di import considerano rumore di arrotondamento (budget_305: 1,82 EUR): sotto non c'e' avviso
-# all'utente, quindi nemmeno le frasi del lettore. E' piu' larga della tolleranza di arrotondamento del lettore
-# (`diagnosi.TOLLERANZA_ARROTONDAMENTO`, 1 EUR, sui singoli blocchi): per l'innesco vale la maggiore.
-_TOL_QUADRATURA = Decimal("2")
-
-
-def _resolve_validation_status(warning_free: bool, forecastable: bool) -> str:
-    """Stato di validazione a tre vie.
-
-    Invariante: lo stato e' ``unbalanced`` esattamente quando all'utente e'
-    stato mostrato un avviso "BILANCIO SBILANCIATO" (``warning_free=False``,
-    cioe' ``unbalanced_reason`` non era ``None``) — stato e avviso non
-    possono mai essere in disaccordo. Deliberatamente NON e' derivato dalla
-    tolleranza rigorosa di ``arithmetic_balanced`` (0,01 €): i gate che
-    generano l'avviso (``validate_balance``, ``check_quadratura(tol=2)``)
-    usano tolleranze piu' larghe, quindi uno sbilancio nella fascia
-    (0,01 €; 2,00 €] — rumore che i gate considerano accettabile (vedi
-    budget_305, scarto 1,82 €) — non deve produrre uno stato "unbalanced"
-    senza alcun avviso a spiegarlo.
-    """
-    if not warning_free:
-        return "unbalanced"
-    return "verified" if forecastable else "review_required"
-
-
-def _should_import_prior(
-    fresh_balances: bool, is_empty: bool, *, has_existing: bool
-) -> bool:
-    """Se salvare l'anno di raffronto appena estratto.
-
-    Un anno vuoto non si importa mai: non c'e' nulla da rettificare. Un anno
-    sbilanciato si importa SOLO se non ne esiste gia' uno: meglio uno storico
-    da correggere che nessuno storico (senza anno di raffronto il wizard
-    infrannuale non parte), ma mai al prezzo di degradare un record buono.
-    """
-    if is_empty:
-        return False
-    if fresh_balances:
-        return True
-    return not has_existing
-
-
-def _avviso_comparato_non_letto(
-    prior_fiscal_year: Optional[int],
-    *,
-    stampa_comparato: bool,
-    prior_imported: bool,
-    gia_avvisato: bool,
-    has_existing: bool,
-) -> Optional[str]:
-    """L'avviso per un comparato stampato nel PDF che l'import non ha salvato (#60).
-
-    Un lettore che non sa leggere la colonna dell'anno precedente (es. il prospetto
-    a quattro colonne «corrente | comparato | scostamento | %», dove il parser
-    deterministico legge solo la corrente) non la inventa: ma tacere che c'era
-    farebbe sparire l'anno di riferimento senza che l'utente lo sappia. Niente
-    avviso se l'anno e' stato importato, se un avviso sul precedente c'e' gia', o
-    se il documento non stampa alcun comparato (un infrannuale monocolonna).
-    """
-    if prior_fiscal_year is None or not stampa_comparato or prior_imported or gia_avvisato:
-        return None
-    seguito = (
-        f"resta quello gia' presente per il {prior_fiscal_year}"
-        if has_existing
-        else f"importa il bilancio {prior_fiscal_year} a parte se ti serve come anno di riferimento"
-    )
-    return (
-        f"ANNO PRECEDENTE NON IMPORTATO [{prior_fiscal_year}]: il documento stampa una colonna "
-        f"comparativa, ma non e' stato possibile leggerla in modo affidabile; {seguito}."
-    )
-
-
-def _single_year_read_prior_column(
-    single_bs: Optional[Dict[str, Decimal]],
-    dual_current_bs: Optional[Dict[str, Decimal]],
-    dual_prior_bs: Optional[Dict[str, Decimal]],
-) -> bool:
-    """True quando l'estrattore a UN anno ha letto la colonna di RAFFRONTO.
-
-    Su un bilancio annuale comparato le due colonne sono omogenee (2025 / 2024) e
-    l'estrattore a un anno prende quella corrente. Su un INFRANNUALE comparato non lo
-    sono — 9 mesi contro 12 — e la colonna di raffronto e' la piu' "completa" delle
-    due: se il prompt la preferisse, l'anno corrente uscirebbe con i numeri dell'anno
-    sbagliato. Un bilancio letto dall'anno sbagliato e' internamente coerente: quadra,
-    e nessun cancello di quadratura lo vede. Lo vede solo il confronto con la colonna
-    che il passaggio a due anni etichetta esplicitamente come comparato.
-
-    Il criterio e' l'IDENTITA', non la somiglianza: leggere due volte la stessa colonna
-    da' gli stessi importi al centesimo, mentre un attivo a 9 mesi e uno a 12 si
-    somigliano senza mai coincidere. Da qui la tolleranza dell'euro (la stessa di
-    ``validate_balance``) e le tre ancore minime non nulle.
-
-    Serve una CONTRADDIZIONE per un verdetto positivo, mai un'assenza: senza comparato,
-    con troppe poche ancore, o quando il passaggio a due anni restituisce due colonne
-    uguali (e quindi il confronto non distingue nulla), la risposta e' False — «non lo
-    so» non fa scartare la lettura.
-    """
-    if not single_bs or not dual_current_bs or not dual_prior_bs:
-        return False
-
-    tolerance = Decimal("1.00")
-
-    def _anchorable(container, key):
-        value = container.get(key)
-        return isinstance(value, Decimal)
-
-    anchors = [
-        key
-        for key, value in dual_prior_bs.items()
-        # Le chiavi diagnostiche (``_plug_residual``, ``_ce_sp_difference``) non sono
-        # poste di bilancio: contarle come ancore impedirebbe di riconoscere due
-        # letture della stessa colonna con residui diversi.
-        if not key.startswith("_")
-        and isinstance(value, Decimal)
-        and value != 0
-        and _anchorable(single_bs, key)
-        and _anchorable(dual_current_bs, key)
-    ]
-    if len(anchors) < 3:
-        return False
-
-    if any(abs(single_bs[key] - dual_prior_bs[key]) > tolerance for key in anchors):
-        return False
-
-    return any(
-        abs(dual_current_bs[key] - dual_prior_bs[key]) > tolerance for key in anchors
-    )
-
-
-def _is_aggregated_summary(text: str) -> bool:
-    """True when the document carries NO legal IV-CEE substructure — only top-level
-    macro-voci (e.g. "Immobilizzazioni: 2.406.946", "B) Patrimonio netto: ..."), with
-    no roman-numeral sub-items, no "esigibili entro/oltre l'esercizio", and no account
-    codes. These are over-aggregated riepiloghi (often AI-generated, e.g. the LUGS /
-    FINALE_CEE test fixtures) that are NOT an importable art. 2424/2425 schema — so the
-    import should say "formato non supportato" rather than the cryptic "does not balance".
-
-    Used ONLY at the validate_balance failure point (a file that already balances never
-    reaches it), so this can never reclassify a correctly-imported bilancio. Gestionali
-    with a real (even abbreviated) schema always carry roman numerals / "esigibili" /
-    account codes, so they keep the "BILANCIO NON QUADRATO" honest-fail path.
-    """
-    if not text:
-        return False
-    # Roman-numeral legal items II..X, optionally prefixed by the section letter (A.II, B) II).
-    romans = re.findall(
-        r'(?im)^\s*(?:[A-D][.\)]\s*)?(?:II|III|IV|VIII|VII|VI|IX|V|X)\b', text)
-    has_esigibili = bool(re.search(r'esigibili\s+(?:entro|oltre)', text, re.I))
-    has_codes = bool(re.search(r'(?m)^\s*\d{4,}\b', text))
-    # Codici puntati alfanumerici seguiti dalla descrizione («10.05.3K - CONCESSIONI», «20.30.CL -
-    # DEBITI VS.ALTRI FINANZIATORI»): sono conti di un gestionale, non macro-voci. Senza, una
-    # situazione contabile vera finiva fra i riepiloghi e veniva rifiutata (budget_1776/1786).
-    if not has_codes:
-        has_codes = len(re.findall(
-            r'(?m)^\s*\d{2,3}\.\d{2,3}(?:\.[0-9A-Z]{1,12})?\s+-\s+\S', text)) >= 5
-    return len(romans) < 3 and not has_esigibili and not has_codes
-
-
-# Italian-formatted amount: 1.234.567,89 / -58.481,84 / 258,31
-_IT_AMOUNT_RE = re.compile(r'-?\d{1,3}(?:\.\d{3})*,\d{2}\b')
-
-
-def _euro_it(value: Decimal) -> str:
-    return f"{value:,.2f}".replace(',', '#').replace('.', ',').replace('#', '.')
-
-
-def _label_amount_pairs(text: str) -> list:
-    """(label, amount) for every printed amount, tolerating the two layouts these
-    summaries use: "Immobilizzazioni: 2.406.946,04" and a label whose amount sits on
-    the following line (PyMuPDF splits two-column tables that way)."""
-    pairs = []
-    pending_label = None
-    for raw_line in text.splitlines():
-        line = raw_line.strip()
-        if not line:
-            continue
-        match = _IT_AMOUNT_RE.search(line)
-        if not match:
-            pending_label = line
-            continue
-        label = line[:match.start()].strip(' :.\t-–') or (pending_label or '')
-        pairs.append((label, Decimal(
-            match.group().replace('.', '').replace(',', '.'))))
-        pending_label = None
-    return pairs
-
-
-def _section(text: str, start_pattern: str, end_pattern: str) -> Optional[str]:
-    start = re.search(start_pattern, text, re.I | re.M)
-    if not start:
-        return None
-    rest = text[start.end():]
-    end = re.search(end_pattern, rest, re.I | re.M)
-    return rest[:end.start()] if end else rest
-
-
-def _summary_internal_contradiction(text: str) -> Optional[str]:
-    """Diagnosis for an over-aggregated summary that contradicts its OWN printed
-    figures — the components it lists do not rebuild the totals it prints.
-
-    budget_137 is the motivating case: it carries the budget_133/135 macro figures with
-    Debiti inflated (2.688.470,08 -> 3.995.536,14) so the two sides tie, which lets it
-    slip past the "Totale Attivo != Totale Passivo" source check. The tie is cosmetic:
-    the Attivo components sum 89.354,38 above the printed total, and the CE components
-    land 61.350,89 away from the printed result. Saying "riepilogo aggregato" there
-    hides a document that is arithmetically self-contradictory.
-
-    Reads only amounts the document prints, and reports the gaps. It never infers a
-    corrected figure and never touches an accounting value. Returns None when the
-    printed figures are consistent or too sparse to judge — silence is the safe answer,
-    the caller still rejects the file for its own reasons.
-    """
-    if not text:
-        return None
-    faults = []
-
-    # --- CE: does "Differenza A-B" + "Gestione finanziaria" reach the printed result?
-    ce_text = _section(text, r'^.*CONTO\s+ECONOMICO.*$', r'^\s*NOT[AE]\b')
-    if ce_text and not re.search(r'\b(IRES|IRAP|imposte)\b', ce_text, re.I):
-        # Imposte would sit between the two, so only judge a CE that prints none.
-        ce_pairs = _label_amount_pairs(ce_text)
-
-        def _find(pattern):
-            for label, amount in ce_pairs:
-                if re.search(pattern, label, re.I):
-                    return amount
-            return None
-
-        differenza = _find(r'^differenza\b')
-        finanziaria = _find(r'gestione\s+finanziaria')
-        risultato = _find(r"^(risultato\s+netto|utile\s+netto|"
-                          r"perdita\s+(?:d')?esercizio)")
-        if differenza is not None and finanziaria is not None and risultato is not None:
-            gap = abs(differenza + finanziaria - risultato)
-            if gap > Decimal('2'):
-                faults.append(
-                    "le componenti del Conto Economico non ricostruiscono il "
-                    f"risultato netto dichiarato (scarto €{_euro_it(gap)})"
+            source_current, source_prior = extract_standard_ivcee_balances(
+                file_path
+            )
+            source_current_ce, source_prior_ce = extract_standard_ivcee_income(
+                file_path
+            )
+            source_bs = overlay_standard_ivcee_balance(best[0], source_current)
+            source_prior_bs = overlay_standard_ivcee_balance(
+                best[2] or {}, source_prior
+            )
+            if source_current is not None and _balances(source_bs):
+                logger.warning(
+                    "LLM IV-CEE current extraction unbalanced; using "
+                    "source-validated legal subtotals"
                 )
-
-    # --- Attivo: do the listed components add up to the printed total?
-    attivo_text = _section(
-        text,
-        r'^.*STATO\s+PATRIMONIALE\s*[-–]?\s*ATTIVO.*$',
-        r'^.*(?:STATO\s+PATRIMONIALE\s*[-–]?\s*)?PASSIVO.*$',
-    )
-    if attivo_text:
-        declared = None
-        components = Decimal('0')
-        for label, amount in _label_amount_pairs(attivo_text):
-            if re.match(r'^totale\s+attivo\b', label, re.I):
-                declared = amount
-            elif not re.match(r'^totale\b', label, re.I):
-                # Subtotals ("Totale immobilizzazioni") would double-count the leaves.
-                components += amount
-        if declared is not None and declared != 0:
-            gap = abs(components - declared)
-            if gap > Decimal('2'):
-                faults.append(
-                    "le componenti dell'Attivo non coincidono con il totale "
-                    f"stampato (scarto €{_euro_it(gap)})"
+                # Keep the independently extracted CE and every typed
+                # detail field; overwrite only the fully cross-footed legal
+                # SP aggregates/totals returned by the source parser.
+                source_ce = dict(best[1])
+                if source_current_ce is not None:
+                    source_ce.update(source_current_ce)
+                source_prior_income = dict(best[3] or {})
+                if source_prior_ce is not None:
+                    source_prior_income.update(source_prior_ce)
+                best = (
+                    source_bs,
+                    source_ce,
+                    source_prior_bs if source_prior is not None else best[2],
+                    source_prior_income if source_prior_ce is not None else best[3],
                 )
-
-    if not faults:
-        return None
-    return (
-        "Il documento sorgente è internamente incoerente: "
-        + " e ".join(faults)
-        + ". Correggere il documento contabile originale."
-    )
-
-
-# Soglia oltre cui un plug residuo del parser best-effort rende il bilancio inaffidabile
-# (composizione per lo più fabbricata): sopra questa frazione del totale si rifiuta
-# l'estrazione deterministica e si tenta l'LLM. Sotto, si importa con flag "BILANCIO NON
-# QUADRATO" per correzione in Rettifiche (workflow esistente). Vedi iv_cee_hierarchy.
-SC_PLUG_REJECT_PCT = Decimal("0.20")
-
-
-# Map short keys from situazione_contabile_parser to full DB field names
-_SC_KEY_MAP = {
-    'sp01': 'sp01_crediti_soci', 'sp02': 'sp02_immob_immateriali', 'sp03': 'sp03_immob_materiali',
-    'sp04': 'sp04_immob_finanziarie', 'sp04a': 'sp04a_partecipazioni', 'sp05': 'sp05_rimanenze',
-    'sp06': 'sp06_crediti_breve', 'sp06g': 'sp06g_crediti_altri_breve',
-    'sp07': 'sp07_crediti_lungo',
-    'sp08': 'sp08_attivita_finanziarie', 'sp09': 'sp09_disponibilita_liquide',
-    'sp10': 'sp10_ratei_risconti_attivi', 'sp11': 'sp11_capitale', 'sp12': 'sp12_riserve',
-    'sp13': 'sp13_utile_perdita', 'sp14': 'sp14_fondi_rischi', 'sp15': 'sp15_tfr',
-    # sp06g / sp16g are the KPI-neutral catch-all destinations named by
-    # situazione_contabile_parser.FALLBACK_FIELDS. _map_sc_keys SILENTLY DROPS a
-    # short key it does not know, so an unmapped fallback bucket would make read
-    # mass disappear with no gate firing (the sp04a incident).
-    'sp16': 'sp16_debiti_breve', 'sp16g': 'sp16g_altri_debiti_breve',
-    'sp17': 'sp17_debiti_lungo',
-    'sp18': 'sp18_ratei_risconti_passivi',
-    'ce01': 'ce01_ricavi_vendite', 'ce02': 'ce02_variazioni_rimanenze',
-    'ce03': 'ce03_lavori_interni',
-    'ce03a': 'ce03a_incrementi_immobilizzazioni',
-    'ce04': 'ce04_altri_ricavi',
-    'ce05': 'ce05_materie_prime', 'ce06': 'ce06_servizi', 'ce07': 'ce07_godimento_beni',
-    'ce08': 'ce08_costi_personale', 'ce09': 'ce09_ammortamenti',
-    'ce10': 'ce10_var_rimanenze_mat_prime', 'ce11': 'ce11_accantonamenti',
-    'ce11b': 'ce11b_altri_accantonamenti', 'ce12': 'ce12_oneri_diversi',
-    'ce13': 'ce13_proventi_partecipazioni', 'ce14': 'ce14_altri_proventi_finanziari',
-    'ce15': 'ce15_oneri_finanziari', 'ce16': 'ce16_utili_perdite_cambi',
-    'ce17': 'ce17_rettifiche_attivita_fin',
-    'ce17a': 'ce17a_rivalutazioni', 'ce17b': 'ce17b_svalutazioni',
-    'ce18': 'ce18_proventi_straordinari',
-    'ce19': 'ce19_oneri_straordinari', 'ce20': 'ce20_imposte',
-}
-
-def _map_sc_keys(data: Dict[str, Decimal]) -> Dict[str, Decimal]:
-    """Map short SC parser keys (sp03, ce01) to full DB field names (sp03_immob_materiali)."""
-    result = {}
-    for k, v in data.items():
-        # Already a full key? Pass through.
-        if '_' in k:
-            result[k] = v
-        elif k in _SC_KEY_MAP:
-            result[_SC_KEY_MAP[k]] = v
-        # else: skip (totale_attivo, totale_passivo, etc.)
-    return result
-
-
-def _coge_attivo(api_key: str) -> bool:
-    """Il pass CoGe di route C puo' girare? Con il fornitore di default (Haiku) serve la
-    chiave Anthropic, come sempre; con gx10 serve la chiave gx10, e la chiave Anthropic
-    non conta (la route C deve poter girare interamente in locale)."""
-    from importers.llm_provider import gx10_disponibile, provider_coge
-    if provider_coge() == "gx10":
-        return gx10_disponibile()
-    return bool(api_key)
-
-
-def _ivcee_attivo(api_key: str) -> bool:
-    """Il ramo IV-CEE via LLM (route A/B, e l'ultima risorsa di route C) puo' girare?
-    Con il fornitore di default (Haiku) serve la chiave Anthropic, come sempre; con
-    gx10 (PDF_LLM_PROVIDER_IVCEE=gx10) serve la chiave gx10, e la chiave Anthropic non
-    conta per il ramo testuale. La vision resta sempre su Anthropic: i suoi cancelli,
-    dentro pdf_extractor_llm.py, restano un controllo separato e invariato."""
-    from importers.llm_provider import gx10_disponibile, provider_ivcee
-    if provider_ivcee() == "gx10":
-        return gx10_disponibile()
-    return bool(api_key)
-
-
-def _modello_non_disponibile(messaggio_storico: str) -> str:
-    """Il messaggio quando serve un modello che non c'e'. Con Anthropic consentito resta quello
-    di sempre; senza, dice la verita': la fase richiederebbe Anthropic (non consentito) o gx10
-    (non configurato), ed e' stata saltata - mai un ripiego su un servizio a pagamento."""
-    from importers.llm_provider import anthropic_consentito, gx10_disponibile
-    if anthropic_consentito():
-        return messaggio_storico
-    if not gx10_disponibile():
-        return ("Lettura col modello non disponibile: gx10 non configurato (GX10_API_KEY) e "
-                "Anthropic non consentito. Nessun lettore a regole ha riconosciuto il documento.")
-    return ("Questa fase richiederebbe Anthropic, che non e' consentito (solo gx10 e MinerU "
-            "locali): fase saltata. Nessun lettore a regole ha riconosciuto il documento.")
-
-
-def _ripiego_classico_acceso() -> bool:
-    """Interruttore del ripiego sul percorso classico (Fase 4): acceso salvo
-    ``IMPORT_RIPIEGO_CLASSICO`` = 0/false/no/off. Spento, un documento che lo snello non adotta
-    esce con un ``PDFImportError`` chiaro invece di passare al classico."""
-    return os.environ.get("IMPORT_RIPIEGO_CLASSICO", "1").strip().lower() not in ("0", "false", "no", "off")
-
-
-def _motivo_ripiego_classico(snello_report: Optional[dict]) -> str:
-    """Perche' lo snello ha ceduto al classico, per ``validation_report['import_snello']``."""
-    if snello_report is None:
-        return "motore_classico"
-    if snello_report.get("esito") == "non_applicabile":
-        return "non_applicabile"
-    if snello_report.get("fase") == "eccezione":
-        return "eccezione"
-    if snello_report.get("fonte_testo") == "tabelle_mineru":
-        return "scansione_non_quadra"
-    return "ripiego"
-
-
-def _motore_snello() -> bool:
-    """L'importatore e' il motore di default (decisione del proprietario, 2026-10-16:
-    "devono essere tutti su snello"): lettori a regole prima di qualunque modello, poi gx10.
-    ``IMPORT_MOTORE=classico`` (o qualunque valore diverso da "snello") torna all'importatore
-    di prima; la variabile assente vale "snello"."""
-    return os.environ.get("IMPORT_MOTORE", "snello").strip().lower() == "snello"
-
-
-def _xbrl_reso_extract(file_path: str):
-    """(bs, ce, prior_bs, prior_ce) del PDF reso da un XBRL depositato, oppure None.
-
-    Lo stesso lettore che l'importatore prova per primo (``xbrl_reso_parser``: ogni totale
-    stampato riprodotto al centesimo, nessuna tolleranza), qui anche per il percorso di sempre:
-    senza, un micro reso da XBRL (SGH 31/12/2025) finiva al modello, sei minuti e il passivo
-    perso. Si adotta solo il candidato che il lettore dichiara ``adottabile`` e che passa gli
-    stessi cancelli degli altri lettori deterministici."""
-    from importers import xbrl_reso_parser
-
-    return _adotta_candidato_reso(xbrl_reso_parser.estrai(file_path), "PDF reso da XBRL")
-
-
-def _adotta_candidato_reso(candidato: Optional[dict], nome: str):
-    """(bs, ce, prior_bs, prior_ce) di un candidato del cuore del lettore XBRL
-    (``xbrl_reso_parser.estrai_da_righe``: il reso XBRL e lo schema di legge generico), oppure
-    None. Si adotta solo il candidato ``adottabile`` che passa ``validate_balance`` e
-    ``check_quadratura``; l'anno precedente solo se li passa anche lui."""
-    from importers.iv_cee_hierarchy import check_quadratura
-
-    if candidato is None:
-        return None
-    if not candidato.get("adottabile"):
-        logger.info("%s riconosciuto ma non adottato: %s", nome, candidato.get("rifiuto"))
-        return None
-    mapper = IVCEEMapper()
-    bs, ce = dict(candidato["bs"]), dict(candidato["ce"])
-
-    def _con_totali(b, stampati):
-        if stampati.get("totale_attivo") is not None:
-            b["totale_attivo"] = Decimal(stampati["totale_attivo"])
-        if stampati.get("totale_passivo") is not None:
-            b["totale_passivo"] = Decimal(stampati["totale_passivo"])
-        return b
-
-    bs = _con_totali(bs, candidato.get("stampati") or {})
-    if not (mapper.validate_balance(bs) and check_quadratura(bs, ce, tol=Decimal("2")).quadra):
-        return None
-    prior_bs, prior_ce = candidato.get("prior_bs"), candidato.get("prior_ce")
-    if prior_bs is not None and prior_ce is not None:
-        from importers.iv_cee_hierarchy import _ATTIVO_FIELDS, _PASSIVO_FIELDS
-        prior_bs = dict(prior_bs)
-        prior_bs["totale_attivo"] = sum((Decimal(prior_bs.get(k, 0) or 0) for k in _ATTIVO_FIELDS), Decimal(0))
-        prior_bs["totale_passivo"] = sum((Decimal(prior_bs.get(k, 0) or 0) for k in _PASSIVO_FIELDS), Decimal(0))
-        if not (mapper.validate_balance(prior_bs)
-                and check_quadratura(prior_bs, prior_ce, tol=Decimal("2")).quadra):
-            prior_bs = prior_ce = None
-    logger.info("Using deterministic legal schema reader: %s (prior=%s)", nome,
-                candidato.get("prior_stato"))
-    return bs, ce, prior_bs, prior_ce
-
-
-def _schema_etichette_extract(file_path: str, extraction_context: Any = None):
-    """(bs, ce, prior_bs, prior_ce) dello schema col percorso nell'etichetta, oppure None.
-
-    Le tabelle MinerU quando c'e' una scansione, altrimenti il testo del PDF. Il lettore ha
-    gia' verificato ogni totale stampato; qui passano gli stessi cancelli degli altri lettori
-    deterministici (``validate_balance`` e ``check_quadratura``), e l'anno precedente si
-    porta solo se li passa anche lui. Un anno che il lettore rifiuta non si sostituisce:
-    si torna None e prosegue la catena di sempre, che lo dichiarera' a modo suo."""
-    from importers import schema_etichette_parser as etichette
-
-    if extraction_context is not None:
-        letto = etichette.estrai_da_mineru(extraction_context)
-    else:
-        letto = etichette.estrai(file_path)
-    return _adotta_schema(letto, extraction_context, "Schema con percorso nell'etichetta")
-
-
-def _schema_generico_mineru_extract(extraction_context: Any):
-    """(bs, ce, prior_bs, prior_ce) dello schema di legge di una scansione senza percorso
-    nell'etichetta, dalle tabelle MinerU, oppure None.
-
-    Le stesse regole e gli stessi controlli al centesimo del lettore dello schema di legge
-    generico (``schema_legge_generico.estrai_da_mineru``): prima di MinerU 4 le tabelle di
-    una scansione non erano abbastanza pulite, e questa famiglia finiva sull'estrattore
-    Anthropic, vietato, cioe' su un errore (budget_1322, 2026-10-26)."""
-    from importers import schema_legge_generico as generico
-
-    adottato = _adotta_candidato_reso(generico.estrai_da_mineru(extraction_context),
-                                      "Schema di legge dalle tabelle MinerU")
-    if adottato is not None:
-        for dati in (adottato[0], adottato[2]):
-            if dati is not None:
-                dati["_mineru_source_detail_fields"] = Decimal(sum(
-                    1 for k, v in dati.items() if not k.startswith("_") and k.startswith("sp")
-                    and len(k.split("_")[0]) > 4 and v))
-    return adottato
-
-
-def _prospetto_sintetico_mineru_extract(extraction_context: Any):
-    """(bs, ce, None, None) del prospetto CEE sintetico a una colonna di una scansione, dalle
-    tabelle MinerU (``prospetto_sintetico.estrai_da_mineru``, budget_1405), oppure None. Le
-    stesse verifiche dell'importatore (``deterministico._esito``: ogni totale stampato, la
-    massa non classificata) e gli stessi cancelli degli altri lettori. Le approssimazioni
-    (il totale di una voce senza dettaglio nel suo sotto-campo convenzionale) restano
-    dichiarate in ``_approssimazioni_prospetto``, come le dichiara lo snello."""
-    from importers import prospetto_sintetico
-    from importers.import_snello.deterministico import _esito
-
-    letto = prospetto_sintetico.estrai_da_mineru(extraction_context)
-    if letto is None or letto.get("bs") is None:
-        if letto is not None:
-            logger.info("Prospetto sintetico dalle tabelle MinerU non adottato: %s", letto.get("rifiuto"))
-        return None
-    esito = _esito("prospetto_sintetico", letto["bs"], letto["ce"], letto["stampati"])
-    if not esito.get("adottato") or esito.get("esito") != "ok":
-        logger.info("Prospetto sintetico dalle tabelle MinerU non adottato: %s", esito.get("esito"))
-        return None
-    adottato = _adotta_candidato_reso(
-        {"adottabile": True, "bs": esito["bs"], "ce": esito["ce"], "stampati": letto["stampati"]},
-        "Prospetto sintetico dalle tabelle MinerU")
-    if adottato is not None:
-        adottato[0]["_approssimazioni_prospetto"] = sorted(
-            {x["campo"] for x in letto.get("approssimazioni") or []})
-        adottato[0]["_source_prospetto_sintetico"] = Decimal("1")
-    return adottato
-
-
-def _adotta_schema(letto: Optional[dict], extraction_context: Any, nome: str):
-    """I cancelli comuni ai lettori deterministici dello schema di legge: il lettore ha
-    gia' verificato ogni totale stampato; qui ``validate_balance`` e ``check_quadratura``, e
-    l'anno precedente si porta solo se li passa anche lui."""
-    from importers.iv_cee_hierarchy import check_quadratura
-
-    mapper = IVCEEMapper()
-    if letto is None:
-        return None
-    bs, ce = letto.get("bs"), letto.get("ce")
-    if bs is None or ce is None:
-        logger.info("%s riconosciuto ma non adottato: %s", nome, letto.get("rifiuto"))
-        return None
-
-    def _passa(b, c) -> bool:
-        return mapper.validate_balance(b) and check_quadratura(b, c, tol=Decimal("2")).quadra
-
-    if not _passa(bs, ce):
-        logger.info("%s letto ma non quadrato: catena di sempre", nome)
-        return None
-    prior_bs, prior_ce = letto.get("prior_bs"), letto.get("prior_ce")
-    prior_ok = prior_bs is not None and prior_ce is not None and _passa(prior_bs, prior_ce)
-    if extraction_context is not None:
-        for dati in (bs, prior_bs if prior_ok else None):
-            if dati is not None:
-                dati["_mineru_source_detail_fields"] = Decimal(sum(
-                    1 for k, v in dati.items() if not k.startswith("_") and k.startswith("sp")
-                    and len(k.split("_")[0]) > 4 and v))
-    logger.info("Using deterministic legal schema: %s (prior_valid=%s, anni=%s)",
-                nome, prior_ok, letto.get("anni"))
-    return bs, ce, (prior_bs if prior_ok else None), (prior_ce if prior_ok else None)
-
-
-def _dettagli_gia_letti(snello_report: Optional[dict], mineru_tabelle: bool,
-                        da_mineru: bool, bs: dict) -> Optional[str]:
-    """Il motivo per non rifare la ricerca dei dettagli, o None se va fatta.
-
-    - Reso XBRL adottato dall'importatore (Task 25): i dettagli sono gia' quelli del
-      prospetto e delle tabelle di nota, riconciliati al centesimo o dichiarati.
-    - Situazione contabile dalle tabelle MinerU: ogni sottoconto e' gia' una cella letta; sulla
-      scansione la ricerca non ha testo e finiva su Qwen (6 minuti su Unicarton, per nessuna
-      proposta).
-    - Schema di legge letto dalle tabelle MinerU (col percorso nell'etichetta, generico, o
-      prospetto sintetico): il lettore ha gia' verificato ogni dettaglio sul suo totale
-      stampato, e il prospetto sintetico un dettaglio non lo stampa affatto (le sue voci
-      sono dichiarate nell'avviso PROSPETTO SINTETICO). Col testo pulito di
-      MinerU 4 la ricerca partiva su Qwen e ne respingeva ogni proposta (budget_1319: 70-115 s
-      invece di 6-9, e otto avvisi «DETTAGLI NON APPLICATI» su un foglio gia' dettagliato).
-    - Percorso del lettore adottato (Fase 3): dettagli e scadenze sono gia' decisi foglia per foglia."""
-    if snello_report is not None and snello_report.get("fonte") == "deterministico:xbrl_reso_parser":
-        return "dettagli_letti_dal_prospetto_xbrl"
-    if snello_report is not None and snello_report.get("fonte") == "deterministico:lettore":
-        # Fase 3, Task 11: il lettore ha gia' deciso per ogni foglia il dettaglio piu' fine e la scadenza dal testo
-        # stampato (senza prova a breve); la ricerca rileggeva il documento con la regola gestionale «finanziamenti e
-        # mutui oltre 12 mesi» e spostava sp16/sp17 contro quella decisione
-        return "dettagli_letti_dal_lettore"
-    if mineru_tabelle:
-        return "dettagli_letti_dalle_tabelle_mineru"
-    if da_mineru and (bs.get("_source_schema_etichette") or bs.get("_source_xbrl_reso")
-                      or bs.get("_source_prospetto_sintetico")):
-        return "dettagli_letti_dallo_schema_mineru"
-    return None
-
-
-def _extract_route_c_last_resort(llm_extract):
-    """Run the IV-CEE last resort without claiming a gross-vs-net measurement.
-
-    Route C documents can print gross control totals while the IV-CEE extractor
-    correctly nets contra-assets.  The extractor's unclassified-mass diagnostic
-    is therefore not comparable on this route: keep the keys explicit, but mark
-    the measurement as unknown for both the current and comparative years.
-
-    ``llm_extract`` is injected so this production seam is testable without an
-    API call or a corpus document capable of exhausting both route-C parsers.
-    """
-    from importers.iv_cee_hierarchy import withdraw_unclassified_mass
-
-    balance_sheet_data, income_data, prior_bs_data, prior_ce_data = llm_extract()
-    balance_sheet_data.update(
-        withdraw_unclassified_mass("route-c-ultima-risorsa")
-    )
-    if prior_bs_data:
-        prior_bs_data.update(
-            withdraw_unclassified_mass("route-c-ultima-risorsa-prior")
-        )
-    return balance_sheet_data, income_data, prior_bs_data, prior_ce_data
-
-
-def _apply_vision_rescue(file_path: str,
-                         balance_sheet_data: Dict[str, Decimal],
-                         income_data: Dict[str, Decimal],
-                         declared: Dict[str, Optional[Decimal]],
-                         donor_bs: Optional[Dict[str, Decimal]],
-                         ocr_text: Optional[str],
-                         reader=None) -> Tuple[Dict[str, Decimal], Dict[str, Decimal],
-                                               List[str], Dict[str, str]]:
-    """Riscatto vision per sezione, in coda alla catena route C.
-
-    Ritorna (bilancio, conto economico, sezioni riscattate, motivi). I `motivi` sono
-    la stringa che il cancello ha prodotto per OGNI sezione tentata, accettata o no:
-    e' la provenienza che finisce nel validation_report persistito (spec §5).
-
-    Innesco: check_quadratura sul foglio FINITO. La posizione e' deliberata — innescare
-    prima del netting farebbe scattare il riscatto su un attivo ancora lordo, un divario
-    che il netting dei fondi chiude da solo. Le due sezioni si innescano in modo
-    indipendente: un file puo' riscattare il CE e lasciare l'SP com'e'.
-
-    Ogni errore e' NON fatale: si logga e si tiene il candidato precedente. Se il
-    riscatto non riesce, il foglio resta esattamente com'e' oggi.
-    """
-    from importers import vision_rescue as vr
-    from importers.iv_cee_hierarchy import check_quadratura
-    from importers import situazione_contabile_parser as scp
-
-    read = reader or vr.read_section
-    rescued: List[str] = []
-    reasons: Dict[str, str] = {}
-    try:
-        before = check_quadratura(balance_sheet_data, income_data)
-    except Exception as err:
-        logger.warning(f"Riscatto vision: quadratura iniziale non calcolabile ({err})")
-        return balance_sheet_data, income_data, rescued, reasons
-
-    sp_broken = before.is_empty or abs(before.sbilancio) > Decimal("0.01") or before.masked
-    ce_broken = not before.utile_match
-    if not sp_broken and not ce_broken:
-        return balance_sheet_data, income_data, rescued, reasons
-
-    try:
-        pages = scp.section_pages(file_path)
-    except Exception as err:
-        logger.warning(f"Riscatto vision: pagine per sezione non determinabili ({err})")
-        return balance_sheet_data, income_data, rescued, reasons
-
-    # --- Conto economico ---------------------------------------------------
-    if ce_broken:
-        try:
-            sec = read(file_path, pages.get("ce", []), "ce")
-            # Stesso reintegro dello SP (vedi il ramo sotto): la riga saltata dalla
-            # vision si ripesca dal text layer solo se spiega il divario al centesimo.
-            # Qui la voce si risolve con il resolver del CE, non con quelli dell'SP.
-            if sec is not None:
-                sec = vr.close_gaps(file_path, pages.get("ce", []), sec)
-            if sec is not None and sec.rows:
-                new_ce = _map_sc_keys(scp.build_ce_from_vision(
-                    [(r.code, r.description, r.amount, r.column) for r in sec.rows]))
-                rebuilt = sum((r.amount for r in sec.rows if r.column == "left"),
-                              Decimal("0"))
-                # Il CE non tocca il bilancio: lo si passa immutato su entrambi i lati
-                # del confronto. Con ce=None `utile_match` varrebbe True per difetto e
-                # il ramo `fixed_identity` del cancello scatterebbe a vuoto.
-                after = check_quadratura(balance_sheet_data, new_ce)
-                # `residual_measured` resta al suo default True: qui il bilancio non
-                # viene toccato, quindi after.plug_residual == before.plug_residual e il
-                # parametro non cambierebbe nulla in nessuno dei due valori.
-                ok, why = vr.accept_rescue("ce", rebuilt, sec, declared, before, after)
-                logger.info(f"Riscatto vision CE: {'accettato' if ok else 'scartato'} — {why}")
-                reasons["ce"] = why
-                if ok:
-                    income_data = new_ce
-                    before = after
-                    rescued.append("ce")
-        except Exception as err:
-            logger.warning(f"Riscatto vision CE fallito ({type(err).__name__}: {err})")
-
-    # --- Stato patrimoniale ------------------------------------------------
-    if sp_broken:
-        try:
-            sec = read(file_path, pages.get("sp", []), "sp")
-            # La vision salta a intermittenza una riga, e la tolleranza del cancello
-            # (0,5% del totale stampato) puo' essere piu' larga della riga saltata:
-            # il riscatto passerebbe col buco dentro, e quel buco diventerebbe lo
-            # sbilancio finale. Misurato su budget_623 (9.079,77 = i debiti verso
-            # istituti previdenziali). Il reintegro ripesca dal TEXT LAYER solo una
-            # riga che spieghi il divario al centesimo: non inventa massa, e se non
-            # trova nulla la sezione resta com'era.
-            if sec is not None:
-                sec = vr.close_gaps(file_path, pages.get("sp", []), sec)
-            if sec is not None and sec.rows:
-                # Il segno del risultato lo decide l'identita' che ha VALIDATO i totali
-                # letti, non l'ordine delle chiavi: un documento stampa spesso sia un
-                # "utile" sia una "perdita" e preferire il primo ribalta il risultato
-                # quando e' il ramo della perdita a tornare.
-                utile = vr.vision_result(sec)
-                # Letto sul `declared` COME RICEVUTO, prima che la ricaduta qui sotto
-                # sovrascriva _decl coi totali vision: e' la presenza di un'ancora
-                # INDIPENDENTE (stampata e letta dal testo) a rendere misurabile il
-                # residuo del foglio riscattato. I totali vision non lo sono — sono la
-                # stessa lettura che si sta riscattando.
-                _has_text_anchor = any((declared or {}).get(_k)
-                                       for _k in ('attivo', 'passivo', 'pareggio'))
-                if utile is None:
-                    logger.info("Riscatto vision SP: totali letti non coerenti — non tentato")
-                else:
-                    _raw_bs = scp.build_sp_from_vision(
-                        [(r.code, r.description, r.amount, r.column) for r in sec.rows],
-                        utile=utile)
-                    new_bs = _map_sc_keys(_raw_bs)
-                    # Letto PRIMA della catena: dopo net_contra_accounts questa chiave
-                    # non descrive piu' la stessa massa.
-                    netted = new_bs.get('_netted_contra', Decimal('0'))
-                    # Il totale stampato e' LORDO quando i fondi stanno sul passivo: si
-                    # misura il lordo contro il lordo (stesso cancello di _hier_reconstruct).
-                    rebuilt = new_bs.get('totale_attivo', Decimal('0')) + netted
-                    # L'omologo della colonna di destra, costruito per essere
-                    # confrontabile con il TOTALE PASSIVITA' stampato:
-                    #   totale_passivo somma _PASSIVO_KEYS, sp13 COMPRESO, mentre il
-                    #   totale di colonna stampato NON comprende il risultato (che il
-                    #   documento espone come riga di pareggio: attivo == passivo +
-                    #   utile, oppure attivo + perdita == passivo) -> si sottrae `utile`;
-                    #   i fondi ammortamento sono righe della colonna DESTRA che
-                    #   build_sp_from_vision sottrae dall'attivo, quindi non sono in
-                    #   totale_passivo mentre sono nel totale stampato -> si risomma
-                    #   `netted`, esattamente come per l'attivo qui sopra.
-                    # Il risultato e' la somma delle righe lette a destra: la stessa
-                    # cosa che il documento stampa come totale di colonna.
-                    rebuilt_pas = (_raw_bs.get('totale_passivo', Decimal('0'))
-                                   - utile + netted)
-
-                    # Stessa post-elaborazione degli altri candidati.
-                    if donor_bs is not None:
-                        new_bs = scp.overlay_debt_typing(new_bs, donor_bs)
-                    new_bs, _contra = scp.net_contra_accounts(
-                        new_bs, file_path, text=ocr_text, declared=declared)
-                    from importers.pdf_extractor_llm import _reconcile_trial_to_declared
-                    _decl = dict(declared or {})
-                    # Su un layer di testo illeggibile le ancore dichiarate sono vuote
-                    # (route C le azzera di proposito), e senza ancora
-                    # _reconcile_trial_to_declared non misura NULLA: lo zero asserito da
-                    # build_sp_from_vision sopravvivrebbe fino al cancello, regalandogli
-                    # un miglioramento che nessuno ha verificato. I totali letti in
-                    # vision hanno gia' superato il controllo di coerenza interna
-                    # (vision_result), quindi qui valgono da ancora — e' la stessa
-                    # sanzione per cui section_anchor li preferisce.
-                    if not any(_decl.get(_k) for _k in ('attivo', 'passivo', 'pareggio')):
-                        _vis_att, _vis_pas = sec.totals.get("left"), sec.totals.get("right")
-                        if _vis_att:
-                            _decl['attivo'] = _vis_att
-                        if _vis_pas:
-                            _decl['passivo'] = _vis_pas
-                    # La riduzione vale anche per le ancore vision: sono LORDE quanto
-                    # quelle stampate, quindi passano di qui prima del confronto.
-                    _cut = _contra if _contra > 0 else netted
-                    if _cut > 0:
-                        for _k in ('attivo', 'passivo', 'pareggio'):
-                            if _decl.get(_k):
-                                _decl[_k] = _decl[_k] - _cut
-                    # Indispensabile: build_sp_from_vision ASSERISCE _plug_residual = 0,
-                    # non lo misura. E' questa chiamata a sostituirlo con il divario
-                    # misurato contro il totale dichiarato — senza, ogni riscatto SP
-                    # entrerebbe nel cancello con un miglioramento regalato.
-                    new_bs = _reconcile_trial_to_declared(new_bs, _decl, "vision")
-
-                    after = check_quadratura(new_bs, income_data)
-                    ok, why = vr.accept_rescue("sp", rebuilt, sec, declared, before,
-                                               after,
-                                               residual_measured=_has_text_anchor,
-                                               rebuilt_passivo=rebuilt_pas)
-                    logger.info(f"Riscatto vision SP: {'accettato' if ok else 'scartato'} — {why}")
-                    reasons["sp"] = why
-                    if ok:
-                        balance_sheet_data = new_bs
-                        rescued.append("sp")
-        except Exception as err:
-            logger.warning(f"Riscatto vision SP fallito ({type(err).__name__}: {err})")
-
-    return balance_sheet_data, income_data, rescued, reasons
-
-
-def _create_balance_sheet(db, financial_year_id: int, data: Dict[str, Decimal]) -> 'BalanceSheet':
-    """Create a lossless BalanceSheet record from every ORM ``sp*`` column.
-
-    The previous hand-written constructor silently dropped entire detail families
-    (sp01, sp02, sp03, sp05 and sp14).  Deriving the field registry from the model
-    makes a newly supported IV-CEE field persist automatically and keeps all import
-    routes aligned with the database schema.
-    """
-    fields = (c.name for c in BalanceSheet.__table__.columns if c.name.startswith('sp'))
-    values = {field: data.get(field, Decimal('0')) for field in fields}
-    bs = BalanceSheet(financial_year_id=financial_year_id, **values)
-    db.add(bs)
-    db.flush()
-    return bs
-
-
-def _create_income_statement(db, financial_year_id: int, data: Dict[str, Decimal]) -> 'IncomeStatement':
-    """Create a lossless IncomeStatement record from every ORM ``ce*`` column."""
-    fields = (c.name for c in IncomeStatement.__table__.columns if c.name.startswith('ce'))
-    values = {field: data.get(field, Decimal('0')) for field in fields}
-    inc = IncomeStatement(financial_year_id=financial_year_id, **values)
-    db.add(inc)
-    db.flush()
-    return inc
-
-
-def _lettore_diagnosi_import(file_path, extraction_context, fiscal_year, qd, unbalanced_reason, snello_report):
-    """La diagnosi del lettore di righe per questo import: ``(diagnosi | None, frasi)``. Non solleva mai.
-
-    Spenta con ``LETTORE_DIAGNOSI=0|false|no`` (nessuna chiave). Le frasi vanno all'utente solo se l'import
-    stesso dichiara che qualcosa non torna; altrimenti la diagnosi resta in ``validation_report``."""
-    if os.environ.get("LETTORE_DIAGNOSI", "1").strip().lower() in ("0", "false", "no", "off"):
-        return None, []
-    try:
-        from importers.lettore.diagnosi import diagnosi_pdf, frasi_per_utente
-        anno = fiscal_year or datetime.now().year
-        diagnosi = diagnosi_pdf(file_path, extraction_context, anno_corrente=anno, anno_precedente=anno - 1)
-    except Exception as exc:  # noqa: BLE001 - il lettore non ferma mai un import
-        logger.warning(f"Lettore di righe non eseguito: {exc}")
-        try:
-            from importers.lettore.diagnosi import diagnosi_vuota
-            return diagnosi_vuota("errore", f"{type(exc).__name__}: {exc}"[:300]), []
-        except Exception:  # noqa: BLE001 - nemmeno l'import del lettore deve fermare l'import
-            return {"esito": "errore", "motivo": f"{type(exc).__name__}: {exc}"[:300], "ingresso": "pdf", "tipo": "",
-                    "contrapposto": False, "colonne": [], "blocchi_aperti": [], "avvisi": [], "secondi": 0.0}, []
-    try:
-        sezioni = set()
-        if abs(qd.sbilancio) > _TOL_QUADRATURA:
-            sezioni.add("SP")
-        if not qd.utile_match:
-            sezioni.add("CE")
-        if (snello_report or {}).get("esito") in ("squadrato", "tappo"):
-            sezioni.add("SP")
-        if unbalanced_reason and not sezioni:
-            sezioni = {"SP", "CE"}
-        frasi = frasi_per_utente(diagnosi, sezioni, anno_precedente=anno - 1) if sezioni else []
-    except Exception as exc:  # noqa: BLE001
-        logger.warning(f"Frasi del lettore non prodotte: {exc}")
-        frasi = []
-    return diagnosi, frasi
+        except Exception as source_err:
+            logger.info(
+                "Deterministic legal IV-CEE fallback declined (%s: %s)",
+                type(source_err).__name__, source_err,
+            )
+    if best is not None:
+        _rifiuta_passivo_non_letto(best[0])
+    return (best), _macro_report
 
 
 def import_pdf_balance_sheet(
@@ -1709,351 +737,10 @@ def import_pdf_balance_sheet(
         def _llm_extract():
             """IV CEE extraction via LLM. Returns (bs, ce, prior_bs, prior_ce)."""
             nonlocal _macro_report
-            # "Situazione contabile riclassificata dettagliata" (BILAQ, detail_riclass,
-            # Santini): lo schema di legge col percorso nell'etichetta, letto per percorso e
-            # verificato su ogni totale stampato, dalle tabelle MinerU di una scansione o dal
-            # testo del PDF. Prima di qualunque modello: su questa famiglia il modello prendeva
-            # sotto-righe per totali ("B.6.2) Materie prime" per B.6), contava due volte i
-            # crediti oltre 12 mesi e perdeva i debiti verso il gruppo. Si adotta solo se
-            # passa gli stessi cancelli degli altri lettori deterministici.
-            if extraction_context is None:
-                try:
-                    adottato = _xbrl_reso_extract(file_path)
-                except Exception as reso_err:
-                    adottato = None
-                    logger.info("PDF reso da XBRL non letto (%s: %s)", type(reso_err).__name__, reso_err)
-                if adottato is not None:
-                    return adottato
-            try:
-                adottato = _schema_etichette_extract(file_path, extraction_context)
-            except Exception as etichette_err:
-                adottato = None
-                logger.info("Schema con percorso nell'etichetta non letto (%s: %s)",
-                            type(etichette_err).__name__, etichette_err)
-            if adottato is not None:
-                return adottato
-            if extraction_context is not None:
-                for lettore in (_schema_generico_mineru_extract, _prospetto_sintetico_mineru_extract):
-                    try:
-                        adottato = lettore(extraction_context)
-                    except Exception as lettore_err:
-                        adottato = None
-                        logger.info("%s non letto (%s: %s)", lettore.__name__,
-                                    type(lettore_err).__name__, lettore_err)
-                    if adottato is not None:
-                        return adottato
-            # /import/pdf-ocr supplies structured MinerU table rows.  Build an
-            # evidence-only IV-CEE candidate from those rows before touching the
-            # original PDF.  It is accepted only through the same structural and
-            # accounting gates as every other extractor; an incomplete or
-            # ambiguous OCR mapping simply declines and the established source
-            # parser / LLM fallbacks continue.
-            if extraction_context is not None:
-                try:
-                    from importers.iv_cee_hierarchy import check_quadratura
-                    from importers.mineru_adapter import extract_ivcee_candidate
-
-                    mineru_candidate = extract_ivcee_candidate(extraction_context)
-                    if mineru_candidate is not None:
-                        mineru_q = check_quadratura(
-                            mineru_candidate.current_bs,
-                            mineru_candidate.current_ce,
-                            tol=Decimal("2"),
-                        )
-                        if mapper.validate_balance(mineru_candidate.current_bs) and mineru_q.quadra:
-                            prior_ok = False
-                            if mineru_candidate.prior_bs and mineru_candidate.prior_ce is not None:
-                                prior_q = check_quadratura(
-                                    mineru_candidate.prior_bs,
-                                    mineru_candidate.prior_ce,
-                                    tol=Decimal("2"),
-                                )
-                                prior_ok = (
-                                    mapper.validate_balance(mineru_candidate.prior_bs)
-                                    and prior_q.quadra
-                                )
-                            logger.info(
-                                "Using source-validated MinerU IV-CEE tables "
-                                "(fields=%d unresolved=%d prior_valid=%s)",
-                                mineru_candidate.source_detail_fields,
-                                len(mineru_candidate.unresolved_rows),
-                                prior_ok,
-                            )
-                            return (
-                                mineru_candidate.current_bs,
-                                mineru_candidate.current_ce,
-                                mineru_candidate.prior_bs if prior_ok else None,
-                                mineru_candidate.prior_ce if prior_ok else None,
-                            )
-                        logger.info(
-                            "Structured MinerU IV-CEE candidate declined by accounting gates: %s",
-                            "; ".join(mineru_q.warnings) or "structural balance mismatch",
-                        )
-                except Exception as mineru_err:
-                    logger.info(
-                        "Structured MinerU IV-CEE extraction declined (%s: %s)",
-                        type(mineru_err).__name__,
-                        mineru_err,
-                    )
-
-            # A regular comparative legal IV-CEE export has enough independent
-            # source controls to be read deterministically: each section exposes
-            # its own subtotal and both sides close to printed totals. Prefer that
-            # evidence-backed path before requiring an API call. It returns data
-            # only when SP, CE and CE↔SP all cross-foot; incomplete/ambiguous
-            # layouts decline and continue through the established LLM route.
-            # The deterministic source path also supports clean infrannual
-            # monocolumn statements. A prior-year column is optional, never required.
-            try:
-                from importers.iv_cee_hierarchy import check_quadratura
-                from importers.standard_ivcee_parser import (
-                    extract_standard_ivcee_balances,
-                    extract_standard_ivcee_income,
-                )
-
-                source_bs, source_prior_bs = extract_standard_ivcee_balances(
-                    file_path
-                )
-                source_ce, source_prior_ce = extract_standard_ivcee_income(
-                    file_path
-                )
-                if source_bs is not None and source_ce is not None:
-                    source_q = check_quadratura(
-                        source_bs, source_ce, tol=Decimal("2")
-                    )
-                    if mapper.validate_balance(source_bs) and source_q.quadra:
-                        prior_ok = False
-                        if source_prior_bs is not None and source_prior_ce is not None:
-                            prior_q = check_quadratura(
-                                source_prior_bs,
-                                source_prior_ce,
-                                tol=Decimal("2"),
-                            )
-                            prior_ok = (
-                                mapper.validate_balance(source_prior_bs)
-                                and prior_q.quadra
-                            )
-                        logger.info(
-                            "Using deterministic source-validated IV-CEE "
-                            "extraction (prior_valid=%s)",
-                            prior_ok,
-                        )
-                        return (
-                            source_bs,
-                            source_ce,
-                            source_prior_bs if prior_ok else None,
-                            source_prior_ce if prior_ok else None,
-                        )
-            except Exception as source_err:
-                logger.info(
-                    "Deterministic legal IV-CEE extraction declined (%s: %s)",
-                    type(source_err).__name__,
-                    source_err,
-                )
-
-            if not _ivcee_attivo(api_key):
-                raise PDFImportError(_modello_non_disponibile(
-                    "ANTHROPIC_API_KEY is required for PDF import"))
-            if not is_trial_balance and not is_scanned and not _ocr_source:
-                # Prefer source-verified macros, but incomplete coverage must not
-                # prevent importing. The existing extractor recovers the base;
-                # finalization assigns unexplained detail to residual accounts.
-                from importers.macro_analysis import analyze_pdf_macros, MacroAnalysisError
-                from importers.standard_ivcee_parser import has_comparative_ivcee_columns
-                try:
-                    bs, ce, prior_bs, prior_ce, _macro_report = analyze_pdf_macros(
-                        file_path,
-                        include_prior=not period_months and has_comparative_ivcee_columns(file_path),
-                    )
-                except MacroAnalysisError as exc:
-                    warning = (
-                        'MACROVOCI DA VERIFICARE: lettura incompleta; importazione '
-                        'proseguita con estrazione alternativa e conti residuali. '
-                        'Verificare le voci segnalate in Rettifiche.'
-                    )
-                    _macro_report = {**exc.report, 'fallback_used': True,
-                                     'warnings': [*exc.report.get('warnings', []), warning]}
-                    sc_quadratura_warnings.append(warning)
-                    logger.warning('%s Diagnosi: %s', warning, exc.report.get('errors', []))
-                else:
-                    return bs, ce, prior_bs, prior_ce
-            logger.info("Using LLM extraction (ANTHROPIC_API_KEY found)")
-            from importers.pdf_extractor_llm import (
-                extract_pdf_with_llm, extract_pdf_both_years_with_llm,
-            )
-            # A prior year is optional. Use the dual prompt only when the source
-            # physically proves two date columns; a monocolumn partial statement
-            # must use the single-year extractor and return no fabricated prior.
-            from importers.standard_ivcee_parser import has_comparative_ivcee_columns
-
-            if period_months and not has_comparative_ivcee_columns(file_path):
-                logger.info(
-                    f"Single-year infrannual extraction (period_months={period_months}; "
-                    "no prior column detected)"
-                )
-                bs, ce = extract_pdf_with_llm(file_path, force_llm=True)
-                _rifiuta_passivo_non_letto(bs)
-                return bs, ce, None, None
-
-            # Da qui in giu' passano SIA il budget annuale SIA l'infrannuale comparato
-            # (#50). L'infrannuale comparato tornava direttamente dal prompt a due anni,
-            # cioe' senza la mitigazione descritta qui sotto: dopo #27 quei file hanno
-            # cominciato ad arrivarci, e una riga di CE persa sull'anno corrente usciva
-            # dove prima usciva intera. Un percorso solo, perche' un secondo percorso
-            # ri-diverge alla prima modifica del primo.
-            #
-            # Take the CURRENT year from the proven single-year extractor
-            # (the both-years prompt occasionally drops a current-year line — budget_227), then
-            # run a dual pass purely to capture the PRIOR (comparative) column. This way a
-            # comparative bilancio imports BOTH years and the user is never asked to re-upload a
-            # year already in the PDF, WITHOUT degrading current-year quality. The dual pass
-            # returns empty prior dicts on monocolumn PDFs (no fabricated prior). The extra
-            # Haiku calls are cheap and PDF import is infrequent.
-            # force_llm=True: this helper is only reached for IV-CEE PDFs or as the
-            # explicit fallback after the deterministic parser returned empty; in the
-            # latter case the document was (mis-)detected as a trial balance, so without
-            # force_llm the single-year extractor would re-route back to that same empty
-            # deterministic parser (budget_313/314).
-            from importers.iv_cee_hierarchy import rollup_debiti_aggregates
-
-            def _balances(d):
-                return bool(d) and mapper.validate_balance(rollup_debiti_aggregates(d))
-
-            _letture_sp: list = []   # le letture SP dell'ultimo tentativo (un anno, due anni)
-
-            def _attempt():
-                """One extraction pass: single-year current + dual pass for the prior,
-                falling back to the dual-pass current when the single-year one does not
-                balance (dense 4-column layouts trip the single-year prompt) or when it
-                turns out to have read the COMPARATIVE column instead of the current one
-                (infrannuale: the two columns are not homogeneous, 9 months against 12)."""
-                bs, ce = extract_pdf_with_llm(file_path, force_llm=True)
-                prior_bs = prior_ce = None
-                read_comparative = False
-                _letture_sp.clear()
-                _letture_sp.append(bs)
-                try:
-                    dual_bs, dual_ce, prior_bs, prior_ce = extract_pdf_both_years_with_llm(file_path)
-                    _letture_sp.append(dual_bs)
-                    if _single_year_read_prior_column(bs, dual_bs, prior_bs):
-                        # Quadrerebbe lo stesso: e' l'anno sbagliato, non un foglio rotto.
-                        read_comparative = True
-                        logger.warning(
-                            "Single-year current extraction coincides with the "
-                            "comparative column: it read the wrong column; using the "
-                            "dual-pass current year"
-                        )
-                        bs, ce = dual_bs, dual_ce
-                    elif not _balances(bs) and _balances(dual_bs):
-                        logger.info(
-                            "Single-year current extraction is unbalanced; using the "
-                            "dual-pass current year (it balances)"
-                        )
-                        bs, ce = dual_bs, dual_ce
-                except Exception as prior_err:
-                    logger.warning(
-                        f"Prior-year dual extraction failed ({type(prior_err).__name__}: "
-                        f"{prior_err}); importing current year only"
-                    )
-                # Dichiarata SEMPRE, anche a zero: a valle una chiave assente vale zero,
-                # quindi tacere equivarrebbe a dichiararsi puliti.
-                if bs is not None:
-                    bs["_single_year_read_comparative"] = (
-                        Decimal("1") if read_comparative else Decimal("0")
-                    )
-                return bs, ce, prior_bs, prior_ce
-
-            # The Haiku extractor is stochastic on this schema: a dense 4-column bilancio
-            # (2025/2024/DIFFERENZA/SCOST.%) misreads a debiti line on a minority of runs,
-            # unbalancing the year. Retry until BOTH the current and any prior year balance
-            # (keeping the best attempt so far), which turns an ~80%/pass success into
-            # near-certainty. Bounded and only re-runs while a year still fails; PDF import
-            # is infrequent so the extra Haiku calls are acceptable.
-            best = None
-            for attempt in range(3):
-                bs, ce, prior_bs_data, prior_ce_data = _attempt()
-                current_ok = _balances(bs)
-                prior_ok = _balances(prior_bs_data) or not prior_bs_data
-                if best is None or (current_ok and not _balances(best[0])):
-                    best = (bs, ce, prior_bs_data, prior_ce_data)
-                if current_ok and prior_ok:
-                    best = (bs, ce, prior_bs_data, prior_ce_data)
-                    break
-                # La riprova serve contro una lettura sbilanciata, non contro un prospetto che
-                # non c'e': se il tentativo ha letto uno SP vuoto (Attivo = Passivo = 0, sia la
-                # lettura a un anno sia quella a due) altri due giri danno lo stesso vuoto, a
-                # quattro chiamate l'uno (budget_1667: dieci minuti prima dello stesso rifiuto).
-                try:
-                    from importers.iv_cee_hierarchy import check_quadratura
-                    _sp_vuoto = len(_letture_sp) == 2 and all(
-                        (not letto) or check_quadratura(letto).is_empty for letto in _letture_sp)
-                except Exception:
-                    _sp_vuoto = False
-                if _sp_vuoto:
-                    logger.info(
-                        f"Extraction attempt {attempt + 1}: empty balance sheet; "
-                        "not retrying (nothing to re-read)"
-                    )
-                    break
-                logger.info(
-                    f"Extraction attempt {attempt + 1}: current_balances={current_ok}, "
-                    f"prior_balances={prior_ok}; retrying" if attempt < 2 else
-                    f"Extraction attempt {attempt + 1}: current_balances={current_ok}, "
-                    f"prior_balances={prior_ok}; keeping best attempt"
-                )
-
-            # Clean comparative legal IV-CEE exports expose every aggregate and
-            # both side totals at fixed source coordinates.  If all stochastic
-            # attempts are still unbalanced, overlay those printed aggregates only
-            # when their independent section cross-foots reconcile exactly.  This
-            # is a source-backed fallback, not a plug: an incomplete/ambiguous PDF
-            # makes the deterministic parser return None and leaves ``best`` alone.
-            if best is not None and not _balances(best[0]):
-                try:
-                    from importers.standard_ivcee_parser import (
-                        extract_standard_ivcee_balances,
-                        extract_standard_ivcee_income,
-                        overlay_standard_ivcee_balance,
-                    )
-
-                    source_current, source_prior = extract_standard_ivcee_balances(
-                        file_path
-                    )
-                    source_current_ce, source_prior_ce = extract_standard_ivcee_income(
-                        file_path
-                    )
-                    source_bs = overlay_standard_ivcee_balance(best[0], source_current)
-                    source_prior_bs = overlay_standard_ivcee_balance(
-                        best[2] or {}, source_prior
-                    )
-                    if source_current is not None and _balances(source_bs):
-                        logger.warning(
-                            "LLM IV-CEE current extraction unbalanced; using "
-                            "source-validated legal subtotals"
-                        )
-                        # Keep the independently extracted CE and every typed
-                        # detail field; overwrite only the fully cross-footed legal
-                        # SP aggregates/totals returned by the source parser.
-                        source_ce = dict(best[1])
-                        if source_current_ce is not None:
-                            source_ce.update(source_current_ce)
-                        source_prior_income = dict(best[3] or {})
-                        if source_prior_ce is not None:
-                            source_prior_income.update(source_prior_ce)
-                        best = (
-                            source_bs,
-                            source_ce,
-                            source_prior_bs if source_prior is not None else best[2],
-                            source_prior_income if source_prior_ce is not None else best[3],
-                        )
-                except Exception as source_err:
-                    logger.info(
-                        "Deterministic legal IV-CEE fallback declined (%s: %s)",
-                        type(source_err).__name__, source_err,
-                    )
-            if best is not None:
-                _rifiuta_passivo_non_letto(best[0])
-            return best
+            esito, _macro_report = _estrazione_col_modello(
+                file_path, extraction_context, period_months, api_key, mapper, is_scanned,
+                is_trial_balance, _ocr_source, sc_quadratura_warnings, _macro_report)
+            return esito
 
         sc_quadratura_warnings = []
         # Corrupted (not merely absent) text layer — broken ToUnicode font map

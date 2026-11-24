@@ -251,7 +251,10 @@ ciò che non si può non sapere. Ogni voce dice la regola e **cosa si rompe** a 
   legge lo schema di legge, non un elenco di conti: su una contrapposte restituisce un'estrazione
   sbilanciata che diventa il generico «Balance sheet does not balance». È l'ultima risorsa **solo**
   quando il deterministico esce davvero vuoto. Ricablarlo come fallback di route C è una tentazione
-  ricorrente; l'estrattore giusto per le liste CoGe è il pass CoGe dedicato.
+  ricorrente; l'estrattore giusto per le liste CoGe è il pass CoGe dedicato. Dal 2026-11-24 il codice di
+  `pdf_extractor_llm.py` sta nel pacchetto `importers/estrazione_llm/` (IV-CEE in `ivcee.py`, CoGe in `coge.py`,
+  totali stampati in `totali_dichiarati.py`); il file resta la facciata, e come per il parser un `monkeypatch` va
+  sul modulo dove il chiamante cerca la funzione.
 - **L'importatore PDF** (default dal 2026-10-16, rifatto a novembre con le Fasi 0-5 del lettore universale; `IMPORT_MOTORE` assente = questo importatore, `classico` = l'importatore di prima; Anthropic vietato salvo `ANTHROPIC_CONSENTITO=1`, gx10 e MinerU ammessi). Il codice che orchestra i passi sta ancora in `importers/import_snello/` (`import_snello.importa`) e la diagnostica in `validation_report["import_snello"]`: nomi storici del primo «percorso snello», che non è più l'importatore. I passi: prima i lettori deterministici (PDF reso da XBRL
   depositato, schema di legge con o senza dettaglio conti, situazione contabile), **prima** della
   struttura: se uno quadra si adotta a zero chiamate di modello. Altrimenti il modello nomina il

@@ -8,6 +8,8 @@ import fitz
 import pytest
 
 from importers import llm_provider, pdf_extractor_llm as P
+# le estrazioni cercano queste funzioni nel proprio modulo: si sostituiscono li', non nella facciata
+from importers.estrazione_llm import coge as CG
 from importers.llm_provider import LLMProviderError
 
 
@@ -82,7 +84,7 @@ def test_pdf_immagine_con_gx10_e_senza_chiave_anthropic_errore_dichiarato(tmp_pa
     monkeypatch.setenv("PDF_LLM_PROVIDER_COGE", "gx10")
     monkeypatch.setenv("GX10_API_KEY", "x")
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
-    monkeypatch.setattr(P, "_is_image_pdf", lambda *_: True)
+    monkeypatch.setattr(CG, "_is_image_pdf", lambda *_: True)
     with pytest.raises(PDFImportError, match="vision"):
         P.extract_trial_balance_with_llm(_pdf(tmp_path, RIGHE))
 
@@ -117,7 +119,7 @@ def test_il_retry_di_completezza_tiene_il_draw_col_tappo_piu_piccolo(tmp_path, m
         bs["_plug_residual"] = next(draw)
         residui.append(bs["_plug_residual"])
         return bs
-    monkeypatch.setattr(P, "_reconcile_trial_to_declared", con_residuo)
+    monkeypatch.setattr(CG, "_reconcile_trial_to_declared", con_residuo)
     bs, _ = P.extract_trial_balance_with_llm(_pdf(tmp_path, RIGHE))
     assert bs["_plug_residual"] == min(residui)
 

@@ -10,6 +10,8 @@ import fitz
 import pytest
 
 from importers import pdf_extractor_llm as P
+# le estrazioni cercano queste funzioni nel proprio modulo: si sostituiscono li', non nella facciata
+from importers.estrazione_llm import ivcee as IV
 
 PDFImportError = P.PDFImportError
 
@@ -52,11 +54,11 @@ def _finto_extract_with_llm(chiamate):
 
 def _monkeypatch_testo(monkeypatch, tmp_path, chiamate):
     """Instrada al ramo testuale: PDF non-immagine, testo SP/CE finto, chiamata LLM finta."""
-    monkeypatch.setattr(P, "_is_image_pdf", lambda *_: False)
-    monkeypatch.setattr(P, "extract_relevant_pages", lambda *_: ("SP testo", "CE testo"))
-    monkeypatch.setattr(P, "_extract_with_llm", _finto_extract_with_llm(chiamate))
+    monkeypatch.setattr(IV, "_is_image_pdf", lambda *_: False)
+    monkeypatch.setattr(IV, "extract_relevant_pages", lambda *_: ("SP testo", "CE testo"))
+    monkeypatch.setattr(IV, "_extract_with_llm", _finto_extract_with_llm(chiamate))
     monkeypatch.setattr(
-        P, "_extract_with_llm_vision",
+        IV, "_extract_with_llm_vision",
         lambda *a, **k: (_ for _ in ()).throw(AssertionError("vision chiamata sul ramo testuale")))
     monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-test")
 
@@ -85,9 +87,9 @@ class TestExtractPdfWithLlm:
         monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-test")
         chiamate_testo = []
         chiamate_vision = []
-        monkeypatch.setattr(P, "_is_image_pdf", lambda *_: True)
-        monkeypatch.setattr(P, "_render_pdf_pages_as_images", lambda *_: ["img"])
-        monkeypatch.setattr(P, "_extract_with_llm", _finto_extract_with_llm(chiamate_testo))
+        monkeypatch.setattr(IV, "_is_image_pdf", lambda *_: True)
+        monkeypatch.setattr(IV, "_render_pdf_pages_as_images", lambda *_: ["img"])
+        monkeypatch.setattr(IV, "_extract_with_llm", _finto_extract_with_llm(chiamate_testo))
 
         def finta_vision(client, images, system_prompt, output_model, section_name,
                           tool_name, max_retries=2):
@@ -95,7 +97,7 @@ class TestExtractPdfWithLlm:
             if output_model is P.BalanceSheetExtraction:
                 return P.BalanceSheetExtraction()
             return P.IncomeStatementExtraction()
-        monkeypatch.setattr(P, "_extract_with_llm_vision", finta_vision)
+        monkeypatch.setattr(IV, "_extract_with_llm_vision", finta_vision)
 
         P.extract_pdf_with_llm(_pdf(tmp_path))
 
@@ -127,9 +129,9 @@ class TestExtractPdfBothYearsWithLlm:
         monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-test")
         chiamate_testo = []
         chiamate_vision = []
-        monkeypatch.setattr(P, "_is_image_pdf", lambda *_: True)
-        monkeypatch.setattr(P, "_render_pdf_pages_as_images", lambda *_: ["img"])
-        monkeypatch.setattr(P, "_extract_with_llm", _finto_extract_with_llm(chiamate_testo))
+        monkeypatch.setattr(IV, "_is_image_pdf", lambda *_: True)
+        monkeypatch.setattr(IV, "_render_pdf_pages_as_images", lambda *_: ["img"])
+        monkeypatch.setattr(IV, "_extract_with_llm", _finto_extract_with_llm(chiamate_testo))
 
         def finta_vision(client, images, system_prompt, output_model, section_name,
                           tool_name, max_retries=2):
@@ -143,7 +145,7 @@ class TestExtractPdfBothYearsWithLlm:
                 current_year=P.IncomeStatementExtraction(),
                 prior_year=P.IncomeStatementExtraction(),
             )
-        monkeypatch.setattr(P, "_extract_with_llm_vision", finta_vision)
+        monkeypatch.setattr(IV, "_extract_with_llm_vision", finta_vision)
 
         P.extract_pdf_both_years_with_llm(_pdf(tmp_path))
 

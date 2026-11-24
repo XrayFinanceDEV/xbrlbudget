@@ -21,6 +21,8 @@ import pytest
 from importers import bilancio_classifier as classifier
 from importers import macro_analysis
 from importers import pdf_extractor_llm as P
+# le estrazioni cercano queste funzioni nel proprio modulo: si sostituiscono li', non nella facciata
+from importers.estrazione_llm import ivcee as IV
 from importers import pdf_importer as importer
 from importers import standard_ivcee_parser as standard
 
@@ -81,8 +83,8 @@ def route_ab_non_risolta_dal_deterministico(monkeypatch, tmp_path):
         raise macro_analysis.MacroAnalysisError({"errors": ["nessuna macrovoce riconosciuta"]})
     monkeypatch.setattr(macro_analysis, "analyze_pdf_macros", _macro_fallisce)
 
-    monkeypatch.setattr(P, "_is_image_pdf", lambda *_: False)
-    monkeypatch.setattr(P, "extract_relevant_pages", lambda *_: ("SP testo", "CE testo"))
+    monkeypatch.setattr(IV, "_is_image_pdf", lambda *_: False)
+    monkeypatch.setattr(IV, "extract_relevant_pages", lambda *_: ("SP testo", "CE testo"))
     return tmp_path
 
 
@@ -98,7 +100,7 @@ def test_gx10_senza_chiave_anthropic_raggiunge_il_ramo_gx10(
     monkeypatch.setattr(P.anthropic, "Anthropic",
                         lambda *a, **k: (_ for _ in ()).throw(AssertionError("Anthropic chiamato")))
     chiamate = []
-    monkeypatch.setattr(P, "_extract_with_llm", _finto_extract_with_llm(chiamate))
+    monkeypatch.setattr(IV, "_extract_with_llm", _finto_extract_with_llm(chiamate))
     session_factory = _db_in_memoria(monkeypatch)
 
     result = importer.import_pdf_balance_sheet(
@@ -123,7 +125,7 @@ def test_provider_anthropic_di_default_senza_chiave_solleva_come_oggi(
     tmp_path = route_ab_non_risolta_dal_deterministico
     monkeypatch.delenv("PDF_LLM_PROVIDER_IVCEE", raising=False)
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
-    monkeypatch.setattr(P, "_extract_with_llm",
+    monkeypatch.setattr(IV, "_extract_with_llm",
                         lambda *a, **k: (_ for _ in ()).throw(AssertionError("LLM chiamato")))
     _db_in_memoria(monkeypatch)
 
@@ -152,7 +154,7 @@ def test_un_attivo_letto_col_passivo_tutto_a_zero_e_una_lettura_mancante_non_si_
                                             sp06_crediti_breve=Decimal("200"),
                                             totale_attivo=Decimal("300"))
         return P.IncomeStatementExtraction(ce01_ricavi_vendite=Decimal("50"))
-    monkeypatch.setattr(P, "_extract_with_llm", finto)
+    monkeypatch.setattr(IV, "_extract_with_llm", finto)
     _db_in_memoria(monkeypatch)
 
     with pytest.raises(PDFImportError, match="passivo mancante"):

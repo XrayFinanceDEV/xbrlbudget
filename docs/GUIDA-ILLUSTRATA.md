@@ -18,13 +18,15 @@
   [11. Riclassificato](#11-riclassificato) · [12. Rendiconto](#12-rendiconto) ·
   [13. Report](#13-report--il-business-plan) · [14. Indici](#14-analisi-finanziaria-completa-indici) ·
   [15. Startup](#15-il-percorso-startup)
-- [I due percorsi completi](#i-due-percorsi-completi) · [Glossario](#glossario) ·
+- [I due percorsi completi](#i-due-percorsi-completi) · [Le formule dei report](#le-formule-dei-report) ·
+  [Glossario](#glossario) ·
   [Che cosa succede quando qualcosa non torna](#che-cosa-succede-quando-qualcosa-non-torna) ·
   [Dove andare dopo](#dove-andare-dopo)
 
 **A chi serve.** Questa è la guida d'uso: come si fa una cosa dall'inizio alla fine, con un
-esempio sui numeri veri per ogni schermata. Non è il manuale del motore — per le formule c'è
-[FORECASTING_GUIDE.md](budget/FORECASTING_GUIDE.md), per i contratti delle API
+esempio sui numeri veri per ogni schermata. Le formule degli indici che finiscono nei due report
+stanno nella sezione [Le formule dei report](#le-formule-dei-report). Non è il manuale del motore:
+per l'aritmetica del previsionale c'è [FORECASTING_GUIDE.md](budget/FORECASTING_GUIDE.md), per i contratti delle API
 [API-PREVISIONALE.md](budget/API-PREVISIONALE.md). Ogni sezione chiude con un «Approfondisci»
 che punta alla pagina tecnica giusta.
 
@@ -285,6 +287,8 @@ proiettata, più i **segnali di allarme della crisi d'impresa**.
 **1.65x** sulla proiezione. È il numero che pesa di più nel punteggio: il debito finanziario
 netto vale più di cinque anni di margine lordo, e scende sotto due solo se il piano tiene.
 
+**Formule, soglie e classe di rischio** → [Le formule dei report](#il-report-infrannuale)
+
 **Approfondisci** → [INDICATORI-E-STAMPA.md](frontend/INDICATORI-E-STAMPA.md)
 
 ## 7. Stampa
@@ -308,6 +312,8 @@ CE, costi, SP, circolante, debito, crisi d'impresa, segnali, allegati A/B), gene
 **Attenzione a**
 
 - La stampa del browser è un'anteprima: per consegnare il documento usa «Scarica PDF».
+
+**Formule** → [Le formule dei report › Il report infrannuale](#il-report-infrannuale)
 
 **Approfondisci** → [REPORT-INFRANNUALE-PDF.md](budget/REPORT-INFRANNUALE-PDF.md)
 
@@ -697,6 +703,8 @@ piano: un 5 anni ne conta una in più dello stesso 3 anni.
 **Attenzione a.** Finché un controllo bloccante non si risolve il pulsante resta «Scarica
 bozza»: la bozza ha gli stessi numeri, ma il documento dice di essere bozza.
 
+**Formule** → [Le formule dei report › Il Business plan](#il-business-plan)
+
 **Approfondisci** → [BUSINESS-PLAN-PDF.md](budget/BUSINESS-PLAN-PDF.md)
 
 ## 14. Analisi finanziaria completa (Indici)
@@ -791,6 +799,307 @@ driver. Le griglie CE Prev./SP Prev. restano disponibili, con gli stessi overrid
 
 ---
 
+# Le formule dei report
+
+Ogni numero dei due documenti che si consegnano — il **report infrannuale** della Stampa (§ 7)
+e il **Business plan** del Report (§ 13) — si calcola con le formule di questa sezione. I report
+non ricalcolano nulla per conto proprio: leggono gli indicatori del server e, al più, sommano o
+sottraggono righe già presenti nei prospetti.
+
+**Prima di confrontare i due documenti, leggi le «differenze fra i due report», qui sotto.**
+Alcuni indicatori hanno lo stesso nome nei due documenti ma non la stessa formula: lo stesso anno
+può avere un DSCR o una PFN diversi nel report infrannuale e nel Business plan, e non è un errore
+di nessuno dei due.
+
+## Le grandezze di base (valgono per entrambi)
+
+| Grandezza | Formula |
+|---|---|
+| **Valore della produzione** | ricavi delle vendite + variazioni delle rimanenze di prodotti + variazioni dei lavori in corso su ordinazione + incrementi di immobilizzazioni per lavori interni + altri ricavi e proventi |
+| **Costi operativi** | costi della produzione **esclusi** ammortamenti e svalutazioni (B.10). Gli accantonamenti (B.12, B.13) ci restano dentro |
+| **EBITDA (MOL)** | valore della produzione − costi operativi |
+| **EBITDA margin** | EBITDA ÷ ricavi delle vendite × 100 |
+| **EBIT (risultato operativo)** | EBITDA − ammortamenti e svalutazioni |
+| **Risultato ante imposte** | EBIT + proventi finanziari − oneri finanziari ± utili e perdite su cambi ± rettifiche di valore di attività finanziarie ± proventi e oneri straordinari |
+| **Utile netto** | risultato ante imposte − imposte sul reddito |
+| **Immobilizzazioni** | immateriali + materiali + finanziarie |
+| **Patrimonio netto** | capitale + riserve + utile (perdita) dell'esercizio |
+| **Capitale circolante commerciale** | crediti verso clienti (entro **e** oltre 12 mesi) + rimanenze − debiti verso fornitori (entro e oltre 12 mesi) |
+| **Incidenza di un costo** | costo ÷ ricavi delle vendite × 100 (il denominatore sono i ricavi delle vendite, non il valore della produzione) |
+| **Variazione %** | (valore ÷ valore di confronto − 1) × 100; «n.d.» se il valore di confronto è zero |
+
+**«n.d.» non vuol dire zero.** Un indice va a «n.d.» quando il denominatore è zero o negativo,
+oppure quando manca il dettaglio che serve: crediti verso clienti, debiti verso fornitori o
+debiti finanziari che l'import ha lasciato solo in aggregato. Si corregge integrando il dettaglio
+in Rettifiche (§ 3).
+
+## Il report infrannuale
+
+**Le colonne.** **C** è il consuntivo dell'ultimo anno pieno; **6M** (o il numero di mesi del
+periodo) è l'infrannuale alla data; **Ann.** è l'annualizzato, che compare solo nel conto
+economico e solo se il periodo è parziale; **F** è il forecast a fine anno, che compare solo se
+la proiezione è stata generata.
+
+- **Annualizzato** = valore del periodo × 12 ÷ mesi del periodo. Vale solo per le voci di
+  conto economico. Lo stato patrimoniale è una fotografia alla data e non si annualizza mai.
+- **Forecast** = la proiezione a fine anno costruita con le ipotesi sul resto dell'anno (§ 5).
+  Non è l'annualizzato aritmetico.
+- **Indicatori della colonna 6M**: lo stato patrimoniale è quello alla data, il conto
+  economico è annualizzato. Così ROI, ROE, ROS, EBITDA %, DSCR e PFN/EBITDA si confrontano con un
+  anno intero.
+
+**Le grandezze delle sezioni 4-6**
+
+| Voce | Formula |
+|---|---|
+| Attivo circolante (sez. 4) | rimanenze + crediti entro 12 mesi + crediti oltre 12 mesi + attività finanziarie non immobilizzate + disponibilità liquide |
+| Debiti finanziari (sez. 4) | debiti verso banche + altri finanziatori + obbligazioni, entro e oltre 12 mesi |
+| Debiti operativi (sez. 4) | debiti verso fornitori + tributari + previdenziali + altri debiti, entro e oltre 12 mesi |
+| Capitale circolante netto (sez. 4) | attivo circolante della riga sopra − debiti entro 12 mesi |
+| Capitale circolante netto «(indicatore)» (sez. 5) | quello degli indicatori della crisi, nella tabella qui sotto. Il report avverte che le due righe usano aggregazioni diverse |
+
+**I 15 indicatori della crisi d'impresa** (sezioni 6-7; sono gli stessi della tab Indicatori, § 6)
+
+Qui l'**attivo corrente** è rimanenze + crediti entro 12 mesi + attività finanziarie non
+immobilizzate + disponibilità liquide + ratei e risconti attivi. Il **passivo corrente** è
+fatto dei soli debiti entro 12 mesi.
+
+| Indicatore | Formula |
+|---|---|
+| **DSCR** | (EBITDA − imposte) ÷ oneri finanziari |
+| **EBITDA %** | EBITDA ÷ ricavi delle vendite × 100 |
+| **Margine di tesoreria** | attivo corrente − rimanenze − debiti entro 12 mesi |
+| **CCN** | attivo corrente − debiti entro 12 mesi |
+| **Liquidità corrente** | attivo corrente ÷ debiti entro 12 mesi |
+| **Margine di struttura** | patrimonio netto − immobilizzazioni |
+| **Copertura immobilizzazioni** | (patrimonio netto + debiti oltre 12 mesi) ÷ immobilizzazioni × 100 |
+| **Indipendenza finanziaria** | patrimonio netto ÷ totale attivo × 100 |
+| **PFN** | debiti verso banche + obbligazioni (entro e oltre) − disponibilità liquide − attività finanziarie non immobilizzate. I debiti verso altri finanziatori **restano fuori**, esposti a parte nella sezione 6 |
+| **PFN / EBITDA** | PFN ÷ EBITDA |
+| **ROI** | EBIT ÷ totale attivo × 100 |
+| **ROE** | utile netto ÷ patrimonio netto × 100 |
+| **ROS** | EBIT ÷ ricavi delle vendite × 100 |
+| **Oneri finanziari / MOL** | oneri finanziari ÷ EBITDA × 100 |
+| **Oneri finanziari / fatturato** | oneri finanziari ÷ ricavi delle vendite × 100. È solo informativo: non entra nella classe di rischio |
+
+**PFN quando manca il dettaglio dei debiti.** Se i debiti verso banche e le obbligazioni sono
+a zero, la PFN si calcola sul totale dei debiti meno quelli non finanziari noti (fornitori,
+tributari, previdenziali, altri finanziatori). Se l'import non ha dato nessun dettaglio dei debiti
+(bilancio abbreviato), si usa il totale dei debiti.
+
+**Punteggio, esito e classe di rischio.** Ogni indicatore riceve un punteggio da 0 a 1, lineare
+fra i due estremi della tabella e fermo a 0 e a 1 fuori da quegli estremi. L'esito di riga
+dipende dal punteggio:
+
+- **oltre soglia** sotto 0,33;
+- **attenzione** da 0,33 a 0,66;
+- **in soglia** da 0,66 in su.
+
+| Indicatore | Su che cosa si misura | Punteggio 0 a | Punteggio 1 a |
+|---|---|---|---|
+| DSCR | DSCR | 1,0 | 1,5 |
+| EBITDA % | EBITDA % | 5% | 20% |
+| Margine di tesoreria | (attivo corrente − rimanenze) ÷ debiti entro 12 mesi | 0,8 | 1,3 |
+| CCN e Liquidità corrente | attivo corrente ÷ debiti entro 12 mesi | 0,8 | 1,5 |
+| Margine di struttura | patrimonio netto ÷ immobilizzazioni × 100 | 50% | 120% |
+| Copertura immobilizzazioni | copertura | 80% | 150% |
+| Indipendenza finanziaria | indipendenza | 15% | 50% |
+| PFN e PFN / EBITDA | PFN / EBITDA | 6 | 0 |
+| ROI | ROI | 0% | 12% |
+| ROE | ROE | 0% | 12% |
+| ROS | ROS | 0% | 10% |
+| Oneri finanziari / MOL | oneri / MOL | 30% | 5% |
+| Oneri finanziari / fatturato | oneri / fatturato | 5% | 1% |
+
+Quando un indicatore non si può calcolare, il punteggio è 0,5, cioè «non lo so», e a schermo
+l'indice è «n.d.». Succede in tre casi:
+
+- **DSCR** senza oneri finanziari;
+- **ROE** con patrimonio netto nullo o negativo;
+- **oneri finanziari / fatturato** senza ricavi.
+
+Una contraddizione misurata, invece, dà 0. Succede in due casi:
+
+- PFN positiva con EBITDA nullo o negativo dà 0 su **PFN** e **PFN / EBITDA**;
+- oneri finanziari con EBITDA nullo o negativo danno 0 su **Oneri finanziari / MOL**.
+
+La **classe di rischio** nasce da due conteggi: gli indicatori oltre soglia, fra i 14 che
+concorrono, e i segnali extracontabili attivi (sezione 8). La tabella si legge dall'alto, e vale
+la prima riga che corrisponde:
+
+| Indicatori oltre soglia | Segnali attivi | Classe |
+|---|---|---|
+| 0 | 0 | **A3** · Nessun rischio |
+| fino a 2 | 0 | **A2** · Rischio minimo |
+| 3 | 0 | **A1** · Rischio basso |
+| fino a 5 | 0 | **B3** · Rischio moderato |
+| fino a 5 | 1 | **B2** · Rischio significativo |
+| fino a 5 | 2 | **B1** · Rischio elevato |
+| fino a 6 | fino a 3 | **C3** · Rischio alto |
+| 7 | fino a 3 | **C2** · Rischio grave |
+| più di 5 | 3 o più | **C1** · Pre-crisi |
+| tutti gli altri casi | | **D** · Crisi |
+
+La colonna **C** non ha segnali extracontabili: i segnali riguardano il periodo in corso, non
+l'anno chiuso.
+
+## Il Business plan
+
+**Le colonne.** **C** è il consuntivo, **F** il forecast dell'anno di partenza quando il piano
+nasce da un infrannuale, **P** gli anni di piano. Ogni colonna è un anno intero: nessun flusso
+viene annualizzato.
+
+**Conto economico e costi (sezioni 2-3)**
+
+| Voce | Formula |
+|---|---|
+| Altri ricavi e variazioni | valore della produzione − ricavi delle vendite |
+| Costi operativi (prima di ammortamenti) | totale costi della produzione − ammortamenti e svalutazioni |
+| Incidenze | voce ÷ ricavi delle vendite × 100 |
+
+**Costi fissi e variabili, break even point (sezione 4)**
+
+| Voce | Formula |
+|---|---|
+| **Costi variabili** | quota variabile del consumo di materie (acquisti + variazione delle rimanenze di materie) + quota variabile dei servizi |
+| **Costi fissi** | quota fissa di materie e servizi + godimento di beni di terzi + personale + oneri diversi di gestione + accantonamenti − altri ricavi − variazioni delle rimanenze di prodotti − variazioni dei lavori in corso − incrementi di immobilizzazioni per lavori interni |
+| **Margine di contribuzione** | ricavi delle vendite − costi variabili |
+| **Break even point** | costi fissi ÷ (margine di contribuzione ÷ ricavi delle vendite) |
+| **Margine di sicurezza** | (ricavi delle vendite − break even point) ÷ ricavi delle vendite × 100; è negativo quando i ricavi stanno sotto il pareggio |
+
+Le quote fisse e variabili sono quelle del passo 3 del wizard. Gli anni di piano le leggono dal
+motore. La colonna di partenza applica le stesse regole con le quote del **primo** anno di
+piano, così le colonne restano confrontabili. Senza ipotesi salvate, si usa il 60% fisso e il
+40% variabile. Il calcolo è costruito perché valga sempre (ricavi − break even point) ×
+margine di contribuzione ÷ ricavi = EBITDA. Se materie o servizi sono stati forzati a mano, la
+divisione fra fisso e variabile non esiste più e la sezione mostra «n.d.».
+
+**Flussi di cassa (sezione 5 e Allegato C)** — rendiconto con il metodo indiretto:
+
+- flusso operativo (A) = utile prima di imposte, interessi e plusvalenze + rettifiche non monetarie
+  (ammortamenti, accantonamenti, svalutazioni) ± variazioni del capitale circolante netto −
+  interessi, imposte pagate e utilizzo dei fondi;
+- variazione delle disponibilità liquide = A + B (investimenti) + C (finanziamento);
+- disponibilità liquide a fine esercizio = quelle a inizio esercizio + la variazione.
+
+Quando il motore dichiara le erogazioni dell'anno, la riga dei mezzi di terzi si divide in
+erogazioni e rimborsi; altrimenti resta il saldo netto. I **flussi operativi cumulati** della
+copertina sono la somma dei flussi A degli anni di piano.
+
+**Debito e sostenibilità (sezione 6)**
+
+| Indicatore | Formula |
+|---|---|
+| **PFN** | debiti verso banche + **altri finanziatori** + obbligazioni (entro e oltre) − disponibilità liquide − attività finanziarie non immobilizzate |
+| **Debiti finanziari (convenzione PFN)** | PFN + disponibilità liquide |
+| **PFN / EBITDA** | PFN ÷ EBITDA; «n.d.» se l'EBITDA non è positivo |
+| **DSCR** | (EBITDA − imposte) ÷ (oneri finanziari + **quota capitale delle rate dei piani**) |
+| **Oneri finanziari / MOL**, **/ ricavi** | oneri finanziari ÷ EBITDA (o ÷ ricavi delle vendite) × 100 |
+| **ROD (costo del denaro)** | oneri finanziari ÷ debito finanziario **medio** fra inizio e fine anno. Si usa la sola fine anno quando manca il bilancio d'inizio o uno dei due non ha il dettaglio dei debiti |
+
+**La quota capitale del DSCR.** Negli anni di piano comprende solo le rate di un piano di rimborso
+vero:
+
+- contratti bancari;
+- debito bancario pregresso con un piano in anni;
+- altri finanziatori.
+
+Non vi entrano mai il rientro di uno scoperto o di un fido, né i rimborsi anticipati fatti con la
+cassa in eccesso. Nella colonna di partenza la quota è il rimborso di debito finanziario letto dal
+rendiconto. Il DSCR va a «n.d.» quando quel rendiconto non c'è, per esempio sulla prima colonna
+storica, e quando un anno di piano non dichiara le rate.
+
+**PFN, PFN / EBITDA e ROD vanno a «n.d.»** quando i debiti ci sono ma l'import non li ha divisi
+fra banche, altri finanziatori e obbligazioni. Dichiarare «PFN = − cassa» sarebbe un numero
+inventato.
+
+**Capitale circolante (sezione 7)** — giorni su un anno commerciale di 360 giorni, calcolati sui
+saldi di fine anno.
+
+| Indicatore | Formula |
+|---|---|
+| **DSO** — giorni di credito | 360 × crediti verso clienti (entro e oltre 12 mesi) ÷ ricavi delle vendite |
+| **DIO** — giorni di magazzino | 360 × rimanenze ÷ consumo di materie (acquisti + variazione delle rimanenze di materie); «n.d.» con consumo non positivo, frequente nelle aziende di servizi |
+| **DPO** — giorni di debito | 360 × debiti verso fornitori (entro e oltre 12 mesi) ÷ (materie + servizi); se non ci sono acquisti, ÷ ricavi |
+| **Ciclo di conversione del denaro** | DIO + DSO − DPO |
+
+I giorni che il report misura qui non sono sempre quelli digitati nel passo 4 del wizard. Il
+wizard tiene in due gruppi i giorni di magazzino, e i saldi di bilancio comprendono l'IVA mentre
+ricavi e acquisti no. La sezione 10 del report lo ricorda.
+
+**Solidità, liquidità e redditività (sezione 8 e Allegato D)**
+
+Qui l'**attivo corrente** è rimanenze + crediti entro 12 mesi + attività finanziarie non
+immobilizzate + disponibilità liquide + ratei e risconti attivi. Il **passivo corrente** è
+debiti entro 12 mesi + **ratei e risconti passivi**.
+
+| Indicatore | Formula |
+|---|---|
+| **Altre attività** | totale attivo − (immobilizzazioni + rimanenze + crediti commerciali + disponibilità liquide) |
+| **Altre passività** | totale attivo − (patrimonio netto + debiti finanziari) |
+| **CCN** | attivo corrente − passivo corrente |
+| **Margine di tesoreria** | attivo corrente − rimanenze − passivo corrente |
+| **Margine di struttura** | patrimonio netto − immobilizzazioni |
+| **Liquidità corrente** | attivo corrente ÷ passivo corrente |
+| **Liquidità immediata** | (attivo corrente − rimanenze) ÷ passivo corrente |
+| **Indipendenza finanziaria** | patrimonio netto ÷ totale attivo × 100 |
+| **Copertura immobilizzazioni** | (patrimonio netto + debiti oltre 12 mesi + **TFR**) ÷ immobilizzazioni × 100 |
+| **ROI** | EBIT ÷ totale attivo × 100 |
+| **ROE** | utile netto ÷ patrimonio netto × 100; «n.d.» con patrimonio netto negativo |
+| **ROS** | EBIT ÷ ricavi delle vendite × 100 |
+| **Spread (ROI − ROD)** | ROI − ROD |
+
+**Allegato D**: i 15 indicatori della pratica, con le formule della tabella sopra e il DSCR della
+sezione 6. Quando la colonna di partenza è un periodo parziale si aggiungono due righe
+annualizzate:
+
+- **ROI (annualizzato)** = ROI del periodo × 12 ÷ mesi;
+- **PFN / EBITDA (annualizzato)** = PFN / EBITDA del periodo × mesi ÷ 12.
+
+**Allegato E — indici analitici**
+
+| Indice | Formula |
+|---|---|
+| Current Ratio (ILC) | attivo corrente ÷ passivo corrente, come nella sezione 8 |
+| Quick Ratio (ISL) | (attivo corrente − rimanenze) ÷ passivo corrente |
+| Acid Test | (crediti entro e oltre 12 mesi + attività finanziarie + disponibilità liquide) ÷ debiti entro 12 mesi |
+| Autonomia finanziaria | patrimonio netto ÷ totale attivo |
+| Indice di indebitamento, Debiti / Patrimonio netto | debiti totali ÷ patrimonio netto |
+| Debiti / Valore della produzione | debiti totali ÷ valore della produzione |
+| ROD (costo del denaro) | come nella sezione 6 |
+| (CN+PF+TFR)/AF | (patrimonio netto + debiti oltre 12 mesi + TFR) ÷ immobilizzazioni |
+| CN/AF | patrimonio netto ÷ immobilizzazioni |
+| CN/(PC+PF) | patrimonio netto ÷ debiti totali |
+| Giorni magazzino, credito, debito, ciclo di conversione | come nella sezione 7 |
+| Rotazione attivo | ricavi delle vendite ÷ totale attivo |
+| Spread (ROI − ROD) | ROI − ROD |
+| Leva finanziaria | totale attivo ÷ patrimonio netto |
+| MOL / Ricavi, OF / Ricavi | EBITDA (oneri finanziari) ÷ ricavi delle vendite |
+| Ricavi / Costo personale, Ricavi / Costo materie | ricavi delle vendite ÷ costo del personale (÷ materie prime) |
+
+ROE, ROI, ROS ed EBITDA margin non si ripetono nell'Allegato E: sono già nell'Allegato D.
+Lo Z-Score di Altman e il rating FGPMI non sono nel report: si consultano in Indici (§ 14).
+
+## Le differenze fra i due report
+
+Questi indicatori portano lo stesso nome nei due documenti ma si calcolano in modo diverso:
+
+| Indicatore | Report infrannuale | Business plan |
+|---|---|---|
+| **DSCR** | (EBITDA − imposte) ÷ **oneri finanziari** | (EBITDA − imposte) ÷ (oneri finanziari **+ quota capitale delle rate**) |
+| **PFN** | banche + obbligazioni − liquidità − attività finanziarie | banche + **altri finanziatori** + obbligazioni − liquidità − attività finanziarie |
+| **PFN senza dettaglio dei debiti** | ricostruita dal totale dei debiti | «n.d.» |
+| **Liquidità corrente, CCN, margine di tesoreria** | passivo corrente = debiti entro 12 mesi | passivo corrente = debiti entro 12 mesi **+ ratei e risconti passivi** |
+| **Copertura immobilizzazioni** | (PN + debiti oltre 12 mesi) ÷ immobilizzazioni | (PN + debiti oltre 12 mesi **+ TFR**) ÷ immobilizzazioni |
+
+**Che cosa vuol dire in pratica.** Quando un budget parte da un infrannuale, la colonna «F» del
+Business plan e la colonna «F» del report infrannuale descrivono lo stesso anno. Su un'azienda con
+rate da rimborsare, con debiti verso altri finanziatori, con ratei passivi o con TFR, questi
+indicatori danno numeri diversi nei due documenti. Ciascun documento è coerente con sé stesso: per
+confrontare i due, guarda le formule qui sopra.
+
+---
+
 # Glossario
 
 | Termine | Una riga |
@@ -804,9 +1113,9 @@ driver. Le griglie CE Prev./SP Prev. restano disponibili, con gli stessi overrid
 | **DPO** | Giorni medi di pagamento dei debiti commerciali. |
 | **MOL (EBITDA)** | Margine operativo lordo = utile operativo + ammortamenti. |
 | **EBIT (RO)** | Risultato operativo, prima dei finanziari. |
-| **PFN** | Posizione finanziaria netta = debiti finanziari − liquidità. |
+| **PFN** | Posizione finanziaria netta = debiti finanziari − liquidità. Il perimetro dei debiti finanziari cambia fra i due report: vedi [Le formule dei report](#le-differenze-fra-i-due-report). |
 | **CCN** | Capitale circolante netto = attivo corrente − passivo corrente. |
-| **DSCR** | (MOL − imposte) ÷ (oneri finanziari + quota capitale delle rate dei piani). |
+| **DSCR** | Nel Business plan: (MOL − imposte) ÷ (oneri finanziari + quota capitale delle rate dei piani). Nel report infrannuale: (MOL − imposte) ÷ oneri finanziari. |
 | **Break even point** | Il fatturato di pareggio, calcolato dalle quote fisse/variabili dei costi di piano. |
 | **Infrannuale** | Periodo parziale (1-11 mesi) proiettato a 12 contro l'ultimo anno pieno. |
 | **Riclassificato** | Lo SP per aree omogenee con i relativi indici. |

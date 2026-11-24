@@ -499,7 +499,10 @@ _SP_PASSIVO_RULES = [
     (['FONDI', 'ONERI'], 'sp14'),
     (['FONDO', 'RISCHI'], 'sp14'),
     (['FONDO', 'ONERI'], 'sp14'),
-    # TFR
+    # TFR. L'imposta sostitutiva sul TFR e' un debito tributario, non il fondo: dentro un mastro
+    # tributari-previdenza (budget_210, 1757) "ERARIO C/IMP.SOST.TFR" finiva in sp15.
+    (['ERARI', 'TFR'], 'sp16'),
+    (['SOST', 'TFR'], 'sp16'),
     (['TFR'], 'sp15'),
     (['T.F.R'], 'sp15'),
     (['TRATTAMENTO', 'FINE', 'RAPPORTO'], 'sp15'),
@@ -1309,7 +1312,8 @@ def _debt_type(desc_upper: str) -> str:
     if _kw_any(desc_upper, ['FORNITOR', 'COMMERCIAL', 'FATTURE DA RICEV']):
         return 'd'
     # Tributari (D.12): 'ERARI' covers ERARIO/ERARIALI/ERARIALE.
-    if _kw_any(desc_upper, ['TRIBUTAR', 'ERARI', 'IVA', 'IMPOST', 'F24', 'RITENUT']):
+    if _kw_any(desc_upper, ['TRIBUTAR', 'ERARI', 'IVA', 'IMPOST', 'F24', 'RITENUT']) \
+            or re.search(r'\bIR(?:ES|AP|PEF)\b', desc_upper):
         return 'e'
     if _kw_any(desc_upper, ['PREV', 'INPS', 'INAIL', 'SICUR', 'ENPALS', 'INARCASSA']):
         return 'f'
@@ -6228,6 +6232,10 @@ def classify_attivo(desc_upper: str) -> Tuple[str, bool]:
     return f, f != 'sp06'
 
 
+def _tributari_e_previdenza(d: str) -> bool:
+    return bool(re.search(r'\bTRIB|ERARI', d)) and _kw_any(d, ['PREV', 'INPS', 'INAIL'])
+
+
 def classify_passivo(desc_upper: str) -> Tuple[str, bool]:
     d = _descrizione_di_conto(desc_upper)
     if _is_fondo_amm(d):
@@ -6265,6 +6273,11 @@ def classify_passivo(desc_upper: str) -> Tuple[str, bool]:
                 and _kw_any(d, ['FINANZIAMENTI DI TERZI', 'MUTUI E FINANZIAMENTI',
                                 'VARI DI FINANZ', 'DIVERSI DI FINANZ'])):
             return 'sp16a', False
+        # Un mastro che nomina due voci, tributari E previdenza ("DEB.TRIB.-ISTIT.PREV.SOCIALE_
+        # D12_D13", budget_1784), non e' di nessuna delle due: si scende nei conti, e l'IVA va
+        # nei tributari invece di finire coi contributi.
+        if _tributari_e_previdenza(d):
+            return 'sp16g', False
         return 'sp16' + letter, letter != 'g'
     return tag, tag != 'sp16'
 

@@ -948,13 +948,14 @@ def _tipo_tabella(etichette: list[str]) -> Optional[str]:
 
 def _leggi_tabelle(documento: fitz.Document, dopo: int) -> dict:
     """Le due tabelle di nota con le scadenze (``Quota scadente entro/oltre l'esercizio``), anche
-    quando proseguono sulla pagina dopo (l'intestazione si ripete). Solo la colonna di fine
-    esercizio e le due quote: nient'altro della nota integrativa entra."""
+    quando proseguono sulla pagina dopo (l'intestazione si ripete), e quella dei debiti assistiti
+    da garanzie reali. Solo la colonna di fine esercizio, le due quote e, dei debiti garantiti, il
+    totale e la quota ipotecaria per natura: nient'altro della nota integrativa entra."""
     tabelle: list[tuple[int, list]] = []
     for numero in range(dopo, len(documento)):
         pagina = documento[numero]
         testo = pagina.get_text()
-        if "Quota scadente" not in testo:
+        if "Quota scadente" not in testo and "garanzie reali" not in testo:
             continue
         try:
             trovate_pag = pagina.find_tables().tables
@@ -1004,7 +1005,97 @@ def raccogli_tabelle(tabelle: list[tuple[int, list]]) -> dict:
     for raccolta in trovate.values():
         if not raccolta["finita"]:
             raccolta["errore"] = raccolta["errore"] or "tabella_senza_totale"
+    garanzie = _tabella_garanzie(tabelle)
+    if garanzie is not None:
+        trovate["debiti_garanzie"] = garanzie
     return trovate
+
+
+def _tabella_garanzie(tabelle: list[tuple[int, list]]) -> Optional[dict]:
+    """La tabella «Debiti assistiti da garanzie reali su beni sociali» divisa per natura: il totale
+    di ogni natura (ultima colonna, «Totale») e la quota assistita da ipoteche, senza scadenza.
+    None se il documento non la stampa per natura (la sola riga «Ammontare» non basta)."""
+    for numero, righe in tabelle:
+        if not righe:
+            continue
+        etichette = [_norm(r[0] or "") for r in righe]
+        if "totale debiti" not in etichette:
+            continue
+        inizio = next((i for i, r in enumerate(righe)
+                       if etichette[i].startswith("debiti") and any(_norm(c or "") for c in r[1:])), None)
+        if not inizio:
+            continue
+        intest = [_norm(" ".join(righe[i][k] or "" for i in range(inizio))) for k in range(len(righe[0]))]
+        if not any("garanzie reali" in c for c in intest):
+            continue
+        i_ipoteche = next((k for k, c in enumerate(intest) if "ipoteche" in c), None)
+        i_totale = len(intest) - 1
+        if intest[i_totale] != "totale":
+            continue
+        raccolta = {"righe": [], "totale": None, "pagine": [numero + 1], "errore": None}
+        for r, e in zip(righe[inizio:], etichette[inizio:]):
+            try:
+                cella = {"fine": _cella(r[i_totale]),
+                         "ipoteche": _cella(r[i_ipoteche]) if i_ipoteche is not None else None}
+            except (ValueError, IndexError) as exc:
+                raccolta["errore"] = f"cella_non_numerica:{exc}"
+                break
+            if e.startswith("totale"):
+                raccolta["totale"] = cella
+                break
+            raccolta["righe"].append((e, cella))
+        if raccolta["totale"] is None:
+            raccolta["errore"] = raccolta["errore"] or "tabella_senza_totale"
+        return raccolta
+    return None
+
+
+def _applica_garanzie(importi: dict[str, Decimal], raccolta: dict) -> dict:
+    """I debiti per natura dalla tabella delle garanzie, quando lo schema stampa solo entro e oltre.
+
+    La tabella non dice la scadenza: ogni natura va a breve (regola del proprietario: debito senza
+    scadenza stampata, a breve). L'oltre che lo schema stampa resta oltre, e si attribuisce a una
+    natura solo quando coincide al centesimo con il debito ipotecario dell'unica natura che ne ha
+    (decisione del proprietario, 2026-11-24, budget_1798); altrimenti la tabella non si applica.
+    Tutto o niente: le nature devono sommare al totale della tabella e a entro + oltre stampati."""
+    rapporto: dict = {"pagine": raccolta["pagine"], "applicata": False, "fonte": "garanzie"}
+    if raccolta["errore"]:
+        rapporto["motivo"] = raccolta["errore"]
+        return rapporto
+    entro, oltre = importi.get("sp16", _ZERO), importi.get("sp17", _ZERO)
+    if not (entro or oltre) or any(importi.get(f"sp1{c}{l}", _ZERO) for c in "67" for l in "abcdefg"):
+        rapporto["motivo"] = "prospetto_con_dettaglio"
+        return rapporto
+    mappate = []
+    for etichetta, cella in raccolta["righe"]:
+        lettera = _lettera(etichetta, _RIGHE_DEBITI)
+        if lettera is None or cella["fine"] is None:
+            rapporto["motivo"] = f"riga_non_riconosciuta:{etichetta}"
+            return rapporto
+        mappate.append((lettera, cella))
+    somma = sum((c["fine"] for _, c in mappate), _ZERO)
+    if raccolta["totale"]["fine"] != somma or somma != entro + oltre:
+        rapporto["motivo"] = "non_riconcilia_col_prospetto"
+        rapporto["tabella"] = str(somma)
+        rapporto["prospetto"] = [str(entro), str(oltre)]
+        return rapporto
+    lungo = None
+    if oltre:
+        ipotecarie = [(l, c) for l, c in mappate if c["ipoteche"]]
+        if len(ipotecarie) != 1 or ipotecarie[0][1]["ipoteche"] != oltre:
+            rapporto["motivo"] = "oltre_non_attribuibile"
+            return rapporto
+        lungo = ipotecarie[0][0]
+    for lettera, c in mappate:
+        quota_oltre = oltre if lettera == lungo else _ZERO
+        _aggiungi(importi, "sp16" + lettera, c["fine"] - quota_oltre)
+        _aggiungi(importi, "sp17" + lettera, quota_oltre)
+    importi["sp16"] = _ZERO
+    importi["sp17"] = _ZERO
+    rapporto["applicata"] = True
+    rapporto["righe"] = len(mappate)
+    rapporto["oltre_a"] = lungo
+    return rapporto
 
 
 def _lettera(etichetta: str, tabella_righe) -> Optional[str]:
@@ -1306,7 +1397,11 @@ def _estrai_da_righe(documento: fitz.Document, righe: list[_Riga], colonne: int,
         importi = dict(dati.importi)
         if c == 0:
             for tipo, raccolta in tabelle.items():
-                dettagli[tipo] = _applica_tabella(importi, tipo, raccolta)
+                if tipo in _FAMIGLIE:
+                    dettagli[tipo] = _applica_tabella(importi, tipo, raccolta)
+            garanzie = tabelle.get("debiti_garanzie")
+            if garanzie is not None and not dettagli.get("debiti", {}).get("applicata"):
+                dettagli["debiti_garanzie"] = _applica_garanzie(importi, garanzie)
         bs, ce = _chiudi(importi)
         anomalie[c].extend(_verifica(c, bs, ce, stampati, calcolati, totali,
                                      destinate_vendita=dati.destinate_vendita))

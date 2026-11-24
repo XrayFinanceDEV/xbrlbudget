@@ -90,7 +90,6 @@ export function currentStepId(
   if (pathname.startsWith("/forecast/balance")) return "sp-previsionale";
   if (pathname.startsWith("/forecast/reclassified")) return "riclassificato";
   if (pathname.startsWith("/forecast")) return "ce-previsionale";
-  if (pathname.startsWith("/analysis")) return "indici";
   if (pathname.startsWith("/cashflow")) return "rendiconto";
   if (pathname.startsWith("/report")) return "report";
   if (pathname.startsWith("/budget")) {

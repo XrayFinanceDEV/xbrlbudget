@@ -87,11 +87,12 @@ knowing:
 - **Prefer extending `/analysis` to adding an endpoint — but that intent is not a description of the
   code.** The reclassified statement and the detailed cashflow have live endpoints of their own
   (`GET /scenarios/{id}/reclassified`, `/detailed-cashflow`, called by `/forecast/reclassified` and
-  `/cashflow`), and the Indici page reads **both** `GET /companies/{id}/years/{year}/calculations/complete`
-  (annual summary) and `GET /companies/{id}/scenarios/{scenario_id}/ratios` (multi-year table) —
-  two calls, not one. One call per page is the target, not the current state. The only routes with **no caller at all**
-  are `GET /companies/{id}/years/{year}/calculations/{altman|fgpmi|ratios}`: their wrappers still sit
-  in `frontend/lib/api.ts`; use `/analysis` rather than reviving them.
+  `/cashflow`). The Indici page (`/analysis`, the only screen with Altman and FGPMI) was deleted on
+  2026-11-24 by owner's decision — Altman and FGPMI are no longer shown anywhere; the calculators
+  stay in the backend. So `GET /companies/{id}/years/{year}/calculations/complete`,
+  `GET /companies/{id}/scenarios/{scenario_id}/ratios` and `GET /companies/{id}/years/{year}/calculations/{altman|fgpmi|ratios}`
+  have **no frontend caller**: their wrappers still sit in `frontend/lib/api.ts`; use `/analysis`
+  rather than reviving them.
 
 ### Authentication & Multi-Tenancy
 
@@ -308,8 +309,9 @@ ciò che non si può non sapere. Ogni voce dice la regola e **cosa si rompe** a 
 ### Indici e report
 
 Regole del lotto 2 fix rilievi (2026-09-26). `calculations/ratios.py`
-(`FinancialRatiosCalculator`, letto dalla pagina Indici via
-`GET /companies/{id}/scenarios/{scenario_id}/ratios`, direttamente — **non** passa da
+(`FinancialRatiosCalculator`, servito da
+`GET /companies/{id}/scenarios/{scenario_id}/ratios` — rotta senza chiamante da quando la pagina
+Indici è stata cancellata, 2026-11-24 — e da `/analysis`; **non** passa da
 `report_indicators.py`) e `calculations/report_indicators.py` (Sezione 8/Allegato E del
 Business plan) condividono le stesse formule: un cambio qui si vede **su ogni scenario
 esistente**, storico compreso, non solo su quelli generati dopo il lotto.
@@ -1212,8 +1214,8 @@ la politica di partita doppia in `frontend/lib/pratica-rettifiche-rules.ts`.
 Due workflow: **Da bilancio** (`/pratica`) e **Startup** (`/budget` in `startupMode`);
 `/infrannuale` è un `redirect()` a `/pratica`. Tre fasi: **DATI** (Anagrafiche · Import ·
 Rettifiche) e **ANALISI** (Confronto · Proiezione · Indicatori · Stampa) come tab dentro
-`/pratica`, **PREVISIONALE** come sette rotte reali (Budget · Indici · CE Prev. · SP Prev. ·
-Riclassificato · Rendiconto · Report). Nulla oltre le Rettifiche è raggiungibile finché non sono
+`/pratica`, **PREVISIONALE** come cinque rotte reali (Budget · CE Prev. · SP Prev. · Rendiconto ·
+Report; Indici e Riclassificato tolti il 2026-09-23, la pagina Indici cancellata il 2026-11-24). Nulla oltre le Rettifiche è raggiungibile finché non sono
 confermate. Fasi, step e gate vivono in `frontend/lib/pratica-steps.ts` (modulo puro, con la sua
 suite); lo stato in `contexts/PraticaContext.tsx`, lo stepper in `components/PraticaStepper.tsx`,
 l'unico punto di avanzamento in `components/pratica/PraticaActionBar.tsx`, il wizard in
@@ -1336,7 +1338,7 @@ rifiutato** (vedi «Invarianti e trappole › Previsionale»).
 and `/aziende` redirect here) · `/budget` (scenario assumptions, and the Startup workflow) ·
 `/forecast/income` (**editable** P&L: cells → batch save → BS adapts) · `/forecast/balance`
 (**editable**: cells write `sp_overrides`, not `*_override` columns) · `/forecast/reclassified`
-(read-only) · `/analysis` (Indici) · `/cashflow` (rendiconto) · `/report` (il
+(read-only, senza ingresso dalla navigazione dal 2026-09-23) · `/cashflow` (rendiconto) · `/report` (il
 **Business plan** — ReportLab, anche in Word con «Scarica Word». Il dossier Typst è **staccato** dall'interfaccia
 dal 2026-09-24, in attesa di tornare come prodotto più avanzato: rotte e codice restano, `REPORT_MODELS` ha il solo
 Business plan e il selettore «Modello» ricompare da sé con un secondo modello. I suoi testi AI mancanti

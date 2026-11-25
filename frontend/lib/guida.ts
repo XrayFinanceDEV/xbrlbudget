@@ -83,7 +83,6 @@ const ETICHETTE_RITORNO: Array<[string, string]> = [
   ["/forecast/income", "Torna al CE previsionale"],
   ["/forecast/balance", "Torna allo SP previsionale"],
   ["/forecast/reclassified", "Torna al riclassificato"],
-  ["/analysis", "Torna agli indici"],
   ["/cashflow", "Torna al rendiconto"],
   ["/report", "Torna al report"],
   ["/import", "Torna all'import"],

@@ -9,22 +9,10 @@ import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { PageHeader } from "@/components/page-header";
-import { ReportTOC } from "@/components/report/report-toc";
-import { ReportScope } from "@/components/final-report/Scope";
-import { ReportSources } from "@/components/final-report/Sources";
-import { ReportAdjustments } from "@/components/final-report/Adjustments";
-import { ReportClosing } from "@/components/final-report/Closing";
 import { ReadinessBanner } from "@/components/final-report/ReadinessBanner";
-import { DiagnosticsPanel } from "@/components/final-report/DiagnosticsPanel";
-import { AssumptionsSections } from "@/components/final-report/AssumptionsSections";
-import { FinalReportChart } from "@/components/final-report/ChartSeries";
-import { ForecastValueTable } from "@/components/final-report/ForecastValueTable";
-import { DossierContent } from "@/components/final-report/Dossier";
-import { generateEditorialNotes, generateFinalReportNarrative, generateForecast, getEditorialSession, prepareEditorialSession, saveFinalReportNarrative } from "@/lib/api";
+import { generateEditorialNotes, generateFinalReportNarrative, generateForecast, getEditorialSession, prepareEditorialSession } from "@/lib/api";
 import { getErrorMessage } from "@/lib/utils";
 import type { EditorialSession } from "@/types/editorial-session";
-import type { FinalReportModel, NarrativeBlock } from "@/types/final-report";
-import { Textarea } from "@/components/ui/textarea";
 import { decidePrepareReportAI, runPrepareReportAI, type PrepareReportAIStep } from "@/lib/prepare-report-ai";
 import { buildPdfOutline, pdfPageUrl } from "@/lib/report-pdf-outline";
 import { REPORT_MODELS, wordAvailable, type ReportModel } from "@/lib/final-report-download";
@@ -32,21 +20,11 @@ import { REPORT_MODELS, wordAvailable, type ReportModel } from "@/lib/final-repo
 const narrativeTitles: Record<string, string> = { executive_summary: "Sintesi esecutiva", adjustments_and_closing: "Commento su rettifiche e chiusura", budget_assumptions: "Commento sulle ipotesi", economic_outlook: "Prospettiva economica", financial_outlook: "Prospettiva finanziaria", risks_and_actions: "Rischi e azioni suggerite" };
 const NARRATIVE_IDS = Object.keys(narrativeTitles);
 const AI_STEP_LABELS: Record<PrepareReportAIStep, string> = { plan: "Preparazione piano…", narrative: "Generazione commenti…", notes: "Generazione note…" };
-import { acknowledgeReportDraft, editReportDraft, syncReportDrafts, type ReportDraftBuckets as StoredDrafts } from "@/lib/report-drafts";
+import { syncReportDrafts, type ReportDraftBuckets as StoredDrafts } from "@/lib/report-drafts";
 import { useFinalReportDownload } from "@/hooks/use-final-report-download";
 import { useFileDownload } from "@/hooks/use-file-download";
 import { downloadReportDocx } from "@/lib/api";
 
-type DraftBucket = StoredDrafts[string];
-function NarrativeBlocks({ notes, onSave, drafts, onDraft }: { notes: Array<{ id: string; text: string; provenance: string; freshness: string }>; onSave: (id: string, text: string) => Promise<boolean>; drafts: DraftBucket; onDraft: (id: string, text: string) => void }) {
-  return <section className="grid gap-4 md:grid-cols-2">{notes.map((note) => <NarrativeCard key={note.id} note={note} onSave={onSave} drafts={drafts} onDraft={onDraft} />)}</section>;
-}
-function NarrativeCard({ note, onSave, drafts, onDraft }: { note: { id: string; text: string; provenance: string; freshness: string }; onSave: (id: string, text: string) => Promise<boolean>; drafts: DraftBucket; onDraft: (id: string, text: string) => void }) {
-  const text = drafts.values[note.id] ?? note.text;
-  const dirty = Boolean(drafts.dirty[note.id]);
-  const [saving, setSaving] = useState(false);
-  return <Card><CardHeader className="pb-2"><CardTitle className="text-base">{narrativeTitles[note.id] ?? note.id}</CardTitle></CardHeader><CardContent><p className="mb-2 text-xs text-muted-foreground">Origine: {note.provenance} · stato: {note.freshness}</p><Textarea value={text} aria-label={narrativeTitles[note.id] ?? note.id} onChange={(event) => onDraft(note.id, event.target.value)} className="min-h-24 print:hidden" /><p className="hidden whitespace-pre-wrap text-sm print:block">{text}</p><Button type="button" variant="outline" size="sm" className="mt-2 print:hidden" disabled={saving || !text.trim() || !dirty} onClick={async () => { setSaving(true); try { await onSave(note.id, text.trim()); } finally { setSaving(false); } }}>{saving ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}Salva commento</Button></CardContent></Card>;
-}
 
 export default function ReportPage() {
   const { selectedCompanyId, selectedCompany, companies } = useApp();
@@ -74,7 +52,6 @@ export default function ReportPage() {
   const readyReportKey = `${scope}:${model?.model_hash ?? "unknown"}`;
   const draftScope = `${scope}:${plan?.plan_hash ?? "unprepared"}`;
   const legacyScope = `${scope}:narrative`;
-  const legacyDraftBucket = draftsByScope.current[legacyScope] ?? { values: {}, dirty: {} };
   const requestScope = `${draftScope}:${model?.source_hash ?? "unknown"}`;
   scopeRef.current = requestScope;
   useEffect(() => {
@@ -82,9 +59,7 @@ export default function ReportPage() {
     syncReportDrafts(draftsByScope.current, legacyScope, session.data.report.narrative);
     setDraftVersion((version) => version + 1);
   }, [draftScope, legacyScope, session.data]);
-  const updateNarrativeDraft = (id: string, text: string) => { editReportDraft(draftsByScope.current, legacyScope, id, text); setDraftVersion((version) => version + 1); };
   const completeAction = async (actionScope: string) => { if (scopeRef.current !== actionScope) return; await queryClient.invalidateQueries({ queryKey }); };
-  const saveNarrative = async (id: string, text: string): Promise<boolean> => { if (!selectedCompanyId || !scenarioId) return false; const actionScope = requestScope; try { await saveFinalReportNarrative(selectedCompanyId, scenarioId, [{ id: id as NarrativeBlock["id"], text }]); acknowledgeReportDraft(draftsByScope.current, legacyScope, id, text); await completeAction(actionScope); toast.success("Commento salvato"); return true; } catch (error) { toast.error(getErrorMessage(error, "Impossibile salvare il commento")); return false; } };
   // «Prepara Report AI» / «Rigenera tutto»: un solo pulsante al posto di tre azioni (prepare, regenerateNarrative,
   // generate). La sequenza e la scelta di che cosa rigenerare vivono in lib/prepare-report-ai.ts (modulo puro);
   // qui c'è solo l'innesto verso le chiamate API vere e lo stato di avanzamento a schermo. La decisione sulle
@@ -181,19 +156,6 @@ export default function ReportPage() {
           <iframe title="Anteprima del report PDF" src={pdfPageUrl(finalReportDownload.inlineUrl, previewPage)} className="h-[85vh] min-w-0 flex-1 rounded-md border" />
         </div> : <div className="flex h-64 items-center justify-center text-sm text-muted-foreground">{finalReportDownload.previewing ? <><Loader2 className="mr-2 h-4 w-4 animate-spin" />Preparazione anteprima…</> : pending ? "Prepara il report con «Prepara Report AI» per vedere l'anteprima." : "Anteprima non disponibile."}</div>}
       </CardContent></Card></section>
-      <details className="print:hidden"><summary className="cursor-pointer text-sm font-medium text-muted-foreground">Vista web del dossier · tabelle e grafici per sezione</summary>
-      <div className="mt-4 flex gap-6 print:block"><div className="print:hidden"><ReportTOC /></div><div className="min-w-0 flex-1 space-y-6">
-      <section id="scope"><ReportScope company={model.company} practice={model.practice} generated_at={model.generated_at} readiness={model.readiness} /></section>
-      <section id="executive-summary">{reportModel === "dossier" ? <NarrativeBlocks notes={model.narrative.filter((note) => note.id === "executive_summary")} onSave={saveNarrative} drafts={legacyDraftBucket} onDraft={updateNarrativeDraft} /> : null}</section><section id="sources"><ReportSources workflow={model.practice.workflow_type} budgetScenarioName={model.practice.budget_scenario.name} sourceRevisions={model.source_revisions} sourceDataQuality={model.source_data_quality} /></section>
-      <section id="adjustments" className="space-y-3"><ReportAdjustments adjustments={model.adjustments} />{reportModel === "dossier" ? <NarrativeBlocks notes={model.narrative.filter((note) => note.id === "adjustments_and_closing")} onSave={saveNarrative} drafts={legacyDraftBucket} onDraft={updateNarrativeDraft} /> : null}</section>
-      <section id="closing"><ReportClosing workflow={model.practice.workflow_type} closing={model.practice.workflow_type === "infrannuale" ? model.infrannual_closing : undefined} /></section><section id="assumptions" className="space-y-3"><AssumptionsSections model={model} />{reportModel === "dossier" ? <NarrativeBlocks notes={model.narrative.filter((note) => note.id === "budget_assumptions")} onSave={saveNarrative} drafts={legacyDraftBucket} onDraft={updateNarrativeDraft} /> : null}</section>
-      <section id="income-forecast"><Card><CardHeader><CardTitle>Conto economico previsionale</CardTitle></CardHeader><CardContent className="space-y-5"><ForecastValueTable report={model as unknown as FinalReportModel} statement="income_statement" />{model.chart_series.filter((chart) => ["income_results", "margins"].includes(chart.id)).map((chart) => <FinalReportChart key={chart.id} series={chart} />)}{reportModel === "dossier" ? <NarrativeBlocks notes={model.narrative.filter((note) => note.id === "economic_outlook")} onSave={saveNarrative} drafts={legacyDraftBucket} onDraft={updateNarrativeDraft} /> : null}</CardContent></Card></section>
-      <section id="balance-forecast"><Card><CardHeader><CardTitle>Stato patrimoniale previsionale</CardTitle></CardHeader><CardContent><ForecastValueTable report={model as unknown as FinalReportModel} statement="balance_sheet" /></CardContent></Card></section>
-      <section id="cashflow-sustainability"><Card><CardHeader><CardTitle>Flussi di cassa e sostenibilità finanziaria</CardTitle></CardHeader><CardContent className="space-y-5"><ForecastValueTable report={model as unknown as FinalReportModel} statement="cashflow" />{model.chart_series.filter((chart) => ["cashflows", "liquidity_debt"].includes(chart.id)).map((chart) => <FinalReportChart key={chart.id} series={chart} />)}{reportModel === "dossier" ? <NarrativeBlocks notes={model.narrative.filter((note) => note.id === "financial_outlook")} onSave={saveNarrative} drafts={legacyDraftBucket} onDraft={updateNarrativeDraft} /> : null}</CardContent></Card></section>
-      <section id="indicators-risks"><Card><CardHeader><CardTitle>Indicatori e rischi</CardTitle></CardHeader><CardContent className="space-y-5">{model.chart_series.filter((chart) => ["working_capital_days", "coverage"].includes(chart.id)).map((chart) => <FinalReportChart key={chart.id} series={chart} />)}{reportModel === "dossier" ? <NarrativeBlocks notes={model.narrative.filter((note) => note.id === "risks_and_actions")} onSave={saveNarrative} drafts={legacyDraftBucket} onDraft={updateNarrativeDraft} /> : null}</CardContent></Card></section>
-      {session.data!.generation_warnings.map((warning) => <Alert key={`${warning.note_id}-${warning.message}`} className="border-amber-400"><AlertTitle>Generazione parziale: {warning.note_id}</AlertTitle><AlertDescription>{warning.message}</AlertDescription></Alert>)}
-      <section id="diagnostics"><DiagnosticsPanel diagnostics={model.diagnostics} /></section><DossierContent report={model} includeCanonicalCharts={false} />
-      </div></div></details>
     </main> : null}
   </div>;
 }

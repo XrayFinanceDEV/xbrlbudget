@@ -7,8 +7,6 @@ import {
   getDetailedCashFlow,
   getForecastReclassifiedData,
   getIntraYearComparison,
-  getMultiYearRatios,
-  getCompleteAnalysis,
   getAliquotaProposta,
 } from "@/lib/api";
 import { usePratica } from "@/contexts/PraticaContext";
@@ -145,30 +143,6 @@ export function useIntraYearComparison(
     queryKey: queryKeys.intraYearComparison(companyId!, scenarioId!),
     queryFn: () => getIntraYearComparison(companyId!, scenarioId!),
     enabled: !!companyId && !!scenarioId,
-  });
-}
-
-// Multi-year ratios (used by analysis page)
-export function useMultiYearRatios(
-  companyId: number | null,
-  scenarioId: number | null
-) {
-  return useQuery({
-    queryKey: queryKeys.multiYearRatios(companyId!, scenarioId!),
-    queryFn: () => getMultiYearRatios(companyId!, scenarioId!),
-    enabled: !!companyId && !!scenarioId,
-  });
-}
-
-// Single-year complete analysis (historical year)
-export function useCompleteAnalysis(
-  companyId: number | null,
-  year: number | null
-) {
-  return useQuery({
-    queryKey: queryKeys.completeAnalysis(companyId!, year!),
-    queryFn: () => getCompleteAnalysis(companyId!, year!),
-    enabled: !!companyId && !!year,
   });
 }
 

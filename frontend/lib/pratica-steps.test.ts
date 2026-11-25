@@ -195,7 +195,6 @@ describe("currentStepId", () => {
     expect(currentStepId("/forecast/balance", "rettifiche", PRATICA)).toBe("sp-previsionale");
     expect(currentStepId("/forecast/reclassified", "x", PRATICA)).toBe("riclassificato");
     expect(currentStepId("/forecast/income", "x", PRATICA)).toBe("ce-previsionale");
-    expect(currentStepId("/analysis", "x", PRATICA)).toBe("indici");
     expect(currentStepId("/cashflow", "x", PRATICA)).toBe("rendiconto");
     expect(currentStepId("/report", "x", PRATICA)).toBe("report");
     expect(currentStepId("/budget", "x", PRATICA)).toBe("budget");

@@ -119,10 +119,8 @@ Workflow **bilancio**:
 | ANALISI | Indicatori | tab | vista | `rettificheOk && comparisonReady` |
 | ANALISI | Stampa | tab | vista | `rettificheOk && (annuale ? comparisonReady : projectionReady)` |
 | PREVISIONALE | Budget → `/budget` | route | azione | `gates.budgetScenario` |
-| PREVISIONALE | Indici → `/analysis` | route | vista | `gates.forecastReady` |
 | PREVISIONALE | CE Prev. → `/forecast/income` | route | vista | `gates.forecastReady` |
 | PREVISIONALE | SP Prev. → `/forecast/balance` | route | vista | `gates.forecastReady` |
-| PREVISIONALE | Riclassificato → `/forecast/reclassified` | route | vista | `gates.forecastReady` |
 | PREVISIONALE | Rendiconto → `/cashflow` | route | vista | `gates.forecastReady` |
 | PREVISIONALE | Report → `/report` | route | vista | `gates.forecastReady` |
 
@@ -138,7 +136,7 @@ un rifiuto del motore (`forecast_generated: false`) si mostra col suo motivo e u
 solo in un toast.
 
 Workflow **startup**: nessuna fase ANALISI — non c'è nulla da importare. Un solo step DATI,
-«Anagrafiche», che è il form del business plan **su `/budget`** (`kind: "route"`), poi i sette step
+«Anagrafiche», che è il form del business plan **su `/budget`** (`kind: "route"`), poi i cinque step
 PREVISIONALE, con Budget sempre abilitato.
 
 ## 4. I gate: chi sblocca cosa, e che cosa il gate non è
@@ -163,7 +161,7 @@ Una versione precedente ne copriva solo `comparison`: uno scenario già creato a
 (`infrannualeScenarioId` valorizzato) bastava da solo a sbloccare Proiezione, Indicatori e Stampa
 anche a rettifiche non confermate, o dopo un «Ripristina originale». Corretto nel commit `71d3303`.
 
-**Nessuno dei sette step PREVISIONALE lo AND direttamente**: si reggono su
+**Nessuno dei cinque step PREVISIONALE lo AND direttamente**: si reggono su
 `budgetScenario`/`forecastReady`. Nel percorso nuovo il vincolo tiene comunque, per via transitiva
 — `budgetScenarioId` viene valorizzato solo dal ponte verso il budget, raggiungibile solo oltre le
 Rettifiche. Ma una pratica **ripresa da uno scenario budget legacy** (`budgetScenarioId`
@@ -255,7 +253,7 @@ Chi registra oggi: le tab Rettifiche / Confronto / Proiezione / Indicatori di `a
 (un unico `useMemo` con uno `switch` su `activeTab`), `AnagraficheStep`, `StampaContent`, e
 `app/budget/page.tsx`. Le altre tab passano `label: null` e usano il fallback.
 
-**Dei sette step PREVISIONALE solo Budget registra un'azione**; gli altri sei sono viste di sola
+**Dei cinque step PREVISIONALE solo Budget registra un'azione**; gli altri quattro sono viste di sola
 lettura. Le vecchie CTA inline per-tab sono state rimosse man mano che gli step venivano migrati;
 **il pulsante «Salva e Calcola Previsionale» di `/budget` è l'unico sopravvissuto**, perché
 `/budget` è raggiungibile anche **fuori** da una pratica (nav piatta, voce «Scenari») dove la barra
@@ -337,8 +335,9 @@ trasferimento del calcolo è questa la regola e la suite attuale.
 ## 9. Storia — perché alcune cose sono come sono
 
 - **«PREVISIONALE ha SEI step, non quattro»** diceva una versione precedente di questa
-  documentazione: `/analysis` (Indici) era allora irraggiungibile da dentro una pratica. Sono
-  sette, e quella lacuna è chiusa.
+  documentazione: `/analysis` (Indici) era allora irraggiungibile da dentro una pratica. Poi
+  sono stati sette; dal 2026-09-23 sono cinque (Indici e Riclassificato tolti dallo stepper), e il
+  2026-11-24 la pagina Indici è stata cancellata.
 - **Il gate delle rettifiche copriva il solo Confronto** fino al commit `71d3303` (§4).
 - **Il dialogo Riepilogo aveva una porta propria.** `handleConfirmRettifiche` è oggi l'**unico**
   percorso che porta al Confronto: lo chiamano sia il primario della barra («Conferma e vai al

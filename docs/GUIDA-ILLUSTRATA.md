@@ -1,10 +1,11 @@
 # Guida illustrata all'applicazione
 
-> Ultima verifica del testo: novembre 2026. Le schermate sono di ottobre 2026: alcune mostrano
-> ancora etichette e numeri di allora (il testo fa fede). Le schermate sono prese sull'app in sviluppo usando un'azienda
-> di prova, col nome oscurato nelle figure: le fasi DATI e ANALISI sulla pratica del **bilancio di verifica 2026 a 6 mesi**,
-> la fase PREVISIONALE e le griglie sullo scenario **«Budget 2027–2029»** (3 anni, anno base
-> 2026). I numeri citati negli esempi sono letti dall'app, non inventati; se rigeneri i dati di
+> Ultima verifica: novembre 2026. Le schermate sono prese sull'ambiente di prova usando un'azienda
+> di prova, col nome e le partite IVA oscurati nelle figure: le fasi DATI e ANALISI sulla pratica del
+> **bilancio di verifica 2026 a 6 mesi**, la fase PREVISIONALE e le griglie sullo scenario
+> **«Budget prova 2027–2029»** (3 anni, anno base 2026). Sette figure sono ancora di ottobre 2026
+> (esito dell'import, cella forzata in CE Prev., override rifiutato in SP Prev., report in bozza,
+> pagina di import autonoma, Startup): lì vale il testo. I numeri citati negli esempi sono letti dall'app, non inventati; se rigeneri i dati di
 > prova, aggiornali qui insieme alle immagini in `docs/images/guida/`.
 
 ## Indice
@@ -135,7 +136,8 @@ navigazione: la via normale è questa tab)
 
 **Come si fa.** 1) scegli tipo file, anno e periodo; 2) scegli il file e premi «Importa e
 Continua»; 3) se l'import riesce, l'app passa da sola alle **Rettifiche**: lì trovi la verifica
-di quadratura. Se il bilancio non quadra viene **importato comunque**, con il riquadro
+di quadratura. Tornando sulla tab, il riquadro verde «Importazione completata» ricorda che il
+bilancio è già caricato. Se il bilancio non quadra viene **importato comunque**, con il riquadro
 «SBILANCIATO», non «aggiustato» in silenzio: si corregge in Rettifiche.
 
 Due casi ti fermano invece sull'Import:
@@ -254,7 +256,7 @@ parziale** (< 12 mesi) importato: è l'analisi del «non ancora chiuso», il par
 - Lo **«Stato Patrimoniale - Confronto»**: un'istantanea a fine periodo, **non annualizzata** —
   è una fotografia, non un flusso.
 
-**Esempio (figura).** Ricavi: **2.104.755 €** nei 6 mesi al 30/06/2026 diventano **4.209.510 €**,
+**Esempio (figura).** Ricavi: **2.104.755 €** nei 6 mesi al 30/06/2026 diventano **4.209.511 €**,
 che è il loro × 12 / 6; contro i 3.761.088 € del 2025 fa **+11.9%** nella colonna «delta %». È
 quella variazione il punto da cui parte la proiezione.
 
@@ -290,11 +292,12 @@ proiettato che **il server** adatta di conseguenza.
 - Lo stato patrimoniale proiettato. Se attivo e passivo non pareggiano, un riquadro ambra dice
   che la differenza è il **fabbisogno finanziario non coperto**.
 
-**Esempio (figura).** Nella colonna 31/12/2026 alcune celle sono digitate a mano: le imposte
-forzate a **32.000 €**, gli oneri diversi a 37.530 €. I sottototali si ricompongono
-live — totale costi della produzione **4.249.644 €**, EBITDA **165.836 €**, risultato prima
-delle imposte 60.130 €, utile **28.130 €** — e sotto lo stato patrimoniale si adatta, con la
-cassa che chiude il foglio.
+**Esempio (figura).** Nella colonna 31/12/2026 le celle bianche sono quelle che puoi digitare: i
+servizi a **1.272.481 €** invece dei 1.872.481 € dell'annualizzazione pura, le imposte a
+**22.400 €**. I sottototali si ricompongono live — totale costi della produzione **4.162.431 €**,
+EBITDA **137.050 €**, risultato prima delle imposte 34.342 €, utile **11.942 €** — e sotto lo
+stato patrimoniale si adatta, con la cassa che chiude il foglio. Nella figura il circolante è
+«di equilibrio»: la cassa di fine anno scende a 95 €.
 
 **Attenzione a**
 
@@ -329,9 +332,10 @@ annualizzato e sulla proiezione, con la classe di rischio.
 Con un bilancio di **12 mesi** non c'è la tab Proiezione: gli Indicatori generano l'anno da soli
 e, se il motore lo rifiuta, mostrano il motivo con «Riprova».
 
-**Esempio (figura).** **PFN/EBITDA: 5.17x** sullo storico e 5.38x sul semestre annualizzato,
-**1.65x** sulla proiezione. È il numero che pesa di più nel punteggio: il debito finanziario
-netto vale più di cinque anni di margine lordo, e scende sotto due solo se il piano tiene.
+**Esempio (figura).** **PFN/EBITDA: 5.17x** sullo storico, 5.38x sul semestre annualizzato e
+**5.99x** sulla proiezione: il debito finanziario netto vale sei anni di margine lordo, e il
+pallino resta rosso in tutte e tre le colonne. Il DSCR invece è verde ovunque (3,02x, 3,23x,
+2,54x): gli oneri finanziari sono coperti, è il debito a essere alto rispetto al margine.
 
 **Formule, soglie e classe di rischio** → [Le formule dei report](#il-report-infrannuale)
 
@@ -422,10 +426,10 @@ proiezione — la schermata lo avvisa con queste parole.
 
 ![Le caselle di variazione %](images/guida/10a-wizard-fatturato-variazioni.jpg)
 
-**Esempio (azienda di prova, ricavi 2026 = 4.109.510 €).** Con +5% nel 2027 l'anteprima dà ricavi
-**4.314.986 €** (+205.476 €); portando quella cella a +7,5% diventano **4.417.723 €**
-(+308.213 €) e tutto il resto del piano si riposiziona: la crescita si compone anno su anno,
-quindi il +6% del 2028 lavora sui 4,42 milioni nuovi, non sui 4,31 vecchi.
+**Esempio (azienda di prova, ricavi 2026 = 4.209.511 €).** Con +2% nel 2027 l'anteprima dà ricavi
+**4.293.701 €** (+84.190 €); portando quella cella a +7,5% diventerebbero **4.525.224 €**
+(+315.713 €) e tutto il resto del piano si riposizionerebbe: la crescita si compone anno su
+anno, quindi il +2% del 2028 lavorerebbe sui 4,53 milioni nuovi, non sui 4,29 vecchi.
 
 **Attenzione a.** Qui una cella vuota vale zero, cioè ricavi fermi all'anno prima. Se la riga è
 stata forzata in **CE Previsionale** (§ 9), sotto la tabella compare
@@ -460,11 +464,12 @@ risultato: consumo più rimanenze finali meno iniziali.
 
 ![La crescita dei costi](images/guida/11b-wizard-costi-crescita.jpg)
 
-**Esempio (servizi 2026 = 1.432.482 €, quota fissa salvata 50%).** Con il 50% l'anteprima dà
-«servizi · quota variabile» 2027 = **752.053 €** e il totale variabile (materie + servizi)
-**887.826 €** (consumo di materie + servizi), il 20,6% dei ricavi. Alzando lo slider a **100%** la parte variabile dei servizi
-va a zero: la quota variabile scende a **0 €** e il totale variabile 2027 a **135.773 €**
-(3,1%) — tutto il costo dei servizi cresce ora con l'inflazione, non più coi ricavi. È la leva
+**Esempio (servizi 2026 = 1.272.481 €, quota fissa salvata 50%; materie prime tutte
+variabili).** Con il 50% l'anteprima dà «servizi · quota variabile» 2027 = **661.690 €** e il
+totale variabile (consumo di materie + servizi) **805.083 €**, il 18,8% dei ricavi. Alzando lo
+slider dei servizi a **100%** la loro parte variabile va a zero e il totale variabile 2027
+scende al solo consumo di materie, **143.392 €** (3,3%) — tutto il costo dei servizi cresce ora
+con la sua percentuale fissa, non più coi ricavi. È la leva
 giusta per capire quanto il margine del piano dipende dal volume.
 
 **Attenzione a.** La % fissa è **una sola e vale per tutti gli anni** (il modello è per anno,
@@ -490,13 +495,14 @@ lo azeri dal dialogo Ricalcola.
 
 ![I giorni medi per anno](images/guida/12a-wizard-circolante-giorni.jpg)
 
-**Esempio (DSO 2027: da 96 a 60 giorni).** Il 96 è l'ipotesi salvata: la colonna 2026 mostra
-il valore **derivato** dall'anno base (97 gg) e una cella vuota ricade su di esso. I crediti
-commerciali 2027 passano da **1.155.663 €**
-a **724.164 €**, la «cassa liberata» 2027 da +227.248 € a **+658.747 €**. Ma attenzione al 2028:
-i giorni 2028 restano 95 e l'incasso straordinario del 2027 si **rovescia** in un assorbimento di
-**−458.688 €**. Un giorno medio modificato in un solo anno è una decisione *una tantum*, non una
-politica di cassa: se vuoi che duri, metti gli stessi giorni su tutti gli anni.
+**Esempio (figura).** La colonna 2026 mostra i giorni **derivati** dall'anno base: DSO 90, DPO
+133, materie e semilavorati **751 giorni** sul consumo. Le ipotesi salvate fanno scendere il DSO
+a 88, 86 e 85 giorni e il magazzino materie a 750, 700 e 650: il circolante commerciale passa da
+815.636 € a 806.975 € nel 2027, e la «cassa liberata» è **+8.660 €** nel 2027 e +17.277 € nel
+2028. Sotto i 751 giorni c'è l'avviso «oltre la soglia: senza un valore il motore riporta il
+saldo»: lasciando vuote quelle celle il magazzino resterebbe quello del 2026. Un giorno medio
+modificato in un solo anno è una decisione *una tantum*, non una politica di cassa: l'anno dopo
+la differenza si rovescia. Se vuoi che duri, metti gli stessi giorni su tutti gli anni.
 
 **Attenzione a.** I giorni che scrivi si applicano così come sono, anche oltre 365. Se lasci la
 cella vuota, il motore deduce i giorni dall'anno base; se quel calcolo ha un denominatore non
@@ -539,11 +545,12 @@ lato breve si chiude nel primo anno di piano, quello oltre 12 mesi lo scadenzi t
 
 ![Il pregresso bancario](images/guida/13b-wizard-pregresso-banche.jpg)
 
-**Esempio (azienda di prova).** Debiti verso banche 2026 = **960.937 €**, «di cui 493.409 € a breve»:
-fidi 400.000 € (tasso 6%) + 93.409 € di rate 2027 dei due finanziamenti. Il credito oltre 12
-mesi da 45.000 € scadenziato a 5.000 €/anno chiude il piano con **30.000 € «resta aperto»** —
-quei 30.000 € restano nello stato patrimoniale a fine piano, e nessun anno di piano li vedrà
-scadere.
+**Esempio (azienda di prova).** Debiti verso banche 2026 = **820.937 €**, «di cui 353.409 € a breve»:
+fidi 330.000 € (tasso 6%) + 23.409 € di rata 2027 dell'unico finanziamento, che ha un residuo di
+490.937,17 €; i due controlli in fondo dicono «quadra» e «coerente». Gli altri crediti tributari
+oltre 12 mesi, 17.356 €, sono scadenziati a 10.000 € nel 2028 e 7.000 € nel 2029: il piano chiude
+con **356 € «resta aperto»** — restano nello stato patrimoniale a fine piano, e nessun anno di
+piano li vedrà incassare.
 
 **Attenzione a.** Un anno forzato in **via manuale** (passo 7, «Posizione tributaria manuale») non può scaricare meno di quanto
 il piano tributario ripartirà l'anno dopo, o la stessa rata uscirebbe due volte: il motore lo
@@ -587,12 +594,17 @@ TFR, altri saldi. La cassa chiude il foglio.
 
 ![Cassa e scoperto](images/guida/14a-wizard-piano-cassa.jpg)
 
-**Esempio (azienda di prova: «Nuova Finanza», 250.000 € erogati nel 2027, 5 anni, tasso 4,5%).** La
-scheda stessa dice «rata 50.000 €/anno dal 2027»; nell'anteprima «Debito, cassa e PFN» il nuovo
-prestito residua **200.000 €** a fine 2027, 150.000 € nel 2028, 100.000 € nel 2029 — e la rata
-che scade l'anno dopo sta **già** dentro i debiti bancari a breve dello SP Prev. (non resta
-tutta oltre i 12 mesi: sarebbe un errore che il pareggio attivo = passivo non vede, ma che
-falsa circolante e indici di liquidità).
+**Esempio (figura).** Il fondo TFR parte da 248.580 € al 31/12/2026 e cresce con
+l'accantonamento calcolato (128.242 € nel 2027); una liquidazione di **50.000 €** nel 2028 esce
+di cassa e riduce il fondo, che a fine anno è 457.628 €. Lo scenario non ha nuovi investimenti
+né nuovi finanziamenti: nell'anteprima «Debito, cassa e PFN» i debiti scendono solo con le rate
+del finanziamento esistente (490.937 € → 413.710 € nel 2029), la cassa sale da 95 € a 511.863 € e
+la PFN da 857.346 € a 263.351 €, con la conferma «La cassa resta positiva in tutti gli anni:
+nessun fabbisogno da coprire».
+
+Con un **nuovo finanziamento** la rata che scade l'anno dopo sta **già** dentro i debiti bancari
+a breve dello SP Prev.: non resta tutta oltre i 12 mesi, che sarebbe un errore che il pareggio
+attivo = passivo non vede, ma che falsa circolante e indici di liquidità.
 
 **Approfondisci** → [FORECASTING_GUIDE.md](budget/FORECASTING_GUIDE.md)
 
@@ -621,12 +633,12 @@ falsa circolante e indici di liquidità).
 
 ![Il pagamento delle imposte](images/guida/15b-wizard-imposte-pagamento.jpg)
 
-**Esempio (azienda di prova).** Nel 2027 l'uscita di cassa per imposte è **37.227 €**: saldo 2026
-**4.227 €** + acconto 2027 **33.000 €**, versati in un colpo solo. Nel 2028 l'uscita è
-**−33.000 €**: il primo anno di piano chiude in perdita, quindi non c'è saldo da pagare e
-l'acconto versato l'anno prima torna indietro come credito compensato; non a caso l'«acconto
-auto» del 2028 in anteprima è **0 €**: l'acconto di default è il 100% dell'imposta dell'anno
-prima, e quella del 2027 è zero. Nel 2029 si pagano saldo + acconto del 2028: **109.291 €**. Se
+**Esempio (azienda di prova).** Nessun bilancio depositato esprime un'aliquota, quindi la
+proposta è il 27,9% predefinito. Nel 2027 si versano acconti per **22.400 €**, il 100%
+dell'imposta 2026; l'imposta 2027 è però solo 6.702 €, e a fine anno restano **15.698 €** di
+credito. Nel 2028 quel credito si compensa per intero con l'acconto 2028 (6.702 €): l'uscita di
+cassa per imposte è **−8.995 €**, cioè un rientro. Nel 2029 il risultato è in perdita, l'imposta
+è zero, e acconto (3.155 €) e credito compensato (3.547 €) si pareggiano quasi: −392 €. Se
 l'aliquota proposta non ti convince la cambi: si applica così com'è.
 
 **Approfondisci** → [API-PREVISIONALE.md](budget/API-PREVISIONALE.md) §4
@@ -667,7 +679,8 @@ percentuali del wizard sono già diventate importi, e qui puoi forzarli.
 - Dentro una pratica, il pulsante della barra è «Salva e prosegui: SP Prev.».
 - Sotto: ricavi/EBITDA, EBIT/utile, il riepilogo indici per anno.
 
-**Esempio.** Forzando «Ricavi delle vendite» 2027 a **4.500.000 €** (figura sotto), il 2027
+**Esempio (figura sotto, presa a ottobre su una versione dello scenario con crescita +6% nel
+2028).** Forzando «Ricavi delle vendite» 2027 a **4.500.000 €**, il 2027
 diventa 4,5 milioni **e anche il 2028 si muove**: 4.770.000 € = il forzato × la crescita +6%
 salvata, e il 2029 a 4.817.700 €. L'override è sopravvissuto a ogni «Salva e Calcola»
 successivo: vince sulla percentuale e non si azzera da solo.
@@ -730,10 +743,10 @@ dall'attività operativa, B. attività di investimento, C. attività di finanzia
 - Il debito finanziario **non passa dal circolante**: le variazioni dei debiti vanno in
   finanziamento, e il circolante prende gli aggregati al netto delle quote finanziarie.
 
-**Esempio (figura).** 2027: l'operativo porta **+178.346 €**, gli investimenti −150.000 €
-(«(Investimenti)» nella sezione B), il finanziamento **+106.591 €** (incremento mezzi di terzi
-− rimborsi): **+134.937 €** di incremento, che sommati ai 55 € d'apertura chiudono a
-**134.991 €** di disponibilità liquide. Il «VERIFICA» in fondo è esattamente questo conto.
+**Esempio (figura).** 2027: l'operativo porta **+321.097 €**, gli investimenti −12.715 € (attività
+finanziarie, sezione B), il finanziamento **−23.409 €** (la rata del finanziamento esistente, in
+«(Decremento mezzi di terzi)»): **+284.973 €** di incremento, che sommati ai 95 € d'apertura
+chiudono a **285.068 €** di disponibilità liquide. Il «VERIFICA» in fondo è esattamente questo conto.
 
 **Approfondisci** → [FORECASTING_GUIDE.md](budget/FORECASTING_GUIDE.md)
 
